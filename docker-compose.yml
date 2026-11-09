@@ -1,26 +1,26 @@
-# 开发环境编排（方案 A：一次只跑一套环境）
+# 部署用编排（生产）。开发不走容器，见 README「本地开发」
 #   docker compose up -d --build
-# 生产环境见 docker-compose.prod.yml
-name: qiqi-mall-dev
+name: qiqi-mall
 
 services:
   server:
     build:
       context: ./qiqi-mall-server
-    image: qiqi-mall-server:dev
-    container_name: qiqi-server-dev
+    image: qiqi-mall-server:prod
+    container_name: qiqi-server
     environment:
       TZ: Asia/Shanghai
-      SPRING_PROFILE: dev
+      SPRING_PROFILE: prod
+      JAVA_OPTS: "-XX:MaxRAMPercentage=75"
     # 不映射到宿主机：仅通过 compose 内网由前端 nginx 访问
     # 临时联调需要直连时，取消下面注释（建议绑 127.0.0.1 而非 0.0.0.0）
     # ports:
-    #   - "127.0.0.1:8081:8081"
+    #   - "127.0.0.1:8082:8082"
     expose:
-      - "8081"
+      - "8082"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/api/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8082/api/health"]
       interval: 20s
       timeout: 5s
       retries: 5
@@ -32,14 +32,14 @@ services:
     build:
       context: ./qiqi-mall-web
       args:
-        BUILD_MODE: development
-    image: qiqi-mall-web:dev
-    container_name: qiqi-web-dev
+        BUILD_MODE: production
+    image: qiqi-mall-web:prod
+    container_name: qiqi-web
     environment:
       TZ: Asia/Shanghai
-      BACKEND_UPSTREAM: http://server:8081
+      BACKEND_UPSTREAM: http://server:8082
     ports:
-      - "5173:80"
+      - "5174:80"
     restart: unless-stopped
     depends_on:
       server:

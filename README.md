@@ -8,20 +8,16 @@
 qiqi-mall/
 ├── qiqi-mall-web/          # 前端 (Vue 3 + Vite + Element Plus)
 │   ├── public/
+│   ├── nginx/              # 容器内 nginx 配置模板
 │   └── src/
-│       ├── api/            # 接口请求封装
+│       ├── api/            # 接口封装
 │       ├── assets/         # 静态资源/样式
 │       ├── components/     # 公共组件
+│       ├── layout/         # 三段式布局
 │       ├── router/         # 路由
 │       ├── store/          # 状态管理 (Pinia)
 │       └── views/          # 页面
-│           ├── home/       # 首页
-│           ├── product/    # 商品列表/详情
-│           ├── cart/       # 购物车
-│           ├── order/      # 订单
-│           ├── user/       # 登录/注册/个人中心
-│           └── admin/      # 后台管理
-├── qiqi-mall-server/       # 后端 (Spring Boot + MyBatis-Plus)
+├── qiqi-mall-server/       # 后端 (Spring Boot)
 │   └── src/main/java/com/qiqi/mall/
 │       ├── controller/     # 接口层
 │       ├── service/        # 业务层 (impl 为实现)
@@ -31,31 +27,61 @@ qiqi-mall/
 │       ├── config/         # 配置类
 │       ├── common/         # 通用返回/异常
 │       └── utils/          # 工具类
+├── docker-compose.yml      # 部署编排（生产）
 ├── sql/                    # 数据库脚本
 └── docs/                   # 文档
 ```
 
-## 运行端口
+## 本地开发（日常迭代）
 
-| 服务 | 开发 | 生产 |
-|------|------|------|
-| 前端 Vite | 5173 | 5174 |
-| 后端 Spring Boot | 8081 | 8082 |
+不走容器，直接跑源码，支持热更新。
 
-启动命令：
 ```bash
-# 后端
+# 终端 1：后端 8081
 cd qiqi-mall-server
-mvn spring-boot:run -Dspring-boot.run.profiles=dev    # 开发 8081
-mvn spring-boot:run -Dspring-boot.run.profiles=prod   # 生产 8082
+mvn spring-boot:run -Dspring-boot.run.profiles=dev
 
-# 前端
+# 终端 2：前端 5173
 cd qiqi-mall-web
-npm run dev        # 开发 5173 → 代理 8081
-npm run dev:prod   # 生产预览 5174 → 代理 8082
+npm install          # 首次
+npm run dev
 ```
 
-前后端均监听 0.0.0.0，Tailscale 组网内可通过 `http://100.113.135.55:<端口>` 访问。
+访问 http://localhost:5173
+
+**热更新表现（已实测）**：
+
+| 改动 | 生效方式 | 耗时 |
+|------|---------|------|
+| 前端 Vue/CSS | Vite HMR，浏览器局部更新不刷新页面 | ~110 ms |
+| 后端 Java | 改动后 `mvn compile`，devtools 自动重启 | ~4 s |
+
+后端热重启说明：`spring-boot-devtools` 监听 `target/classes`，需要先重新编译。
+用 IDEA 开启自动编译即可全自动；命令行手动执行：
+
+```bash
+cd qiqi-mall-server && mvn -o compile
+```
+
+## 部署（容器）
+
+镜像多阶段构建，只对外暴露前端端口，详见 `docs/docker.md`。
+
+```bash
+docker compose up -d --build      # 构建并启动
+docker compose ps                 # 状态
+docker compose logs -f web        # 日志
+docker compose down               # 停止
+```
+
+访问 http://localhost:5174
+
+| 环境 | 前端 | 后端 | 说明 |
+|------|------|------|------|
+| 本地开发 | 5173 | 8081 | 直接跑源码，热更新 |
+| 容器部署 | 5174 | 8082 | 后端仅容器内网，不映射宿主机 |
+
+两套可同时运行，端口互不冲突。Tailscale 组网内可用 `http://100.113.135.55:<端口>` 访问。
 
 ## 前端布局
 
@@ -68,17 +94,3 @@ npm run dev:prod   # 生产预览 5174 → 代理 8082
 当前仅保留 `/dashboard` 一个页面（空白占位），业务页面后续按需添加。
 
 界面截图见 `docs/screenshots/shot-dashboard.png`。
-
-## Docker 部署
-
-方案 A（一次只跑一套环境），镜像多阶段构建，详见 `docs/docker.md`。
-
-```bash
-docker compose up -d --build                              # 开发  仅对外 5173
-docker compose -f docker-compose.prod.yml up -d --build   # 生产  仅对外 5174
-```
-
-| 服务 | 开发端口 | 生产端口 | 说明 |
-|------|---------|---------|------|
-| 前端 | 5173 | 5174 | 唯一对外入口 |
-| 后端 | 8081 | 8082 | 仅容器内网，不映射宿主机 |
