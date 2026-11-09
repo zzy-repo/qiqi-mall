@@ -44,6 +44,13 @@ docker compose up -d mysql        # 本机 127.0.0.1:3306，root 密码见 .env.
 mysql -h127.0.0.1 -uroot -pqiqi123456 qiqi_mall
 ```
 
+| 脚本 | 内容 |
+|------|------|
+| `sql/schema.sql` | 建库建表 |
+| `sql/data.sql` | 示例数据（10 分类 / 3 类型 / 6 属性 / 5 商品 / 9 SKU） |
+
+两个脚本都挂到 `/docker-entrypoint-initdb.d/`，数据卷为空时按序自动执行。
+
 ## 本地开发（日常迭代）
 
 不走容器，直接跑源码，支持热更新。
