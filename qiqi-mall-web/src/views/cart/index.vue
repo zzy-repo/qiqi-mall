@@ -14,9 +14,9 @@
           <el-table-column prop="price" label="单价" width="100">
             <template #default="{ row }">¥ {{ row.price }}</template>
           </el-table-column>
-          <el-table-column label="数量" width="140">
+          <el-table-column label="数量" width="170">
             <template #default="{ row }">
-              <el-input-number v-model="row.qty" :min="1" size="small" />
+              <el-input-number v-model="row.qty" :min="1" size="small" style="width: 120px" />
             </template>
           </el-table-column>
           <el-table-column label="小计" width="110">
