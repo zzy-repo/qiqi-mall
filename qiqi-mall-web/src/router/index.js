@@ -32,6 +32,18 @@ const routes = [
         meta: { title: '商品列表' }
       },
       {
+        path: 'tenant',
+        name: 'Tenant',
+        component: () => import('../views/tenant/index.vue'),
+        meta: { title: '租户' }
+      },
+      {
+        path: 'plan',
+        name: 'Plan',
+        component: () => import('../views/plan/index.vue'),
+        meta: { title: '套餐' }
+      },
+      {
         path: 'order',
         name: 'Order',
         component: () => import('../views/order/index.vue'),

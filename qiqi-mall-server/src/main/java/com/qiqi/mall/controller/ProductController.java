@@ -1,6 +1,7 @@
 package com.qiqi.mall.controller;
 
 import com.qiqi.mall.common.Result;
+import com.qiqi.mall.common.TenantContext;
 import com.qiqi.mall.entity.Product;
 import com.qiqi.mall.service.ProductService;
 import org.springframework.web.bind.annotation.*;
@@ -30,6 +31,7 @@ public class ProductController {
     @PostMapping
     public Result<Product> create(@RequestBody Product body) {
         body.setId(null);
+        if (body.getTenantId() == null) body.setTenantId(TenantContext.get());
         productService.save(body);
         return Result.ok(body);
     }

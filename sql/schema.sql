@@ -72,6 +72,7 @@ CREATE TABLE sku (
 -- 订单（status 状态机：0待付款 1已付款 2已发货 3已完成 4已关闭）
 CREATE TABLE IF NOT EXISTS `order` (
   `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` BIGINT NOT NULL DEFAULT 1 COMMENT '租户ID',
   `order_sn` VARCHAR(50) NOT NULL COMMENT '订单号',
   `member_id` BIGINT NOT NULL COMMENT '买家ID',
   `total_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '订单总金额',
@@ -130,5 +131,51 @@ CREATE TABLE IF NOT EXISTS `order_setting` (
   `auto_close_minutes` INT NOT NULL DEFAULT 30 COMMENT '未付款自动关单分钟数',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单设置';
+
+-- ============ 多租户模块 ============
+
+-- 租户（tenant_id 全局根源）
+CREATE TABLE IF NOT EXISTS `tenant` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT 'tenant_id 全局根源',
+  `name` VARCHAR(100) NOT NULL COMMENT '公司名',
+  `status` TINYINT NOT NULL DEFAULT 1 COMMENT '1启用 0禁用',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='租户';
+
+-- 租户用户
+CREATE TABLE IF NOT EXISTS `tenant_user` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` BIGINT NOT NULL COMMENT '所属租户',
+  `username` VARCHAR(50) NOT NULL COMMENT '用户名',
+  `password` VARCHAR(100) NOT NULL COMMENT '密码',
+  PRIMARY KEY (`id`),
+  KEY `idx_tenant` (`tenant_id`),
+  CONSTRAINT `fk_tu_tenant` FOREIGN KEY (`tenant_id`) REFERENCES `tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='租户用户';
+
+-- 套餐
+CREATE TABLE IF NOT EXISTS `plan` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `name` VARCHAR(50) NOT NULL COMMENT '如:基础版/专业版',
+  `order_quota` INT NOT NULL DEFAULT 0 COMMENT '订单量配额',
+  `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '价格',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='套餐';
+
+-- 租户套餐订阅
+CREATE TABLE IF NOT EXISTS `tenant_plan` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `tenant_id` BIGINT NOT NULL COMMENT '租户ID',
+  `plan_id` BIGINT NOT NULL COMMENT '套餐ID',
+  `expire_at` DATE NOT NULL COMMENT '到期时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_tenant` (`tenant_id`),
+  CONSTRAINT `fk_tp_tenant` FOREIGN KEY (`tenant_id`) REFERENCES `tenant` (`id`),
+  CONSTRAINT `fk_tp_plan` FOREIGN KEY (`plan_id`) REFERENCES `plan` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='租户套餐订阅';
+
+-- 商品/订单增加租户隔离字段
+ALTER TABLE `product` ADD COLUMN `tenant_id` BIGINT NOT NULL DEFAULT 1 COMMENT '租户ID' AFTER `id`;
+ALTER TABLE `order` ADD COLUMN `tenant_id` BIGINT NOT NULL DEFAULT 1 COMMENT '租户ID' AFTER `id`;
 
 SET FOREIGN_KEY_CHECKS = 1;

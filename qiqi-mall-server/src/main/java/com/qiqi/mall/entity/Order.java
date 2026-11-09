@@ -15,6 +15,9 @@ public class Order {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    /** 租户ID */
+    private Long tenantId;
+
     /** 订单号 */
     private String orderSn;
 

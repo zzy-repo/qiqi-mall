@@ -12,6 +12,9 @@ public class Product {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    /** 租户ID */
+    private Long tenantId;
+
     private String name;
 
     private Long categoryId;

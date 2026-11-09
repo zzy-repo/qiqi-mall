@@ -23,6 +23,14 @@
           </template>
           <el-menu-item index="/dashboard">数据概览</el-menu-item>
         </el-sub-menu>
+        <el-sub-menu index="tenant">
+          <template #title>
+            <el-icon><OfficeBuilding /></el-icon>
+            <span>租户</span>
+          </template>
+          <el-menu-item index="/tenant">租户</el-menu-item>
+          <el-menu-item index="/plan">套餐</el-menu-item>
+        </el-sub-menu>
         <el-sub-menu index="order">
           <template #title>
             <el-icon><List /></el-icon>

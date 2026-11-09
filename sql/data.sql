@@ -92,3 +92,29 @@ INSERT INTO return_apply (id, order_id, member_id, return_reason, description, s
 -- 订单设置（全局单行）
 INSERT INTO order_setting (id, auto_confirm_days, auto_close_minutes) VALUES
   (1, 7, 30);
+
+-- ============ 多租户示例数据 ============
+INSERT INTO tenant (id, name, status) VALUES
+  (1, '七七自营', 1),
+  (2, '合作商户A', 1),
+  (3, '合作商户B', 0);
+
+INSERT INTO tenant_user (id, tenant_id, username, password) VALUES
+  (1, 1, 'qiqi', '123456'),
+  (2, 2, 'shanghu-a', '123456');
+
+INSERT INTO plan (id, name, order_quota, price) VALUES
+  (1, '基础版', 1000, 99.00),
+  (2, '专业版', 10000, 499.00);
+
+INSERT INTO tenant_plan (id, tenant_id, plan_id, expire_at) VALUES
+  (1, 1, 2, '2027-12-31'),
+  (2, 2, 1, '2026-06-30');
+
+-- 合作商户A 的隔离数据
+INSERT INTO product (id, tenant_id, name, category_id, type_id, publish_status) VALUES
+  (6, 2, '商户A-手机壳', 4, 1, 1);
+INSERT INTO `order` (id, tenant_id, order_sn, member_id, total_amount, status, pay_type, payment_time, receiver_name) VALUES
+  (5, 2, 'QQ20261109005', 2, 29.00, 1, 1, '2026-11-09 09:00:00', '商户A客户');
+INSERT INTO order_item (id, order_id, product_id, product_sku_id, product_name, product_price, product_quantity) VALUES
+  (5, 5, 6, 1, '商户A-手机壳', 29.00, 1);

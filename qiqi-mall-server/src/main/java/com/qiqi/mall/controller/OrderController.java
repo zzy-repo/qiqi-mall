@@ -2,6 +2,7 @@ package com.qiqi.mall.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.qiqi.mall.common.Result;
+import com.qiqi.mall.common.TenantContext;
 import com.qiqi.mall.dto.OrderDetailDTO;
 import com.qiqi.mall.entity.Order;
 import com.qiqi.mall.entity.OrderItem;
@@ -57,6 +58,7 @@ public class OrderController {
     public Result<Order> create(@RequestBody OrderCreateRequest request) {
         Order order = request.getOrder();
         order.setId(null);
+        if (order.getTenantId() == null) order.setTenantId(TenantContext.get());
         if (order.getOrderSn() == null || order.getOrderSn().isBlank()) {
             order.setOrderSn("QQ" + System.currentTimeMillis());
         }
