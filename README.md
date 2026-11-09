@@ -74,11 +74,11 @@ npm run dev:prod   # 生产预览 5174 → 代理 8082
 方案 A（一次只跑一套环境），镜像多阶段构建，详见 `docs/docker.md`。
 
 ```bash
-docker compose up -d --build                              # 开发  5173 / 8081
-docker compose -f docker-compose.prod.yml up -d --build   # 生产  5174 / 8082
+docker compose up -d --build                              # 开发  仅对外 5173
+docker compose -f docker-compose.prod.yml up -d --build   # 生产  仅对外 5174
 ```
 
-| 服务 | 开发端口 | 生产端口 |
-|------|---------|---------|
-| 前端 | 5173 | 5174 |
-| 后端 | 8081 | 8082 |
+| 服务 | 开发端口 | 生产端口 | 说明 |
+|------|---------|---------|------|
+| 前端 | 5173 | 5174 | 唯一对外入口 |
+| 后端 | 8081 | 8082 | 仅容器内网，不映射宿主机 |

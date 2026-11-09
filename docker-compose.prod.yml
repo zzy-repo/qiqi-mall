@@ -12,8 +12,12 @@ services:
       TZ: Asia/Shanghai
       SPRING_PROFILE: prod
       JAVA_OPTS: "-XX:MaxRAMPercentage=75 -Xms256m"
-    ports: !override
-      - "8082:8082"
+    # 不映射到宿主机：仅通过 compose 内网由前端 nginx 访问
+    # 临时联调需要直连时，取消下面注释（建议绑 127.0.0.1 而非 0.0.0.0）
+    # ports:
+    #   - "127.0.0.1:8082:8082"
+    expose:
+      - "8082"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8082/api/health"]
