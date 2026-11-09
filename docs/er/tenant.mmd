@@ -1,0 +1,36 @@
+erDiagram
+    tenant ||--o{ tenant_user : "拥有"
+    tenant ||--o{ tenant_plan : "购买订阅"
+    plan ||--o{ tenant_plan : "被订购"
+    tenant ||--o{ product : "隔离商品"
+    tenant ||--o{ order : "隔离订单"
+
+    tenant {
+        bigint id PK "tenant_id 全局根源"
+        varchar name "公司名"
+        tinyint status "1启用 0禁用"
+    }
+    tenant_user {
+        bigint id PK
+        bigint tenant_id FK "所属租户"
+        varchar username
+        varchar password
+    }
+    plan {
+        bigint id PK
+        varchar name "基础版/专业版"
+        int order_quota "订单量配额"
+        decimal price
+    }
+    tenant_plan {
+        bigint id PK
+        bigint tenant_id FK
+        bigint plan_id FK
+        date expire_at "到期时间"
+    }
+    product {
+        bigint id PK "含 tenant_id 隔离字段"
+    }
+    order {
+        bigint id PK "含 tenant_id 隔离字段"
+    }

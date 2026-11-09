@@ -1,0 +1,37 @@
+erDiagram
+    category ||--o{ category : "父子层级"
+    category ||--o{ product : "归属分类"
+    product_type ||--o{ attribute : "聚合属性"
+    product_type ||--o{ product : "指定类型"
+    product ||--o{ sku : "聚合 SKU"
+
+    category {
+        bigint id PK
+        bigint parent_id "0=顶级，自引用"
+        varchar name
+    }
+    product_type {
+        bigint id PK
+        varchar name "手机/服装/食品"
+    }
+    attribute {
+        bigint id PK
+        bigint type_id FK "聚合于类型"
+        varchar name
+        tinyint is_filter "是否筛选属性"
+    }
+    product {
+        bigint id PK
+        bigint tenant_id FK "租户隔离"
+        varchar name "SPU"
+        bigint category_id FK
+        bigint type_id FK
+        tinyint publish_status "1上架 0下架"
+    }
+    sku {
+        bigint id PK
+        bigint product_id FK "聚合于商品，CASCADE"
+        varchar spec_json "规格如{颜色:黑}"
+        decimal price
+        int stock
+    }
