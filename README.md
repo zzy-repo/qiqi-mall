@@ -37,8 +37,11 @@ qiqi-mall/
 结构见 `sql/schema.sql`（依据 ER 图）：`category` 商品分类（自关联）、`product_type` 商品类型、
 `attribute` 属性、`product` 商品SPU、`sku` SKU。
 
+MySQL 8 跑在容器里（compose 的 `mysql` 服务），首次启动自动执行建表脚本：
+
 ```bash
-mysql -uroot < sql/schema.sql     # 建库建表（qiqi_mall）
+docker compose up -d mysql        # 本机 127.0.0.1:3306，root 密码见 .env.example
+mysql -h127.0.0.1 -uroot -pqiqi123456 qiqi_mall
 ```
 
 ## 本地开发（日常迭代）

@@ -74,21 +74,36 @@ docker-compose.yml
 - 前端：`wget http://127.0.0.1/`
 - 前端 `depends_on: service_healthy`，保证启动顺序
 
-## 后续扩展 MySQL
+## MySQL
 
-```yaml
-  mysql:
-    image: mysql:8
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: qiqi_mall
-    volumes:
-      - mysql-data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+容器化 MySQL 8（compose 里的 `mysql` 服务），不再使用宿主机 MariaDB。
 
-volumes:
-  mysql-data:
+| 项目 | 值 |
+|------|-----|
+| 镜像 | mysql:8（实际 8.4.13） |
+| 宿主机端口 | `127.0.0.1:3306`（仅本机可达） |
+| 容器内地址 | `mysql:3306` |
+| 数据卷 | `mysql-data` |
+| 初始化 | `sql/schema.sql` 挂到 `/docker-entrypoint-initdb.d/`，**数据卷为空时首次启动自动执行** |
+| root 密码 | 环境变量 `MYSQL_ROOT_PASSWORD`，默认 `qiqi123456`（见 `.env.example`） |
+
+本地开发的后端连接串：`jdbc:mysql://127.0.0.1:3306/qiqi_mall`
+容器内后端连接串：`jdbc:mysql://mysql:3306/qiqi_mall`
+
+### 重新初始化表结构
+
+建表脚本只在**数据卷为空**时执行。改了 `sql/schema.sql` 想重来：
+
+```bash
+docker compose down mysql
+docker volume rm qiqi-mall_mysql-data
+docker compose up -d mysql
 ```
 
-后端通过 `jdbc:mysql://mysql:3306/qiqi_mall` 连接。
+⚠️ 会清空所有数据。
+
+### 连接
+
+```bash
+mysql -h127.0.0.1 -uroot -pqiqi123456 qiqi_mall
+```

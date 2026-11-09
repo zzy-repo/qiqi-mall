@@ -3,6 +3,30 @@
 name: qiqi-mall
 
 services:
+  mysql:
+    image: mysql:8
+    container_name: qiqi-mysql
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-qiqi123456}
+      MYSQL_DATABASE: qiqi_mall
+    # 只绑定本机，供本地开发的后端连接；容器内服务用 mysql:3306
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 首次初始化（数据卷为空时）自动建表
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - qiqi-net
+
   server:
     build:
       context: ./qiqi-mall-server
@@ -50,3 +74,6 @@ services:
 networks:
   qiqi-net:
     driver: bridge
+
+volumes:
+  mysql-data:
