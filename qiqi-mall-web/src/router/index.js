@@ -32,6 +32,24 @@ const routes = [
         meta: { title: '商品列表' }
       },
       {
+        path: 'order',
+        name: 'Order',
+        component: () => import('../views/order/index.vue'),
+        meta: { title: '订单列表' }
+      },
+      {
+        path: 'return-apply',
+        name: 'ReturnApply',
+        component: () => import('../views/return-apply/index.vue'),
+        meta: { title: '退货申请' }
+      },
+      {
+        path: 'order-setting',
+        name: 'OrderSetting',
+        component: () => import('../views/order-setting/index.vue'),
+        meta: { title: '订单设置' }
+      },
+      {
         path: 'product-type/:typeId/attributes',
         name: 'TypeAttributes',
         component: () => import('../views/product-type/attributes.vue'),

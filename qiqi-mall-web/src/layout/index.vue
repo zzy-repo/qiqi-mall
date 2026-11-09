@@ -23,6 +23,15 @@
           </template>
           <el-menu-item index="/dashboard">数据概览</el-menu-item>
         </el-sub-menu>
+        <el-sub-menu index="order">
+          <template #title>
+            <el-icon><List /></el-icon>
+            <span>订单</span>
+          </template>
+          <el-menu-item index="/order">订单列表</el-menu-item>
+          <el-menu-item index="/return-apply">退货申请</el-menu-item>
+          <el-menu-item index="/order-setting">订单设置</el-menu-item>
+        </el-sub-menu>
         <el-sub-menu index="product">
           <template #title>
             <el-icon><Goods /></el-icon>

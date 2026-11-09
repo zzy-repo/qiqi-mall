@@ -1,7 +1,19 @@
 -- 示例数据（开发调试用）
 USE qiqi_mall;
 
--- 商品分类（两级树）
+SET FOREIGN_KEY_CHECKS = 0;
+TRUNCATE TABLE sku;
+TRUNCATE TABLE product;
+TRUNCATE TABLE attribute;
+TRUNCATE TABLE product_type;
+TRUNCATE TABLE category;
+TRUNCATE TABLE `order`;
+TRUNCATE TABLE order_item;
+TRUNCATE TABLE return_apply;
+TRUNCATE TABLE return_reason;
+TRUNCATE TABLE order_setting;
+SET FOREIGN_KEY_CHECKS = 1;
+
 INSERT INTO category (id, parent_id, name) VALUES
   (1, 0, '手机数码'),
   (2, 0, '服装'),
@@ -48,3 +60,35 @@ INSERT INTO sku (id, product_id, spec_json, price, stock) VALUES
   (7, 4, '{"颜色":"白色","尺码":"L"}', 99.00, 500),
   (8, 4, '{"颜色":"黑色","尺码":"M"}', 99.00, 480),
   (9, 5, '{"净含量":"250g"}', 128.00, 200);
+
+-- ============ 订单模块示例数据 ============
+
+-- 退货原因字典
+INSERT INTO return_reason (id, name) VALUES
+  (1, '质量问题'),
+  (2, '七天无理由'),
+  (3, '发错货'),
+  (4, '不想要了');
+
+-- 订单（member_id 用 1 表示同一个测试买家）
+INSERT INTO `order` (id, order_sn, member_id, total_amount, status, pay_type, payment_time, receiver_name) VALUES
+  (1, 'QQ20261109001', 1, 7998.00, 1, 1, '2026-11-08 10:20:00', '七七'),
+  (2, 'QQ20261109002', 1, 599.00,  2, 2, '2026-11-08 14:35:00', '七七'),
+  (3, 'QQ20261109003', 1, 128.00,  0, 0, NULL, '七七'),
+  (4, 'QQ20261109004', 1, 99.00,   4, 0, NULL, '七七');
+
+-- 订单明细
+INSERT INTO order_item (id, order_id, product_id, product_sku_id, product_name, product_price, product_quantity) VALUES
+  (1, 1, 1, 1, '七七 Pro 15 智能手机', 3999.00, 2),
+  (2, 2, 2, 4, '七七 Air 蓝牙耳机', 599.00, 1),
+  (3, 3, 5, 9, '手冲单品咖啡豆', 128.00, 1),
+  (4, 4, 4, 7, '纯棉基础款T恤', 99.00, 1);
+
+-- 退货申请（订单2 发错货申请中，订单1 已通过）
+INSERT INTO return_apply (id, order_id, member_id, return_reason, description, status, reason_id) VALUES
+  (1, 2, 1, '发错货', '收到的是黑色，下单的是钛银色', 0, 3),
+  (2, 1, 1, '质量问题', '屏幕有坏点', 1, 1);
+
+-- 订单设置（全局单行）
+INSERT INTO order_setting (id, auto_confirm_days, auto_close_minutes) VALUES
+  (1, 7, 30);

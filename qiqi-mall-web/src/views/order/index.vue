@@ -1,0 +1,215 @@
+<template>
+  <el-card shadow="never">
+    <template #header>
+      <div class="card-header">
+        <span>订单列表</span>
+        <el-button type="primary" :icon="Plus" @click="openForm()">新增</el-button>
+      </div>
+    </template>
+
+    <el-table v-loading="loading" :data="list" border>
+      <el-table-column prop="orderSn" label="订单号" min-width="160" />
+      <el-table-column prop="memberId" label="买家ID" width="90" />
+      <el-table-column label="总金额" width="130">
+        <template #default="{ row }">¥ {{ Number(row.totalAmount).toFixed(2) }}</template>
+      </el-table-column>
+      <el-table-column label="状态" width="100">
+        <template #default="{ row }">
+          <el-tag :type="statusTag[row.status]" size="small">{{ statusText[row.status] }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="支付方式" width="100">
+        <template #default="{ row }">{{ payText[row.payType] }}</template>
+      </el-table-column>
+      <el-table-column prop="receiverName" label="收货人" width="100" />
+      <el-table-column label="支付时间" width="170">
+        <template #default="{ row }">{{ row.paymentTime || '—' }}</template>
+      </el-table-column>
+      <el-table-column label="操作" width="150" fixed="right">
+        <template #default="{ row }">
+          <el-button link type="primary" size="small" @click="openDetail(row)">明细</el-button>
+          <el-button link type="primary" size="small" @click="openForm(row)">编辑</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+
+    <!-- 新增/编辑：订单 + 明细一起提交 -->
+    <el-dialog v-model="visible" :title="form.id ? '编辑订单' : '新增订单'" width="640px">
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
+        <el-form-item label="订单号" prop="orderSn">
+          <el-input v-model="form.orderSn" placeholder="留空自动生成" maxlength="50" />
+        </el-form-item>
+        <el-form-item label="买家ID" prop="memberId">
+          <el-input-number v-model="form.memberId" :min="1" :controls="false" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="收货人" prop="receiverName">
+          <el-input v-model="form.receiverName" maxlength="50" />
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-select v-model="form.status" style="width: 100%">
+            <el-option v-for="(t, i) in statusText" :key="i" :label="t" :value="i" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="支付方式">
+          <el-select v-model="form.payType" style="width: 100%">
+            <el-option v-for="(t, i) in payText" :key="i" :label="t" :value="i" />
+          </el-select>
+        </el-form-item>
+
+        <el-divider content-position="left">订单明细</el-divider>
+        <el-table :data="form.items" border size="small">
+          <el-table-column label="SKU ID" width="110">
+            <template #default="{ row }">
+              <el-input-number v-model="row.productSkuId" :min="1" :controls="false" style="width: 90px" />
+            </template>
+          </el-table-column>
+          <el-table-column label="商品名（快照）">
+            <template #default="{ row }">
+              <el-input v-model="row.productName" maxlength="100" />
+            </template>
+          </el-table-column>
+          <el-table-column label="单价" width="130">
+            <template #default="{ row }">
+              <el-input-number v-model="row.productPrice" :min="0" :precision="2" :controls="false" style="width: 110px" />
+            </template>
+          </el-table-column>
+          <el-table-column label="数量" width="110">
+            <template #default="{ row }">
+              <el-input-number v-model="row.productQuantity" :min="1" :precision="0" :controls="false" style="width: 90px" />
+            </template>
+          </el-table-column>
+          <el-table-column label="" width="60">
+            <template #default="{ $index }">
+              <el-button link type="danger" size="small" @click="form.items.splice($index, 1)">删</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-button class="add-item" size="small" :icon="Plus" @click="addItem">加一条明细</el-button>
+      </el-form>
+      <template #footer>
+        <el-button @click="visible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submit">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 详情：明细 + 退货申请聚合展示 -->
+    <el-drawer v-model="detailVisible" :title="`订单明细 - ${detail?.order?.orderSn || ''}`" size="700px">
+      <template v-if="detail">
+        <h4>商品明细</h4>
+        <el-table :data="detail.items" border size="small">
+          <el-table-column prop="productName" label="商品名" min-width="160" />
+          <el-table-column label="单价" width="100">
+            <template #default="{ row }">¥ {{ Number(row.productPrice).toFixed(2) }}</template>
+          </el-table-column>
+          <el-table-column prop="productQuantity" label="数量" width="70" />
+          <el-table-column label="小计" width="110">
+            <template #default="{ row }">¥ {{ (Number(row.productPrice) * row.productQuantity).toFixed(2) }}</template>
+          </el-table-column>
+        </el-table>
+
+        <h4 style="margin-top: 20px">退货申请</h4>
+        <el-table :data="detail.returnApplies" border size="small">
+          <el-table-column prop="returnReason" label="原因" min-width="120" />
+          <el-table-column prop="description" label="说明" min-width="150" show-overflow-tooltip />
+          <el-table-column label="状态" width="90">
+            <template #default="{ row }">
+              <el-tag :type="['warning', 'success', 'danger'][row.status]" size="small">
+                {{ ['待处理', '已通过', '已拒绝'][row.status] }}
+              </el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-if="!detail.returnApplies.length" description="无退货申请" :image-size="60" />
+      </template>
+    </el-drawer>
+  </el-card>
+</template>
+
+<script setup>
+import { ref, reactive, onMounted } from 'vue'
+import { Plus } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { listOrders, createOrder, updateOrder } from '../../api/order'
+
+const statusText = ['待付款', '已付款', '已发货', '已完成', '已关闭']
+const statusTag = ['warning', 'success', 'primary', 'success', 'info']
+const payText = ['未支付', '支付宝', '微信']
+
+const list = ref([])
+const loading = ref(false)
+
+const load = async () => {
+  loading.value = true
+  try {
+    list.value = await listOrders()
+  } catch (e) {
+    ElMessage.error('加载失败：' + e.message)
+  } finally {
+    loading.value = false
+  }
+}
+
+const emptyItem = () => ({ productSkuId: null, productName: '', productPrice: 0, productQuantity: 1 })
+const blankForm = () => ({
+  id: null, orderSn: '', memberId: null, receiverName: '',
+  status: 0, payType: 0, items: [emptyItem()]
+})
+
+const visible = ref(false)
+const saving = ref(false)
+const formRef = ref()
+const form = reactive(blankForm())
+
+const rules = {
+  memberId: [{ required: true, message: '请输入买家ID', trigger: 'blur' }],
+  receiverName: [{ required: true, message: '请输入收货人', trigger: 'blur' }]
+}
+
+const addItem = () => form.items.push(emptyItem())
+
+const openForm = (row) => {
+  Object.assign(form, row ? { ...row, items: form.items } : blankForm())
+  if (row) {
+    // 编辑时先拉明细
+    import('../../api/order').then(({ getOrder }) =>
+      getOrder(row.id).then((d) => { form.items = d.items.length ? d.items : [emptyItem()] }))
+  } else {
+    form.items = [emptyItem()]
+  }
+  visible.value = true
+  formRef.value?.clearValidate()
+}
+
+const submit = async () => {
+  const valid = await formRef.value.validate().catch(() => false)
+  if (!valid) return
+  saving.value = true
+  try {
+    const payload = { order: { ...form }, items: form.items }
+    if (form.id) await updateOrder(form.id, payload.order)
+    else await createOrder(payload)
+    ElMessage.success('保存成功')
+    visible.value = false
+    await load()
+  } catch (e) {
+    ElMessage.error('保存失败：' + e.message)
+  } finally {
+    saving.value = false
+  }
+}
+
+const detail = ref(null)
+const detailVisible = ref(false)
+const openDetail = async (row) => {
+  const { getOrder } = await import('../../api/order')
+  detail.value = await getOrder(row.id)
+  detailVisible.value = true
+}
+
+onMounted(load)
+</script>
+
+<style scoped>
+.card-header { display: flex; justify-content: space-between; align-items: center; }
+.add-item { margin-top: 10px; width: 100%; }
+</style>

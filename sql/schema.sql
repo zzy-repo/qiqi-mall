@@ -6,6 +6,8 @@ CREATE DATABASE IF NOT EXISTS qiqi_mall
 
 USE qiqi_mall;
 
+SET FOREIGN_KEY_CHECKS = 0;
+
 DROP TABLE IF EXISTS sku;
 DROP TABLE IF EXISTS product;
 DROP TABLE IF EXISTS attribute;
@@ -64,3 +66,69 @@ CREATE TABLE sku (
   KEY idx_product_id (product_id),
   CONSTRAINT fk_sku_product FOREIGN KEY (product_id) REFERENCES product (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='商品SKU';
+
+-- ============ 订单模块 ============
+
+-- 订单（status 状态机：0待付款 1已付款 2已发货 3已完成 4已关闭）
+CREATE TABLE IF NOT EXISTS `order` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `order_sn` VARCHAR(50) NOT NULL COMMENT '订单号',
+  `member_id` BIGINT NOT NULL COMMENT '买家ID',
+  `total_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '订单总金额',
+  `status` TINYINT NOT NULL DEFAULT 0 COMMENT '状态:0待付款 1已付款 2已发货 3已完成 4已关闭',
+  `pay_type` TINYINT NOT NULL DEFAULT 0 COMMENT '支付方式:0未支付 1支付宝 2微信',
+  `payment_time` DATETIME DEFAULT NULL COMMENT '支付时间',
+  `receiver_name` VARCHAR(50) NOT NULL COMMENT '收货人姓名（快照）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_order_sn` (`order_sn`),
+  KEY `idx_member` (`member_id`),
+  KEY `idx_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单';
+
+-- 订单明细（聚合于订单）
+CREATE TABLE IF NOT EXISTS `order_item` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `order_id` BIGINT NOT NULL COMMENT '订单ID',
+  `product_id` BIGINT NOT NULL COMMENT '商品ID（SPU快照）',
+  `product_sku_id` BIGINT NOT NULL COMMENT 'SKU ID（快照）',
+  `product_name` VARCHAR(100) NOT NULL COMMENT '下单时商品名（快照）',
+  `product_price` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '成交价（快照）',
+  `product_quantity` INT NOT NULL DEFAULT 1 COMMENT '购买数量',
+  PRIMARY KEY (`id`),
+  KEY `idx_order` (`order_id`),
+  CONSTRAINT `fk_order_item_order` FOREIGN KEY (`order_id`) REFERENCES `order` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_order_item_product` FOREIGN KEY (`product_id`) REFERENCES `product` (`id`),
+  CONSTRAINT `fk_order_item_sku` FOREIGN KEY (`product_sku_id`) REFERENCES `sku` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单明细';
+
+-- 退货原因（字典）
+CREATE TABLE IF NOT EXISTS `return_reason` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `name` VARCHAR(50) NOT NULL COMMENT '原因名称',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='退货原因';
+
+-- 退货申请（聚合于订单；status:0待处理 1通过 2拒绝）
+CREATE TABLE IF NOT EXISTS `return_apply` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `order_id` BIGINT NOT NULL COMMENT '订单ID',
+  `member_id` BIGINT NOT NULL COMMENT '申请人ID',
+  `return_reason` VARCHAR(200) NOT NULL COMMENT '退货原因描述',
+  `description` VARCHAR(500) DEFAULT NULL COMMENT '详细说明',
+  `status` TINYINT NOT NULL DEFAULT 0 COMMENT '状态:0待处理 1通过 2拒绝',
+  `reason_id` BIGINT NOT NULL COMMENT '退货原因字典ID',
+  PRIMARY KEY (`id`),
+  KEY `idx_order` (`order_id`),
+  CONSTRAINT `fk_return_order` FOREIGN KEY (`order_id`) REFERENCES `order` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_return_reason` FOREIGN KEY (`reason_id`) REFERENCES `return_reason` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='退货申请';
+
+-- 订单设置（全局单行配置）
+CREATE TABLE IF NOT EXISTS `order_setting` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `auto_confirm_days` INT NOT NULL DEFAULT 7 COMMENT '自动收货天数',
+  `auto_close_minutes` INT NOT NULL DEFAULT 30 COMMENT '未付款自动关单分钟数',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单设置';
+
+SET FOREIGN_KEY_CHECKS = 1;
