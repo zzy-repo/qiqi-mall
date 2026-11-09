@@ -20,6 +20,26 @@
           <el-icon><Odometer /></el-icon>
           <template #title>数据概览</template>
         </el-menu-item>
+        <el-menu-item index="/category">
+          <el-icon><Folder /></el-icon>
+          <template #title>商品分类</template>
+        </el-menu-item>
+        <el-menu-item index="/product-type">
+          <el-icon><Collection /></el-icon>
+          <template #title>商品类型</template>
+        </el-menu-item>
+        <el-menu-item index="/attribute">
+          <el-icon><Setting /></el-icon>
+          <template #title>属性</template>
+        </el-menu-item>
+        <el-menu-item index="/product">
+          <el-icon><Goods /></el-icon>
+          <template #title>商品</template>
+        </el-menu-item>
+        <el-menu-item index="/sku">
+          <el-icon><Tickets /></el-icon>
+          <template #title>SKU</template>
+        </el-menu-item>
       </el-menu>
     </el-aside>
 

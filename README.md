@@ -32,6 +32,15 @@ qiqi-mall/
 └── docs/                   # 文档
 ```
 
+## 数据库
+
+结构见 `sql/schema.sql`（依据 ER 图）：`category` 商品分类（自关联）、`product_type` 商品类型、
+`attribute` 属性、`product` 商品SPU、`sku` SKU。
+
+```bash
+mysql -uroot < sql/schema.sql     # 建库建表（qiqi_mall）
+```
+
 ## 本地开发（日常迭代）
 
 不走容器，直接跑源码，支持热更新。
