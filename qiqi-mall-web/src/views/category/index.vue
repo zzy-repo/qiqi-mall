@@ -1,5 +1,5 @@
 <template>
-  <el-card shadow="never" header="商品分类">
+  <el-card shadow="never">
     <template #header>
       <div class="card-header">
         <span>商品分类</span>
@@ -7,7 +7,7 @@
       </div>
     </template>
 
-    <el-table :data="list" border row-key="id" default-expand-all>
+    <el-table v-loading="loading" :data="tree" border row-key="id" default-expand-all>
       <el-table-column prop="id" label="分类ID" width="100" />
       <el-table-column prop="parentId" label="父分类ID" width="120" />
       <el-table-column prop="name" label="分类名称" />
@@ -30,21 +30,46 @@
       </el-form>
       <template #footer>
         <el-button @click="visible = false">取消</el-button>
-        <el-button type="primary" @click="submit">确定</el-button>
+        <el-button type="primary" :loading="saving" @click="submit">确定</el-button>
       </template>
     </el-dialog>
   </el-card>
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { listCategories, createCategory, updateCategory } from '../../api/category'
 
-// 数据来源：后端接口（待接入）
 const list = ref([])
+const loading = ref(false)
+
+// 扁平数据转树结构
+const tree = computed(() => {
+  const map = new Map(list.value.map((r) => ({ ...r, children: [] })).map((r) => [r.id, r]))
+  const roots = []
+  map.forEach((node) => {
+    const parent = node.parentId ? map.get(node.parentId) : null
+    if (parent) parent.children.push(node)
+    else roots.push(node)
+  })
+  return roots
+})
+
+const load = async () => {
+  loading.value = true
+  try {
+    list.value = await listCategories()
+  } catch (e) {
+    ElMessage.error('加载失败：' + e.message)
+  } finally {
+    loading.value = false
+  }
+}
 
 const visible = ref(false)
+const saving = ref(false)
 const formRef = ref()
 const form = reactive({ id: null, parentId: 0, name: '' })
 
@@ -62,9 +87,21 @@ const openForm = (row) => {
 const submit = async () => {
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
-  // TODO: 接入后端接口后替换
-  ElMessage.info('接口未接入，数据未保存')
+  saving.value = true
+  try {
+    if (form.id) await updateCategory(form.id, form)
+    else await createCategory(form)
+    ElMessage.success('保存成功')
+    visible.value = false
+    await load()
+  } catch (e) {
+    ElMessage.error('保存失败：' + e.message)
+  } finally {
+    saving.value = false
+  }
 }
+
+onMounted(load)
 </script>
 
 <style scoped>

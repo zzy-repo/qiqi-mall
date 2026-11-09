@@ -2,6 +2,18 @@
 server:
   port: 8082
   address: 0.0.0.0
+spring:
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:mysql}:3306/qiqi_mall?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:qiqi123456}
+    driver-class-name: com.mysql.cj.jdbc.Driver
 logging:
   level:
     com.qiqi.mall: info
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: auto

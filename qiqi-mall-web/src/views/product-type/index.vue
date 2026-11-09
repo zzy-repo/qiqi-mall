@@ -7,12 +7,13 @@
       </div>
     </template>
 
-    <el-table :data="list" border>
+    <el-table v-loading="loading" :data="list" border>
       <el-table-column prop="id" label="类型ID" width="100" />
       <el-table-column prop="name" label="类型名称" />
-      <el-table-column label="操作" width="100" fixed="right">
+      <el-table-column label="操作" width="150" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="openForm(row)">编辑</el-button>
+          <el-button link type="primary" size="small" @click="openAttributes(row)">属性</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -25,27 +26,45 @@
       </el-form>
       <template #footer>
         <el-button @click="visible = false">取消</el-button>
-        <el-button type="primary" @click="submit">确定</el-button>
+        <el-button type="primary" :loading="saving" @click="submit">确定</el-button>
       </template>
     </el-dialog>
   </el-card>
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
+import { listProductTypes, createProductType, updateProductType } from '../../api/productType'
 
-// 数据来源：后端接口（待接入）
+const router = useRouter()
+
 const list = ref([])
+const loading = ref(false)
+
+const load = async () => {
+  loading.value = true
+  try {
+    list.value = await listProductTypes()
+  } catch (e) {
+    ElMessage.error('加载失败：' + e.message)
+  } finally {
+    loading.value = false
+  }
+}
 
 const visible = ref(false)
+const saving = ref(false)
 const formRef = ref()
 const form = reactive({ id: null, name: '' })
 
 const rules = {
   name: [{ required: true, message: '请输入类型名称', trigger: 'blur' }]
 }
+
+const openAttributes = (row) => router.push(`/product-type/${row.id}/attributes`)
 
 const openForm = (row) => {
   Object.assign(form, row ? { ...row } : { id: null, name: '' })
@@ -56,9 +75,21 @@ const openForm = (row) => {
 const submit = async () => {
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
-  // TODO: 接入后端接口后替换
-  ElMessage.info('接口未接入，数据未保存')
+  saving.value = true
+  try {
+    if (form.id) await updateProductType(form.id, form)
+    else await createProductType(form)
+    ElMessage.success('保存成功')
+    visible.value = false
+    await load()
+  } catch (e) {
+    ElMessage.error('保存失败：' + e.message)
+  } finally {
+    saving.value = false
+  }
 }
+
+onMounted(load)
 </script>
 
 <style scoped>

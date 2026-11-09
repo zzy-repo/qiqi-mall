@@ -26,22 +26,22 @@ const routes = [
         meta: { title: '商品类型' }
       },
       {
-        path: 'attribute',
-        name: 'Attribute',
-        component: () => import('../views/attribute/index.vue'),
-        meta: { title: '属性' }
-      },
-      {
         path: 'product',
         name: 'Product',
         component: () => import('../views/product/index.vue'),
-        meta: { title: '商品' }
+        meta: { title: '商品列表' }
       },
       {
-        path: 'sku',
-        name: 'Sku',
-        component: () => import('../views/sku/index.vue'),
-        meta: { title: 'SKU' }
+        path: 'product-type/:typeId/attributes',
+        name: 'TypeAttributes',
+        component: () => import('../views/product-type/attributes.vue'),
+        meta: { title: '属性管理', parent: '商品类型' }
+      },
+      {
+        path: 'product/:productId/skus',
+        name: 'ProductSkus',
+        component: () => import('../views/product/skus.vue'),
+        meta: { title: 'SKU 管理', parent: '商品列表' }
       }
     ]
   }

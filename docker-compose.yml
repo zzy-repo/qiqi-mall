@@ -37,6 +37,12 @@ services:
       TZ: Asia/Shanghai
       SPRING_PROFILE: prod
       JAVA_OPTS: "-XX:MaxRAMPercentage=75"
+      MYSQL_HOST: mysql
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-qiqi123456}
+    depends_on:
+      mysql:
+        condition: service_healthy
     # 不映射到宿主机：仅通过 compose 内网由前端 nginx 访问
     # 临时联调需要直连时，取消下面注释（建议绑 127.0.0.1 而非 0.0.0.0）
     # ports:

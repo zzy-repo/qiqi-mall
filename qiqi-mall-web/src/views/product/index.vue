@@ -2,12 +2,12 @@
   <el-card shadow="never">
     <template #header>
       <div class="card-header">
-        <span>商品</span>
+        <span>商品列表</span>
         <el-button type="primary" :icon="Plus" @click="openForm()">新增</el-button>
       </div>
     </template>
 
-    <el-table :data="list" border>
+    <el-table v-loading="loading" :data="list" border>
       <el-table-column prop="id" label="商品ID" width="100" />
       <el-table-column prop="name" label="商品名称" min-width="200" />
       <el-table-column prop="categoryId" label="分类ID" width="110" />
@@ -19,9 +19,10 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="100" fixed="right">
+      <el-table-column label="操作" width="150" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="openForm(row)">编辑</el-button>
+          <el-button link type="primary" size="small" @click="openSkus(row)">SKU</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -46,21 +47,37 @@
       </el-form>
       <template #footer>
         <el-button @click="visible = false">取消</el-button>
-        <el-button type="primary" @click="submit">确定</el-button>
+        <el-button type="primary" :loading="saving" @click="submit">确定</el-button>
       </template>
     </el-dialog>
   </el-card>
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
+import { listProducts, createProduct, updateProduct } from '../../api/product'
 
-// 数据来源：后端接口（待接入）
+const router = useRouter()
+
 const list = ref([])
+const loading = ref(false)
+
+const load = async () => {
+  loading.value = true
+  try {
+    list.value = await listProducts()
+  } catch (e) {
+    ElMessage.error('加载失败：' + e.message)
+  } finally {
+    loading.value = false
+  }
+}
 
 const visible = ref(false)
+const saving = ref(false)
 const formRef = ref()
 const form = reactive({ id: null, name: '', categoryId: null, typeId: null, publishStatus: 0 })
 
@@ -69,6 +86,8 @@ const rules = {
   categoryId: [{ required: true, message: '请输入分类ID', trigger: 'blur' }],
   typeId: [{ required: true, message: '请输入类型ID', trigger: 'blur' }]
 }
+
+const openSkus = (row) => router.push(`/product/${row.id}/skus`)
 
 const openForm = (row) => {
   Object.assign(form, row
@@ -81,9 +100,21 @@ const openForm = (row) => {
 const submit = async () => {
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
-  // TODO: 接入后端接口后替换
-  ElMessage.info('接口未接入，数据未保存')
+  saving.value = true
+  try {
+    if (form.id) await updateProduct(form.id, form)
+    else await createProduct(form)
+    ElMessage.success('保存成功')
+    visible.value = false
+    await load()
+  } catch (e) {
+    ElMessage.error('保存失败：' + e.message)
+  } finally {
+    saving.value = false
+  }
 }
+
+onMounted(load)
 </script>
 
 <style scoped>

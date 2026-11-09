@@ -28,11 +28,9 @@
             <el-icon><Goods /></el-icon>
             <span>商品</span>
           </template>
+          <el-menu-item index="/product">商品列表</el-menu-item>
           <el-menu-item index="/category">商品分类</el-menu-item>
           <el-menu-item index="/product-type">商品类型</el-menu-item>
-          <el-menu-item index="/attribute">属性</el-menu-item>
-          <el-menu-item index="/product">商品</el-menu-item>
-          <el-menu-item index="/sku">SKU</el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>
@@ -93,11 +91,16 @@ const isCollapse = ref(false)
 const env = import.meta.env.VITE_APP_ENV
 
 const activeMenu = computed(() => route.path)
-const breadcrumbs = computed(() =>
+const breadcrumbs = computed(() => {
+  const items = []
   route.matched
     .filter((r) => r.meta?.title)
-    .map((r) => ({ path: r.path, title: r.meta.title }))
-)
+    .forEach((r) => {
+      if (r.meta.parent) items.push({ path: '', title: r.meta.parent })
+      items.push({ path: r.path, title: r.meta.title })
+    })
+  return items
+})
 </script>
 
 <style scoped>
