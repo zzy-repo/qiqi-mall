@@ -15,18 +15,3 @@ erDiagram
     订单 ||--o| 退货申请 : "退货"
     退货原因 ||--o{ 退货申请 : "被选择"
     订单设置 ||..|| 订单 : "全局配置"
-
-    租户 { bigint id PK }
-    套餐 { bigint id PK }
-    商品分类 { bigint id PK }
-    商品类型 { bigint id PK }
-    属性 { bigint id PK }
-    商品 { bigint id PK }
-    SKU { bigint id PK }
-    订单 { bigint id PK }
-    订单明细 { bigint id PK }
-    退货申请 { bigint id PK }
-    退货原因 { bigint id PK }
-    订单设置 { bigint id PK }
-    租户用户 { bigint id PK }
-    租户套餐订阅 { bigint id PK }
