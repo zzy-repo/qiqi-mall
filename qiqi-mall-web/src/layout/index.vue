@@ -16,30 +16,24 @@
         active-text-color="#ffd04b"
         class="layout-menu"
       >
-        <el-menu-item index="/dashboard">
-          <el-icon><Odometer /></el-icon>
-          <template #title>数据概览</template>
-        </el-menu-item>
-        <el-menu-item index="/category">
-          <el-icon><Folder /></el-icon>
-          <template #title>商品分类</template>
-        </el-menu-item>
-        <el-menu-item index="/product-type">
-          <el-icon><Collection /></el-icon>
-          <template #title>商品类型</template>
-        </el-menu-item>
-        <el-menu-item index="/attribute">
-          <el-icon><Setting /></el-icon>
-          <template #title>属性</template>
-        </el-menu-item>
-        <el-menu-item index="/product">
-          <el-icon><Goods /></el-icon>
-          <template #title>商品</template>
-        </el-menu-item>
-        <el-menu-item index="/sku">
-          <el-icon><Tickets /></el-icon>
-          <template #title>SKU</template>
-        </el-menu-item>
+        <el-sub-menu index="home">
+          <template #title>
+            <el-icon><HomeFilled /></el-icon>
+            <span>首页</span>
+          </template>
+          <el-menu-item index="/dashboard">数据概览</el-menu-item>
+        </el-sub-menu>
+        <el-sub-menu index="product">
+          <template #title>
+            <el-icon><Goods /></el-icon>
+            <span>商品</span>
+          </template>
+          <el-menu-item index="/category">商品分类</el-menu-item>
+          <el-menu-item index="/product-type">商品类型</el-menu-item>
+          <el-menu-item index="/attribute">属性</el-menu-item>
+          <el-menu-item index="/product">商品</el-menu-item>
+          <el-menu-item index="/sku">SKU</el-menu-item>
+        </el-sub-menu>
       </el-menu>
     </el-aside>
 
