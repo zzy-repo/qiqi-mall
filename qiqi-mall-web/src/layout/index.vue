@@ -16,38 +16,9 @@
         active-text-color="#ffd04b"
         class="layout-menu"
       >
-        <el-sub-menu index="dashboard">
-          <template #title>
-            <el-icon><Odometer /></el-icon>
-            <span>控制台</span>
-          </template>
-          <el-menu-item index="/dashboard">数据概览</el-menu-item>
-        </el-sub-menu>
-        <el-sub-menu index="product">
-          <template #title>
-            <el-icon><Goods /></el-icon>
-            <span>商品管理</span>
-          </template>
-          <el-menu-item index="/product/list">商品列表</el-menu-item>
-          <el-menu-item index="/product/category">商品分类</el-menu-item>
-        </el-sub-menu>
-        <el-sub-menu index="order">
-          <template #title>
-            <el-icon><Document /></el-icon>
-            <span>订单管理</span>
-          </template>
-          <el-menu-item index="/order/list">订单列表</el-menu-item>
-        </el-sub-menu>
-        <el-sub-menu index="user">
-          <template #title>
-            <el-icon><User /></el-icon>
-            <span>用户管理</span>
-          </template>
-          <el-menu-item index="/user/list">用户列表</el-menu-item>
-        </el-sub-menu>
-        <el-menu-item index="/cart">
-          <el-icon><ShoppingCart /></el-icon>
-          <template #title>购物车</template>
+        <el-menu-item index="/dashboard">
+          <el-icon><Odometer /></el-icon>
+          <template #title>数据概览</template>
         </el-menu-item>
       </el-menu>
     </el-aside>
