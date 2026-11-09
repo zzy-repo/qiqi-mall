@@ -32,16 +32,28 @@ const routes = [
         meta: { title: '商品列表' }
       },
       {
-        path: 'tenant',
-        name: 'Tenant',
-        component: () => import('../views/tenant/index.vue'),
-        meta: { title: '租户' }
+        path: 'member',
+        name: 'Member',
+        component: () => import('../views/member/index.vue'),
+        meta: { title: '会员列表' }
       },
       {
-        path: 'plan',
-        name: 'Plan',
-        component: () => import('../views/plan/index.vue'),
-        meta: { title: '套餐' }
+        path: 'member/:memberId/addresses',
+        name: 'MemberAddresses',
+        component: () => import('../views/member/addresses.vue'),
+        meta: { title: '收货地址', parent: '会员列表' }
+      },
+      {
+        path: 'member/:memberId/carts',
+        name: 'MemberCarts',
+        component: () => import('../views/member/carts.vue'),
+        meta: { title: '购物车', parent: '会员列表' }
+      },
+      {
+        path: 'admin',
+        name: 'Admin',
+        component: () => import('../views/admin/index.vue'),
+        meta: { title: '管理员' }
       },
       {
         path: 'order',

@@ -2,7 +2,6 @@ package com.qiqi.mall.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.qiqi.mall.common.Result;
-import com.qiqi.mall.common.TenantContext;
 import com.qiqi.mall.dto.OrderDetailDTO;
 import com.qiqi.mall.entity.Order;
 import com.qiqi.mall.entity.OrderItem;
@@ -58,12 +57,21 @@ public class OrderController {
     public Result<Order> create(@RequestBody OrderCreateRequest request) {
         Order order = request.getOrder();
         order.setId(null);
-        if (order.getTenantId() == null) order.setTenantId(TenantContext.get());
         if (order.getOrderSn() == null || order.getOrderSn().isBlank()) {
             order.setOrderSn("QQ" + System.currentTimeMillis());
         }
-        orderService.save(order);
         List<OrderItem> items = request.getItems();
+        // 总金额以明细为准（快照价 × 数量）
+        if (items != null && !items.isEmpty()) {
+            java.math.BigDecimal total = java.math.BigDecimal.ZERO;
+            for (OrderItem it : items) {
+                java.math.BigDecimal price = it.getProductPrice() == null ? java.math.BigDecimal.ZERO : it.getProductPrice();
+                int qty = it.getProductQuantity() == null ? 1 : it.getProductQuantity();
+                total = total.add(price.multiply(java.math.BigDecimal.valueOf(qty)));
+            }
+            order.setTotalAmount(total);
+        }
+        orderService.save(order);
         if (items != null) {
             items.forEach(item -> {
                 item.setId(null);

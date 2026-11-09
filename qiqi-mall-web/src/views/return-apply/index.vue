@@ -8,8 +8,12 @@
     </template>
 
     <el-table v-loading="loading" :data="list" border>
-      <el-table-column prop="orderId" label="订单ID" width="100" />
-      <el-table-column prop="memberId" label="申请人ID" width="100" />
+      <el-table-column label="订单号" width="170">
+        <template #default="{ row }">{{ orderSn.get(row.orderId) || row.orderId }}</template>
+      </el-table-column>
+      <el-table-column label="申请人" width="110">
+        <template #default="{ row }">{{ memberName.get(row.memberId) || row.memberId }}</template>
+      </el-table-column>
       <el-table-column label="原因" min-width="140">
         <template #default="{ row }">{{ reasonName.get(row.reasonId) || row.returnReason }}</template>
       </el-table-column>
@@ -30,8 +34,15 @@
 
     <el-dialog v-model="visible" :title="form.id ? '审核退货申请' : '新增退货申请'" width="520px">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
-        <el-form-item label="订单ID" prop="orderId">
-          <el-input-number v-model="form.orderId" :min="1" :controls="false" style="width: 100%" :disabled="!!form.id" />
+        <el-form-item label="订单" prop="orderId">
+          <el-select v-model="form.orderId" placeholder="请选择订单" style="width: 100%" :disabled="!!form.id">
+            <el-option v-for="o in orders" :key="o.id" :label="o.orderSn" :value="o.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="申请人" prop="memberId">
+          <el-select v-model="form.memberId" placeholder="请选择会员" style="width: 100%">
+            <el-option v-for="m in members" :key="m.id" :label="m.username" :value="m.id" />
+          </el-select>
         </el-form-item>
         <el-form-item label="退货原因" prop="reasonId">
           <el-select v-model="form.reasonId" style="width: 100%" placeholder="请选择原因">
@@ -62,23 +73,33 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { listReturnReasons } from '../../api/returnReason'
+import { listOrders } from '../../api/order'
+import { listMembers } from '../../api/member'
 import request from '../../api/request'
 
 const list = ref([])
 const reasons = ref([])
 const loading = ref(false)
 
+const orders = ref([])
+const members = ref([])
 const reasonName = computed(() => new Map(reasons.value.map((r) => [r.id, r.name])))
+const orderSn = computed(() => new Map(orders.value.map((o) => [o.id, o.orderSn])))
+const memberName = computed(() => new Map(members.value.map((m) => [m.id, m.username])))
 
 const load = async () => {
   loading.value = true
   try {
-    const [rs, applies] = await Promise.all([
+    const [rs, applies, ords, mems] = await Promise.all([
       listReturnReasons(),
-      request.get('/return-applies')
+      request.get('/return-applies'),
+      listOrders(),
+      listMembers()
     ])
     reasons.value = rs
     list.value = applies
+    orders.value = ords
+    members.value = mems
   } catch (e) {
     ElMessage.error('加载失败：' + e.message)
   } finally {
@@ -89,15 +110,16 @@ const load = async () => {
 const visible = ref(false)
 const saving = ref(false)
 const formRef = ref()
-const form = reactive({ id: null, orderId: null, reasonId: null, description: '', status: 0, returnReason: '' })
+const form = reactive({ id: null, orderId: null, memberId: null, reasonId: null, description: '', status: 0, returnReason: '' })
 
 const rules = {
-  orderId: [{ required: true, message: '请输入订单ID', trigger: 'blur' }],
+  orderId: [{ required: true, message: '请选择订单', trigger: 'change' }],
+  memberId: [{ required: true, message: '请选择申请人', trigger: 'change' }],
   reasonId: [{ required: true, message: '请选择退货原因', trigger: 'change' }]
 }
 
 const openForm = (row) => {
-  Object.assign(form, row ? { ...row } : { id: null, orderId: null, reasonId: null, description: '', status: 0, returnReason: '' })
+  Object.assign(form, row ? { ...row } : { id: null, orderId: null, memberId: null, reasonId: null, description: '', status: 0, returnReason: '' })
   visible.value = true
   formRef.value?.clearValidate()
 }

@@ -9,7 +9,9 @@
 
     <el-table v-loading="loading" :data="list" border>
       <el-table-column prop="orderSn" label="订单号" min-width="160" />
-      <el-table-column prop="memberId" label="买家ID" width="90" />
+      <el-table-column label="买家" width="110">
+        <template #default="{ row }">{{ memberName.get(row.memberId) || row.memberId }}</template>
+      </el-table-column>
       <el-table-column label="总金额" width="130">
         <template #default="{ row }">¥ {{ Number(row.totalAmount).toFixed(2) }}</template>
       </el-table-column>
@@ -22,6 +24,7 @@
         <template #default="{ row }">{{ payText[row.payType] }}</template>
       </el-table-column>
       <el-table-column prop="receiverName" label="收货人" width="100" />
+      <el-table-column prop="receiverPhone" label="收货电话" width="140" />
       <el-table-column label="支付时间" width="170">
         <template #default="{ row }">{{ row.paymentTime || '—' }}</template>
       </el-table-column>
@@ -39,11 +42,19 @@
         <el-form-item label="订单号" prop="orderSn">
           <el-input v-model="form.orderSn" placeholder="留空自动生成" maxlength="50" />
         </el-form-item>
-        <el-form-item label="买家ID" prop="memberId">
-          <el-input-number v-model="form.memberId" :min="1" :controls="false" style="width: 100%" />
+        <el-form-item label="买家" prop="memberId">
+          <el-select v-model="form.memberId" placeholder="请选择会员" style="width: 100%">
+            <el-option v-for="m in members" :key="m.id" :label="`${m.username}${m.nickname ? '（' + m.nickname + '）' : ''}`" :value="m.id" />
+          </el-select>
         </el-form-item>
         <el-form-item label="收货人" prop="receiverName">
           <el-input v-model="form.receiverName" maxlength="50" />
+        </el-form-item>
+        <el-form-item label="收货电话">
+          <el-input v-model="form.receiverPhone" maxlength="20" />
+        </el-form-item>
+        <el-form-item label="收货地址">
+          <el-input v-model="form.receiverAddress" type="textarea" :rows="2" maxlength="255" />
         </el-form-item>
         <el-form-item label="状态">
           <el-select v-model="form.status" style="width: 100%">
@@ -58,14 +69,34 @@
 
         <el-divider content-position="left">订单明细</el-divider>
         <el-table :data="form.items" border size="small">
-          <el-table-column label="SKU ID" width="110">
+          <el-table-column label="商品" width="170">
             <template #default="{ row }">
-              <el-input-number v-model="row.productSkuId" :min="1" :controls="false" style="width: 90px" />
+              <el-select
+                v-model="row.productId"
+                placeholder="选择商品"
+                size="small"
+                @change="(v) => onItemProductChange(row, v)"
+              >
+                <el-option v-for="p in products" :key="p.id" :label="p.name" :value="p.id" />
+              </el-select>
             </template>
           </el-table-column>
-          <el-table-column label="商品名（快照）">
+          <el-table-column label="规格（SKU）" width="190">
             <template #default="{ row }">
-              <el-input v-model="row.productName" maxlength="100" />
+              <el-select
+                v-model="row.productSkuId"
+                placeholder="选择规格"
+                size="small"
+                :disabled="!row.productId"
+                @change="(v) => onItemSkuChange(row, v)"
+              >
+                <el-option
+                  v-for="s in skuOptionsOf(row)"
+                  :key="s.id"
+                  :label="`${s.specJson || '默认规格'} · ¥${Number(s.price).toFixed(2)}`"
+                  :value="s.id"
+                />
+              </el-select>
             </template>
           </el-table-column>
           <el-table-column label="单价" width="130">
@@ -126,10 +157,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { listOrders, createOrder, updateOrder } from '../../api/order'
+import { listMembers } from '../../api/member'
+import { listProducts } from '../../api/product'
+import { listSkus } from '../../api/sku'
 
 const statusText = ['待付款', '已付款', '已发货', '已完成', '已关闭']
 const statusTag = ['warning', 'success', 'primary', 'success', 'info']
@@ -137,6 +171,31 @@ const payText = ['未支付', '支付宝', '微信']
 
 const list = ref([])
 const loading = ref(false)
+const members = ref([])
+const products = ref([])
+const skus = ref([])
+
+/** 某一行可选规格：只列该商品的 SKU */
+const skuOptionsOf = (row) => skus.value.filter((s) => s.productId === row.productId)
+
+/** 换商品时清空已选规格与快照 */
+const onItemProductChange = (row, productId) => {
+  row.productSkuId = null
+  row.productName = ''
+  row.productPrice = 0
+  const p = products.value.find((x) => x.id === productId)
+  if (p) row.productName = p.name
+}
+
+/** 选规格时带出商品名与成交价快照 */
+const onItemSkuChange = (row, skuId) => {
+  const s = skus.value.find((x) => x.id === skuId)
+  if (!s) return
+  row.productPrice = Number(s.price)
+  const p = products.value.find((x) => x.id === s.productId)
+  if (p) row.productName = p.name
+}
+const memberName = computed(() => new Map(members.value.map((m) => [m.id, m.username])))
 
 const load = async () => {
   loading.value = true
@@ -149,9 +208,10 @@ const load = async () => {
   }
 }
 
-const emptyItem = () => ({ productSkuId: null, productName: '', productPrice: 0, productQuantity: 1 })
+const emptyItem = () => ({ productId: null, productSkuId: null, productName: '', productPrice: 0, productQuantity: 1 })
 const blankForm = () => ({
   id: null, orderSn: '', memberId: null, receiverName: '',
+  receiverPhone: '', receiverAddress: '',
   status: 0, payType: 0, items: [emptyItem()]
 })
 
@@ -161,7 +221,7 @@ const formRef = ref()
 const form = reactive(blankForm())
 
 const rules = {
-  memberId: [{ required: true, message: '请输入买家ID', trigger: 'blur' }],
+  memberId: [{ required: true, message: '请选择买家', trigger: 'change' }],
   receiverName: [{ required: true, message: '请输入收货人', trigger: 'blur' }]
 }
 
@@ -206,10 +266,21 @@ const openDetail = async (row) => {
   detailVisible.value = true
 }
 
-onMounted(load)
+onMounted(async () => {
+  load()
+  try {
+    const [mems, prods, allSkus] = await Promise.all([listMembers(), listProducts(), listSkus()])
+    members.value = mems
+    products.value = prods
+    skus.value = allSkus
+  } catch (e) {
+    // 参照数据失败不阻塞列表
+  }
+})
 </script>
 
 <style scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; }
 .add-item { margin-top: 10px; width: 100%; }
+.snapshot { color: #606266; }
 </style>

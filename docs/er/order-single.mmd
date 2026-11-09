@@ -1,0 +1,45 @@
+erDiagram
+    订单 ||--o{ 订单明细 : "包含明细"
+    订单 ||--o| 退货申请 : "可能产生退货"
+    退货原因 ||--o{ 退货申请 : "被选择"
+    订单设置 ||..|| 订单 : "全局配置"
+    商品 ||--o{ 订单明细 : "快照引用"
+    SKU ||--o{ 订单明细 : "快照引用"
+
+    订单 {
+        bigint id PK
+        varchar order_sn UK "订单号-全局唯一"
+        bigint member_id "买家"
+        decimal total_amount
+        tinyint status "0待付款 1已付款 2已发货 3已完成 4已关闭"
+        tinyint pay_type "0未支付 1支付宝 2微信"
+        datetime payment_time
+        varchar receiver_name "收货人快照"
+    }
+    订单明细 {
+        bigint id PK
+        bigint order_id FK "CASCADE"
+        bigint product_id FK "SPU"
+        bigint product_sku_id FK "SKU"
+        varchar product_name "下单时快照"
+        decimal product_price "成交价快照"
+        int product_quantity
+    }
+    退货申请 {
+        bigint id PK
+        bigint order_id FK "聚合于订单，CASCADE"
+        bigint member_id "申请人"
+        varchar return_reason
+        varchar description "详细说明"
+        tinyint status "0待处理 1通过 2拒绝"
+        bigint reason_id FK
+    }
+    退货原因 {
+        bigint id PK
+        varchar name "质量问题/七天无理由/发错货/不想要了"
+    }
+    订单设置 {
+        bigint id PK
+        int auto_confirm_days "自动收货天数"
+        int auto_close_minutes "未付款自动关单分钟"
+    }

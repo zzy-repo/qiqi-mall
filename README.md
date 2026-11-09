@@ -34,8 +34,11 @@ qiqi-mall/
 
 ## 数据库
 
-结构见 `sql/schema.sql`（依据 ER 图）：`category` 商品分类（自关联）、`product_type` 商品类型、
-`attribute` 属性、`product` 商品SPU、`sku` SKU。
+结构见 `sql/schema.sql`（依据 ER 图），共 14 张表，分三个模块：
+
+- **商品模块**：`category` 商品分类（自关联树）、`product_type` 商品类型、`attribute` 属性、`product` 商品SPU、`sku` SKU
+- **订单模块**：`order` 订单、`order_item` 订单明细、`return_apply` 退货申请、`return_reason` 退货原因、`order_setting` 订单设置
+- **用户模块**：`member` 会员、`member_address` 收货地址、`cart` 购物车、`admin` 管理员
 
 MySQL 8 跑在容器里（compose 的 `mysql` 服务），首次启动自动执行建表脚本：
 
@@ -47,7 +50,7 @@ mysql -h127.0.0.1 -uroot -pqiqi123456 qiqi_mall
 | 脚本 | 内容 |
 |------|------|
 | `sql/schema.sql` | 建库建表 |
-| `sql/data.sql` | 示例数据（10 分类 / 3 类型 / 6 属性 / 5 商品 / 9 SKU） |
+| `sql/data.sql` | 示例数据（3 会员 / 3 地址 / 3 购物车 / 1 管理员 / 10 分类 / 3 类型 / 6 属性 / 5 商品 / 9 SKU / 4 订单 / 2 退货） |
 
 两个脚本都挂到 `/docker-entrypoint-initdb.d/`，数据卷为空时按序自动执行。
 
