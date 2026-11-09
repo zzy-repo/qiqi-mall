@@ -1,12 +1,12 @@
 erDiagram
-    order ||--o{ order_item : "包含明细"
-    order ||--o| return_apply : "可能产生退货"
-    return_reason ||--o{ return_apply : "被选择"
-    order_setting ||..|| order : "全局配置"
-    product ||--o{ order_item : "快照引用"
-    sku ||--o{ order_item : "快照引用"
+    订单 ||--o{ 订单明细 : "包含明细"
+    订单 ||--o| 退货申请 : "可能产生退货"
+    退货原因 ||--o{ 退货申请 : "被选择"
+    订单设置 ||..|| 订单 : "全局配置"
+    商品 ||--o{ 订单明细 : "快照引用"
+    SKU ||--o{ 订单明细 : "快照引用"
 
-    order {
+    订单 {
         bigint id PK
         bigint tenant_id FK "租户隔离"
         varchar order_sn UK "订单号"
@@ -17,7 +17,7 @@ erDiagram
         datetime payment_time
         varchar receiver_name "收货人快照"
     }
-    order_item {
+    订单明细 {
         bigint id PK
         bigint order_id FK "CASCADE"
         bigint product_id FK "SPU"
@@ -26,7 +26,7 @@ erDiagram
         decimal product_price "成交价快照"
         int product_quantity
     }
-    return_apply {
+    退货申请 {
         bigint id PK
         bigint order_id FK "聚合于订单，CASCADE"
         bigint member_id "申请人"
@@ -35,11 +35,11 @@ erDiagram
         tinyint status "0待处理 1通过 2拒绝"
         bigint reason_id FK
     }
-    return_reason {
+    退货原因 {
         bigint id PK
         varchar name "质量问题/七天无理由/发错货/不想要了"
     }
-    order_setting {
+    订单设置 {
         bigint id PK
         int auto_confirm_days "自动收货天数"
         int auto_close_minutes "未付款自动关单分钟"

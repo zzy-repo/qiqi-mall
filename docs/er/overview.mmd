@@ -1,32 +1,32 @@
 erDiagram
-    tenant ||--o{ tenant_user : "拥有"
-    tenant ||--o{ product : "隔离"
-    tenant ||--o{ order : "隔离"
-    tenant ||--o{ tenant_plan : "购买"
-    plan ||--o{ tenant_plan : "被订购"
+    租户 ||--o{ 租户用户 : "拥有"
+    租户 ||--o{ 商品 : "隔离"
+    租户 ||--o{ 订单 : "隔离"
+    租户 ||--o{ 租户套餐订阅 : "购买"
+    套餐 ||--o{ 租户套餐订阅 : "被订购"
 
-    category ||--o{ category : "父子"
-    category ||--o{ product : "归属"
-    product_type ||--o{ attribute : "聚合"
-    product_type ||--o{ product : "指定"
-    product ||--o{ sku : "聚合"
+    商品分类 ||--o{ 商品分类 : "父子"
+    商品分类 ||--o{ 商品 : "归属"
+    商品类型 ||--o{ 属性 : "聚合"
+    商品类型 ||--o{ 商品 : "指定"
+    商品 ||--o{ SKU : "聚合"
 
-    order ||--o{ order_item : "包含"
-    order ||--o| return_apply : "退货"
-    return_reason ||--o{ return_apply : "被选择"
-    order_setting ||..|| order : "全局配置"
+    订单 ||--o{ 订单明细 : "包含"
+    订单 ||--o| 退货申请 : "退货"
+    退货原因 ||--o{ 退货申请 : "被选择"
+    订单设置 ||..|| 订单 : "全局配置"
 
-    tenant { bigint id PK }
-    plan { bigint id PK }
-    category { bigint id PK }
-    product_type { bigint id PK }
-    attribute { bigint id PK }
-    product { bigint id PK }
-    sku { bigint id PK }
-    order { bigint id PK }
-    order_item { bigint id PK }
-    return_apply { bigint id PK }
-    return_reason { bigint id PK }
-    order_setting { bigint id PK }
-    tenant_user { bigint id PK }
-    tenant_plan { bigint id PK }
+    租户 { bigint id PK }
+    套餐 { bigint id PK }
+    商品分类 { bigint id PK }
+    商品类型 { bigint id PK }
+    属性 { bigint id PK }
+    商品 { bigint id PK }
+    SKU { bigint id PK }
+    订单 { bigint id PK }
+    订单明细 { bigint id PK }
+    退货申请 { bigint id PK }
+    退货原因 { bigint id PK }
+    订单设置 { bigint id PK }
+    租户用户 { bigint id PK }
+    租户套餐订阅 { bigint id PK }
