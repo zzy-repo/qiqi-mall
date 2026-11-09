@@ -8,8 +8,6 @@
     </template>
 
     <el-table v-loading="loading" :data="tree" border row-key="id" default-expand-all>
-      <el-table-column prop="id" label="分类ID" width="100" />
-      <el-table-column prop="parentId" label="父分类ID" width="120" />
       <el-table-column prop="name" label="分类名称" />
       <el-table-column label="操作" width="100" fixed="right">
         <template #default="{ row }">
@@ -23,9 +21,16 @@
         <el-form-item label="分类名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入分类名称" maxlength="50" />
         </el-form-item>
-        <el-form-item label="父分类ID" prop="parentId">
-          <el-input-number v-model="form.parentId" :min="0" :controls="false" style="width: 100%" />
-          <div class="tip">顶级分类填 0</div>
+        <el-form-item label="父分类" prop="parentId">
+          <el-tree-select
+            v-model="form.parentId"
+            :data="parentOptions"
+            check-strictly
+            :render-after-expand="false"
+            default-expand-all
+            style="width: 100%"
+            placeholder="请选择父分类"
+          />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -46,6 +51,26 @@ const list = ref([])
 const loading = ref(false)
 
 // 扁平数据转树结构
+// 收集节点及其所有后代 id（编辑时禁选，防止把自己挂到后代下）
+const withDescendants = (node) => {
+  const ids = [node.id]
+  for (const c of node.children || []) ids.push(...withDescendants(c))
+  return ids
+}
+
+const parentOptions = computed(() => {
+  const disabledIds = form.id
+    ? new Set(withDescendants(tree.value.find((n) => n.id === form.id) || { id: form.id }))
+    : new Set()
+  const toNode = (c) => ({
+    value: c.id,
+    label: c.name,
+    disabled: disabledIds.has(c.id),
+    children: (c.children || []).map(toNode)
+  })
+  return [{ value: 0, label: '作为顶级分类' }, ...tree.value.map(toNode)]
+})
+
 const tree = computed(() => {
   const map = new Map(list.value.map((r) => ({ ...r, children: [] })).map((r) => [r.id, r]))
   const roots = []

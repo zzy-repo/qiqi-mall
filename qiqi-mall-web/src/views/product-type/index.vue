@@ -8,7 +8,6 @@
     </template>
 
     <el-table v-loading="loading" :data="list" border>
-      <el-table-column prop="id" label="类型ID" width="100" />
       <el-table-column prop="name" label="类型名称" />
       <el-table-column label="操作" width="150" fixed="right">
         <template #default="{ row }">
