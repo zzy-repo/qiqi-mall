@@ -1,3 +1,20 @@
+# 七七商城 系统架构
+
+> 源文件：`docs/architecture.dot`（部署拓扑）+ `docs/request-flow.dot`（请求/租户隔离流程）
+> 重新出图：`dot -Tpng -Gdpi=150 docs/xxx.dot -o docs/xxx.png`（graphviz）
+
+## 1. 部署拓扑
+
+![部署拓扑](architecture.png)
+
+## 2. 请求处理与租户隔离
+
+![请求流程](request-flow.png)
+
+## 历史版本
+
+以下 mermaid 版本保留作参考（单图塞下所有信息导致布局混乱，已弃用）：
+
 # 七七商城 系统架构图
 
 ```mermaid

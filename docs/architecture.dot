@@ -1,0 +1,32 @@
+digraph deploy {
+    rankdir=LR;
+    splines=polyline;
+    nodesep=0.6; ranksep=0.9;
+    fontname="Noto Sans CJK SC";
+    node [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC", fontsize=12, penwidth=1.3, margin="0.2,0.12"];
+    edge [fontname="Noto Sans CJK SC", fontsize=10, penwidth=1.3, color="#444444"];
+
+    user  [label="浏览器\n（七七 / 商户）", fillcolor="#FFE9F0", color="#D4849E"];
+
+    subgraph cluster_dev {
+        label="本地开发环境（并行存在）"; labeljust="l";
+        style="rounded,dashed"; color="#999999"; bgcolor="#F9F9F9";
+        vite  [label="Vite :5173", fillcolor="#E8F4FF", color="#5B9BD5"];
+        sbdev [label="Spring Boot :8081 (dev)", fillcolor="#E8F4FF", color="#5B9BD5"];
+        vite -> sbdev [label="/api"];
+    }
+
+    subgraph cluster_deploy {
+        label="容器化部署（docker compose · qiqi-net）"; labeljust="l";
+        style="rounded"; color="#E07B39"; bgcolor="#FFF6EF";
+        nginx [label="qiqi-web\nnginx → 宿主 5174\n静态资源 + /api/ 反代", fillcolor="#FFE3C6", color="#E07B39"];
+        spring [label="qiqi-server\nSpring Boot :8082\n（仅容器网络内）", fillcolor="#FFE3C6", color="#E07B39"];
+        mysql [label="qiqi-mysql\nMySQL 8 :3306\n仅 127.0.0.1 · 卷 mysql-data", fillcolor="#FFE3C6", color="#E07B39"];
+        nginx -> spring [label="/api/"];
+        spring -> mysql [label="JDBC"];
+    }
+
+    user -> nginx [label=":5174", color="#E07B39", penwidth=1.8];
+    user -> vite [label=":5173 开发", style=dashed];
+    sbdev -> mysql [label="JDBC", style=dashed];
+}
