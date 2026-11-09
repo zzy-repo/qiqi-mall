@@ -34,3 +34,25 @@ qiqi-mall/
 ├── sql/                    # 数据库脚本
 └── docs/                   # 文档
 ```
+
+## 运行端口
+
+| 服务 | 开发 | 生产 |
+|------|------|------|
+| 前端 Vite | 5173 | 5174 |
+| 后端 Spring Boot | 8081 | 8082 |
+
+启动命令：
+```bash
+# 后端
+cd qiqi-mall-server
+mvn spring-boot:run -Dspring-boot.run.profiles=dev    # 开发 8081
+mvn spring-boot:run -Dspring-boot.run.profiles=prod   # 生产 8082
+
+# 前端
+cd qiqi-mall-web
+npm run dev        # 开发 5173 → 代理 8081
+npm run dev:prod   # 生产预览 5174 → 代理 8082
+```
+
+前后端均监听 0.0.0.0，Tailscale 组网内可通过 `http://100.113.135.55:<端口>` 访问。

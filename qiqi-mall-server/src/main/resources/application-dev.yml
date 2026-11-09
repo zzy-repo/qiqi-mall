@@ -1,0 +1,11 @@
+# 开发环境：端口 8081
+server:
+  port: 8081
+  address: 0.0.0.0
+spring:
+  devtools:
+    restart:
+      enabled: true
+logging:
+  level:
+    com.qiqi.mall: debug

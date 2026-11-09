@@ -1,0 +1,7 @@
+# 生产环境：端口 8082
+server:
+  port: 8082
+  address: 0.0.0.0
+logging:
+  level:
+    com.qiqi.mall: info
