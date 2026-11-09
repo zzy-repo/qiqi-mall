@@ -1,0 +1,48 @@
+# 开发环境编排（方案 A：一次只跑一套环境）
+#   docker compose up -d --build
+# 生产环境见 docker-compose.prod.yml
+name: qiqi-mall-dev
+
+services:
+  server:
+    build:
+      context: ./qiqi-mall-server
+    image: qiqi-mall-server:dev
+    container_name: qiqi-server-dev
+    environment:
+      TZ: Asia/Shanghai
+      SPRING_PROFILE: dev
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/api/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - qiqi-net
+
+  web:
+    build:
+      context: ./qiqi-mall-web
+      args:
+        BUILD_MODE: development
+    image: qiqi-mall-web:dev
+    container_name: qiqi-web-dev
+    environment:
+      TZ: Asia/Shanghai
+      BACKEND_UPSTREAM: http://server:8081
+    ports:
+      - "5173:80"
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    networks:
+      - qiqi-net
+
+networks:
+  qiqi-net:
+    driver: bridge

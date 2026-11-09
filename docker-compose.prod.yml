@@ -1,0 +1,48 @@
+# 生产环境编排（方案 A：与开发环境同时只能跑一套）
+#   docker compose -f docker-compose.prod.yml up -d --build
+name: qiqi-mall-prod
+
+services:
+  server:
+    build:
+      context: ./qiqi-mall-server
+    image: qiqi-mall-server:prod
+    container_name: qiqi-server-prod
+    environment:
+      TZ: Asia/Shanghai
+      SPRING_PROFILE: prod
+      JAVA_OPTS: "-XX:MaxRAMPercentage=75 -Xms256m"
+    ports: !override
+      - "8082:8082"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8082/api/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - qiqi-net
+
+  web:
+    build:
+      context: ./qiqi-mall-web
+      args:
+        BUILD_MODE: production
+    image: qiqi-mall-web:prod
+    container_name: qiqi-web-prod
+    environment:
+      TZ: Asia/Shanghai
+      BACKEND_UPSTREAM: http://server:8082
+    ports: !override
+      - "5174:80"
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    networks:
+      - qiqi-net
+
+networks:
+  qiqi-net:
+    driver: bridge

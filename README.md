@@ -68,3 +68,17 @@ npm run dev:prod   # 生产预览 5174 → 代理 8082
 当前仅保留 `/dashboard` 一个页面（空白占位），业务页面后续按需添加。
 
 界面截图见 `docs/screenshots/shot-dashboard.png`。
+
+## Docker 部署
+
+方案 A（一次只跑一套环境），镜像多阶段构建，详见 `docs/docker.md`。
+
+```bash
+docker compose up -d --build                              # 开发  5173 / 8081
+docker compose -f docker-compose.prod.yml up -d --build   # 生产  5174 / 8082
+```
+
+| 服务 | 开发端口 | 生产端口 |
+|------|---------|---------|
+| 前端 | 5173 | 5174 |
+| 后端 | 8081 | 8082 |
