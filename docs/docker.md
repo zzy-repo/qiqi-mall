@@ -109,3 +109,25 @@ docker compose up -d mysql
 ```bash
 mysql -h127.0.0.1 -uroot -pqiqi123456 qiqi_mall
 ```
+
+## 镜像拉取（国内网络）
+
+Docker Hub 直连经常超时，按「先探测、再用可用源」的流程处理：
+
+```bash
+# 1) 探测各镜像源是否可用（200 才算通）
+for m in docker.1panel.live docker.1ms.run docker.m.daocloud.io dockerproxy.com hub-mirror.c.163.com; do
+  echo -n "$m "; curl -s -o /dev/null -m 8 -w "%{http_code}\n" \
+    -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+    "https://$m/v2/library/nginx/manifests/alpine"
+done
+
+# 2) 用可用源拉取，再打回本地标准名（Dockerfile 里仍是官方名）
+docker pull docker.1panel.live/library/nginx:alpine
+docker tag  docker.1panel.live/library/nginx:alpine nginx:alpine
+```
+
+需要的基础镜像：`nginx:alpine`、`node:22-alpine`、`maven:3.9-eclipse-temurin-21`、`eclipse-temurin:21-jre-alpine`、`mysql:8`。
+
+实测（2026-11-10）：`docker.1panel.live` 可用；`docker.1ms.run` 返回 401/503；其余多数不通。
+备选方案：若镜像源均不可用，可走阿里云主机的 HTTP 代理（`HTTP_PROXY`/`HTTPS_PROXY` 配到 Docker daemon 后重启 docker）。
