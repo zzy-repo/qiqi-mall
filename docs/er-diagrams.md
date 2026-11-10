@@ -17,7 +17,7 @@
 | 8 | 验证码机制时序图 | 机制 | 图形码生成校验、一次性消费、失败计数 |
 | 9 | 图片上传时序图 | 机制 | MinIO 上传、安全校验、URL 回填 |
 | 10 | ER图-总览 | 数据 | 15 实体全关系总览 |
-| 11 | ER图-商品域 | 数据 | 分类/类型/属性/商品/SKU/相册 |
+| 11 | ER图-商品域 | 数据 | 分类/类型/属性/商品/SKU/**SKU规格值**/相册 |
 | 12 | ER图-订单域 | 数据 | 订单/明细/退货/原因/设置 |
 | 13 | ER图-用户域 | 数据 | 会员/收货地址/购物车/管理员 |
 
@@ -41,12 +41,24 @@ B/C 端分离：admin-web（管理后台）与 portal-web（买家商城）两�
 - ⛔ 缺口：场景3 的"买家确认收货接口"与"管理员发货按钮"（订单状态机中间段）
 - ⛔ 支付为模拟实现（POST /orders/{id}/pay 直接改状态），演示需主动说明
 
-### 待执行的 SQL 增量（图片能力）
+### 图片能力 SQL（已并入 sql/schema.sql）
 ```sql
-ALTER TABLE product ADD COLUMN pic VARCHAR(500) COMMENT '主图URL';
-ALTER TABLE sku ADD COLUMN pic VARCHAR(500) COMMENT 'SKU图URL';
--- product_pic 相册表见 图11；删除租户域4表：tenant/tenant_user/plan/tenant_plan；product/order去tenant_id
+product.pic VARCHAR(500)   -- 主图URL（MinIO）
+sku.pic     VARCHAR(500)   -- SKU图URL（MinIO）
+product_gallery(product_id FK CASCADE, url, sort)  -- 商品相册，见图11
 ```
+
+### 设计决策记录：SKU 规格从 JSON 改为关联表（图11 v2，已实施）
+
+- **背景**：C 端详情页需按属性展示/筛选规格，`sku.spec_json`（如 `{"净含量":"250g"}`）无法结构化查询，且属性名冗余存储改名难同步
+- **变更**：SKU 删除 `spec_json` 列，新增 `sku_spec` 表（id / sku_id FK CASCADE / attribute_id FK / value，UNIQUE(sku_id, attribute_id)）
+- **收益**：属性名单一来源（attribute 表）、可按属性值筛选/校验笛卡尔积、前端规格选择器可按属性分组渲染
+- **实施情况（2026-11-10）**：
+  - 建表：`sku_spec`（UNIQUE(sku_id, attribute_id) FK→sku CASCADE、FK→attribute）+ `product_gallery`（FK→product CASCADE）+ `product.pic` / `sku.pic`
+  - 后端：`SkuController` 保存体 `{sku, specs}`（规格值整组替换）；`ProductController` 保存体 `{product, gallery}`（相册整组替换）；`SpecTextHelper` 统一把规格值拼成「颜色:黑,内存:256G」
+  - admin：SKU 弹窗按商品类型的属性动态增删规格值；商品弹窗可编辑主图与相册
+  - portal：详情页规格按钮显示规格文本、主图 + 相册缩略图；购物车/结算显示规格文本
+  - 下单同时校验并扣减 `sku.stock`（库存不足整单回滚）
 
 ## 其他文档
 

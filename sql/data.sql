@@ -9,6 +9,8 @@ TRUNCATE TABLE order_item;
 TRUNCATE TABLE `order`;
 TRUNCATE TABLE return_reason;
 TRUNCATE TABLE order_setting;
+TRUNCATE TABLE sku_spec;
+TRUNCATE TABLE product_gallery;
 TRUNCATE TABLE sku;
 TRUNCATE TABLE product;
 TRUNCATE TABLE attribute;
@@ -73,24 +75,46 @@ INSERT INTO attribute (id, type_id, name, is_filter) VALUES
   (6, 3, '净含量', 0);
 
 -- 商品（SPU）
-INSERT INTO product (id, name, category_id, type_id, publish_status) VALUES
-  (1, '七七 Pro 15 智能手机', 4, 1, 1),
-  (2, '七七 Air 蓝牙耳机',   5, 1, 1),
-  (3, '七七 Book 14 轻薄本', 6, 1, 0),
-  (4, '纯棉基础款T恤',       7, 2, 1),
-  (5, '手冲单品咖啡豆',      10, 3, 1);
+INSERT INTO product (id, name, category_id, type_id, publish_status, pic) VALUES
+  (1, '七七 Pro 15 智能手机', 4, 1, 1, 'http://minio.local/qiqi-mall/product/1-cover.jpg'),
+  (2, '七七 Air 蓝牙耳机',   5, 1, 1, 'http://minio.local/qiqi-mall/product/2-cover.jpg'),
+  (3, '七七 Book 14 轻薄本', 6, 1, 0, 'http://minio.local/qiqi-mall/product/3-cover.jpg'),
+  (4, '纯棉基础款T恤',       7, 2, 1, 'http://minio.local/qiqi-mall/product/4-cover.jpg'),
+  (5, '手冲单品咖啡豆',      10, 3, 1, 'http://minio.local/qiqi-mall/product/5-cover.jpg');
 
 -- SKU（聚合于商品）
-INSERT INTO sku (id, product_id, spec_json, price, stock) VALUES
-  (1, 1, '{"颜色":"黑","内存":"256G"}',  3999.00, 100),
-  (2, 1, '{"颜色":"白","内存":"256G"}',  3999.00, 80),
-  (3, 1, '{"颜色":"黑","内存":"512G"}',  4599.00, 50),
-  (4, 2, '{"颜色":"星空灰"}',            599.00, 200),
-  (5, 3, '{"内存":"16G","硬盘":"512G"}', 5499.00, 30),
-  (6, 3, '{"内存":"32G","硬盘":"1T"}',   7499.00, 15),
-  (7, 4, '{"颜色":"白","尺码":"M"}',      99.00, 500),
-  (8, 4, '{"颜色":"黑","尺码":"L"}',      99.00, 300),
-  (9, 5, '{"净含量":"250g"}',            128.00, 1000);
+INSERT INTO sku (id, product_id, price, stock, pic) VALUES
+  (1, 1, 3999.00, 100, 'http://minio.local/qiqi-mall/sku/1.jpg'),
+  (2, 1, 3999.00, 80,  'http://minio.local/qiqi-mall/sku/2.jpg'),
+  (3, 1, 4599.00, 50,  'http://minio.local/qiqi-mall/sku/3.jpg'),
+  (4, 2, 599.00,  200, 'http://minio.local/qiqi-mall/sku/4.jpg'),
+  (5, 3, 5499.00, 30,  'http://minio.local/qiqi-mall/sku/5.jpg'),
+  (6, 3, 7499.00, 15,  'http://minio.local/qiqi-mall/sku/6.jpg'),
+  (7, 4, 99.00,   500, 'http://minio.local/qiqi-mall/sku/7.jpg'),
+  (8, 4, 99.00,   300, 'http://minio.local/qiqi-mall/sku/8.jpg'),
+  (9, 5, 128.00,  1000,'http://minio.local/qiqi-mall/sku/9.jpg');
+
+-- SKU 规格值（颜色/内存/尺码/净含量，引用 attribute 定义）
+-- attribute: 1=手机-颜色 2=手机-内存 3=手机-屏幕尺寸 4=服装-尺码 5=服装-颜色 6=食品-净含量
+INSERT INTO sku_spec (id, sku_id, attribute_id, value) VALUES
+  (1, 1, 1, '黑'), (2, 1, 2, '256G'),
+  (3, 2, 1, '白'), (4, 2, 2, '256G'),
+  (5, 3, 1, '黑'), (6, 3, 2, '512G'),
+  (7, 4, 1, '星空灰'),
+  (8, 5, 2, '16G'),
+  (9, 6, 2, '32G'),
+  (10, 7, 5, '白'), (11, 7, 4, 'M'),
+  (12, 8, 5, '黑'), (13, 8, 4, 'L'),
+  (14, 9, 6, '250g');
+
+-- 商品相册
+INSERT INTO product_gallery (id, product_id, url, sort) VALUES
+  (1, 1, 'http://minio.local/qiqi-mall/product/1-1.jpg', 1),
+  (2, 1, 'http://minio.local/qiqi-mall/product/1-2.jpg', 2),
+  (3, 1, 'http://minio.local/qiqi-mall/product/1-3.jpg', 3),
+  (4, 2, 'http://minio.local/qiqi-mall/product/2-1.jpg', 1),
+  (5, 4, 'http://minio.local/qiqi-mall/product/4-1.jpg', 1),
+  (6, 5, 'http://minio.local/qiqi-mall/product/5-1.jpg', 1);
 
 -- ============ 订单模块 ============
 

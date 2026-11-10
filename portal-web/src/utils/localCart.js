@@ -12,7 +12,7 @@ const read = () => {
 
 const write = (items) => localStorage.setItem(KEY, JSON.stringify(items))
 
-/** 条目结构：{productSkuId, productId, productName, specJson, price, quantity} */
+/** 条目结构：{productSkuId, productId, productName, specText, price, quantity} */
 export const listLocalCart = () => read()
 
 export const addLocalCart = (item) => {

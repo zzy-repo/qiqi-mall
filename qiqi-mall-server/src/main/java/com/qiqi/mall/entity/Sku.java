@@ -16,10 +16,10 @@ public class Sku {
 
     private Long productId;
 
-    /** 规格组合 JSON */
-    private String specJson;
-
     private BigDecimal price;
 
     private Integer stock;
+
+    /** SKU图URL（指向 MinIO） */
+    private String pic;
 }

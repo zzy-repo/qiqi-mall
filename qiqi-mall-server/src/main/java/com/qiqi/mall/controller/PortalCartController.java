@@ -9,6 +9,7 @@ import com.qiqi.mall.security.CurrentUser;
 import com.qiqi.mall.service.CartService;
 import com.qiqi.mall.service.ProductService;
 import com.qiqi.mall.service.SkuService;
+import com.qiqi.mall.service.SpecTextHelper;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
@@ -24,11 +25,14 @@ public class PortalCartController {
     private final CartService cartService;
     private final ProductService productService;
     private final SkuService skuService;
+    private final SpecTextHelper specTextHelper;
 
-    public PortalCartController(CartService cartService, ProductService productService, SkuService skuService) {
+    public PortalCartController(CartService cartService, ProductService productService, SkuService skuService,
+                                SpecTextHelper specTextHelper) {
         this.cartService = cartService;
         this.productService = productService;
         this.skuService = skuService;
+        this.specTextHelper = specTextHelper;
     }
 
     /** 我的购物车（带商品名与规格展示字段） */
@@ -47,7 +51,8 @@ public class PortalCartController {
             item.put("productSkuId", cart.getProductSkuId());
             item.put("quantity", cart.getQuantity());
             item.put("productName", product == null ? "" : product.getName());
-            item.put("specJson", sku == null ? "" : sku.getSpecJson());
+            item.put("specText", specTextHelper.textOf(cart.getProductSkuId()));
+            item.put("pic", sku == null ? null : sku.getPic());
             item.put("price", sku == null ? 0 : sku.getPrice());
             result.add(item);
         }

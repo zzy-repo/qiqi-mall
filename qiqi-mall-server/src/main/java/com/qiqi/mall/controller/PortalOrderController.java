@@ -80,6 +80,13 @@ public class PortalOrderController {
             if (sku == null) continue;
             Product product = productService.getById(sku.getProductId());
             int qty = input.getQuantity() == null || input.getQuantity() < 1 ? 1 : input.getQuantity();
+            if (sku.getStock() == null || sku.getStock() < qty) {
+                // 库存不足直接失败，事务回滚
+                throw new IllegalStateException("库存不足：" + (product == null ? "" : product.getName()));
+            }
+            // 扣库存
+            sku.setStock(sku.getStock() - qty);
+            skuService.updateById(sku);
 
             OrderItem item = new OrderItem();
             item.setOrderId(order.getId());

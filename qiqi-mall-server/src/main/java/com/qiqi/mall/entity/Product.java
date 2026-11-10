@@ -20,4 +20,7 @@ public class Product {
 
     /** 上下架：0 下架 1 上架 */
     private Integer publishStatus;
+
+    /** 主图URL（指向 MinIO） */
+    private String pic;
 }

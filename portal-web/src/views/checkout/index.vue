@@ -31,7 +31,9 @@
       <template #header>商品清单</template>
       <el-table :data="items" border size="small">
         <el-table-column prop="productName" label="商品" min-width="180" />
-        <el-table-column prop="specJson" label="规格" min-width="160" />
+        <el-table-column label="规格" min-width="160">
+          <template #default="{ row }">{{ row.specText || '默认规格' }}</template>
+        </el-table-column>
         <el-table-column label="单价" width="110">
           <template #default="{ row }">¥ {{ Number(row.price).toFixed(2) }}</template>
         </el-table-column>

@@ -8,6 +8,14 @@
     </template>
 
     <el-table v-loading="loading" :data="list" border>
+      <el-table-column label="主图" width="90">
+        <template #default="{ row }">
+          <el-image v-if="row.pic" :src="row.pic" fit="cover" class="thumb">
+            <template #error><span class="empty-pic">无图</span></template>
+          </el-image>
+          <span v-else class="empty-pic">—</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="name" label="商品名称" min-width="200" />
       <el-table-column label="上下架" width="110">
         <template #default="{ row }">
@@ -44,6 +52,21 @@
             <el-option v-for="t in types" :key="t.id" :label="t.name" :value="t.id" />
           </el-select>
         </el-form-item>
+        <el-form-item label="主图">
+          <el-input v-model="form.pic" placeholder="主图URL（MinIO）" maxlength="255" />
+        </el-form-item>
+        <el-form-item label="商品相册">
+          <div class="gallery">
+            <div v-for="(img, index) in form.gallery" :key="index" class="gallery-row">
+              <el-input v-model="img.url" placeholder="图片URL（MinIO）" style="flex: 1" maxlength="255" />
+              <el-input-number v-model="img.sort" :min="0" :precision="0" style="width: 110px" controls-position="right" />
+              <el-button link type="danger" size="small" @click="form.gallery.splice(index, 1)">删除</el-button>
+            </div>
+            <el-button size="small" :icon="Plus" @click="form.gallery.push({ url: '', sort: form.gallery.length + 1 })">
+              添加图片
+            </el-button>
+          </div>
+        </el-form-item>
         <el-form-item label="上下架">
           <el-radio-group v-model="form.publishStatus">
             <el-radio :value="1">上架</el-radio>
@@ -64,7 +87,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
-import { listProducts, createProduct, updateProduct } from '../../api/product'
+import { listProducts, getProduct, createProduct, updateProduct } from '../../api/product'
 import { listCategories } from '../../api/category'
 import { listProductTypes } from '../../api/productType'
 
@@ -115,7 +138,10 @@ const load = async () => {
 const visible = ref(false)
 const saving = ref(false)
 const formRef = ref()
-const form = reactive({ id: null, name: '', categoryId: null, typeId: null, publishStatus: 0 })
+const blankForm = () => ({
+  id: null, name: '', categoryId: null, typeId: null, publishStatus: 1, pic: '', gallery: []
+})
+const form = reactive(blankForm())
 
 const rules = {
   name: [{ required: true, message: '请输入商品名称', trigger: 'blur' }],
@@ -125,10 +151,17 @@ const rules = {
 
 const openSkus = (row) => router.push(`/product/${row.id}/skus`)
 
-const openForm = (row) => {
-  Object.assign(form, row
-    ? { ...row }
-    : { id: null, name: '', categoryId: null, typeId: null, publishStatus: 0 })
+const openForm = async (row) => {
+  Object.assign(form, blankForm())
+  if (row) {
+    try {
+      const data = await getProduct(row.id)
+      Object.assign(form, { ...data.product, gallery: data.gallery || [] })
+    } catch (e) {
+      ElMessage.error('加载商品失败：' + e.message)
+      return
+    }
+  }
   visible.value = true
   formRef.value?.clearValidate()
 }
@@ -138,8 +171,18 @@ const submit = async () => {
   if (!valid) return
   saving.value = true
   try {
-    if (form.id) await updateProduct(form.id, form)
-    else await createProduct(form)
+    const payload = {
+      product: {
+        name: form.name,
+        categoryId: form.categoryId,
+        typeId: form.typeId,
+        publishStatus: form.publishStatus,
+        pic: form.pic
+      },
+      gallery: form.gallery.filter((g) => g.url)
+    }
+    if (form.id) await updateProduct(form.id, payload)
+    else await createProduct(payload)
     ElMessage.success('保存成功')
     visible.value = false
     await load()
@@ -155,4 +198,8 @@ onMounted(() => { load(); loadRefs() })
 
 <style scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; }
+.thumb { width: 44px; height: 44px; border-radius: 4px; }
+.empty-pic { color: #c0c4cc; }
+.gallery { width: 100%; display: flex; flex-direction: column; gap: 8px; }
+.gallery-row { display: flex; gap: 8px; align-items: center; }
 </style>

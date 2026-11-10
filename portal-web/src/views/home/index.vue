@@ -28,7 +28,12 @@
         shadow="hover"
         @click="$router.push(`/product/${p.id}`)"
       >
-        <div class="thumb"><el-icon :size="40"><Goods /></el-icon></div>
+        <div class="thumb">
+          <el-image v-if="p.pic" :src="p.pic" fit="cover" class="cover">
+            <template #error><el-icon :size="40"><Goods /></el-icon></template>
+          </el-image>
+          <el-icon v-else :size="40"><Goods /></el-icon>
+        </div>
         <div class="name">{{ p.name }}</div>
         <div class="cta">查看详情 →</div>
       </el-card>
@@ -74,9 +79,11 @@ onMounted(async () => {
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
 .card { cursor: pointer; }
 .thumb {
-  height: 110px; background: #f0f2f5; border-radius: 4px;
+  height: 110px; background: #f0f2f5; border-radius: 4px; overflow: hidden;
   display: flex; align-items: center; justify-content: center; color: #c0c4cc; margin-bottom: 10px;
 }
+.cover { width: 100%; height: 100%; }
+.cover :deep(img) { width: 100%; height: 100%; object-fit: cover; }
 .name { font-size: 14px; color: #303133; min-height: 40px; }
 .cta { font-size: 12px; color: #409eff; margin-top: 8px; }
 </style>

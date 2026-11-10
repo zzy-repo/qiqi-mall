@@ -3,7 +3,27 @@
     <el-page-header content="商品详情" @back="$router.back()" />
     <el-card v-if="product" shadow="never" class="detail">
       <div class="head">
-        <div class="thumb"><el-icon :size="60"><Goods /></el-icon></div>
+        <div class="left">
+          <div class="thumb">
+            <el-image v-if="product.pic" :src="product.pic" fit="cover" class="cover">
+              <template #error><el-icon :size="60"><Goods /></el-icon></template>
+            </el-image>
+            <el-icon v-else :size="60"><Goods /></el-icon>
+          </div>
+          <div v-if="gallery.length" class="gallery">
+            <el-image
+              v-for="g in gallery"
+              :key="g.id"
+              :src="g.url"
+              class="gallery-item"
+              :class="{ active: g.id === activeGallery }"
+              fit="cover"
+              @click="activeGallery = g.id"
+            >
+              <template #error><div class="gallery-fallback">无图</div></template>
+            </el-image>
+          </div>
+        </div>
         <div class="info">
           <h2>{{ product.name }}</h2>
           <div class="price">¥ {{ currentSku ? Number(currentSku.price).toFixed(2) : '—' }}</div>
@@ -11,7 +31,7 @@
             <span class="label">规格：</span>
             <el-radio-group v-model="skuId">
               <el-radio-button v-for="s in skus" :key="s.id" :value="s.id">
-                {{ s.specJson || '默认规格' }}
+                {{ s.specText || '默认规格' }}
               </el-radio-button>
             </el-radio-group>
           </div>
@@ -47,6 +67,9 @@ const skuId = ref(null)
 const quantity = ref(1)
 const loading = ref(false)
 
+const gallery = ref([])
+const activeGallery = ref(null)
+
 const currentSku = computed(() => skus.value.find((s) => s.id === skuId.value) || null)
 
 const load = async () => {
@@ -55,6 +78,8 @@ const load = async () => {
     const data = await getProductDetail(Number(route.params.id))
     product.value = data.product
     skus.value = data.skus || []
+    gallery.value = data.gallery || []
+    activeGallery.value = gallery.value[0]?.id || null
     skuId.value = skus.value[0]?.id || null
   } catch (e) {
     ElMessage.error('加载商品失败：' + e.message)
@@ -78,7 +103,7 @@ const addCart = async () => {
       productSkuId: skuId.value,
       productId: product.value.id,
       productName: product.value.name,
-      specJson: currentSku.value.specJson,
+      specText: currentSku.value.specText,
       price: currentSku.value.price,
       quantity: quantity.value
     })
@@ -103,10 +128,20 @@ onMounted(load)
 <style scoped>
 .detail { margin-top: 16px; }
 .head { display: flex; gap: 24px; }
+.left { display: flex; flex-direction: column; gap: 8px; }
 .thumb {
-  width: 220px; height: 220px; background: #f0f2f5; border-radius: 6px;
+  width: 220px; height: 220px; background: #f0f2f5; border-radius: 6px; overflow: hidden;
   display: flex; align-items: center; justify-content: center; color: #c0c4cc;
 }
+.cover { width: 100%; height: 100%; }
+.cover :deep(img) { width: 100%; height: 100%; object-fit: cover; }
+.gallery-fallback { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: #f0f2f5; color: #c0c4cc; font-size: 11px; }
+.gallery { display: flex; gap: 6px; width: 220px; overflow-x: auto; }
+.gallery-item {
+  width: 48px; height: 48px; object-fit: cover; border-radius: 4px;
+  border: 2px solid transparent; cursor: pointer;
+}
+.gallery-item.active { border-color: #409eff; }
 .info h2 { margin: 0 0 12px; font-size: 20px; }
 .price { color: #f56c6c; font-size: 24px; font-weight: 600; margin-bottom: 16px; }
 .specs, .qty { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }

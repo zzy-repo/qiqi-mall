@@ -5,7 +5,9 @@
     <el-card shadow="never">
       <el-table v-loading="loading" :data="rows" border>
         <el-table-column prop="productName" label="商品" min-width="180" />
-        <el-table-column prop="specJson" label="规格" min-width="180" />
+        <el-table-column label="规格" min-width="180">
+          <template #default="{ row }">{{ row.specText || '默认规格' }}</template>
+        </el-table-column>
         <el-table-column label="单价" width="120">
           <template #default="{ row }">¥ {{ Number(row.price).toFixed(2) }}</template>
         </el-table-column>

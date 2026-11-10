@@ -17,6 +17,8 @@ DROP TABLE IF EXISTS order_item;
 DROP TABLE IF EXISTS `order`;
 DROP TABLE IF EXISTS return_reason;
 DROP TABLE IF EXISTS order_setting;
+DROP TABLE IF EXISTS sku_spec;
+DROP TABLE IF EXISTS product_gallery;
 DROP TABLE IF EXISTS sku;
 DROP TABLE IF EXISTS product;
 DROP TABLE IF EXISTS attribute;
@@ -125,6 +127,7 @@ CREATE TABLE `product` (
   `category_id` BIGINT NOT NULL COMMENT '所属分类',
   `type_id` BIGINT NOT NULL COMMENT '所属类型',
   `publish_status` TINYINT NOT NULL DEFAULT 1 COMMENT '1上架 0下架',
+  `pic` VARCHAR(500) DEFAULT NULL COMMENT '主图URL（指向 MinIO）',
   PRIMARY KEY (`id`),
   KEY `idx_category` (`category_id`),
   KEY `idx_type` (`type_id`),
@@ -136,13 +139,37 @@ CREATE TABLE `product` (
 CREATE TABLE `sku` (
   `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
   `product_id` BIGINT NOT NULL COMMENT '所属商品',
-  `spec_json` VARCHAR(255) DEFAULT NULL COMMENT '规格，如 {"颜色":"黑","内存":"256G"}',
   `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '价格',
   `stock` INT NOT NULL DEFAULT 0 COMMENT '库存',
+  `pic` VARCHAR(500) DEFAULT NULL COMMENT 'SKU图URL（指向 MinIO）',
   PRIMARY KEY (`id`),
   KEY `idx_product` (`product_id`),
   CONSTRAINT `fk_sku_product` FOREIGN KEY (`product_id`) REFERENCES `product` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='SKU';
+
+-- SKU 规格值（聚合于 SKU，引用属性定义）
+CREATE TABLE `sku_spec` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `sku_id` BIGINT NOT NULL COMMENT '所属SKU',
+  `attribute_id` BIGINT NOT NULL COMMENT '指向属性定义',
+  `value` VARCHAR(100) NOT NULL COMMENT '属性值，如 黑色',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_sku_attribute` (`sku_id`, `attribute_id`),
+  KEY `idx_attribute` (`attribute_id`),
+  CONSTRAINT `fk_spec_sku` FOREIGN KEY (`sku_id`) REFERENCES `sku` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_spec_attribute` FOREIGN KEY (`attribute_id`) REFERENCES `attribute` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='SKU规格值';
+
+-- 商品相册（聚合于商品）
+CREATE TABLE `product_gallery` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `product_id` BIGINT NOT NULL COMMENT '所属商品',
+  `url` VARCHAR(500) NOT NULL COMMENT '图片URL（指向 MinIO）',
+  `sort` INT NOT NULL DEFAULT 0 COMMENT '展示顺序',
+  PRIMARY KEY (`id`),
+  KEY `idx_product` (`product_id`),
+  CONSTRAINT `fk_gallery_product` FOREIGN KEY (`product_id`) REFERENCES `product` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='商品相册';
 
 -- ============ 订单模块 ============
 
