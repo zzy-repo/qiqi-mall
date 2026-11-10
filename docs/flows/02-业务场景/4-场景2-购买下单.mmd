@@ -1,14 +1,14 @@
 flowchart LR
     subgraph Buyer[买家 portal-web]
-        B0[查看商品详情 ✅] --> B1[加入购物车 ✅<br/>匿名存本地]
+        B0[查看商品详情] --> B1[加入购物车<br/>匿名存本地]
         B1 --> B2{已登录?}
-        B2 -- 否 --> L[登录/注册页 ✅<br/>记录redirect]
-        L -- 已有账号:输密码 --> M[合并购物车 merge ✅]
-        L -- 没有账号:切注册tab --> R[填写用户名/密码/昵称 ✅<br/>查重+BCrypt入库]
+        B2 -- 否 --> L[登录/注册页<br/>记录redirect]
+        L -- 已有账号:输密码 --> M[合并购物车 merge]
+        L -- 没有账号:切注册tab --> R[填写用户名/密码/昵称<br/>查重+BCrypt入库]
         R -- 注册即登录,发token --> M
         B2 -- 是 --> M
-        M --> B3[购物车结算页 ✅] --> B4[提交订单 ✅<br/>POST /portal/orders 快照+扣库存]
-        B4 --> B5[支付 ⛔模拟实现<br/>POST /orders/id/pay 演示需说明]
+        M --> B3[购物车结算页] --> B4[提交订单<br/>POST /portal/orders 快照+扣库存]
+        B4 --> B5[支付]
         B5 --> Done2([场景2完成:订单进入待审核 status=7<br/>等管理员审核→待发货])
     end
     style Buyer fill:#e8f4fd,stroke:#2196f3

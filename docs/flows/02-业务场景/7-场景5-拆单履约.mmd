@@ -1,16 +1,16 @@
 flowchart LR
     subgraph A[管理员 admin-web]
-        A1[审核通过 ✅已实现<br/>audit-pass触发拆单] --> A2[逐个发货单下发 ⛔未实现<br/>dispatch接口]
-        A2 --> A3[模拟WMS回传 ⛔未实现<br/>拣货出库运单号]
+        A1[审核通过已实现<br/>audit-pass触发拆单] --> A2[逐个发货单下发]
+        A2 --> A3[模拟WMS回传]
     end
     subgraph B[OMS oms模块]
-        B1[SplitOrderService拆单 ✅<br/>按分仓归属生成N个发货单] -.-> A1
-        A2 --> B2[发货单状态机流转<br/>待下发→已下发 ⛔]
-        A3 --> B3[回传处理+物流信息写入 ⛔<br/>delivery_logistics]
+        B1[SplitOrderService拆单<br/>按分仓归属生成N个发货单] -.-> A1
+        A2 --> B2[发货单状态机流转<br/>待下发→已下发]
+        A3 --> B3[回传处理+物流信息写入]
     end
     subgraph C[买家 portal-web]
-        C1[下单支付 ✅] --> C2[我的订单看包裹拆分<br/>⛔未实现前端展示]
-        C2 --> C3[订单状态随子单聚合<br/>全部出库才已发货 ⛔]
+        C1[下单支付] --> C2[我的订单看包裹拆分<br/>]
+        C2 --> C3[订单状态随子单聚合<br/>全部出库才已发货]
     end
     C1 -.提交后进入待审核.-> B1
     A1 -.拆出N个发货单.-> C2
