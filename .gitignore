@@ -7,3 +7,6 @@ target/
 .env.*.local
 .DS_Store
 .vite/
+
+# 面试准备（本地私有）
+docs/面试准备.md
