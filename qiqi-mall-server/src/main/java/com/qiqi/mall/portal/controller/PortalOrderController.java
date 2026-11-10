@@ -14,6 +14,8 @@ import com.qiqi.mall.oms.service.OrderItemService;
 import com.qiqi.mall.oms.service.OrderService;
 import com.qiqi.mall.oms.service.OrderTransactionalCreator;
 import com.qiqi.mall.oms.service.PaymentRecordService;
+import com.qiqi.mall.member.entity.Cart;
+import com.qiqi.mall.member.service.CartService;
 import com.qiqi.mall.shared.security.IdempotentTokenStore;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -35,16 +37,19 @@ public class PortalOrderController {
     private final PaymentRecordService paymentRecordService;
     private final OrderCreateService orderCreateService;
     private final IdempotentTokenStore idempotentTokenStore;
+    private final CartService cartService;
 
     public PortalOrderController(OrderService orderService, OrderItemService orderItemService,
                                  PaymentRecordService paymentRecordService,
                                  OrderCreateService orderCreateService,
-                                 IdempotentTokenStore idempotentTokenStore) {
+                                 IdempotentTokenStore idempotentTokenStore,
+                                 CartService cartService) {
         this.orderService = orderService;
         this.orderItemService = orderItemService;
         this.paymentRecordService = paymentRecordService;
         this.orderCreateService = orderCreateService;
         this.idempotentTokenStore = idempotentTokenStore;
+        this.cartService = cartService;
     }
 
     /**
@@ -105,6 +110,15 @@ public class PortalOrderController {
                 request.getReceiverPhone(), request.getReceiverAddress(), inputs,
                 Boolean.TRUE.equals(request.getFromCart()));
 
+        // 清购物车：从 oms 事务内上移到 portal 侧（解除 oms→member 依赖）
+        if (Boolean.TRUE.equals(request.getFromCart())) {
+            for (ItemInput input : request.getItems()) {
+                cartService.remove(new LambdaQueryWrapper<Cart>()
+                        .eq(Cart::getMemberId, memberId)
+                        .eq(Cart::getProductSkuId, input.getProductSkuId()));
+            }
+        }
+
         return Result.ok(detailBody(order));
     }
 
@@ -114,7 +128,9 @@ public class PortalOrderController {
         Order order = orderService.getById(id);
         if (order == null || !order.getMemberId().equals(CurrentUser.id())) return Result.fail("订单不存在");
         if (order.getStatus() != 0) return Result.fail("当前订单状态不可支付");
-        order.setStatus(1);
+        // 口径②：支付成功后自动进入「待审核」，无需管理员手动提交
+        // 状态流转：0待付款 →（支付）1已付款 →（OMS 自动交付）7待审核
+        order.setStatus(7);
         order.setPayType(payType);
         order.setPaymentTime(LocalDateTime.now());
         orderService.updateById(order);

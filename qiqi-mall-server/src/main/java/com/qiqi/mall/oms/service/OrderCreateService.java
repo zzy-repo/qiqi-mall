@@ -13,6 +13,10 @@ import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * 下单入口（非事务）：死锁自动重试。
+ *
+ * 模块边界约定：本类是 **portal → oms 的唯一合法入口**（portal 允许 import 本类，
+ * 其余 oms 具体实现类不允许被 portal 直接引用）；将来引入 OrderFacade 时由它替代本类的对外角色。
+ *
  * 见 benchmark/oversell/deadlock-fix.mmd 步骤 3~5：
  * 事务整体回滚 → 零残留 → 重试安全；重试沿用同一 HTTP 请求，不再消费幂等令牌；
  * 重试次数用尽仍死锁 → 抛「系统繁忙，请重试」（不暴露 SQL 原文）。

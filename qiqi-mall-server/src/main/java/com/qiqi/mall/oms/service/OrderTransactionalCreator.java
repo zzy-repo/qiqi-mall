@@ -1,14 +1,12 @@
 package com.qiqi.mall.oms.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.qiqi.mall.member.entity.Cart;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.order.entity.OrderItem;
 import com.qiqi.mall.catalog.entity.Product;
 import com.qiqi.mall.catalog.entity.Sku;
 import com.qiqi.mall.catalog.service.ProductService;
 import com.qiqi.mall.catalog.service.SkuService;
-import com.qiqi.mall.member.service.CartService;
 import com.qiqi.mall.shared.common.OrderSnGenerator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -29,15 +27,13 @@ public class OrderTransactionalCreator {
     private final OrderItemService orderItemService;
     private final ProductService productService;
     private final SkuService skuService;
-    private final CartService cartService;
 
     public OrderTransactionalCreator(OrderService orderService, OrderItemService orderItemService,
-                                     ProductService productService, SkuService skuService, CartService cartService) {
+                                     ProductService productService, SkuService skuService) {
         this.orderService = orderService;
         this.orderItemService = orderItemService;
         this.productService = productService;
         this.skuService = skuService;
-        this.cartService = cartService;
     }
 
     public record ItemInput(Long skuId, Integer quantity) {}
@@ -86,13 +82,8 @@ public class OrderTransactionalCreator {
         order.setTotalAmount(total);
         orderService.updateById(order);
 
-        if (fromCart) {
-            for (ItemInput input : inputs) {
-                cartService.remove(new LambdaQueryWrapper<Cart>()
-                        .eq(Cart::getMemberId, memberId)
-                        .eq(Cart::getProductSkuId, input.skuId()));
-            }
-        }
+        // 清购物车已上移到 portal 侧（下单事务后执行）：
+        // 购物车是「意图清单」而非账务数据，允许与订单存在轻微不一致，以此解除 oms→member 的模块依赖。
         return order;
     }
 }

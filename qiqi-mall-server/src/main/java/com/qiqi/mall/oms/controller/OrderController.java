@@ -11,6 +11,8 @@ import com.qiqi.mall.oms.entity.ReturnApply;
 import com.qiqi.mall.oms.service.OrderItemService;
 import com.qiqi.mall.oms.service.OrderService;
 import com.qiqi.mall.oms.service.ReturnApplyService;
+import com.qiqi.mall.oms.service.SplitOrderService;
+import com.qiqi.mall.catalog.service.SkuService;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -23,12 +25,17 @@ public class OrderController {
     private final OrderService orderService;
     private final OrderItemService orderItemService;
     private final ReturnApplyService returnApplyService;
+    private final SplitOrderService splitOrderService;
+    private final SkuService skuService;
 
     public OrderController(OrderService orderService, OrderItemService orderItemService,
-                           ReturnApplyService returnApplyService) {
+                           ReturnApplyService returnApplyService, SplitOrderService splitOrderService,
+                           SkuService skuService) {
         this.orderService = orderService;
         this.orderItemService = orderItemService;
         this.returnApplyService = returnApplyService;
+        this.splitOrderService = splitOrderService;
+        this.skuService = skuService;
     }
 
     /**
@@ -104,7 +111,36 @@ public class OrderController {
         return Result.ok();
     }
 
-    /** 发货：已付款(1) → 已发货(2)，守卫：仅 status=1 */
+    /**
+     * 审核通过：待审核(7) → 待发货(8)，守卫：仅 status=7；随后触发拆单生成发货单。
+     */
+    @PostMapping("/{id}/audit-pass")
+    public Result<java.util.List<com.qiqi.mall.oms.entity.DeliveryOrder>> auditPass(@PathVariable Long id) {
+        Order order = orderService.getById(id);
+        if (order == null) return Result.fail("订单不存在");
+        if (order.getStatus() == null || order.getStatus() != 7) return Result.fail("只有待审核订单可以审核通过");
+        order.setStatus(8);
+        orderService.updateById(order);
+        return Result.ok(splitOrderService.split(id));
+    }
+
+    /**
+     * 审核不通过：待审核(7) → 已关闭(4)，守卫：仅 status=7；联动回补库存（下单即扣模型）。
+     */
+    @PostMapping("/{id}/audit-reject")
+    @org.springframework.transaction.annotation.Transactional
+    public Result<Void> auditReject(@PathVariable Long id) {
+        Order order = orderService.getById(id);
+        if (order == null) return Result.fail("订单不存在");
+        if (order.getStatus() == null || order.getStatus() != 7) return Result.fail("只有待审核订单可以审核不通过");
+        order.setStatus(4);
+        orderService.updateById(order);
+        orderItemService.list(new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getOrderId, id))
+                .forEach(item -> skuService.restoreStock(item.getProductSkuId(), item.getProductQuantity()));
+        return Result.ok();
+    }
+
+    /** 发货：已付款(1) → 已发货(2)，守卫：仅 status=1（历史直发路径，拆单链走 audit-pass） */
     @PostMapping("/{id}/ship")
     public Result<Order> ship(@PathVariable Long id) {
         Order order = orderService.getById(id);

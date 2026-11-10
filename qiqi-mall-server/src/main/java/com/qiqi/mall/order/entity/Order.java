@@ -23,7 +23,10 @@ public class Order {
 
     private BigDecimal totalAmount;
 
-    /** 状态:0待付款 1已付款 2已发货 3已完成 4已关闭 */
+    /**
+     * 状态：0待付款 1已付款 2已发货 3已完成 4已关闭 5退款中 6已退款
+     *      7待审核 8待发货 9部分发货（拆单履约链，见 docs/flows/04-状态机与修复/14-订单状态图）
+     */
     private Integer status;
 
     /** 支付方式:0未支付 1支付宝 2微信 */
@@ -39,4 +42,7 @@ public class Order {
 
     /** 收货地址（快照） */
     private String receiverAddress;
+
+    /** 拆单标记：0未拆(单仓直发) 1已拆 */
+    private Integer splitStatus;
 }
