@@ -11,7 +11,7 @@ erDiagram
         varchar order_sn UK
         bigint member_id FK
         decimal total_amount
-        tinyint status "0~6(现有)"
+        tinyint status "0待付款1已付款2已发货3已完成4已关闭5退款中6已退款7待审核8待发货9部分发货"
         tinyint split_status "0未拆1已拆 0未拆=单仓直发"
     }
     发货单 {
