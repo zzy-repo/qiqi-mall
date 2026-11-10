@@ -1,0 +1,14 @@
+sequenceDiagram
+    autonumber
+    participant A as 请求A
+    participant B as 请求B
+    participant DB as MySQL(sku行)
+
+    Note over DB: 初始 stock=10, 两人各买1件(库存充足)
+    A->>DB: ① 读 stock → 得到 10
+    B->>DB: ② 读 stock → 得到 10  ← B读到A写回前的旧值!
+    A->>A: ③ 检查 10>=1 ✅ 通过
+    B->>B: ④ 检查 10>=1 ✅ 通过(基于同一个旧值)
+    A->>DB: ⑤ 写回 stock=9
+    B->>DB: ⑥ 写回 stock=9  ← 覆盖了⑤,而不是 9-1=8!
+    Note over DB: 最终 stock=9<br/>卖2件只扣了1件 → 超卖1件<br/>且B全程"合理":它看到的库存确实够

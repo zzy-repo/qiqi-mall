@@ -1,0 +1,27 @@
+sequenceDiagram
+    autonumber
+    participant A as 请求A
+    participant B as 请求B
+    participant DB as MySQL(sku行)
+    participant App as 应用层
+
+    Note over DB: 修复v1: SQL原子扣减<br/>UPDATE sku SET stock=stock-1 WHERE id=? AND stock>=1<br/>判断压进WHERE,行锁保证A-B串行
+
+    A->>DB: UPDATE ... WHERE id=1 AND stock>=1
+    Note over DB: 行锁:A先拿到,stock 10→9
+    DB-->>App: 影响行数=1 → 扣减成功
+    App-->>A: ✅ 下单成功
+
+    B->>DB: UPDATE ... WHERE id=1 AND stock>=1
+    Note over DB: B等待A的行锁释放后执行<br/>此时stock=9, 9>=1成立 → 8<br/>(若stock已=0,则WHERE不成立)
+    DB-->>App: 影响行数=1
+    App-->>B: ✅ 下单成功
+
+    Note over DB: 关键差异:没有"读旧值→计算→写回"三步<br/>减法在数据库行内原子完成<br/>B看到的永远是A写完后的最新值
+
+    rect rgb(255, 240, 240)
+    Note over DB: 失败路径:库存耗尽时
+    C->>DB: UPDATE ... WHERE stock>=1 (此时stock=0)
+    DB-->>App: 影响行数=0 → WHERE不满足
+    App-->>C: ❌ "库存不足"(不再静默超卖)
+    end

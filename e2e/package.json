@@ -1,0 +1,18 @@
+{
+  "name": "qiqi-mall-e2e",
+  "private": true,
+  "version": "1.0.0",
+  "description": "七七商城四个业务场景的 Playwright E2E 测试",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:s1": "playwright test scenario1-browse.spec.js",
+    "test:s2": "playwright test scenario2-checkout.spec.js",
+    "test:s3": "playwright test scenario3-fulfillment.spec.js",
+    "test:s4": "playwright test scenario4-return.spec.js",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1"
+  }
+}
