@@ -66,6 +66,11 @@
             <artifactId>mybatis-plus-jsqlparser</artifactId>
             <version>3.5.9</version>
         </dependency>
+        <!-- Redis：多实例共享 KV（验证码/幂等令牌） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
         <!-- MinIO 对象存储（图片上传） -->
         <dependency>
             <groupId>io.minio</groupId>

@@ -46,6 +46,9 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-qiqi123456}
       # 浏览器访问 MinIO 的地址（宿主机侧），部署机固定 IP 时可换成 http://<IP>:9000
       MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-http://127.0.0.1:9000}
+      # 进程外 KV 档位：memory（单实例，默认）| redis（多实例共享）
+      KV_STORE: ${KV_STORE:-memory}
+      REDIS_HOST: redis
     depends_on:
       mysql:
         condition: service_healthy
@@ -64,6 +67,25 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    networks:
+      - qiqi-net
+
+  # Redis：多实例共享的进程外 KV（验证码 / 幂等令牌），见 docs/multi-instance-plan.md
+  redis:
+    image: redis:7-alpine
+    container_name: qiqi-redis
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
     networks:
       - qiqi-net
 
@@ -138,3 +160,4 @@ networks:
 volumes:
   mysql-data:
   minio-data:
+  redis-data:

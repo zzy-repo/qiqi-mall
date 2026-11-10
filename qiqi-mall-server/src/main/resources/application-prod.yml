@@ -3,6 +3,11 @@ server:
   port: 8082
   address: 0.0.0.0
 spring:
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      timeout: 3s
   datasource:
     url: jdbc:mysql://${MYSQL_HOST:mysql}:3306/qiqi_mall?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: ${MYSQL_USER:root}
@@ -31,3 +36,5 @@ app:
     access-key: ${MINIO_ACCESS_KEY:qiqiadmin}
     secret-key: ${MINIO_SECRET_KEY:qiqi123456}
     bucket: qiqi-mall
+  # 进程外 KV：memory(单实例) | redis(多实例共享验证码/幂等令牌)
+  kv-store: ${KV_STORE:memory}
