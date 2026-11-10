@@ -166,8 +166,10 @@ docker compose down               # 停止
 
 | 流转 | 接口 | 守卫 | 联动 |
 |---|---|---|---|
-| 待付款→已付款 | `POST /portal/orders/{id}/pay` | status=0 | 写支付流水（type=1） |
-| 已付款→已发货 | `POST /admin/orders/{id}/ship` | status=1 | — |
+| 待付款→待审核 | `POST /portal/orders/{id}/pay` | status=0 | 写支付流水（type=1）；同一次调用内 `0→1已付款→7待审核`，**1 是瞬时态、接口响应中不可观测** |
+| 待审核→待发货 | `POST /admin/orders/{id}/audit-pass` | status=7 | 自动拆单生成发货单 |
+| 待审核→已关闭 | `POST /admin/orders/{id}/audit-reject` | status=7 | 回补库存 |
+| 待发货→已发货 | （发货单驱动的聚合流转） | 全部子单≥已出库 | 部分出库时订单=9部分发货 |
 | 已发货→已完成 | `POST /portal/orders/{id}/confirm` | status=2 且本人订单 | — |
 | 已付款/已发货→退款中 | `POST /portal/returns` | status∈{1,2} 且无待处理申请 | 订单置 5 |
 | 退款中→已退款 | `PUT /admin/return-applies/{id}`（通过） | 仅 return_apply 待处理 | 退款流水（type=2）+ 库存回补 |

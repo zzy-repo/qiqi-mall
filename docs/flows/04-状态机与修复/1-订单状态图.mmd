@@ -1,15 +1,14 @@
 stateDiagram-v2
     [*] --> 待付款 : 用户提交订单
-    待付款 --> 已付款 : [买家]支付 POST /portal/orders/{id}/pay<br/>守卫:仅status=0
+    待付款 --> 待审核 : [买家]支付 POST /portal/orders/{id}/pay<br/>守卫:仅status=0<br/>(同一次调用内 0待付款→1已付款→7待审核; 1为瞬时态,接口响应中不可观测)
     待付款 --> 已关闭 : [定时任务]自动关单<br/>守卫:超时auto_close_minutes<br/>联动:回补库存(下单即扣模型)<br/>依赖:order.create_time(待补)
-    已付款 --> 待审核 : [OMS]订单交付 OrderFacade.submit<br/>守卫:幂等令牌+规则校验
     待审核 --> 待发货 : [管理员/规则]审核通过<br/>守卫:仅status=待审核
     待审核 --> 已关闭 : 审核不通过<br/>联动:回补库存
     待发货 --> 已发货 : [OMS]全部发货单出库后自动流转<br/>守卫:全部子发货单≥已出库
-    已付款 --> 退款中 : [买家]申请退货 POST /portal/returns<br/>守卫:仅status=1或2
+    已发货 --> 退款中 : [买家]申请退货 POST /portal/returns<br/>守卫:仅status=1或2(1为瞬时态,实际可发起的是已发货2)
     已发货 --> 已完成 : [买家]确认收货 POST /portal/orders/{id}/confirm<br/>守卫:仅status=2且本人订单<br/>(auto_confirm_days到期自动确认:待order.create_time)
     已完成 --> [*]
     已关闭 --> [*]
     退款中 --> 已退款 : [管理员]审核通过<br/>守卫:仅return_apply待处理<br/>联动:退款流水+库存回补
-    退款中 --> 已付款 : [管理员]审核拒绝<br/>守卫:仅return_apply待处理
+    退款中 --> 已付款 : [管理员]审核拒绝<br/>守卫:仅return_apply待处理<br/>(退货被拒后回到1已付款,是status=1唯一的静置场景)
     已退款 --> [*]

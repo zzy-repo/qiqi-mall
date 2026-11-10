@@ -9,6 +9,6 @@ flowchart LR
         B2 -- 是 --> M
         M --> B3[购物车结算页 ✅] --> B4[提交订单 ✅<br/>POST /portal/orders 快照+扣库存]
         B4 --> B5[支付 ⛔模拟实现<br/>POST /orders/id/pay 演示需说明]
-        B5 --> Done2([场景2完成:订单已付款<br/>等待发货])
+        B5 --> Done2([场景2完成:订单进入待审核 status=7<br/>等管理员审核→待发货])
     end
     style Buyer fill:#e8f4fd,stroke:#2196f3

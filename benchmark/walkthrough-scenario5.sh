@@ -13,12 +13,12 @@ ORDER=$(curl -s -m 15 -X POST $B/portal/orders -H "Authorization: Bearer $MT" -H
 OID=$(echo "$ORDER" | J "d['data']['order']['id']")
 echo "  下单响应: $(echo "$ORDER" | J "'orderId=%s status=%s total=%s' % (d['data']['order']['id'], d['data']['order']['status'], d['data']['order']['totalAmount'])")"
 echo "  明细数: $(echo "$ORDER" | J "len(d['data']['items'])")"
-echo "  期望: status=7待审核（指令①）；实际见上"
+echo "  预期(口径②): 下单后 status=0待付款"
 
 echo "=== 步骤2 支付 ==="
 PAY=$(curl -s -m 10 -X POST "$B/portal/orders/$OID/pay?payType=1" -H "Authorization: Bearer $MT")
 echo "  支付响应: $(echo "$PAY" | J "'status=%s payType=%s paymentTime=%s' % (d['data']['order']['status'], d['data']['order']['payType'], d['data']['order']['paymentTime'])")"
-echo "  指令②期望 status=1；实际见上（口径②：支付后自动进 7待审核）"
+echo "  预期(口径②): 支付后 status=7待审核（0→1→7 同一次调用，1为瞬时态）"
 
 echo "=== 步骤3 管理员审核通过（自动拆单） ==="
 AT=$(curl -s -m 8 -X POST $B/admin/auth/login -H 'Content-Type: application/json' -d '{"username":"admin","password":"123456"}' | J "d['data']['accessToken']")
