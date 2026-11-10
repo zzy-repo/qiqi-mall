@@ -111,3 +111,31 @@ MySQLTransactionRollbackException: Deadlock found when trying to get lock
   3. 降低冲突：多 SKU 订单按 `sku_id` 升序加锁（本问题单 SKU 也出现，收益有限）
 
 > 注：`race.sh` 的失败计数原按 `"库存不足"`（带结尾引号）grep，匹配不到实际文案「库存不足：<商品名>」，已修正为关键词匹配。
+
+## 9. 死锁复现（v1 副作用验证，2026-11-10）
+
+### 复现工具：`deadlock.sh`
+与 race.sh（单SKU抢库存）不同，本脚本制造**锁顺序交叉**：
+- 一半订单按 [SKU1→SKU2] 顺序下单，另一半按 [SKU2→SKU1]
+- 两个并发事务以**相反顺序**请求相同两行资源 → 循环等待
+
+### 结果（100 并发，双 SKU 各 1000 库存——库存充足排除库存不足干扰）
+
+| 指标 | 结果 |
+|---|---|
+| 成功 | 46 |
+| **死锁异常（原文透出）** | **53** |
+| 其他失败 | 1 |
+
+死锁触发率 **53%**——远高于 race.sh 的单行热点（200并发仅1次死锁），**多行交叉顺序是死锁的主催化剂**，稳定可复现。
+
+### 死锁异常原文样例
+```
+MySQLTransactionRollbackException: Deadlock found when trying to get lock; try restarting transaction
+```
+（`GlobalExceptionHandler` 直接返回 `e.getMessage()`，SQL 原文透给前端）
+
+### 结论
+- 数据一致性完好（牺牲事务整体回滚，无超卖）
+- 用户侧灾难：53% 的下单看到 SQL 报错原文
+- → v1.5 治理（异常映射 + 幂等重试）的必要性已量化

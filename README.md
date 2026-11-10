@@ -125,7 +125,7 @@ docker compose down               # 停止
 
 ### 后台登录验证码
 
-同一用户名连续失败 5 次后要求输入图形验证码（见 `docs/captcha-flow.mmd`）：
+同一用户名连续失败 5 次后要求输入图形验证码（见 `docs/flows/8-验证码机制时序图.mmd`）：
 
 1. 登录页输完用户名 → `GET /admin/auth/captcha-required?username=`（5 分钟窗口内失败 ≥5 次返回 true）
 2. 需要时 `GET /admin/auth/captcha` → `{captchaId, image(base64)}`，点图可刷新，有效期 5 分钟
@@ -148,7 +148,7 @@ docker compose down               # 停止
 | `/cart` | 购物车（未登录用本地购物车） | 游客可用 |
 | `/login` | 登录 / 注册（注册即自动登录） | — |
 | `/checkout` | 结算（收货地址 + 提交订单） | 需登录 |
-| `/orders` | 我的订单（详情 / 模拟支付 / 申请退货） | 需登录 |
+| `/orders` | 我的订单（详情 / 模拟支付 / **确认收货** / 申请退货 / **售后状态列**） | 需登录 |
 | `/addresses` | 收货地址管理 | 需登录 |
 
 支付为模拟：`POST /portal/orders/{id}/pay` 把订单从「待付款」置为「已付款」并记录支付时间。
@@ -157,3 +157,34 @@ docker compose down               # 停止
 
 侧边栏：用户（会员列表 / 管理员）、订单（订单列表 / 退货申请 / 订单设置）、商品（商品列表 / 商品分类 / 商品类型）。
 收货地址与购物车聚合在会员行操作里，订单明细在订单详情抽屉，属性在商品类型、SKU 在商品列表 —— 均不占独立菜单。
+
+订单列表行操作：明细 / **发货**（仅「已付款」显示，带确认框）/ 编辑。退货申请行「审核」可选通过或拒绝。
+
+## 订单状态机
+
+`order.status`：`0待付款 1已付款 2已发货 3已完成 4已关闭 5退款中 6已退款`（见 `docs/flows/14-订单状态图.mmd`）
+
+| 流转 | 接口 | 守卫 | 联动 |
+|---|---|---|---|
+| 待付款→已付款 | `POST /portal/orders/{id}/pay` | status=0 | 写支付流水（type=1） |
+| 已付款→已发货 | `POST /admin/orders/{id}/ship` | status=1 | — |
+| 已发货→已完成 | `POST /portal/orders/{id}/confirm` | status=2 且本人订单 | — |
+| 已付款/已发货→退款中 | `POST /portal/returns` | status∈{1,2} 且无待处理申请 | 订单置 5 |
+| 退款中→已退款 | `PUT /admin/return-applies/{id}`（通过） | 仅 return_apply 待处理 | 退款流水（type=2）+ 库存回补 |
+| 退款中→已付款 | 同上（拒绝） | 仅 return_apply 待处理 | 订单回到 1 |
+
+- 通用编辑接口 `PUT /admin/orders/{id}` **会剥离 status**，状态只能经上表的专用接口流转。
+- 下单即扣库存，采用 SQL 原子扣减 `UPDATE sku SET stock = stock - ? WHERE id = ? AND stock >= ?`，影响行数 0 视为库存不足（超卖压测见 `benchmark/oversell/README.md`）。
+- 支付流水表 `payment_record` 记录每笔支付/退款（`order_sn` 为对账键，索引无外键）。
+
+**演示话术**：支付为**模拟实现**——`POST /portal/orders/{id}/pay` 直接把订单置为已付款并写一条 `channel=0/1/2`、`trade_no=MOCKPAY...` 的流水，不接真实支付网关；退款同理写 `MOCKREF...` 流水。
+
+## 图片上传（MinIO）
+
+商品主图、商品相册、SKU 图片支持直接上传（也保留手填 URL）：
+
+- 存储：MinIO，bucket `qiqi-mall`，启动时自动建桶并设置「公开读」，浏览器 `<img src>` 直连拉图，后端不经手图片流量
+- 接口：`POST /admin/upload/image`（multipart，字段名 `file`），仅 `jpg/png/webp`、≤5MB，超出返回 413/415
+- 命名：`products/yyyy/MM/<uuid>.<ext>`，返回 `{url, objectName}`
+- 配置：`app.minio.*`（dev 默认 `http://127.0.0.1:9000`）；部署用 `MINIO_PUBLIC_URL` 指定浏览器可达地址
+- 控制台：http://localhost:9001（账号见 `.env.example` 的 `MINIO_ACCESS_KEY/MINIO_SECRET_KEY`）

@@ -1,0 +1,28 @@
+sequenceDiagram
+    autonumber
+    participant A as 请求A(事务内)
+    participant B as 请求B(事务内)
+    participant DB as InnoDB(sku行锁)
+
+    Note over DB: 背景:v1原子扣减后,每个请求在事务内对同一行加排他锁<br/>200并发=200个事务排队抢同一行
+
+    A->>DB: BEGIN + UPDATE sku行(拿到行锁)<br/>事务内还要写订单/明细(其他行)
+    B->>DB: BEGIN + UPDATE sku行(等待A的行锁)
+    Note over B: B进入锁等待队列...
+
+    rect rgb(255, 235, 235)
+        Note over A,B: 死锁形成(两种典型路径)
+        alt 路径1:锁顺序交叉
+            A->>DB: 继续持有sku行锁,同时申请订单表行锁
+            B->>DB: 已持有其他行的锁,反方向申请sku行锁
+            Note over A,B: A等B持有的,B等A持有的<br/>互相等待=循环等待
+        else 路径2:锁等待队列超时/冲突检测
+            B->>DB: 等待期间InnoDB检测到冲突风险
+        end
+        DB->>B: InnoDB主动牺牲B事务<br/>Deadlock found when trying to get lock
+        B-->>B: @Transactional整体回滚(库存/订单全回退)
+        B-->>前端: ❌ MySQLTransactionRollbackException原文透出<br/>(GlobalExceptionHandler直接返回e.getMessage)
+        Note over DB: 数据一致性完好:A继续提交,库存对<br/>但用户看到的是一条SQL报错
+    end
+
+    Note over A,DB: 结论:v1正确性100%但暴露新问题<br/>高并发下行锁热点+死锁牺牲者收到原始异常

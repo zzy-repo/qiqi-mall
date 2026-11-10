@@ -54,12 +54,12 @@
           </el-select>
         </el-form-item>
         <el-form-item label="主图">
-          <el-input v-model="form.pic" placeholder="主图URL（MinIO）" maxlength="255" />
+          <ImageUploader v-model="form.pic" placeholder="主图URL（可直接上传）" />
         </el-form-item>
         <el-form-item label="商品相册">
           <div class="gallery">
             <div v-for="(img, index) in form.gallery" :key="index" class="gallery-row">
-              <el-input v-model="img.url" placeholder="图片URL（MinIO）" style="flex: 1" maxlength="255" />
+              <ImageUploader v-model="img.url" class="grow" placeholder="相册图URL" />
               <el-input-number v-model="img.sort" :min="0" :precision="0" style="width: 110px" controls-position="right" />
               <el-button link type="danger" size="small" @click="form.gallery.splice(index, 1)">删除</el-button>
             </div>
@@ -88,6 +88,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
+import ImageUploader from '../../components/ImageUploader.vue'
 import { listProducts, getProduct, createProduct, updateProduct } from '../../api/product'
 import { listCategories } from '../../api/category'
 import { listProductTypes } from '../../api/productType'
@@ -202,5 +203,6 @@ onMounted(() => { load(); loadRefs() })
 .thumb { width: 44px; height: 44px; border-radius: 4px; }
 .empty-pic { color: #c0c4cc; }
 .gallery { width: 100%; display: flex; flex-direction: column; gap: 8px; }
-.gallery-row { display: flex; gap: 8px; align-items: center; }
+.gallery-row { display: flex; gap: 8px; align-items: flex-start; }
+.grow { flex: 1; }
 </style>

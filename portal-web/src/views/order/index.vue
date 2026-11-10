@@ -40,6 +40,17 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <div class="pager">
+        <el-pagination
+          v-model:current-page="page"
+          :page-size="size"
+          :total="total"
+          layout="prev, pager, next, total"
+          background
+          @current-change="load"
+        />
+      </div>
     </el-card>
 
     <el-dialog v-model="detailVisible" title="订单详情" width="620px">
@@ -100,6 +111,10 @@ const statusTag = ['warning', 'success', 'primary', 'success', 'info', 'warning'
 
 const orders = ref([])
 const loading = ref(false)
+// 分页（后端返回 {records, total, current, size, pages}）
+const page = ref(1)
+const size = ref(10)
+const total = ref(0)
 const detail = ref(null)
 const detailVisible = ref(false)
 const reasons = ref([])
@@ -130,8 +145,12 @@ const returnRules = { reasonId: [{ required: true, message: '请选择退货原�
 const load = async () => {
   loading.value = true
   try {
-    const [orderRows, returnRows] = await Promise.all([listOrders(), listMyReturns().catch(() => [])])
-    orders.value = orderRows
+    const [pageData, returnRows] = await Promise.all([
+      listOrders(page.value, size.value),
+      listMyReturns().catch(() => [])
+    ])
+    orders.value = pageData.records || []
+    total.value = Number(pageData.total || 0)
     myReturns.value = returnRows
   } catch (e) {
     ElMessage.error('加载订单失败：' + e.message)
@@ -202,5 +221,6 @@ onMounted(async () => {
 
 <style scoped>
 .title { margin: 0 0 12px; font-size: 16px; }
+.pager { display: flex; justify-content: flex-end; margin-top: 12px; }
 h4 { margin: 16px 0 8px; font-size: 14px; }
 </style>

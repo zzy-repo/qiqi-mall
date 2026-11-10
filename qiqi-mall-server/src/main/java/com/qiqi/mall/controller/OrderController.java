@@ -1,6 +1,7 @@
 package com.qiqi.mall.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.qiqi.mall.common.OrderSnGenerator;
 import com.qiqi.mall.common.Result;
 import com.qiqi.mall.dto.OrderDetailDTO;
 import com.qiqi.mall.entity.Order;
@@ -58,7 +59,7 @@ public class OrderController {
         Order order = request.getOrder();
         order.setId(null);
         if (order.getOrderSn() == null || order.getOrderSn().isBlank()) {
-            order.setOrderSn("QQ" + System.currentTimeMillis());
+            order.setOrderSn(OrderSnGenerator.next());
         }
         List<OrderItem> items = request.getItems();
         // 总金额以明细为准（快照价 × 数量）

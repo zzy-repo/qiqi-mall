@@ -62,9 +62,11 @@ test.describe('场景2 购买下单', () => {
 
     // 订单明细快照：下单时商品名与成交价
     const token = await page.evaluate(() => localStorage.getItem('qiqi_member_token'))
-    const ordersRes = await api.get(`/portal/orders`, { headers: { Authorization: `Bearer ${token}` } })
-    const orders = (await ordersRes.json()).data
-    const created = orders[0]
+    const ordersRes = await api.get(`/portal/orders?page=1&size=10`, { headers: { Authorization: `Bearer ${token}` } })
+    const pageData = (await ordersRes.json()).data
+    expect(pageData.total, '分页响应应包含 total').toBeGreaterThan(0)
+    expect(Array.isArray(pageData.records), '分页响应应包含 records 数组').toBeTruthy()
+    const created = pageData.records[0]
     expect(created.status, '模拟支付后状态应为已付款(1)').toBe(1)
     expect(created.receiverName).toBe('E2E买家')
     expect(Number(created.totalAmount)).toBe(Number(skuPrice))

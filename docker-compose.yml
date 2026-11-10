@@ -42,9 +42,15 @@ services:
       MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-qiqi123456}
       # JWT 密钥（生产务必覆盖）
       JWT_SECRET: ${JWT_SECRET:-qiqi-mall-prod-secret-key-please-change-9876543210}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-qiqiadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-qiqi123456}
+      # 浏览器访问 MinIO 的地址（宿主机侧），部署机固定 IP 时可换成 http://<IP>:9000
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-http://127.0.0.1:9000}
     depends_on:
       mysql:
         condition: service_healthy
+      minio:
+        condition: service_started
     # 不映射到宿主机：仅通过 compose 内网由前端 nginx 访问
     # 临时联调需要直连时，取消下面注释（建议绑 127.0.0.1 而非 0.0.0.0）
     # ports:
@@ -58,6 +64,30 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    networks:
+      - qiqi-net
+
+  # MinIO 对象存储：商品图片（见 docs/flows/9-图片上传时序图）
+  minio:
+    image: minio/minio:latest
+    container_name: qiqi-minio
+    environment:
+      TZ: Asia/Shanghai
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-qiqiadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-qiqi123456}
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"   # S3 API，浏览器 <img src> 直连
+      - "9001:9001"   # 控制台
+    volumes:
+      - minio-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     networks:
       - qiqi-net
 
@@ -107,3 +137,4 @@ networks:
 
 volumes:
   mysql-data:
+  minio-data:

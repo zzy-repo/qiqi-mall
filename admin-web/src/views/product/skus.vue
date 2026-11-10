@@ -44,7 +44,7 @@
           <el-input :model-value="productName || form.productId" disabled />
         </el-form-item>
         <el-form-item label="SKU 图片">
-          <el-input v-model="form.pic" placeholder="图片URL（MinIO）" maxlength="255" />
+          <ImageUploader v-model="form.pic" placeholder="SKU 图片URL（可直接上传）" />
         </el-form-item>
 
         <el-form-item label="规格值">
@@ -83,6 +83,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { Plus, ArrowLeft } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import ImageUploader from '../../components/ImageUploader.vue'
 import { listSkus, getSku, createSku, updateSku, listSkuAttributes } from '../../api/sku'
 import { getProduct } from '../../api/product'
 

@@ -60,6 +60,18 @@
             <version>0.12.6</version>
             <scope>runtime</scope>
         </dependency>
+        <!-- 分页插件 PaginationInnerInterceptor 所在模块（3.5.9 起拆分） -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-jsqlparser</artifactId>
+            <version>3.5.9</version>
+        </dependency>
+        <!-- MinIO 对象存储（图片上传） -->
+        <dependency>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>8.5.12</version>
+        </dependency>
         <!-- 图形验证码 -->
         <dependency>
             <groupId>cn.hutool</groupId>

@@ -56,7 +56,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { listCart } from '../../api/cart'
-import { createOrder } from '../../api/order'
+import { createOrder, getIdempotentToken } from '../../api/order'
 import { listAddresses } from '../../api/member'
 
 const router = useRouter()
@@ -66,10 +66,22 @@ const addresses = ref([])
 const addressId = ref(null)
 const submitting = ref(false)
 const form = ref({ receiverName: '', receiverPhone: '', receiverAddress: '' })
+// 幂等令牌：进结算页领一次，提交时携带；被消费/过期后自动重领
+const idempotentToken = ref('')
+
+const refreshToken = async () => {
+  try {
+    const data = await getIdempotentToken()
+    idempotentToken.value = data.tokenId
+  } catch {
+    idempotentToken.value = ''
+  }
+}
 
 const total = computed(() => items.value.reduce((sum, i) => sum + Number(i.price) * i.quantity, 0).toFixed(2))
 
 const load = async () => {
+  await refreshToken()
   try {
     items.value = await listCart()
     if (!items.value.length) {
@@ -107,12 +119,15 @@ const submit = async () => {
     const data = await createOrder({
       ...form.value,
       fromCart: true,
+      idempotentToken: idempotentToken.value,
       items: items.value.map((i) => ({ productSkuId: i.productSkuId, quantity: i.quantity }))
     })
     ElMessage.success('下单成功，去支付')
     router.replace({ path: '/orders', query: { pay: data.order.id } })
   } catch (e) {
     ElMessage.error('下单失败：' + e.message)
+    // 令牌可能已被消费/过期，重领后再让用户点一次
+    await refreshToken()
   } finally {
     submitting.value = false
   }

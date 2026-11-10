@@ -24,3 +24,10 @@ app:
     # 生产环境通过环境变量 JWT_SECRET 覆盖
     secret: ${JWT_SECRET:qiqi-mall-prod-secret-key-please-change-9876543210}
     expire-minutes: 720
+  minio:
+    # 容器内地址（后端访问）；浏览器直连用 public-base-url
+    endpoint: http://minio:9000
+    public-base-url: ${MINIO_PUBLIC_URL:http://127.0.0.1:9000}
+    access-key: ${MINIO_ACCESS_KEY:qiqiadmin}
+    secret-key: ${MINIO_SECRET_KEY:qiqi123456}
+    bucket: qiqi-mall

@@ -1,11 +1,10 @@
 stateDiagram-v2
     [*] --> 待付款 : 用户提交订单
     待付款 --> 已付款 : [买家]支付 POST /portal/orders/{id}/pay<br/>守卫:仅status=0
-    待付款 --> 已关闭 : [定时任务]自动关单<br/>守卫:超时auto_close_minutes<br/>联动:释放预占库存
+    待付款 --> 已关闭 : [定时任务]自动关单<br/>守卫:超时auto_close_minutes<br/>联动:回补库存(下单即扣模型)<br/>依赖:order.create_time(待补)
     已付款 --> 已发货 : [管理员]发货 POST /admin/orders/{id}/ship<br/>守卫:仅status=1
     已付款 --> 退款中 : [买家]申请退货 POST /portal/returns<br/>守卫:仅status=1或2
-    已发货 --> 已收货 : [买家]确认收货 POST /portal/orders/{id}/confirm<br/>守卫:仅status=2<br/>(或定时任务按auto_confirm_days自动)
-    已收货 --> 已完成 : 系统自动流转
+    已发货 --> 已完成 : [买家]确认收货 POST /portal/orders/{id}/confirm<br/>守卫:仅status=2且本人订单<br/>(auto_confirm_days到期自动确认:待order.create_time)
     已完成 --> [*]
     已关闭 --> [*]
     退款中 --> 已退款 : [管理员]审核通过<br/>守卫:仅return_apply待处理<br/>联动:退款流水+库存回补

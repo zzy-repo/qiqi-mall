@@ -1,6 +1,7 @@
 package com.qiqi.mall.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.qiqi.mall.common.Result;
 import com.qiqi.mall.entity.Order;
 import com.qiqi.mall.entity.OrderItem;
@@ -26,27 +27,36 @@ public class PortalOrderController {
 
     private final OrderService orderService;
     private final OrderItemService orderItemService;
-    private final ProductService productService;
-    private final SkuService skuService;
-    private final CartService cartService;
     private final PaymentRecordService paymentRecordService;
+    private final OrderCreateService orderCreateService;
+    private final IdempotentTokenStore idempotentTokenStore;
 
     public PortalOrderController(OrderService orderService, OrderItemService orderItemService,
-                                 ProductService productService, SkuService skuService, CartService cartService,
-                                 PaymentRecordService paymentRecordService) {
+                                 PaymentRecordService paymentRecordService,
+                                 OrderCreateService orderCreateService,
+                                 IdempotentTokenStore idempotentTokenStore) {
         this.orderService = orderService;
         this.orderItemService = orderItemService;
-        this.productService = productService;
-        this.skuService = skuService;
-        this.cartService = cartService;
         this.paymentRecordService = paymentRecordService;
+        this.orderCreateService = orderCreateService;
+        this.idempotentTokenStore = idempotentTokenStore;
     }
 
-    /** 我的订单列表 */
+    /**
+     * 我的订单列表（分页）。
+     * size 限制 1~50；按主键倒序（走主键索引，比按时间排序更快）。
+     * 返回 Page：{records, total, current, size, pages}
+     */
     @GetMapping
-    public Result<List<Order>> list() {
-        return Result.ok(orderService.list(new LambdaQueryWrapper<Order>()
-                .eq(Order::getMemberId, CurrentUser.id()).orderByDesc(Order::getId)));
+    public Result<Page<Order>> list(@RequestParam(defaultValue = "1") long page,
+                                    @RequestParam(defaultValue = "10") long size) {
+        long safePage = Math.max(page, 1);
+        long safeSize = Math.min(Math.max(size, 1), 50);
+        Page<Order> result = orderService.page(new Page<>(safePage, safeSize),
+                new LambdaQueryWrapper<Order>()
+                        .eq(Order::getMemberId, CurrentUser.id())
+                        .orderByDesc(Order::getId));
+        return Result.ok(result);
     }
 
     /** 订单详情（含明细） */
@@ -57,62 +67,37 @@ public class PortalOrderController {
         return Result.ok(detailBody(order));
     }
 
-    /** 提交订单：{receiverName, receiverPhone, receiverAddress, items:[{productSkuId, quantity}], fromCart} */
+    /** 进结算页领取幂等令牌（TTL 30 分钟），提交订单时携带，防重复提交 */
+    @GetMapping("/idempotent-token")
+    public Result<Map<String, Object>> idempotentToken() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("tokenId", idempotentTokenStore.issue());
+        return Result.ok(data);
+    }
+
+    /** 提交订单：{receiverName, receiverPhone, receiverAddress, items:[{productSkuId, quantity}], fromCart, idempotentToken} */
     @PostMapping
-    @Transactional
     public Result<Map<String, Object>> create(@RequestBody CreateRequest request) {
         Long memberId = CurrentUser.id();
         if (request.getItems() == null || request.getItems().isEmpty()) return Result.fail("请选择要结算的商品");
         if (request.getReceiverName() == null || request.getReceiverName().isBlank()) return Result.fail("请填写收货人");
         if (request.getReceiverAddress() == null || request.getReceiverAddress().isBlank()) return Result.fail("请填写收货地址");
 
-        Order order = new Order();
-        order.setOrderSn("QQ" + System.currentTimeMillis());
-        order.setMemberId(memberId);
-        order.setStatus(0);
-        order.setPayType(0);
-        order.setReceiverName(request.getReceiverName());
-        order.setReceiverPhone(request.getReceiverPhone());
-        order.setReceiverAddress(request.getReceiverAddress());
-        order.setTotalAmount(BigDecimal.ZERO);
-        orderService.save(order);
+        // 幂等令牌：原子消费，重复提交直接拒绝（防双击/网络重放的重复下单）
+        if (!idempotentTokenStore.consume(request.getIdempotentToken())) {
+            return Result.fail("请勿重复提交订单（或页面已过期），请刷新结算页重试");
+        }
 
-        BigDecimal total = BigDecimal.ZERO;
-        List<OrderItem> items = new ArrayList<>();
+        List<OrderTransactionalCreator.ItemInput> inputs = new ArrayList<>();
         for (ItemInput input : request.getItems()) {
-            Sku sku = skuService.getById(input.getProductSkuId());
-            if (sku == null) continue;
-            Product product = productService.getById(sku.getProductId());
-            int qty = input.getQuantity() == null || input.getQuantity() < 1 ? 1 : input.getQuantity();
-            // 原子扣减：把「判断+减法」压进一条 SQL，避免 check-then-act 超卖
-            if (!skuService.deductStock(sku.getId(), qty)) {
-                // 库存不足直接失败，事务回滚（已扣的库存一并回滚）
-                throw new IllegalStateException("库存不足：" + (product == null ? "" : product.getName()));
-            }
-
-            OrderItem item = new OrderItem();
-            item.setOrderId(order.getId());
-            item.setProductId(sku.getProductId());
-            item.setProductSkuId(sku.getId());
-            item.setProductName(product == null ? "" : product.getName());
-            item.setProductPrice(sku.getPrice());
-            item.setProductQuantity(qty);
-            items.add(item);
-            total = total.add(sku.getPrice().multiply(BigDecimal.valueOf(qty)));
+            inputs.add(new OrderTransactionalCreator.ItemInput(input.getProductSkuId(), input.getQuantity()));
         }
-        if (items.isEmpty()) return Result.fail("商品信息无效，无法下单");
-        orderItemService.saveBatch(items);
-        order.setTotalAmount(total);
-        orderService.updateById(order);
 
-        // 从购物车下单则移除对应条目
-        if (Boolean.TRUE.equals(request.getFromCart())) {
-            for (ItemInput input : request.getItems()) {
-                cartService.remove(new LambdaQueryWrapper<com.qiqi.mall.entity.Cart>()
-                        .eq(com.qiqi.mall.entity.Cart::getMemberId, memberId)
-                        .eq(com.qiqi.mall.entity.Cart::getProductSkuId, input.getProductSkuId()));
-            }
-        }
+        // 事务在 OrderTransactionalCreator 内（每次全新事务），此处负责死锁重试
+        Order order = orderCreateService.createWithRetry(memberId, request.getReceiverName(),
+                request.getReceiverPhone(), request.getReceiverAddress(), inputs,
+                Boolean.TRUE.equals(request.getFromCart()));
+
         return Result.ok(detailBody(order));
     }
 
@@ -168,6 +153,7 @@ public class PortalOrderController {
         private String receiverAddress;
         private List<ItemInput> items;
         private Boolean fromCart;
+        private String idempotentToken;
 
         public String getReceiverName() { return receiverName; }
         public void setReceiverName(String receiverName) { this.receiverName = receiverName; }
@@ -179,5 +165,7 @@ public class PortalOrderController {
         public void setItems(List<ItemInput> items) { this.items = items; }
         public Boolean getFromCart() { return fromCart; }
         public void setFromCart(Boolean fromCart) { this.fromCart = fromCart; }
+        public String getIdempotentToken() { return idempotentToken; }
+        public void setIdempotentToken(String idempotentToken) { this.idempotentToken = idempotentToken; }
     }
 }

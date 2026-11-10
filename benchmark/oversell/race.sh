@@ -5,11 +5,13 @@ TOKEN=$(cat benchmark/oversell/.token)
 CONCURRENCY=200
 QTY_PER_ORDER=1
 echo "发起 $CONCURRENCY 个并发下单请求(每单qty=$QTY_PER_ORDER)..."
+# 每个请求单独领一个幂等令牌（模拟 N 个用户各自点一次结算）
 for i in $(seq 1 $CONCURRENCY); do
+  TK=$(curl -s -m 10 http://127.0.0.1:8081/portal/orders/idempotent-token -H "Authorization: Bearer $TOKEN" | sed -n 's/.*"tokenId":"\([^"]*\)".*/\1/p')
   curl -s -m 10 -X POST http://127.0.0.1:8081/portal/orders \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
-    -d "{\"items\":[{\"productSkuId\":1,\"quantity\":$QTY_PER_ORDER}],\"receiverName\":\"压测$i\",\"receiverAddress\":\"测试地址\"}" \
+    -d "{\"items\":[{\"productSkuId\":1,\"quantity\":$QTY_PER_ORDER}],\"receiverName\":\"压测$i\",\"receiverAddress\":\"测试地址\",\"idempotentToken\":\"$TK\"}" \
     -o /tmp/order_resp_$i.json &
 done
 wait

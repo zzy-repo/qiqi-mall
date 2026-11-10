@@ -53,15 +53,15 @@ erDiagram
     }
     支付流水 {
         bigint id PK
-        varchar order_sn FK "关联订单号,对账键"
+        varchar order_sn "关联订单号,对账键(索引,无外键)"
         decimal amount
         tinyint type "1支付 2退款"
         tinyint channel "1支付宝 2微信 0模拟"
         varchar trade_no "第三方流水号(模拟为本地生成)"
         datetime created_at
     }
-    订单 ||..o{ 支付流水 : "对账使用(规划)"
-    退货申请 ||..o| 支付流水 : "退款流水(规划)"
+    订单 ||--o{ 支付流水 : "产生流水"
+    退货申请 ||--o| 支付流水 : "产生退款流水"
     订单设置 {
         bigint id PK
         int auto_confirm_days "自动收货天数"

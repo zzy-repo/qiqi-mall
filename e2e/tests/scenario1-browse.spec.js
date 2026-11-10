@@ -23,9 +23,10 @@ test.describe('场景1 商品浏览', () => {
     await page.locator('.el-form-item').filter({ hasText: '商品名称' }).locator('input').fill(productName)
     await pickTreeSelect(page, '分类', '手机数码') // 父分类：验证 check-strictly 修复
     await pickSelect(page, '类型', '手机')
-    await page.locator('.el-form-item').filter({ hasText: '主图' }).locator('input').fill('https://example.com/cover.jpg')
+    // 主图现在是「URL 输入 + 上传按钮」组合，填 URL 文本框（type=text）
+    await page.locator('.el-form-item').filter({ hasText: '主图' }).locator('input[type="text"]').fill('https://example.com/cover.jpg')
     await page.getByRole('button', { name: '添加图片' }).click()
-    await page.locator('.gallery-row input').first().fill('https://example.com/1.jpg')
+    await page.locator('.gallery-row input[type="text"]').first().fill('https://example.com/1.jpg')
     await page.getByRole('button', { name: '确定' }).click()
     await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
     await page.waitForTimeout(800)
@@ -47,7 +48,7 @@ test.describe('场景1 商品浏览', () => {
     await page.waitForURL(/\/product\/\d+\/skus/)
     await page.getByRole('button', { name: '新增 SKU' }).click()
     await page.waitForTimeout(800)
-    await page.locator('.el-form-item').filter({ hasText: 'SKU 图片' }).locator('input').fill('https://example.com/sku.jpg')
+    await page.locator('.el-form-item').filter({ hasText: 'SKU 图片' }).locator('input[type="text"]').fill('https://example.com/sku.jpg')
 
     // 新增 SKU 时规格值为空，先点「添加规格值」创建第一行
     await page.getByRole('button', { name: '添加规格值' }).click()

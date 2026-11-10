@@ -1,0 +1,57 @@
+sequenceDiagram
+    autonumber
+    actor U as 用户
+    participant F as 前端
+    participant BE as 后端下单事务
+    participant TK as 幂等令牌存储(内存)
+    participant DB as InnoDB
+    participant EH as 全局异常处理器
+
+    rect rgb(235, 245, 255)
+        Note over U,DB: 步骤1: 幂等令牌发放(进结算页时)
+        U->>F: 打开结算页
+        F->>BE: GET /portal/orders/idempotent-token
+        BE->>TK: setnx(tokenId, 1, TTL=30分钟)
+        BE-->>F: {tokenId}
+        F->>F: 隐藏字段存tokenId,提交时携带
+    end
+
+    rect rgb(235, 255, 235)
+        Note over U,DB: 步骤2: 带令牌下单(重试安全的基础)
+        U->>F: 提交订单(带tokenId)
+        F->>TK: del(tokenId) 原子消费
+        alt del成功=首次提交
+            TK-->>F: OK
+            F->>BE: POST /portal/orders(带tokenId)
+        else del失败=重复提交
+            TK-->>F: 拒绝:请勿重复下单
+        end
+    end
+
+    rect rgb(255, 248, 235)
+        Note over U,DB: 步骤3: 事务执行遇死锁
+        BE->>DB: BEGIN
+        BE->>DB: INSERT订单(锁A) + UPDATE sku(锁B)
+        DB-->>BE: ⛔ Deadlock found(InnoDB牺牲本事务)
+        Note over BE: @Transactional整体回滚<br/>库存/订单零残留=重试是安全的
+        BE->>EH: 异常抛出
+        EH->>EH: 判定:DeadlockLoserDataAccessException?
+        EH->>BE: 是→触发自动重试(第1次)
+    end
+
+    rect rgb(255, 240, 245)
+        Note over U,DB: 步骤4: 重试执行(退避后)
+        BE->>TK: 校验tokenId仍有效?
+        Note over BE: 幂等关键:重试沿用同一tokenId<br/>但del已在首次提交时消费<br/>重试走"已消费"标记而非重新del<br/>=> 重试不会重复扣减
+        BE->>DB: BEGIN(全新事务)
+        BE->>DB: INSERT订单 + UPDATE sku
+        DB-->>BE: 提交成功
+        BE-->>F: ✅ 下单成功
+        F-->>U: 订单已创建(用户对死锁全程无感)
+    end
+
+    rect rgb(245, 245, 255)
+        Note over U,EH: 兜底:重试2次仍死锁(极端)
+        EH->>F: 返回"系统繁忙,请重试"(人话,非SQL原文)
+        Note over EH: DeadlockLoserDataAccessException等<br/>映射表统一处理,杜绝异常原文透出
+    end

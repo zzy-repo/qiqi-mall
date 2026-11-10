@@ -1,0 +1,29 @@
+flowchart TB
+    subgraph Q["查询: 该会员的订单按时间倒序取10条"]
+        direction LR
+        WHERE["WHERE member_id=3<br/>↓ 过滤"] --> ORDER["ORDER BY payment_time DESC<br/>↓ 排序"] --> LIMIT["LIMIT 10<br/>↓ 取10条"]
+    end
+
+    subgraph IDX1["idx_member(member_id) 单列索引 - 排不了序"]
+        direction LR
+        M1["member=3,id=7"] ~~~ M2["member=3,id=19"] ~~~ M3["member=3,id=3"] ~~~ M4["member=3,id=55"]
+        N1["member=5,id=1"] ~~~ N2["member=3,id=88"]
+    end
+
+    subgraph SORT["索引只能过滤,给不出时间顺序 → filesort"]
+        direction TB
+        S0["① 沿idx_member捞出该会员全部行<br/>(id=7,19,3,55,88...) 各行时间乱序"] --> S1["② 全部放进sort_buffer排序<br/>(10万行=慢,这就是filesort)"] --> S2["③ 排完取前10条"]
+    end
+
+    subgraph IDX2["复合索引 member_id,payment_time - 第二列自带时间顺序"]
+        direction LR
+        C1["member=3, time=11:05"] ~~~ C2["member=3, time=10:58"] ~~~ C3["member=3, time=10:30"] ~~~ C4["member=3, time=09:12"]
+        D1["member=5, time=..."]
+    end
+
+    subgraph NO["复合索引后: 顺着索引倒着拿10个就完事"]
+        NO1["沿索引倒序读10行 → 直接返回<br/>无filesort, 成本=10行,与总数据量无关"]
+    end
+
+    Q --> IDX1 --> SORT
+    Q -.加第二列后.-> IDX2 --> NO

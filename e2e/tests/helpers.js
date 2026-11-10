@@ -101,15 +101,20 @@ export async function registerMemberApi(request, username, password = '123456') 
   return { ...body.data, token: body.data.accessToken, username }
 }
 
-/** 通过接口下单（不支付），返回订单详情 */
+/** 通过接口下单（不支付），返回订单详情。需先领幂等令牌（后端要求） */
 export async function createOrderApi(request, token, { skuId, quantity = 1, receiverName = 'E2E接口买家' } = {}) {
+  const tokenRes = await request.get(`${API}/portal/orders/idempotent-token`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  const idempotentToken = (await tokenRes.json()).data.tokenId
   const res = await request.post(`${API}/portal/orders`, {
     headers: { Authorization: `Bearer ${token}` },
     data: {
       receiverName,
       receiverPhone: '13600003333',
       receiverAddress: '广东省深圳市南山区接口路 1 号',
-      items: [{ productSkuId: skuId, quantity }]
+      items: [{ productSkuId: skuId, quantity }],
+      idempotentToken
     }
   })
   const body = await res.json()

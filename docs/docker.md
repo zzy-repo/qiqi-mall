@@ -131,3 +131,18 @@ docker tag  docker.1panel.live/library/nginx:alpine nginx:alpine
 
 实测（2026-11-10）：`docker.1panel.live` 可用；`docker.1ms.run` 返回 401/503；其余多数不通。
 备选方案：若镜像源均不可用，可走阿里云主机的 HTTP 代理（`HTTP_PROXY`/`HTTPS_PROXY` 配到 Docker daemon 后重启 docker）。
+
+## MinIO（商品图片）
+
+`docker-compose.yml` 的 `minio` 服务：
+
+| 项 | 值 |
+|---|---|
+| 镜像 | `minio/minio`（`server /data --console-address ":9001"`） |
+| 端口 | 9000（S3 API，浏览器直连拉图）/ 9001（控制台） |
+| 账号 | `.env` 的 `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY`（默认 `qiqiadmin` / `qiqi123456`） |
+| bucket | `qiqi-mall`，后端启动时自动创建并设为公开读 |
+| 数据卷 | `minio-data` |
+| 浏览器地址 | 后端写 URL 用 `MINIO_PUBLIC_URL`（默认 `http://127.0.0.1:9000`） |
+
+后端容器通过 `http://minio:9000` 访问（compose 内网），浏览器通过宿主机 9000 端口直连。
