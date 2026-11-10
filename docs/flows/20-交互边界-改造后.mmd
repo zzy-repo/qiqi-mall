@@ -2,14 +2,14 @@ sequenceDiagram
     autonumber
     actor M as 买家
     participant P as portal-web(商城)
-    participant GW as OrderGateway<br/>──交付边界线──
+    participant GW as OrderFacade<br/>──交付边界线──
     participant OMS as oms模块(订单中台)
     participant DB as MySQL
     actor Ad as 管理员
 
     Note over GW: 边界线:portal到此为止<br/>oms从这里开始<br/>交付物=标准化订单DTO
     M->>P: 提交订单(交易意图)
-    P->>GW: OrderGateway.submit(标准化DTO)
+    P->>GW: OrderFacade.submit(标准化DTO)
     GW->>OMS: 幂等检查+创建内部订单
     OMS->>OMS: 审核规则校验
     OMS->>DB: status=待审核+扣库存+写单
