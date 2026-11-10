@@ -31,15 +31,20 @@ redis:
 **关键设计：接口不变，实现分层**——当初 CaptchaStore/IdempotentTokenStore 独立成类就是为了这一天。
 
 ```java
-// 统一抽象:两个Store的共同能力 = "带TTL的一次性KV"
+// 统一抽象:两个Store的共同能力 = "带TTL的一次性KV + 计数器"
+// 口径A(已实施): put 带 value、consume 返回值 —— 验证码需要"存明文+取回比对",
+// 失败计数需要"只读查询"(captchaRequired 不能自增,否则每访问登录页就误触发验证码)
 public interface KvStore {
-    void put(String key, Duration ttl);
-    boolean consume(String key);      // 原子取出即删(验证码/令牌共用语义)
-    long counter(String key, Duration window);  // 失败计数(验证码用)
+    void put(String key, String value, Duration ttl);   // SET key value EX ttl
+    String consume(String key);                          // GETDEL → value 或 null(不存在/已消费)
+    long increment(String key, Duration window);         // INCR + 首次 EXPIRE
+    long get(String key);                                // GET(只读计数,缺失返回 0)
+    void reset(String key);                              // DEL
 }
-// 实现1: MemoryKvStore(现有ConcurrentHashMap逻辑平移,保留单实例档)
-// 实现2: RedisKvStore(SET EX / GETDEL / INCR+EXPIRE 一一对应)
+// 实现1: MemoryKvStore(@ConditionalOnProperty app.kv-store=memory 或缺省; ConcurrentHashMap + 定时清扫)
+// 实现2: RedisKvStore(@ConditionalOnProperty app.kv-store=redis; Redis 自带过期,无清扫任务)
 // 选择: 配置项 app.kv-store=memory|redis,默认memory
+// 对外接口不变: CaptchaStore / IdempotentTokenStore 方法签名保持原样,内部委托 KvStore,调用方零改动
 ```
 
 迁移对应关系：
@@ -48,6 +53,7 @@ public interface KvStore {
 | put + TTL | `SET key val EX 300` | Redis 单线程 |
 | consume(取出即删) | `GETDEL key`(Redis 6.2+) | 同上 |
 | 失败计数+窗口 | `INCR key` + `EXPIRE key 300`(首次) | 同上 |
+| 只读计数 | `GET key`(缺失=0) | 同上 |
 | 定时清扫 | **不需要**——Redis 自带过期回收 | 免维护 |
 
 ### 第 3 步：多实例启动与流量分发
@@ -113,15 +119,20 @@ redis:
 **关键设计：接口不变，实现分层**——当初 CaptchaStore/IdempotentTokenStore 独立成类就是为了这一天。
 
 ```java
-// 统一抽象:两个Store的共同能力 = "带TTL的一次性KV"
+// 统一抽象:两个Store的共同能力 = "带TTL的一次性KV + 计数器"
+// 口径A(已实施): put 带 value、consume 返回值 —— 验证码需要"存明文+取回比对",
+// 失败计数需要"只读查询"(captchaRequired 不能自增,否则每访问登录页就误触发验证码)
 public interface KvStore {
-    void put(String key, Duration ttl);
-    boolean consume(String key);      // 原子取出即删(验证码/令牌共用语义)
-    long counter(String key, Duration window);  // 失败计数(验证码用)
+    void put(String key, String value, Duration ttl);   // SET key value EX ttl
+    String consume(String key);                          // GETDEL → value 或 null(不存在/已消费)
+    long increment(String key, Duration window);         // INCR + 首次 EXPIRE
+    long get(String key);                                // GET(只读计数,缺失返回 0)
+    void reset(String key);                              // DEL
 }
-// 实现1: MemoryKvStore(现有ConcurrentHashMap逻辑平移,保留单实例档)
-// 实现2: RedisKvStore(SET EX / GETDEL / INCR+EXPIRE 一一对应)
+// 实现1: MemoryKvStore(@ConditionalOnProperty app.kv-store=memory 或缺省; ConcurrentHashMap + 定时清扫)
+// 实现2: RedisKvStore(@ConditionalOnProperty app.kv-store=redis; Redis 自带过期,无清扫任务)
 // 选择: 配置项 app.kv-store=memory|redis,默认memory
+// 对外接口不变: CaptchaStore / IdempotentTokenStore 方法签名保持原样,内部委托 KvStore,调用方零改动
 ```
 
 迁移对应关系：
@@ -130,6 +141,7 @@ public interface KvStore {
 | put + TTL | `SET key val EX 300` | Redis 单线程 |
 | consume(取出即删) | `GETDEL key`(Redis 6.2+) | 同上 |
 | 失败计数+窗口 | `INCR key` + `EXPIRE key 300`(首次) | 同上 |
+| 只读计数 | `GET key`(缺失=0) | 同上 |
 | 定时清扫 | **不需要**——Redis 自带过期回收 | 免维护 |
 
 ### 第 3 步：多实例启动与流量分发
