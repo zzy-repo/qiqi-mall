@@ -17,6 +17,11 @@ DROP TABLE IF EXISTS order_item;
 DROP TABLE IF EXISTS `order`;
 DROP TABLE IF EXISTS return_reason;
 DROP TABLE IF EXISTS order_setting;
+DROP TABLE IF EXISTS delivery_logistics;
+DROP TABLE IF EXISTS delivery_item;
+DROP TABLE IF EXISTS delivery_order;
+DROP TABLE IF EXISTS inventory;
+DROP TABLE IF EXISTS warehouse;
 DROP TABLE IF EXISTS payment_record;
 DROP TABLE IF EXISTS sku_spec;
 DROP TABLE IF EXISTS product_gallery;
@@ -193,6 +198,7 @@ CREATE TABLE `order` (
   `receiver_name` VARCHAR(50) NOT NULL COMMENT '收货人快照',
   `receiver_phone` VARCHAR(20) DEFAULT NULL COMMENT '收货电话快照',
   `receiver_address` VARCHAR(255) DEFAULT NULL COMMENT '收货地址快照',
+  `split_status` TINYINT NOT NULL DEFAULT 0 COMMENT '0未拆(单仓直发) 1已拆',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_order_sn` (`order_sn`),
   KEY `idx_member` (`member_id`),
@@ -233,6 +239,72 @@ CREATE TABLE `return_apply` (
   CONSTRAINT `fk_return_member` FOREIGN KEY (`member_id`) REFERENCES `member` (`id`),
   CONSTRAINT `fk_return_reason` FOREIGN KEY (`reason_id`) REFERENCES `return_reason` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='退货申请';
+
+-- ============ 拆单 / 发货单（docs/er/21-ER图-拆单合单） ============
+
+-- 仓库（字典）
+CREATE TABLE `warehouse` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `name` VARCHAR(50) NOT NULL COMMENT '仓库名称',
+  `status` TINYINT NOT NULL DEFAULT 1 COMMENT '1启用 0停用',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='仓库';
+
+-- 分仓库存（SKU × 仓库，拆单的前提）
+CREATE TABLE `inventory` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `sku_id` BIGINT NOT NULL COMMENT 'SKU',
+  `warehouse_id` BIGINT NOT NULL COMMENT '仓库',
+  `stock` INT NOT NULL DEFAULT 0 COMMENT '该仓库存量',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_sku_wh` (`sku_id`, `warehouse_id`),
+  KEY `idx_wh` (`warehouse_id`),
+  CONSTRAINT `fk_inv_sku` FOREIGN KEY (`sku_id`) REFERENCES `sku` (`id`),
+  CONSTRAINT `fk_inv_wh` FOREIGN KEY (`warehouse_id`) REFERENCES `warehouse` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='分仓库存记录';
+
+-- 发货单（拆单后的新聚合根）
+CREATE TABLE `delivery_order` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `delivery_sn` VARCHAR(50) NOT NULL COMMENT '发货单号（DL开头）',
+  `order_id` BIGINT NOT NULL COMMENT '父订单',
+  `warehouse_id` BIGINT NOT NULL COMMENT '发货仓',
+  `status` TINYINT NOT NULL DEFAULT 0 COMMENT '0待下发 1已下发 2已拣货 3已出库 4运输中 5已签收 9已取消',
+  `receiver_name` VARCHAR(50) NOT NULL COMMENT '收货人快照（多包各自贴单）',
+  `receiver_phone` VARCHAR(20) NOT NULL COMMENT '收货电话快照',
+  `receiver_address` VARCHAR(255) NOT NULL COMMENT '收货地址快照',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_delivery_sn` (`delivery_sn`),
+  KEY `idx_order` (`order_id`),
+  CONSTRAINT `fk_delivery_order` FOREIGN KEY (`order_id`) REFERENCES `order` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_delivery_wh` FOREIGN KEY (`warehouse_id`) REFERENCES `warehouse` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='发货单';
+
+-- 发货单明细（拆分来源可溯源）
+CREATE TABLE `delivery_item` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `delivery_id` BIGINT NOT NULL COMMENT '发货单',
+  `order_item_id` BIGINT NOT NULL COMMENT '拆分来源（订单明细）',
+  `product_sku_id` BIGINT NOT NULL COMMENT 'SKU',
+  `quantity` INT NOT NULL COMMENT '本发货单承担的数量',
+  PRIMARY KEY (`id`),
+  KEY `idx_delivery` (`delivery_id`),
+  CONSTRAINT `fk_ditem_delivery` FOREIGN KEY (`delivery_id`) REFERENCES `delivery_order` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='发货单明细';
+
+-- 物流信息（WMS 回传，1:1）
+CREATE TABLE `delivery_logistics` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `delivery_id` BIGINT NOT NULL COMMENT '发货单',
+  `company` VARCHAR(30) NOT NULL COMMENT '快递公司',
+  `track_no` VARCHAR(50) NOT NULL COMMENT '运单号',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '回传时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_delivery` (`delivery_id`),
+  UNIQUE KEY `uk_track_no` (`track_no`),
+  CONSTRAINT `fk_logi_delivery` FOREIGN KEY (`delivery_id`) REFERENCES `delivery_order` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='物流信息';
 
 -- 支付流水（对账用：支付 / 退款各一条）
 CREATE TABLE `payment_record` (

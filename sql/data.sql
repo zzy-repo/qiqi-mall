@@ -10,6 +10,11 @@ TRUNCATE TABLE `order`;
 TRUNCATE TABLE return_reason;
 TRUNCATE TABLE order_setting;
 TRUNCATE TABLE payment_record;
+TRUNCATE TABLE delivery_logistics;
+TRUNCATE TABLE delivery_item;
+TRUNCATE TABLE delivery_order;
+TRUNCATE TABLE inventory;
+TRUNCATE TABLE warehouse;
 TRUNCATE TABLE sku_spec;
 TRUNCATE TABLE product_gallery;
 TRUNCATE TABLE sku;
@@ -149,6 +154,23 @@ INSERT INTO return_apply (id, order_id, member_id, return_reason, description, s
 INSERT INTO payment_record (id, order_sn, amount, type, channel, trade_no) VALUES
   (1, 'QQ20261109001', 7998.00, 1, 1, 'MOCKPAY20261108000001'),
   (2, 'QQ20261109002', 599.00,  1, 2, 'MOCKPAY20261108000002');
+
+-- ============ 拆单 / 发货单 ============
+
+-- 仓库字典
+INSERT INTO warehouse (id, name, status) VALUES
+  (1, '深圳仓', 1),
+  (2, '杭州仓', 1),
+  (3, '北京仓', 1);
+
+-- 分仓库存：SKU1/2/3 分别落在三个仓，便于演示"一单跨三仓"拆分
+-- 其余 SKU 默认放深圳仓；inventory.stock 与 sku.stock 保持总量一致（对账口径）
+INSERT INTO inventory (id, sku_id, warehouse_id, stock) VALUES
+  (1, 1, 1, 100), (2, 1, 2, 0),   (3, 1, 3, 0),
+  (4, 2, 1, 0),   (5, 2, 2, 80),  (6, 2, 3, 0),
+  (7, 3, 1, 0),   (8, 3, 2, 0),   (9, 3, 3, 50),
+  (10, 4, 1, 200),(11, 5, 1, 30), (12, 6, 1, 15),
+  (13, 7, 1, 500),(14, 8, 1, 300),(15, 9, 1, 1000);
 
 -- 订单设置（全局单行）
 INSERT INTO order_setting (id, auto_confirm_days, auto_close_minutes) VALUES
