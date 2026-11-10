@@ -82,12 +82,27 @@ public class OrderController {
         return Result.ok(order);
     }
 
-    /** 更新订单基础信息（收货人/状态等） */
+    /**
+     * 更新订单基础信息（收货人/地址等）。
+     * 守卫：status 不通过本接口变更——统一置空，状态只能经专用接口 + 前置校验流转。
+     */
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id, @RequestBody Order body) {
         body.setId(id);
+        body.setStatus(null);
         orderService.updateById(body);
         return Result.ok();
+    }
+
+    /** 发货：已付款(1) → 已发货(2)，守卫：仅 status=1 */
+    @PostMapping("/{id}/ship")
+    public Result<Order> ship(@PathVariable Long id) {
+        Order order = orderService.getById(id);
+        if (order == null) return Result.fail("订单不存在");
+        if (order.getStatus() != 1) return Result.fail("只有已付款订单可以发货");
+        order.setStatus(2);
+        orderService.updateById(order);
+        return Result.ok(order);
     }
 
     @DeleteMapping("/{id}")

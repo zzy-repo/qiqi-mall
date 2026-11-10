@@ -41,6 +41,7 @@
           <el-tree-select
             v-model="form.categoryId"
             :data="categoryOptions"
+            check-strictly
             :render-after-expand="false"
             default-expand-all
             style="width: 100%"

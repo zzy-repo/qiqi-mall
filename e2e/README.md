@@ -54,6 +54,15 @@ npm test
 - 断言分两层：**UI 行为**（按钮/状态/跳转）与**服务端事实**（接口返回、库存扣减、明细快照）。
 - 每个用例的失败信息里写明了「缺口」，便于直接对应到 `FINDINGS.md`。
 
-## 已知问题
+## 结果
 
-见 `FINDINGS.md`（当前：3 个功能缺口 + 1 个代码缺陷）。
+四个场景 5 个用例 **全部通过**：
+
+| 文件 | 场景 | 用例数 |
+|---|---|---|
+| `scenario1-browse.spec.js` | 商品浏览 | 1 |
+| `scenario2-checkout.spec.js` | 购买下单 | 1 |
+| `scenario3-fulfillment.spec.js` | 订单履约（发货 / 确认收货） | 2 |
+| `scenario4-return.spec.js` | 售后退货 | 1 |
+
+首轮暴露的问题与修复记录见 `FINDINGS.md`；库存超卖压测见 `benchmark/oversell/README.md`。

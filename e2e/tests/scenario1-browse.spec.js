@@ -21,7 +21,7 @@ test.describe('场景1 商品浏览', () => {
     await page.waitForTimeout(600)
 
     await page.locator('.el-form-item').filter({ hasText: '商品名称' }).locator('input').fill(productName)
-    await pickTreeSelect(page, '分类', '手机')
+    await pickTreeSelect(page, '分类', '手机数码') // 父分类：验证 check-strictly 修复
     await pickSelect(page, '类型', '手机')
     await page.locator('.el-form-item').filter({ hasText: '主图' }).locator('input').fill('https://example.com/cover.jpg')
     await page.getByRole('button', { name: '添加图片' }).click()
@@ -32,6 +32,15 @@ test.describe('场景1 商品浏览', () => {
 
     const newRow = page.locator('.el-table__body tr').filter({ hasText: productName }).first()
     await expect(newRow, '新上架商品应出现在商品列表').toBeVisible()
+
+    // P4 回归：选中「父分类」也应真正保存（此前点父节点不生效）
+    const api = await page.request
+    const token = await page.evaluate(() => localStorage.getItem('qiqi_admin_token'))
+    const listRes = await api.get(`${process.env.API_BASE || 'http://127.0.0.1:8081'}/admin/products`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    const saved = (await listRes.json()).data.find((p) => p.name === productName)
+    expect(saved.categoryId, '父分类「手机数码」应写库成功').toBe(1)
 
     // ---------- 3. 给该商品加 SKU（规格值 + 图片） ----------
     await newRow.getByRole('button', { name: 'SKU' }).click()

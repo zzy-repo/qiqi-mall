@@ -2,8 +2,15 @@ package com.qiqi.mall.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.qiqi.mall.common.Result;
+import com.qiqi.mall.entity.Order;
+import com.qiqi.mall.entity.OrderItem;
+import com.qiqi.mall.entity.PaymentRecord;
 import com.qiqi.mall.entity.ReturnApply;
+import com.qiqi.mall.service.OrderItemService;
+import com.qiqi.mall.service.OrderService;
+import com.qiqi.mall.service.PaymentRecordService;
 import com.qiqi.mall.service.ReturnApplyService;
+import com.qiqi.mall.service.SkuService;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -13,9 +20,19 @@ import java.util.List;
 public class ReturnApplyController {
 
     private final ReturnApplyService returnApplyService;
+    private final OrderService orderService;
+    private final OrderItemService orderItemService;
+    private final SkuService skuService;
+    private final PaymentRecordService paymentRecordService;
 
-    public ReturnApplyController(ReturnApplyService returnApplyService) {
+    public ReturnApplyController(ReturnApplyService returnApplyService, OrderService orderService,
+                                 OrderItemService orderItemService, SkuService skuService,
+                                 PaymentRecordService paymentRecordService) {
         this.returnApplyService = returnApplyService;
+        this.orderService = orderService;
+        this.orderItemService = orderItemService;
+        this.skuService = skuService;
+        this.paymentRecordService = paymentRecordService;
     }
 
     @GetMapping
@@ -35,11 +52,40 @@ public class ReturnApplyController {
         return Result.ok(body);
     }
 
-    /** 审核：status 0待处理 1通过 2拒绝 */
+    /**
+     * 审核退货：status 0待处理 1通过 2拒绝。
+     * 守门：仅「待处理」可审核；审核通过 → 订单退款中(5)→已退款(6) + 退款流水 + 库存回补；
+     *       审核拒绝 → 订单退回已付款(1)。
+     */
     @PutMapping("/{id}")
+    @org.springframework.transaction.annotation.Transactional
     public Result<Void> update(@PathVariable Long id, @RequestBody ReturnApply body) {
-        body.setId(id);
-        returnApplyService.updateById(body);
+        ReturnApply exist = returnApplyService.getById(id);
+        if (exist == null) return Result.fail("退货申请不存在");
+        if (exist.getStatus() != 0) return Result.fail("该申请已处理，不能重复审核");
+        Integer target = body.getStatus();
+        if (target == null || (target != 1 && target != 2)) return Result.fail("审核结果只能是 1通过 / 2拒绝");
+
+        exist.setStatus(target);
+        if (body.getDescription() != null) exist.setDescription(body.getDescription());
+        returnApplyService.updateById(exist);
+
+        Order order = orderService.getById(exist.getOrderId());
+        if (order == null) return Result.ok();
+        if (target == 1) {
+            // 通过：退款 + 回补库存
+            order.setStatus(6);
+            orderService.updateById(order);
+            paymentRecordService.record(order.getOrderSn(), order.getTotalAmount(),
+                    PaymentRecord.TYPE_REFUND, order.getPayType() == null ? 0 : order.getPayType());
+            orderItemService.list(new LambdaQueryWrapper<OrderItem>()
+                            .eq(OrderItem::getOrderId, order.getId()))
+                    .forEach(item -> skuService.restoreStock(item.getProductSkuId(), item.getProductQuantity()));
+        } else {
+            // 拒绝：订单回到已付款
+            order.setStatus(1);
+            orderService.updateById(order);
+        }
         return Result.ok();
     }
 

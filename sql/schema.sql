@@ -17,6 +17,7 @@ DROP TABLE IF EXISTS order_item;
 DROP TABLE IF EXISTS `order`;
 DROP TABLE IF EXISTS return_reason;
 DROP TABLE IF EXISTS order_setting;
+DROP TABLE IF EXISTS payment_record;
 DROP TABLE IF EXISTS sku_spec;
 DROP TABLE IF EXISTS product_gallery;
 DROP TABLE IF EXISTS sku;
@@ -186,7 +187,7 @@ CREATE TABLE `order` (
   `order_sn` VARCHAR(50) NOT NULL COMMENT '订单号-全局唯一',
   `member_id` BIGINT NOT NULL COMMENT '买家ID',
   `total_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '订单总金额',
-  `status` TINYINT NOT NULL DEFAULT 0 COMMENT '0待付款 1已付款 2已发货 3已完成 4已关闭',
+  `status` TINYINT NOT NULL DEFAULT 0 COMMENT '0待付款 1已付款 2已发货 3已完成 4已关闭 5退款中 6已退款',
   `pay_type` TINYINT NOT NULL DEFAULT 0 COMMENT '0未支付 1支付宝 2微信',
   `payment_time` DATETIME DEFAULT NULL COMMENT '支付时间',
   `receiver_name` VARCHAR(50) NOT NULL COMMENT '收货人快照',
@@ -230,6 +231,19 @@ CREATE TABLE `return_apply` (
   CONSTRAINT `fk_return_member` FOREIGN KEY (`member_id`) REFERENCES `member` (`id`),
   CONSTRAINT `fk_return_reason` FOREIGN KEY (`reason_id`) REFERENCES `return_reason` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='退货申请';
+
+-- 支付流水（对账用：支付 / 退款各一条）
+CREATE TABLE `payment_record` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `order_sn` VARCHAR(50) NOT NULL COMMENT '关联订单号（对账键）',
+  `amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '金额',
+  `type` TINYINT NOT NULL DEFAULT 1 COMMENT '1支付 2退款',
+  `channel` TINYINT NOT NULL DEFAULT 0 COMMENT '0模拟 1支付宝 2微信',
+  `trade_no` VARCHAR(64) DEFAULT NULL COMMENT '第三方流水号（模拟为本地生成）',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发生时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_order_sn` (`order_sn`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付流水';
 
 -- 订单设置（全局单行配置）
 CREATE TABLE `order_setting` (

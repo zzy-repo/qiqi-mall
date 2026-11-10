@@ -8,4 +8,14 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class SkuServiceImpl extends ServiceImpl<SkuMapper, Sku> implements SkuService {
+
+    @Override
+    public boolean deductStock(Long skuId, int quantity) {
+        return baseMapper.deductStock(skuId, quantity) > 0;
+    }
+
+    @Override
+    public void restoreStock(Long skuId, int quantity) {
+        baseMapper.restoreStock(skuId, quantity);
+    }
 }

@@ -14,14 +14,29 @@
           </template>
         </el-table-column>
         <el-table-column prop="receiverName" label="收货人" width="100" />
+        <el-table-column label="售后" width="110">
+          <template #default="{ row }">
+            <el-tag v-if="afterSaleText(row.id)" :type="afterSaleTag(row.id)" size="small">
+              {{ afterSaleText(row.id) }}
+            </el-tag>
+            <span v-else>—</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="paymentTime" label="支付时间" width="180">
           <template #default="{ row }">{{ row.paymentTime || '—' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column label="操作" width="260" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openDetail(row)">详情</el-button>
             <el-button v-if="row.status === 0" link type="primary" size="small" @click="pay(row)">模拟支付</el-button>
-            <el-button v-if="row.status >= 1" link type="warning" size="small" @click="openReturn(row)">申请退货</el-button>
+            <el-button v-if="row.status === 2" link type="success" size="small" @click="confirmReceive(row)">确认收货</el-button>
+            <el-button
+              v-if="row.status === 1 || row.status === 2"
+              link
+              type="warning"
+              size="small"
+              @click="openReturn(row)"
+            >申请退货</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -74,19 +89,38 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { listOrders, getOrder, payOrder } from '../../api/order'
-import { listReturnReasons, applyReturn } from '../../api/returns'
+import { listOrders, getOrder, payOrder, confirmOrder } from '../../api/order'
+import { listReturnReasons, listMyReturns, applyReturn } from '../../api/returns'
 
 const route = useRoute()
 
-const statusText = ['待付款', '已付款', '已发货', '已完成', '已关闭']
-const statusTag = ['warning', 'success', 'primary', 'success', 'info']
+// 状态机：0待付款 1已付款 2已发货 3已完成 4已关闭 5退款中 6已退款
+const statusText = ['待付款', '已付款', '已发货', '已完成', '已关闭', '退款中', '已退款']
+const statusTag = ['warning', 'success', 'primary', 'success', 'info', 'warning', 'info']
 
 const orders = ref([])
 const loading = ref(false)
 const detail = ref(null)
 const detailVisible = ref(false)
 const reasons = ref([])
+const myReturns = ref([])
+
+/** 订单 → 售后状态文案（来自 GET /portal/returns） */
+const returnOf = (orderId) => myReturns.value.find((r) => r.orderId === orderId)
+const afterSaleText = (orderId) => {
+  const apply = returnOf(orderId)
+  if (!apply) return ''
+  if (apply.status === 0) return '退款处理中'
+  if (apply.status === 1) return '退款成功'
+  return '退货被拒绝'
+}
+const afterSaleTag = (orderId) => {
+  const apply = returnOf(orderId)
+  if (!apply) return 'info'
+  if (apply.status === 0) return 'warning'
+  if (apply.status === 1) return 'success'
+  return 'danger'
+}
 const returnVisible = ref(false)
 const returning = ref(false)
 const returnFormRef = ref()
@@ -96,11 +130,24 @@ const returnRules = { reasonId: [{ required: true, message: '请选择退货原�
 const load = async () => {
   loading.value = true
   try {
-    orders.value = await listOrders()
+    const [orderRows, returnRows] = await Promise.all([listOrders(), listMyReturns().catch(() => [])])
+    orders.value = orderRows
+    myReturns.value = returnRows
   } catch (e) {
     ElMessage.error('加载订单失败：' + e.message)
   } finally {
     loading.value = false
+  }
+}
+
+/** 确认收货（状态 2→3，服务端有守卫） */
+const confirmReceive = async (row) => {
+  try {
+    await confirmOrder(row.id)
+    ElMessage.success('已确认收货，订单完成')
+    await load()
+  } catch (e) {
+    ElMessage.error('确认收货失败：' + e.message)
   }
 }
 
@@ -135,6 +182,7 @@ const submitReturn = async () => {
     await applyReturn({ orderId: returnForm.orderId, reasonId: returnForm.reasonId, description: returnForm.description })
     ElMessage.success('退货申请已提交，等待商家处理')
     returnVisible.value = false
+    await load()
   } catch (e) {
     ElMessage.error('提交失败：' + e.message)
   } finally {

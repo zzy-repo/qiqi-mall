@@ -1,0 +1,54 @@
+sequenceDiagram
+    autonumber
+    actor M as 买家
+    participant P as portal-web
+    participant BE as 后端(带守卫)
+    participant DB as MySQL
+    actor Ad as 管理员
+    participant AW as admin-web
+
+    rect rgb(230, 255, 230)
+        Note over Ad,DB: 修复P1 发货(专用接口+守卫)
+        Ad->>AW: 订单列表点[发货]按钮
+        AW->>BE: POST /admin/orders/{id}/ship
+        BE->>BE: 守卫:status==1?
+        alt 合法
+            BE->>DB: status 1→2
+            BE-->>AW: 发货成功
+        else 非法
+            BE-->>AW: 拒绝:只有已付款可发货
+        end
+    end
+
+    rect rgb(230, 255, 230)
+        Note over M,DB: 修复P2 确认收货(新接口)
+        M->>P: 我的订单点[确认收货]
+        P->>BE: POST /portal/orders/{id}/confirm
+        BE->>BE: 守卫:status==2? 且归属当前member
+        BE->>DB: status 2→3
+        BE-->>P: 已完成
+    end
+
+    rect rgb(230, 245, 255)
+        Note over M,AW: 修复P3 退货结果可见(接已有接口)
+        M->>P: 我的订单行展示售后状态
+        P->>BE: GET /portal/returns(已存在)
+        BE-->>P: 退货申请列表(含审核状态)
+        P->>M: 行上显示:退款中/已通过/已拒绝
+    end
+
+    rect rgb(230, 245, 255)
+        Note over Ad,DB: 修复P4 分类树(前端一个属性)
+        Ad->>AW: 商品弹窗选父分类[服装]
+        AW->>AW: el-tree-select 加 check-strictly
+        AW->>BE: 保存 category_id=服装
+        BE-->>AW: 保存成功
+    end
+
+    rect rgb(255, 248, 230)
+        Note over BE,DB: 修复守卫缺失(通用更新剥离status)
+        AW->>BE: PUT /admin/orders/{id}(通用编辑)
+        BE->>BE: body.setStatus(null)剥离
+        BE->>DB: 只更新其他字段
+        Note over DB: status只能经专用接口+守卫变更
+    end

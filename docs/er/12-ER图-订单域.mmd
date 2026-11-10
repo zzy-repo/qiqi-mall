@@ -22,7 +22,7 @@ erDiagram
         varchar order_sn UK "订单号-全局唯一"
         bigint member_id FK "买家，指向会员表"
         decimal total_amount
-        tinyint status "0待付款 1已付款 2已发货 3已完成 4已关闭"
+        tinyint status "0待付款1已付款2已发货3已完成4已关闭5退款中6已退款"
         tinyint pay_type "0未支付 1支付宝 2微信"
         datetime payment_time
         varchar receiver_name "收货人快照"
@@ -51,6 +51,17 @@ erDiagram
         bigint id PK
         varchar name "质量问题/七天无理由/发错货/不想要了"
     }
+    支付流水 {
+        bigint id PK
+        varchar order_sn FK "关联订单号,对账键"
+        decimal amount
+        tinyint type "1支付 2退款"
+        tinyint channel "1支付宝 2微信 0模拟"
+        varchar trade_no "第三方流水号(模拟为本地生成)"
+        datetime created_at
+    }
+    订单 ||..o{ 支付流水 : "对账使用(规划)"
+    退货申请 ||..o| 支付流水 : "退款流水(规划)"
     订单设置 {
         bigint id PK
         int auto_confirm_days "自动收货天数"

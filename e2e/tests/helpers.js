@@ -127,14 +127,13 @@ export async function payOrderApi(request, token, orderId) {
   return body.data.order
 }
 
-/** 管理员改订单状态（用于准备「已发货」数据） */
-export async function setOrderStatusApi(request, adminToken, orderId, status) {
-  const res = await request.put(`${API}/admin/orders/${orderId}`, {
-    headers: { Authorization: `Bearer ${adminToken}` },
-    data: { status }
+/** 管理员发货（准备「已发货」数据，走专用接口 + 守卫） */
+export async function shipOrderApi(request, adminToken, orderId) {
+  const res = await request.post(`${API}/admin/orders/${orderId}/ship`, {
+    headers: { Authorization: `Bearer ${adminToken}` }
   })
   const body = await res.json()
-  expect(body.code, `改订单状态应成功：${body.message}`).toBe(0)
+  expect(body.code, `发货应成功：${body.message}`).toBe(0)
 }
 
 /**

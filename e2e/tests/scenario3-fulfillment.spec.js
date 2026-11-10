@@ -2,13 +2,14 @@ import { test, expect } from '@playwright/test'
 import {
   PORTAL,
   ADMIN,
+  API,
   adminLogin,
   adminToken,
   memberLogin,
   registerMemberApi,
   createOrderApi,
   payOrderApi,
-  setOrderStatusApi,
+  shipOrderApi,
   prepareSku,
   stamp
 } from './helpers.js'
@@ -45,7 +46,9 @@ test.describe('场景3 订单履约', () => {
     ).toBeVisible({ timeout: 5000 })
 
     await row.getByRole('button', { name: /发货/ }).click()
-    await page.waitForTimeout(1200)
+    // 弹出发货确认框
+    await page.locator('.el-message-box__btns').getByRole('button', { name: '确定' }).click()
+    await page.waitForTimeout(1500)
     await expect(row, '发货后订单状态应为已发货').toContainText('已发货')
 
     // 服务端复核
@@ -64,7 +67,7 @@ test.describe('场景3 订单履约', () => {
     const order = await createOrderApi(request, member.token, { skuId })
     await payOrderApi(request, member.token, order.id)
     const at = await adminToken(request)
-    await setOrderStatusApi(request, at, order.id, 2) // 已发货
+    await shipOrderApi(request, at, order.id) // 走发货接口 → 已发货
 
     await memberLogin(page, username)
     await page.waitForTimeout(2500)
@@ -75,11 +78,16 @@ test.describe('场景3 订单履约', () => {
     await expect(row).toBeVisible()
     await expect(row).toContainText('已发货')
 
-    // 关键断言 2：应有「确认收货」操作
-    await expect(
-      row.getByRole('button', { name: /确认收货/ }),
-      '【缺口】买家「我的订单」缺少「确认收货」按钮/接口，订单无法流转到已完成'
-    ).toBeVisible({ timeout: 5000 })
+    // 确认收货 → 已完成
+    await row.getByRole('button', { name: /确认收货/ }).click()
+    await page.waitForTimeout(1500)
+    await expect(row, '确认收货后订单状态应为已完成').toContainText('已完成')
+
+    // 服务端复核
+    const res = await request.get(`${API}/portal/orders/${order.id}`, {
+      headers: { Authorization: `Bearer ${member.token}` }
+    })
+    expect((await res.json()).data.order.status, '服务端订单状态应为已完成(3)').toBe(3)
   })
 })
 

@@ -7,6 +7,7 @@ import com.qiqi.mall.entity.OrderItem;
 import com.qiqi.mall.entity.Product;
 import com.qiqi.mall.entity.Sku;
 import com.qiqi.mall.security.CurrentUser;
+import com.qiqi.mall.entity.PaymentRecord;
 import com.qiqi.mall.service.*;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -28,14 +29,17 @@ public class PortalOrderController {
     private final ProductService productService;
     private final SkuService skuService;
     private final CartService cartService;
+    private final PaymentRecordService paymentRecordService;
 
     public PortalOrderController(OrderService orderService, OrderItemService orderItemService,
-                                 ProductService productService, SkuService skuService, CartService cartService) {
+                                 ProductService productService, SkuService skuService, CartService cartService,
+                                 PaymentRecordService paymentRecordService) {
         this.orderService = orderService;
         this.orderItemService = orderItemService;
         this.productService = productService;
         this.skuService = skuService;
         this.cartService = cartService;
+        this.paymentRecordService = paymentRecordService;
     }
 
     /** 我的订单列表 */
@@ -80,13 +84,11 @@ public class PortalOrderController {
             if (sku == null) continue;
             Product product = productService.getById(sku.getProductId());
             int qty = input.getQuantity() == null || input.getQuantity() < 1 ? 1 : input.getQuantity();
-            if (sku.getStock() == null || sku.getStock() < qty) {
-                // 库存不足直接失败，事务回滚
+            // 原子扣减：把「判断+减法」压进一条 SQL，避免 check-then-act 超卖
+            if (!skuService.deductStock(sku.getId(), qty)) {
+                // 库存不足直接失败，事务回滚（已扣的库存一并回滚）
                 throw new IllegalStateException("库存不足：" + (product == null ? "" : product.getName()));
             }
-            // 扣库存
-            sku.setStock(sku.getStock() - qty);
-            skuService.updateById(sku);
 
             OrderItem item = new OrderItem();
             item.setOrderId(order.getId());
@@ -123,6 +125,20 @@ public class PortalOrderController {
         order.setStatus(1);
         order.setPayType(payType);
         order.setPaymentTime(LocalDateTime.now());
+        orderService.updateById(order);
+        // 支付流水（对账键 = 订单号）
+        paymentRecordService.record(order.getOrderSn(), order.getTotalAmount(),
+                PaymentRecord.TYPE_PAY, payType);
+        return Result.ok(detailBody(order));
+    }
+
+    /** 确认收货：已发货(2) → 已完成(3)，守卫：仅本人订单且 status=2 */
+    @PostMapping("/{id}/confirm")
+    public Result<Map<String, Object>> confirm(@PathVariable Long id) {
+        Order order = orderService.getById(id);
+        if (order == null || !order.getMemberId().equals(CurrentUser.id())) return Result.fail("订单不存在");
+        if (order.getStatus() != 2) return Result.fail("只有已发货订单可以确认收货");
+        order.setStatus(3);
         orderService.updateById(order);
         return Result.ok(detailBody(order));
     }

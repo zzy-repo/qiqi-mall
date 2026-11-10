@@ -9,6 +9,7 @@ TRUNCATE TABLE order_item;
 TRUNCATE TABLE `order`;
 TRUNCATE TABLE return_reason;
 TRUNCATE TABLE order_setting;
+TRUNCATE TABLE payment_record;
 TRUNCATE TABLE sku_spec;
 TRUNCATE TABLE product_gallery;
 TRUNCATE TABLE sku;
@@ -143,6 +144,11 @@ INSERT INTO order_item (id, order_id, product_id, product_sku_id, product_name, 
 INSERT INTO return_apply (id, order_id, member_id, return_reason, description, status, reason_id) VALUES
   (1, 2, 1, '发错货',   '收到的是黑色，下单的是星空灰', 0, 3),
   (2, 1, 1, '质量问题', '屏幕有坏点',                   1, 1);
+
+-- 支付流水（订单1、2 已支付；订单1 尚未退款）
+INSERT INTO payment_record (id, order_sn, amount, type, channel, trade_no) VALUES
+  (1, 'QQ20261109001', 7998.00, 1, 1, 'MOCKPAY20261108000001'),
+  (2, 'QQ20261109002', 599.00,  1, 2, 'MOCKPAY20261108000002');
 
 -- 订单设置（全局单行）
 INSERT INTO order_setting (id, auto_confirm_days, auto_close_minutes) VALUES

@@ -1,0 +1,24 @@
+sequenceDiagram
+    autonumber
+    actor X as 任何调用方(curl/前端bug)
+    participant BE as PUT /admin/orders/{id}
+    participant DB as 订单表
+
+    Note over X,DB: 现状: 无守卫的通用更新
+    X->>BE: {"status": 0}
+    BE->>DB: 照单全收
+    Note over DB: 已关闭订单倒回待付款!
+
+    X->>BE: {"status": 4}
+    BE->>DB: 照单全收
+    Note over DB: 未付款直接已完成,跳过支付发货!
+
+    rect rgb(230, 255, 230)
+        Note over X,DB: 修复: 专用接口+入口校验
+        X->>BE: POST /{id}/ship (守卫: 仅status=1可发货)
+        alt 当前状态合法
+            BE->>DB: status 1→2
+        else 状态不合法
+            BE-->>X: 拒绝: 只有已付款订单可发货
+        end
+    end

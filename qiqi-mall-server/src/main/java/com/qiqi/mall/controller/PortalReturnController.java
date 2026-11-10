@@ -41,11 +41,19 @@ public class PortalReturnController {
                 .eq(ReturnApply::getMemberId, CurrentUser.id()).orderByDesc(ReturnApply::getId)));
     }
 
-    /** 提交退货申请 */
+    /** 提交退货申请，守卫：仅「已付款 / 已发货」订单可申请，且不能重复申请 */
     @PostMapping
     public Result<ReturnApply> apply(@RequestBody ApplyRequest request) {
         Order order = orderService.getById(request.getOrderId());
         if (order == null || !order.getMemberId().equals(CurrentUser.id())) return Result.fail("订单不存在");
+        if (order.getStatus() != 1 && order.getStatus() != 2) {
+            return Result.fail("当前订单状态不可申请退货（仅已付款/已发货订单可申请）");
+        }
+        Long pending = returnApplyService.count(new LambdaQueryWrapper<ReturnApply>()
+                .eq(ReturnApply::getOrderId, order.getId())
+                .eq(ReturnApply::getStatus, 0));
+        if (pending != null && pending > 0) return Result.fail("该订单已有待处理的退货申请");
+
         ReturnReason reason = returnReasonService.getById(request.getReasonId());
         if (reason == null) return Result.fail("请选择退货原因");
 
@@ -57,6 +65,10 @@ public class PortalReturnController {
         apply.setDescription(request.getDescription());
         apply.setStatus(0);
         returnApplyService.save(apply);
+
+        // 联动：订单进入「退款中」
+        order.setStatus(5);
+        orderService.updateById(order);
         return Result.ok(apply);
     }
 

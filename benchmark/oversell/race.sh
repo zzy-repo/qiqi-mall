@@ -14,5 +14,6 @@ for i in $(seq 1 $CONCURRENCY); do
 done
 wait
 SUCCESS=$(grep -l '"code":0' /tmp/order_resp_*.json 2>/dev/null | wc -l)
-FAIL=$(grep -l '"库存不足"' /tmp/order_resp_*.json 2>/dev/null | wc -l)
+# 后端报错文案为「库存不足：<商品名>」，这里按不含结尾引号的关键词匹配
+FAIL=$(grep -l '库存不足' /tmp/order_resp_*.json 2>/dev/null | wc -l)
 echo "结果: 成功=$SUCCESS 失败=$FAIL (总计$CONCURRENCY)"
