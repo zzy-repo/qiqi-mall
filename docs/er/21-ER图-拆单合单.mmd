@@ -1,0 +1,51 @@
+erDiagram
+    订单 ||--o{ 发货单 : "拆单生成"
+    发货单 ||--o{ 发货单明细 : "包含"
+    订单明细 ||--o| 发货单明细 : "拆分来源"
+    发货单 ||--o| 物流信息 : "回传"
+    仓库 ||--o{ 发货单 : "承运"
+    商品 ||--o{ 库存记录 : "分仓存放"
+
+    订单 {
+        bigint id PK
+        varchar order_sn UK
+        bigint member_id FK
+        decimal total_amount
+        tinyint status "0~6(现有)"
+        tinyint split_status "0未拆1已拆 0未拆=单仓直发"
+    }
+    发货单 {
+        bigint id PK
+        varchar delivery_sn UK "DL开头"
+        bigint order_id FK "父订单CASCADE"
+        bigint warehouse_id FK "从哪个仓发"
+        tinyint status "0待下发1已下发2已拣货3已出库4运输中5已签收"
+        varchar receiver_name "快照(冗余,发多包各自贴单)"
+        varchar receiver_phone "快照"
+        varchar receiver_address "快照"
+    }
+    发货单明细 {
+        bigint id PK
+        bigint delivery_id FK "CASCADE"
+        bigint order_item_id FK "来源订单明细"
+        bigint product_sku_id FK
+        int quantity "本发货单承担的数量"
+    }
+    物流信息 {
+        bigint id PK
+        bigint delivery_id FK "1:1"
+        varchar company "顺丰中通"
+        varchar track_no UK "运单号"
+        datetime created_at "回传时间"
+    }
+    仓库 {
+        bigint id PK
+        varchar name "深圳仓杭州仓"
+        tinyint status
+    }
+    库存记录 {
+        bigint id PK
+        bigint sku_id FK
+        bigint warehouse_id FK "SKU分仓库存:同一SKU在多个仓有不同数量"
+        int stock
+    }
