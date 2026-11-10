@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/product-types")
+@RequestMapping("/admin/product-types")
 public class ProductTypeController {
 
     private final ProductTypeService productTypeService;

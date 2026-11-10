@@ -1,0 +1,26 @@
+flowchart LR
+    subgraph Buyer[买家 portal-web]
+        direction TB
+        B1[注册/登录<br/>PortalAuth ✅] --> B2[浏览商品<br/>PortalCatalog ✅]
+        B2 --> B3[加入购物车<br/>PortalCart ✅]
+        B3 --> B4[购物车合并<br/>merge ✅]
+        B4 --> B5[提交订单<br/>PortalOrder ✅]
+        B5 --> B6[支付<br/>模拟实现 ⛔需话术]
+        B6 --> B7[我的订单<br/>查看 ✅]
+        B7 --> B8[确认收货<br/>⛔缺接口]
+        B8 --> B9[申请退货<br/>PortalReturn ✅]
+    end
+
+    subgraph Admin[管理员 admin-web]
+        direction TB
+        A1[登录<br/>AdminAuth+验证码 ✅]
+        A1 --> A2[上架商品/SKU<br/>✅]
+        A2 -.提供商品数据.- B2
+        B6 -.通知有新订单.-> A3[订单管理-发货<br/>⛔缺按钮]
+        A3 --> B8
+        B9 --> A4[退货审核处理<br/>✅]
+        A4 --> End([退货闭环完成])
+    end
+
+    Start([游客]) --> B1
+    B7 --> Mine([✅主链路至此可演示])

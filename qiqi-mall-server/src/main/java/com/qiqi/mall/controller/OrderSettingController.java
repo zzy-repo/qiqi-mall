@@ -6,7 +6,7 @@ import com.qiqi.mall.service.OrderSettingService;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/order-setting")
+@RequestMapping("/admin/order-setting")
 public class OrderSettingController {
 
     private final OrderSettingService orderSettingService;

@@ -40,6 +40,8 @@ services:
       MYSQL_HOST: mysql
       MYSQL_USER: root
       MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-qiqi123456}
+      # JWT 密钥（生产务必覆盖）
+      JWT_SECRET: ${JWT_SECRET:-qiqi-mall-prod-secret-key-please-change-9876543210}
     depends_on:
       mysql:
         condition: service_healthy
@@ -59,18 +61,39 @@ services:
     networks:
       - qiqi-net
 
-  web:
+  # C 端买家商城（portal）
+  portal-web:
     build:
-      context: ./qiqi-mall-web
+      context: ./portal-web
       args:
         BUILD_MODE: production
-    image: qiqi-mall-web:prod
-    container_name: qiqi-web
+    image: qiqi-portal-web:prod
+    container_name: qiqi-portal-web
     environment:
       TZ: Asia/Shanghai
       BACKEND_UPSTREAM: http://server:8082
     ports:
       - "5174:80"
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    networks:
+      - qiqi-net
+
+  # B 端管理后台（admin）
+  admin-web:
+    build:
+      context: ./admin-web
+      args:
+        BUILD_MODE: production
+    image: qiqi-admin-web:prod
+    container_name: qiqi-admin-web
+    environment:
+      TZ: Asia/Shanghai
+      BACKEND_UPSTREAM: http://server:8082
+    ports:
+      - "5176:80"
     restart: unless-stopped
     depends_on:
       server:

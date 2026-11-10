@@ -20,11 +20,11 @@ SET FOREIGN_KEY_CHECKS = 1;
 
 -- ============ 用户模块 ============
 
--- 会员（password 占位，暂不做登录）
+-- 会员（密码统一 123456，BCrypt 存储）
 INSERT INTO member (id, username, password, nickname, phone, status) VALUES
-  (1, 'qiqi',      '$2a$10$abcdefghijklmnopqrstuv', '七七',   '13800000001', 1),
-  (2, 'xiaoming',  '$2a$10$abcdefghijklmnopqrstuv', '小明',   '13800000002', 1),
-  (3, 'laowang',   '$2a$10$abcdefghijklmnopqrstuv', '老王',   '13800000003', 0);
+  (1, 'qiqi',      '$2a$10$V1FYkp/NYOZy3z2ZgUW/f.NCGkOcVTPS.AEMu.W3U.pvhKssTDJGS', '七七',   '13800000001', 1),
+  (2, 'xiaoming',  '$2a$10$V1FYkp/NYOZy3z2ZgUW/f.NCGkOcVTPS.AEMu.W3U.pvhKssTDJGS', '小明',   '13800000002', 1),
+  (3, 'laowang',   '$2a$10$V1FYkp/NYOZy3z2ZgUW/f.NCGkOcVTPS.AEMu.W3U.pvhKssTDJGS', '老王',   '13800000003', 0);
 
 -- 收货地址
 INSERT INTO member_address (id, member_id, name, phone, province, city, region, detail, default_status) VALUES
@@ -38,9 +38,9 @@ INSERT INTO cart (id, member_id, product_id, product_sku_id, quantity) VALUES
   (2, 1, 2, 4, 2),
   (3, 2, 4, 7, 1);
 
--- 管理员（password 占位，暂不做登录）
+-- 管理员（密码统一 123456，BCrypt 存储）
 INSERT INTO admin (id, username, password, nickname, email, status) VALUES
-  (1, 'admin', '$2a$10$abcdefghijklmnopqrstuv', '超级管理员', 'admin@qiqi-mall.local', 1);
+  (1, 'admin', '$2a$10$V1FYkp/NYOZy3z2ZgUW/f.NCGkOcVTPS.AEMu.W3U.pvhKssTDJGS', '超级管理员', 'admin@qiqi-mall.local', 1);
 
 -- ============ 商品模块 ============
 

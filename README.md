@@ -1,22 +1,17 @@
 # qiqi-mall 七七商城
 
-前后端分离商城项目：Vue 3 + Spring Boot
+前后端分离商城项目：Vue 3 + Spring Boot，B/C 端分离两套前端 + JWT 鉴权。
 
 ## 目录结构
 
 ```
 qiqi-mall/
-├── qiqi-mall-web/          # 前端 (Vue 3 + Vite + Element Plus)
-│   ├── public/
-│   ├── nginx/              # 容器内 nginx 配置模板
-│   └── src/
-│       ├── api/            # 接口封装
-│       ├── assets/         # 静态资源/样式
-│       ├── components/     # 公共组件
-│       ├── layout/         # 三段式布局
-│       ├── router/         # 路由
-│       ├── store/          # 状态管理 (Pinia)
-│       └── views/          # 页面
+├── portal-web/             # C 端买家商城（登录注册/购物车/结算/我的订单/收货地址）
+│   ├── nginx/              # 容器内 nginx 配置模板（代理 /portal/）
+│   └── src/{api,layout,router,utils,views}
+├── admin-web/              # B 端管理后台（登录 + 商品/订单/会员管理）
+│   ├── nginx/              # 容器内 nginx 配置模板（代理 /admin/）
+│   └── src/{api,layout,router,utils,views}
 ├── qiqi-mall-server/       # 后端 (Spring Boot)
 │   └── src/main/java/com/qiqi/mall/
 │       ├── controller/     # 接口层
@@ -24,7 +19,8 @@ qiqi-mall/
 │       ├── mapper/         # 数据访问层
 │       ├── entity/         # 数据库实体
 │       ├── dto/            # 传输对象
-│       ├── config/         # 配置类
+│       ├── config/         # 配置类（Jackson 时间格式等）
+│       ├── security/       # 鉴权：JWT / 双过滤器链 / 验证码 / 登录上下文
 │       ├── common/         # 通用返回/异常
 │       └── utils/          # 工具类
 ├── docker-compose.yml      # 部署编排（生产）
@@ -50,7 +46,9 @@ mysql -h127.0.0.1 -uroot -pqiqi123456 qiqi_mall
 | 脚本 | 内容 |
 |------|------|
 | `sql/schema.sql` | 建库建表 |
-| `sql/data.sql` | 示例数据（3 会员 / 3 地址 / 3 购物车 / 1 管理员 / 10 分类 / 3 类型 / 6 属性 / 5 商品 / 9 SKU / 4 订单 / 2 退货） |
+| `sql/data.sql` | 示例数据（3 会员 / 3 地址 / 3 购物车 / 1 管理员 / 10 分类 / 3 类型 / 6 属性 / 5 商品 / 9 SKU / 4 订单 / 2 退货）|
+
+示例账号（密码统一 `123456`，BCrypt 存储）：后台 `admin`，买家 `qiqi` / `xiaoming`（`laowang` 为禁用状态）。
 
 两个脚本都挂到 `/docker-entrypoint-initdb.d/`，数据卷为空时按序自动执行。
 
@@ -63,13 +61,19 @@ mysql -h127.0.0.1 -uroot -pqiqi123456 qiqi_mall
 cd qiqi-mall-server
 mvn spring-boot:run -Dspring-boot.run.profiles=dev
 
-# 终端 2：前端 5173
-cd qiqi-mall-web
+# 终端 2：C 端买家商城 5173
+cd portal-web
+npm install          # 首次
+npm run dev
+
+# 终端 3：B 端管理后台 5175
+cd admin-web
 npm install          # 首次
 npm run dev
 ```
 
-访问 http://localhost:5173
+- C 端商城：http://localhost:5173
+- B 端后台：http://localhost:5175
 
 **热更新表现（已实测）**：
 
@@ -92,27 +96,64 @@ cd qiqi-mall-server && mvn -o compile
 ```bash
 docker compose up -d --build      # 构建并启动
 docker compose ps                 # 状态
-docker compose logs -f web        # 日志
+docker compose logs -f portal-web # 日志
 docker compose down               # 停止
 ```
 
-访问 http://localhost:5174
+- C 端商城：http://localhost:5174
+- B 端后台：http://localhost:5176
 
-| 环境 | 前端 | 后端 | 说明 |
-|------|------|------|------|
-| 本地开发 | 5173 | 8081 | 直接跑源码，热更新 |
-| 容器部署 | 5174 | 8082 | 后端仅容器内网，不映射宿主机 |
+| 环境 | C 端 | B 端 | 后端 | 说明 |
+|------|------|------|------|------|
+| 本地开发 | 5173 | 5175 | 8081 | 直接跑源码，热更新 |
+| 容器部署 | 5174 | 5176 | 8082 | 后端仅容器内网，不映射宿主机 |
 
 两套可同时运行，端口互不冲突。Tailscale 组网内可用 `http://100.113.135.55:<端口>` 访问。
 
-## 前端布局
+## 鉴权与接口分流
 
-引入 Element Plus（中文语言包 + 全量图标），三段式布局：
+同一个后端进程，按 URL 前缀分两条独立的 Spring Security 过滤器链：
 
-- **左侧导航栏**：深色侧边栏，支持折叠（220px / 64px）
-- **右侧顶部**：折叠按钮 + 面包屑（跟随路由 `meta.title` 自动生成）+ 环境标签 + 用户下拉
-- **主内容区**：`router-view`，带淡入过渡，当前为空白占位
+| 前缀 | 面向 | Token | 放行规则 |
+|------|------|-------|----------|
+| `/admin/**` | 管理后台 | admin JWT | `/admin/auth/login`、`/admin/auth/captcha*` 公开；其余需 `ROLE_ADMIN` |
+| `/portal/**` | 买家商城 | member JWT | `/portal/auth/**` 公开；商品/分类/规格 GET 公开；购物车、订单、退货、地址需 `ROLE_MEMBER` |
 
-当前仅保留 `/dashboard` 一个页面（空白占位），业务页面后续按需添加。
+- Token：JWT（HS384），claims 含 `uid` / `role`，默认有效期 720 分钟，密钥 `app.jwt.secret`（可用环境变量 `JWT_SECRET` 覆盖）
+- 密码：`BCryptPasswordEncoder`
+- 未登录/过期统一返回 `401 + {code:1, message:'未登录或登录已过期'}`；前端捕获后清 token 并跳登录页（带 `redirect`）
 
-界面截图见 `docs/screenshots/shot-dashboard.png`。
+### 后台登录验证码
+
+同一用户名连续失败 5 次后要求输入图形验证码（见 `docs/captcha-flow.mmd`）：
+
+1. 登录页输完用户名 → `GET /admin/auth/captcha-required?username=`（5 分钟窗口内失败 ≥5 次返回 true）
+2. 需要时 `GET /admin/auth/captcha` → `{captchaId, image(base64)}`，点图可刷新，有效期 5 分钟
+3. 提交登录带 `captchaId + captchaCode`，校验后**立即销毁**（防重放）；密码错误则失败计数 +1，成功则清零
+4. 内存存储 + 每 10 分钟清扫过期条目
+
+买家侧注册成功即自动登录；登录/注册成功后会把浏览器本地（匿名）购物车合并到账号云端购物车。
+
+### 前端路由
+
+- 两个前端都有全局守卫：无 token 访问需登录页面 → 跳登录页并记录 `redirect`，登录后回跳
+- 未知路由自动回主界面：C 端回首页 `/`，B 端回数据概览 `/dashboard`
+
+## C 端页面
+
+| 路由 | 页面 | 登录要求 |
+|------|------|---------|
+| `/` | 首页（分类筛选 + 搜索 + 商品卡片） | 游客可看 |
+| `/product/:id` | 商品详情（规格选择 + 加购/立即购买） | 游客可看 |
+| `/cart` | 购物车（未登录用本地购物车） | 游客可用 |
+| `/login` | 登录 / 注册（注册即自动登录） | — |
+| `/checkout` | 结算（收货地址 + 提交订单） | 需登录 |
+| `/orders` | 我的订单（详情 / 模拟支付 / 申请退货） | 需登录 |
+| `/addresses` | 收货地址管理 | 需登录 |
+
+支付为模拟：`POST /portal/orders/{id}/pay` 把订单从「待付款」置为「已付款」并记录支付时间。
+
+## B 端页面
+
+侧边栏：用户（会员列表 / 管理员）、订单（订单列表 / 退货申请 / 订单设置）、商品（商品列表 / 商品分类 / 商品类型）。
+收货地址与购物车聚合在会员行操作里，订单明细在订单详情抽屉，属性在商品类型、SKU 在商品列表 —— 均不占独立菜单。

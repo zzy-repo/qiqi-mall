@@ -10,7 +10,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/skus")
+@RequestMapping("/admin/skus")
 public class SkuController {
 
     private final SkuService skuService;

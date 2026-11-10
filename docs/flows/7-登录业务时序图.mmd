@@ -1,0 +1,59 @@
+sequenceDiagram
+    autonumber
+    actor U as 用户
+    participant FE as 前端(portal/admin)
+    participant BE as 后端认证服务
+    participant DB as member/admin表
+    participant CS as 验证码内存存储
+
+    rect rgb(240, 248, 255)
+    Note over U,DB: 场景A: 买家登录/注册(portal-web)
+    U->>FE: 游客浏览,点去结算
+    FE->>FE: 路由守卫:无token→记录redirect跳登录页
+    U->>FE: 已有账号:输用户名密码
+    FE->>BE: POST /portal/auth/login
+    BE->>DB: 查member+BCrypt比对
+    alt 密码错误
+        BE-->>FE: 401
+        BE->>CS: 失败计数+1
+    else 成功
+        BE-->>FE: {accessToken}
+        FE->>FE: 存token,回跳redirect
+        FE->>BE: POST /portal/cart/merge(本地购物车合并)
+    end
+
+    U->>FE: 没有账号:切注册tab
+    FE->>BE: POST /portal/auth/register
+    BE->>DB: 用户名查重→BCrypt入库
+    BE-->>FE: {accessToken}(注册即登录)
+    FE->>BE: POST /portal/cart/merge
+    end
+
+    rect rgb(255, 248, 240)
+    Note over U,DB: 场景B: 管理员登录(admin-web)
+    U->>FE: 打开后台地址
+    FE->>BE: GET /admin/captcha-required?username=xxx
+    BE->>CS: 查失败计数
+    CS-->>BE: ≥5次=true
+    BE-->>FE: true→显示验证码行
+    FE->>BE: GET /admin/captcha
+    BE->>CS: save(验证码明文,TTL5分钟)
+    BE-->>FE: {captchaId,图片base64}
+    U->>FE: 输入账号+密码+验证码
+    FE->>BE: POST /admin/login(带captchaId+captchaCode)
+    BE->>CS: verify=remove取出即删(防重放)
+    alt 验证码错误/过期
+        BE-->>FE: 401 重新获取图片
+    else 通过
+        BE->>DB: 查admin+BCrypt比对
+        BE-->>FE: {accessToken}(role进payload)
+    end
+    end
+
+    rect rgb(240, 255, 240)
+    Note over U,DB: 场景C: 已登录访问业务接口
+    U->>FE: 访问受保护页面
+    FE->>BE: 请求头 Authorization: Bearer token
+    BE->>BE: 过滤器链验签JWT(userType分流)
+    BE-->>FE: 业务数据 / 401→跳登录页
+    end

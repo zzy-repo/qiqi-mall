@@ -1,0 +1,12 @@
+flowchart LR
+    subgraph Buyer[买家 portal-web]
+        B1[我的订单查看 ✅] --> B2[确认收货<br/>⛔缺confirm接口]
+        B2 --> Done3([订单已完成])
+    end
+    subgraph Admin[管理员 admin-web]
+        A1[订单列表看到已付款订单 ✅] --> A2[点击发货按钮<br/>⛔缺UI<br/>状态改已发货]
+    end
+    B1 -.订单处于已付款状态.-> A1
+    A2 -.状态流转已发货.-> B2
+    style Admin fill:#fff3e0,stroke:#ff9800
+    style Buyer fill:#e8f4fd,stroke:#2196f3

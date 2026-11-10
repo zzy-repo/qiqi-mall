@@ -1,0 +1,39 @@
+sequenceDiagram
+    autonumber
+    participant F as 前端登录页
+    participant S as 后端验证码服务
+    participant M as 内存存储(CaptchaStore)
+    participant DB as admin表
+
+    Note over F,M: 阶段1: 登录页加载-决定是否显示验证码
+    F->>S: GET /captcha-required?username=xxx
+    S->>M: 查失败计数(username)
+    M-->>S: 失败次数
+    S-->>F: true(≥5次,需要验证码) / false(不需要)
+
+    Note over F,M: 阶段2: 需要验证码时-获取图片
+    F->>S: GET /captcha
+    S->>S: 生成4位图形验证码(Hutool)
+    S->>M: save(验证码明文, captchaId)<br/>TTL=5分钟
+    S-->>F: {captchaId, 图片base64}
+    F->>F: <img>展示, 点击可刷新
+
+    Note over F,M: 阶段3: 提交登录-一次性消费
+    F->>S: POST /login {username, password, captchaId, captchaCode}
+    S->>M: verify(captchaId, captchaCode)<br/>语义=remove取出即删(防重放)
+    alt 验证码错误或过期
+        M-->>S: false
+        S-->>F: 401 验证码错误, 重新获取图片
+    else 验证码通过
+        M-->>S: true(且该captchaId已销毁)
+        S->>DB: 查username + BCrypt比对密码
+        alt 密码错误
+            S->>M: 失败计数+1(刷新5分钟窗口)
+            S-->>F: 401 用户名或密码错误
+        else 密码正确
+            S->>M: 清零失败计数
+            S-->>F: 200 {accessToken}
+        end
+    end
+
+    Note over M: 后台任务: 每10分钟清扫过期Entry<br/>防内存泄漏

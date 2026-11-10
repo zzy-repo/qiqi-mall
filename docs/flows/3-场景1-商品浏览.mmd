@@ -1,0 +1,11 @@
+flowchart LR
+    subgraph Admin[管理员 admin-web]
+        A1[登录 ✅] --> A2[上架商品/SKU/图片 ✅]
+    end
+    subgraph Buyer[买家 portal-web]
+        B1[打开商城首页 ✅] --> B2[浏览分类/搜索 ✅] --> B3[查看商品详情<br/>SPU+SKU规格+图片 ✅]
+    end
+    A2 -.商品数据上架后可见.- B2
+    B3 --> Done1([场景1完成:选中想买的SKU])
+    style Admin fill:#fff3e0,stroke:#ff9800
+    style Buyer fill:#e8f4fd,stroke:#2196f3

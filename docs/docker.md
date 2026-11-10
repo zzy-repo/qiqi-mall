@@ -7,7 +7,7 @@
 | 环境 | 前端 | 后端 | 是否映射宿主机 |
 |------|------|------|---------------|
 | 本地开发（源码） | 5173 | 8081 | 都是本机进程 |
-| 容器部署 | 5174 | 8082 | 仅前端，后端只 `expose` |
+| 容器部署 | C端 5174 / B端 5176 | 8082 | 仅前端，后端只 `expose` |
 
 两套可以同时跑，端口不冲突。
 
@@ -15,7 +15,7 @@
 
 ```bash
 docker compose up -d --build     # 构建并启动
-docker compose up -d --build web # 只重建前端
+docker compose up -d --build portal-web admin-web   # 只重建前端
 docker compose ps                # 状态
 docker compose logs -f server    # 后端日志
 docker compose down              # 停止并移除
@@ -26,7 +26,7 @@ docker compose down              # 停止并移除
 浏览器访问链路：
 
 ```
-浏览器 → :5174 (nginx) → /api/ → http://server:8082（compose 内网）
+浏览器 → :5174 portal / :5176 admin（nginx）→ /portal/ 或 /admin/ → http://server:8082（compose 内网）
 ```
 
 后端不需要宿主机端口。好处：
@@ -48,7 +48,8 @@ docker compose down              # 停止并移除
 
 | 镜像 | 构建阶段 | 运行阶段 | 大小 |
 |------|---------|---------|------|
-| qiqi-mall-web | node:22-alpine + vite build | nginx:alpine | 66 MB |
+| qiqi-portal-web | node:22-alpine + vite build | nginx:alpine | 66 MB |
+| qiqi-admin-web | node:22-alpine + vite build | nginx:alpine | 66 MB |
 | qiqi-mall-server | maven + temurin-21 | temurin-21-jre-alpine | 248 MB |
 
 ## 环境变量传递
@@ -56,7 +57,8 @@ docker compose down              # 停止并移除
 ```
 docker-compose.yml
   ├── server: SPRING_PROFILE=prod          → java -jar app.jar --spring.profiles.active=prod（运行期）
-  └── web:    BUILD_MODE=production        → vite build --mode production（编译期，改环境需重建镜像）
+  ├── portal-web: BUILD_MODE=production    → vite build --mode production
+  └── admin-web:  BUILD_MODE=production    → vite build --mode production
               BACKEND_UPSTREAM=http://server:8082 → nginx 模板 envsubst 渲染（运行期）
 ```
 

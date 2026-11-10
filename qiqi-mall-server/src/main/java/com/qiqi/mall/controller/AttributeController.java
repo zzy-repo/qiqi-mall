@@ -10,7 +10,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/attributes")
+@RequestMapping("/admin/attributes")
 public class AttributeController {
 
     private final AttributeService attributeService;

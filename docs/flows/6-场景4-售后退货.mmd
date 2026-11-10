@@ -1,0 +1,16 @@
+flowchart LR
+    subgraph Buyer[买家 portal-web]
+        B1[我的订单选已收货订单 ✅] --> B2[选退货原因+填说明 ✅] --> B3[提交退货申请 ✅]
+        B5[收到审核结果通知 ✅]
+    end
+    subgraph Admin[管理员 admin-web]
+        A1[退货申请处理页 ✅] --> A2{审核}
+        A2 -- 通过 --> A3[标记通过<br/>状态机:退款中] 
+        A2 -- 拒绝 --> A4[填拒绝理由]
+    end
+    B3 -.新申请进入待处理列表.-> A1
+    A3 -.结果回传.-> B5
+    A4 -.结果回传.-> B5
+    B5 --> Done4([场景4完成:售后闭环])
+    style Admin fill:#fff3e0,stroke:#ff9800
+    style Buyer fill:#e8f4fd,stroke:#2196f3

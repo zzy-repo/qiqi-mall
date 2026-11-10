@@ -1,26 +1,54 @@
-# 七七商城 ER 图
+# 七七商城 设计图集
 
-> Mermaid 源码在 `docs/er/*-full.mmd`，对应图片为同目录 `*-full.png`。
-> 重新出图：`npx --prefix /tmp/mmdc mmdc -p /tmp/mmdc/puppeteer.json -i docs/er/xxx.mmd -o docs/er/xxx.png -b white`
+> 本文档是全部设计图的索引。源码 `.mmd` 与成图 `.png` 同名成对存放，文件按阅读顺序编号。
+> 重新出图（3倍分辨率）：`npx --prefix <mmdc目录> mmdc -s 3 -i <文件>.mmd -o <文件>.png -b white -p puppeteer.json`
 
-## 总览（三模块 14 张表的关系）
+## 图集总目录（按编号即阅读顺序）
 
-![总览](er/overview-full.png)
+| 编号 | 图名 | 类型 | 回答的问题 |
+|---|---|---|---|
+| 1 | 系统架构图 | 架构 | 系统分几端、边界在哪、通道怎么走 |
+| 2 | 主链路总览图 | 流程 | 全部业务环节串联视图（四场景的整合参考） |
+| 3 | 场景1-商品浏览 | 场景 | 管理员上架 → 买家浏览详情 |
+| 4 | 场景2-购买下单 | 场景 | 懒登录拦截 → 购物车合并 → 下单 → 支付 |
+| 5 | 场景3-订单履约 | 场景 | 管理员发货 → 买家确认收货 ⭐缺口集中在此 |
+| 6 | 场景4-售后退货 | 场景 | 买家申请 → 管理员审核 → 售后闭环 |
+| 7 | 登录业务时序图 | 机制 | 三场景时序：买家登录注册回跳、管理员验证码登录、token访问 |
+| 8 | 验证码机制时序图 | 机制 | 图形码生成校验、一次性消费、失败计数 |
+| 9 | 图片上传时序图 | 机制 | MinIO 上传、安全校验、URL 回填 |
+| 10 | ER图-总览 | 数据 | 15 实体全关系总览 |
+| 11 | ER图-商品域 | 数据 | 分类/类型/属性/商品/SKU/相册 |
+| 12 | ER图-订单域 | 数据 | 订单/明细/退货/原因/设置 |
+| 13 | ER图-用户域 | 数据 | 会员/收货地址/购物车/管理员 |
 
-## 商品模块
+存放位置：编号 1~9 在 `flows/`，编号 10~13 在 `er/`。
 
-`category` 商品分类（自关联树）· `product_type` 商品类型 · `attribute` 属性 · `product` 商品SPU · `sku` SKU
+## 阅读顺序建议
 
-![商品模块](er/commodity-full.png)
+1. **先看 1**（架构）：知道系统有几端、什么边界
+2. **再看 2 + 3~6**（场景）：知道业务怎么走、哪些已实现（✅）哪些缺失（⛔）
+3. **实现某模块时查 10~13**（数据）：建表和写接口的依据
+4. **深入某个点时看 7~9**（机制）：登录/验证码/上传的详细设计
 
-## 订单模块
+## 关键设计结论速查
 
-`order` 订单 · `order_item` 订单明细 · `return_apply` 退货申请 · `return_reason` 退货原因 · `order_setting` 订单设置
+### 架构（图1）
+B/C 端分离：admin-web（管理后台）与 portal-web（买家商城）两个前端应用 + 单后端双过滤器链（/admin/** 与 /portal/** 分流）+ MySQL 与 MinIO 双存储。
+**隔离四维度**：入口隔离（不同登录地址）、身份隔离（admin/member 两张账号表）、通道隔离（各自 token 与过滤器链）、数据隔离（两账号表零外键关联）。
 
-![订单模块](er/order-full.png)
+### 场景覆盖现状（图3~6）
+- ✅ 已实现：注册/登录（含注册即登录）、商品浏览、购物车（含本地合并 merge）、下单（快照+扣库存）、退货申请与审核
+- ⛔ 缺口：场景3 的"买家确认收货接口"与"管理员发货按钮"（订单状态机中间段）
+- ⛔ 支付为模拟实现（POST /orders/{id}/pay 直接改状态），演示需主动说明
 
-## 用户模块
+### 待执行的 SQL 增量（图片能力）
+```sql
+ALTER TABLE product ADD COLUMN pic VARCHAR(500) COMMENT '主图URL';
+ALTER TABLE sku ADD COLUMN pic VARCHAR(500) COMMENT 'SKU图URL';
+-- product_pic 相册表见 图11；删除租户域4表：tenant/tenant_user/plan/tenant_plan；product/order去tenant_id
+```
 
-`member` 会员 · `member_address` 收货地址 · `cart` 购物车 · `admin` 管理员
+## 其他文档
 
-![用户模块](er/user-full.png)
+- `docker.md`：容器部署说明（需新增 minio 服务：9000 API/9001 控制台，bucket=qiqi-mall 公开读）
+- `screenshots/`：运行截图
