@@ -146,3 +146,19 @@ docker tag  docker.1panel.live/library/nginx:alpine nginx:alpine
 | 浏览器地址 | 后端写 URL 用 `MINIO_PUBLIC_URL`（默认 `http://127.0.0.1:9000`） |
 
 后端容器通过 `http://minio:9000` 访问（compose 内网），浏览器通过宿主机 9000 端口直连。
+
+## 多实例拓扑（Redis + nginx upstream）
+
+见 `docs/multi-instance-plan.md`、`docs/FIX-multi-instance.md`。
+
+| 容器 | 说明 | 端口 |
+|---|---|---|
+| `qiqi-server-1` | 应用实例 1（`SERVER_PORT=8082`，`KV_STORE=redis`） | 仅 expose |
+| `qiqi-server-2` | 应用实例 2（`SERVER_PORT=8083`，`KV_STORE=redis`） | 仅 expose |
+| `qiqi-gateway` | nginx upstream 轮询两实例（配置 `nginx/qiqi.conf`） | 宿主机 `127.0.0.1:18080` |
+| `qiqi-redis` | 多实例共享 KV（验证码 / 幂等令牌） | `127.0.0.1:6379` |
+
+- 两个前端容器的 `/portal/`、`/admin/` 代理目标统一改为 `http://gateway`。
+- 宿主机 `8080`（cadvisor）、`8090`（已有 nginx）被占用，网关用 **18080**。
+- 单实例档：`KV_STORE=memory` 时不依赖 Redis（行为与改造前一致）。
+- MinIO 改为 `profiles: ["minio"]`：镜像不可用也能起整套（上传接口降级 503），需要时 `docker compose --profile minio up -d minio`。
