@@ -35,6 +35,11 @@ test.describe('场景3 订单履约', () => {
     await page.goto(`${ADMIN}/order`)
     await page.waitForTimeout(1200)
 
+    // 订单量大（历史压测数据），先按订单号搜索
+    await page.locator('input[placeholder="按订单号搜索"]').fill(order.orderSn)
+    await page.locator('input[placeholder="按订单号搜索"]').press('Enter')
+    await page.waitForTimeout(1200)
+
     const row = page.locator('.el-table__body tr').filter({ hasText: order.orderSn }).first()
     await expect(row, '管理员订单列表应能看到已付款订单').toBeVisible()
     await expect(row).toContainText('已付款')
@@ -53,9 +58,10 @@ test.describe('场景3 订单履约', () => {
 
     // 服务端复核
     const at = await adminToken(request)
-    const res = await request.get(`${AUTO_ADMIN_ORDERS}`, { headers: { Authorization: `Bearer ${at}` } })
-    const list = (await res.json()).data
-    const saved = list.find((o) => o.id === order.id)
+    const res = await request.get(`${AUTO_ADMIN_ORDERS}?page=1&size=10&orderSn=${order.orderSn}`, {
+      headers: { Authorization: `Bearer ${at}` }
+    })
+    const saved = (await res.json()).data.records.find((o) => o.id === order.id)
     expect(saved.status, '服务端订单状态应为已发货(2)').toBe(2)
   })
 

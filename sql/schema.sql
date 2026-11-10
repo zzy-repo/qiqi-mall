@@ -196,6 +196,8 @@ CREATE TABLE `order` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_order_sn` (`order_sn`),
   KEY `idx_member` (`member_id`),
+  -- C 端「我的订单」按 member 过滤 + payment_time 倒序，复合索引避免 filesort
+  KEY `idx_member_time` (`member_id`, `payment_time`),
   KEY `idx_status` (`status`),
   CONSTRAINT `fk_order_member` FOREIGN KEY (`member_id`) REFERENCES `member` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单';

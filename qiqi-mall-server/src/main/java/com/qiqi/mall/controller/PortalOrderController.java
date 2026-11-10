@@ -44,7 +44,8 @@ public class PortalOrderController {
 
     /**
      * 我的订单列表（分页）。
-     * size 限制 1~50；按主键倒序（走主键索引，比按时间排序更快）。
+     * size 限制 1~50；排序键用 payment_time 倒序，配合复合索引 idx_member_time(member_id, payment_time)，
+     * 段内天然有序、免 filesort（未支付订单 payment_time 为 NULL 会排在最后，语义上仍是时间近似序）。
      * 返回 Page：{records, total, current, size, pages}
      */
     @GetMapping
@@ -55,6 +56,7 @@ public class PortalOrderController {
         Page<Order> result = orderService.page(new Page<>(safePage, safeSize),
                 new LambdaQueryWrapper<Order>()
                         .eq(Order::getMemberId, CurrentUser.id())
+                        .orderByDesc(Order::getPaymentTime)
                         .orderByDesc(Order::getId));
         return Result.ok(result);
     }

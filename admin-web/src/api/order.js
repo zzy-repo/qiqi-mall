@@ -2,7 +2,7 @@ import request from './request'
 
 const BASE = '/orders'
 
-export const listOrders = (params) => request.get(BASE, { params })
+export const listOrders = (params) => request.get(BASE, { params })  // { page, size, status?, orderSn? }
 export const getOrder = (id) => request.get(`${BASE}/${id}`)
 export const createOrder = (data) => request.post(BASE, data)
 export const updateOrder = (id, data) => request.put(`${BASE}/${id}`, data)

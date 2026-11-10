@@ -1,6 +1,7 @@
 package com.qiqi.mall.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.qiqi.mall.common.OrderSnGenerator;
 import com.qiqi.mall.common.Result;
 import com.qiqi.mall.dto.OrderDetailDTO;
@@ -30,14 +31,22 @@ public class OrderController {
         this.returnApplyService = returnApplyService;
     }
 
+    /**
+     * 订单列表（分页 + 按状态/订单号筛选）。
+     * 订单量大时必须分页：size 夹在 1~50，按主键倒序。
+     */
     @GetMapping
-    public Result<List<Order>> list(@RequestParam(required = false) Integer status,
+    public Result<Page<Order>> list(@RequestParam(defaultValue = "1") long page,
+                                    @RequestParam(defaultValue = "10") long size,
+                                    @RequestParam(required = false) Integer status,
                                     @RequestParam(required = false) String orderSn) {
+        long safePage = Math.max(page, 1);
+        long safeSize = Math.min(Math.max(size, 1), 50);
         LambdaQueryWrapper<Order> query = new LambdaQueryWrapper<>();
         query.eq(status != null, Order::getStatus, status)
                 .like(orderSn != null && !orderSn.isBlank(), Order::getOrderSn, orderSn)
                 .orderByDesc(Order::getId);
-        return Result.ok(orderService.list(query));
+        return Result.ok(orderService.page(new Page<>(safePage, safeSize), query));
     }
 
     /** 订单详情（含明细与退货申请，聚合展示） */

@@ -58,6 +58,7 @@ test.describe('场景4 售后退货', () => {
     await page.goto(`${ADMIN}/return-apply`)
     await page.waitForTimeout(1200)
 
+    await page.waitForTimeout(1200)
     const applyRow = page.locator('.el-table__body tr').filter({ hasText: order.orderSn }).first()
     await expect(applyRow, '管理员退货申请列表应出现新申请').toBeVisible()
     await applyRow.getByRole('button', { name: '审核' }).click()

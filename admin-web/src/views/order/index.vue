@@ -7,6 +7,21 @@
       </div>
     </template>
 
+    <div class="filters">
+      <el-input
+        v-model="query.orderSn"
+        placeholder="按订单号搜索"
+        clearable
+        style="width: 220px"
+        @keyup.enter="search"
+        @clear="search"
+      />
+      <el-select v-model="query.status" placeholder="全部状态" clearable style="width: 140px" @change="search">
+        <el-option v-for="(t, i) in statusText" :key="i" :label="t" :value="i" />
+      </el-select>
+      <el-button type="primary" :icon="Search" @click="search">查询</el-button>
+    </div>
+
     <el-table v-loading="loading" :data="list" border>
       <el-table-column prop="orderSn" label="订单号" min-width="160" />
       <el-table-column label="买家" width="110">
@@ -42,6 +57,17 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <div class="pager">
+      <el-pagination
+        v-model:current-page="query.page"
+        :page-size="query.size"
+        :total="total"
+        layout="prev, pager, next, total"
+        background
+        @current-change="load"
+      />
+    </div>
 
     <!-- 新增/编辑：订单 + 明细一起提交 -->
     <el-dialog v-model="visible" :title="form.id ? '编辑订单' : '新增订单'" width="640px">
@@ -168,6 +194,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listOrders, createOrder, updateOrder, shipOrder } from '../../api/order'
+import { Search } from '@element-plus/icons-vue'
 import { listMembers } from '../../api/member'
 import { listProducts } from '../../api/product'
 import { listSkus } from '../../api/sku'
@@ -179,6 +206,13 @@ const payText = ['未支付', '支付宝', '微信']
 
 const list = ref([])
 const loading = ref(false)
+const total = ref(0)
+const query = reactive({ page: 1, size: 10, orderSn: '', status: null })
+
+const search = () => {
+  query.page = 1
+  load()
+}
 const members = ref([])
 const products = ref([])
 const skus = ref([])
@@ -208,7 +242,14 @@ const memberName = computed(() => new Map(members.value.map((m) => [m.id, m.user
 const load = async () => {
   loading.value = true
   try {
-    list.value = await listOrders()
+    const pageData = await listOrders({
+      page: query.page,
+      size: query.size,
+      orderSn: query.orderSn || undefined,
+      status: query.status === null || query.status === '' ? undefined : query.status
+    })
+    list.value = pageData.records || []
+    total.value = Number(pageData.total || 0)
   } catch (e) {
     ElMessage.error('加载失败：' + e.message)
   } finally {
@@ -303,6 +344,8 @@ onMounted(async () => {
 
 <style scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; }
+.filters { display: flex; gap: 8px; margin-bottom: 12px; }
+.pager { display: flex; justify-content: flex-end; margin-top: 12px; }
 .add-item { margin-top: 10px; width: 100%; }
 .snapshot { color: #606266; }
 </style>

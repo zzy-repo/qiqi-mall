@@ -43,7 +43,8 @@ public class MinioInitializer {
             log.info("MinIO bucket 就绪（公开读）: {}", bucket);
         } catch (Exception e) {
             // MinIO 不可用不阻塞服务启动，上传接口会单独报错
-            log.warn("MinIO 初始化失败（图片上传将不可用）: {}", e.getMessage());
+            log.warn("MinIO 初始化失败（图片上传将不可用）: {} - {}", e.getClass().getSimpleName(), e.getMessage());
+            log.debug("MinIO 初始化异常详情", e);
         }
     }
 

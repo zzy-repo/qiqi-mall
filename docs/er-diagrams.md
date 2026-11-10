@@ -70,3 +70,15 @@ product_gallery(product_id FK CASCADE, url, sort)  -- 商品相册，见图11
 
 - `docker.md`：容器部署说明（需新增 minio 服务：9000 API/9001 控制台，bucket=qiqi-mall 公开读）
 - `screenshots/`：运行截图
+
+### 列表分页（P1）
+
+- 后端：`MybatisPlusConfig` 注册 `PaginationInnerInterceptor`（`maxLimit=100`，不配插件 `Page` 查询会静默失效）
+- C 端我的订单：`GET /portal/orders?page=&size=` → `{records,total,current,size,pages}`，`size` 夹在 1~50，按主键倒序
+- B 端订单列表：同样分页，并支持 `orderSn` / `status` 筛选（历史压测数据达 50 万行，不分页无法使用）
+- 前端：两个订单页都加了 `el-pagination`，`total` 来自后端
+
+### 幂等令牌（下单防重）
+
+`GET /portal/orders/idempotent-token` 领令牌 → 提交订单携带 `idempotentToken`，服务端原子消费；
+重复提交被拒。配合死锁重试：重试沿用同一请求不再消费令牌，因此不会重复扣减。详见 `benchmark/oversell/README.md` 第 9 节。

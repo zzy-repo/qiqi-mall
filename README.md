@@ -179,6 +179,18 @@ docker compose down               # 停止
 
 **演示话术**：支付为**模拟实现**——`POST /portal/orders/{id}/pay` 直接把订单置为已付款并写一条 `channel=0/1/2`、`trade_no=MOCKPAY...` 的流水，不接真实支付网关；退款同理写 `MOCKREF...` 流水。
 
+## 列表分页
+
+- 分页插件：`MybatisPlusConfig` 注册 `PaginationInnerInterceptor(DbType.MYSQL)`，`maxLimit=100`
+  —— **不注册插件，`Page` 查询会静默变成全表返回**，这是分页改造的前提。
+- C 端我的订单：`GET /portal/orders?page=1&size=10` → `{records,total,current,size,pages}`；`size` 服务端夹在 1~50，按主键倒序（走主键索引）。
+- B 端订单列表：同样分页，并支持 `orderSn`（模糊）、`status` 筛选；后台页面带搜索框 + 分页条。
+- 前端：`el-pagination` 绑 `page/size/total`，`@current-change` 重新拉取。
+- 深分页（`page` 很大时的 `LIMIT offset`）本次未做优化，属后续可选项。
+- C 端排序键：`ORDER BY payment_time DESC, id DESC`，配合复合索引 `idx_member_time(member_id, payment_time)`，
+  `EXPLAIN` 显示 `key=idx_member_time`、`Extra: Backward index scan`（**无 filesort**）。
+  实测 50 万行下接口 30~35ms。
+
 ## 图片上传（MinIO）
 
 商品主图、商品相册、SKU 图片支持直接上传（也保留手填 URL）：

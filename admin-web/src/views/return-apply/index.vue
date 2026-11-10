@@ -8,8 +8,8 @@
     </template>
 
     <el-table v-loading="loading" :data="list" border>
-      <el-table-column label="订单号" width="170">
-        <template #default="{ row }">{{ orderSn.get(row.orderId) || row.orderId }}</template>
+      <el-table-column label="订单号" width="180">
+        <template #default="{ row }">{{ row.orderSn || row.orderId }}</template>
       </el-table-column>
       <el-table-column label="申请人" width="110">
         <template #default="{ row }">{{ memberName.get(row.memberId) || row.memberId }}</template>
@@ -93,7 +93,7 @@ const load = async () => {
     const [rs, applies, ords, mems] = await Promise.all([
       listReturnReasons(),
       request.get('/return-applies'),
-      listOrders(),
+      listOrders({ page: 1, size: 50 }).then((d) => d.records || []),
       listMembers()
     ])
     reasons.value = rs

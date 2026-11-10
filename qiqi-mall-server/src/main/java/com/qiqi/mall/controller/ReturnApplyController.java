@@ -13,7 +13,10 @@ import com.qiqi.mall.service.ReturnApplyService;
 import com.qiqi.mall.service.SkuService;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/admin/return-applies")
@@ -35,14 +38,36 @@ public class ReturnApplyController {
         this.paymentRecordService = paymentRecordService;
     }
 
+    /** 列表：附带订单号，方便后台直接辨认（原本只能看到 orderId） */
     @GetMapping
-    public Result<List<ReturnApply>> list(@RequestParam(required = false) Integer status,
-                                          @RequestParam(required = false) Long orderId) {
+    public Result<List<Map<String, Object>>> list(@RequestParam(required = false) Integer status,
+                                                  @RequestParam(required = false) Long orderId) {
         LambdaQueryWrapper<ReturnApply> query = new LambdaQueryWrapper<>();
         query.eq(status != null, ReturnApply::getStatus, status)
                 .eq(orderId != null, ReturnApply::getOrderId, orderId)
                 .orderByDesc(ReturnApply::getId);
-        return Result.ok(returnApplyService.list(query));
+        List<ReturnApply> rows = returnApplyService.list(query);
+
+        Map<Long, String> orderSns = new LinkedHashMap<>();
+        List<Long> orderIds = rows.stream().map(ReturnApply::getOrderId).distinct().toList();
+        if (!orderIds.isEmpty()) {
+            orderService.listByIds(orderIds).forEach(o -> orderSns.put(o.getId(), o.getOrderSn()));
+        }
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (ReturnApply row : rows) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", row.getId());
+            item.put("orderId", row.getOrderId());
+            item.put("orderSn", orderSns.getOrDefault(row.getOrderId(), ""));
+            item.put("memberId", row.getMemberId());
+            item.put("returnReason", row.getReturnReason());
+            item.put("description", row.getDescription());
+            item.put("status", row.getStatus());
+            item.put("reasonId", row.getReasonId());
+            result.add(item);
+        }
+        return Result.ok(result);
     }
 
     @PostMapping
