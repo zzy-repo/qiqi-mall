@@ -1,0 +1,19 @@
+flowchart LR
+    subgraph C[买家 portal-web]
+        C1[浏览商品] --> C2[下单支付<br/>✅快照+原子扣库存] --> C3[看包裹进度 ⛔前端]
+    end
+    subgraph OMS[订单中台 oms]
+        O1[订单交付 ✅] --> O2[审核拆单 ✅<br/>按分仓归属生成N发货单] --> O3[下发WMS ⛔] --> O4[回传处理 ⛔<br/>拣货出库运单号] --> O5[父订单聚合 ⛔<br/>全部出库才已发货]
+    end
+    subgraph W[WMS mock]
+        W1[受理下发 ⛔] --> W2[拣货打包出库 ⛔<br/>模拟回传]
+    end
+    subgraph ADM[管理员 admin-web]
+        A1[审核通过 ✅] --> O2
+        A2[下发按钮 ⛔] --> O3
+        A3[模拟回传驱动器 ⛔] --> W2
+    end
+    C2 ==> O1
+    O2 -.拆出N子单.-> C3
+    O3 -.发货指令.-> W1
+    W2 -.运单号回传.-> O4
