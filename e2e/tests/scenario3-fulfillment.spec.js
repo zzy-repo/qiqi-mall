@@ -49,7 +49,8 @@ test.describe('场景3 订单履约', () => {
 
     // 管理员审核通过（自动拆单）
     await row.getByRole('button', { name: '审核' }).click()
-    await page.locator('.el-message-box__btns').getByRole('button', { name: '通过' }).click()
+    // 注意：'不通过' 也含 '通过' 二字，必须用精确文本
+    await page.locator('.el-message-box__btns').getByRole('button', { name: '通过', exact: true }).click()
     await page.waitForTimeout(2000)
     await expect(row, '审核通过后订单应为待发货').toContainText('待发货')
 

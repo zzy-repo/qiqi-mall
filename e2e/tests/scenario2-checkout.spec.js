@@ -53,7 +53,8 @@ test.describe('场景2 购买下单', () => {
     await expect(page, '提交订单后应进入我的订单并自动支付').toHaveURL(/\/orders/)
 
     const firstRow = page.locator('.el-table__body tr').first()
-    await expect(firstRow).toContainText('已付款')
+    // 口径②：支付成功后自动进入「待审核」
+    await expect(firstRow).toContainText('待审核')
 
     // ---------- 5. 断言服务端：快照 + 金额 + 扣库存 ----------
     const detail = await api.get(`/portal/products/1`)
@@ -67,7 +68,7 @@ test.describe('场景2 购买下单', () => {
     expect(pageData.total, '分页响应应包含 total').toBeGreaterThan(0)
     expect(Array.isArray(pageData.records), '分页响应应包含 records 数组').toBeTruthy()
     const created = pageData.records[0]
-    expect(created.status, '模拟支付后状态应为已付款(1)').toBe(1)
+    expect(created.status, '支付成功后应自动进入待审核(7)').toBe(7)
     expect(created.receiverName).toBe('E2E买家')
     expect(Number(created.totalAmount)).toBe(Number(skuPrice))
 
