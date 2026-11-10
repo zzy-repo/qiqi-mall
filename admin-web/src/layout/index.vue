@@ -39,6 +39,7 @@
           <el-menu-item index="/order">订单列表</el-menu-item>
           <el-menu-item index="/return-apply">退货申请</el-menu-item>
           <el-menu-item index="/order-setting">订单设置</el-menu-item>
+          <el-menu-item index="/warehouse">仓库管理</el-menu-item>
         </el-sub-menu>
         <el-sub-menu index="product">
           <template #title>

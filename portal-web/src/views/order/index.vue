@@ -25,9 +25,10 @@
         <el-table-column prop="paymentTime" label="支付时间" width="180">
           <template #default="{ row }">{{ row.paymentTime || '—' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="260" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openDetail(row)">详情</el-button>
+            <el-button link type="primary" size="small" @click="openParcels(row)">包裹</el-button>
             <el-button v-if="row.status === 0" link type="primary" size="small" @click="pay(row)">模拟支付</el-button>
             <el-button v-if="row.status === 2" link type="success" size="small" @click="confirmReceive(row)">确认收货</el-button>
             <el-button
@@ -74,6 +75,24 @@
       </template>
     </el-dialog>
 
+    <el-drawer v-model="parcelVisible" :title="`包裹 - ${parcelOrderSn}`" size="480px">
+      <el-table :data="parcels" border size="small" empty-text="暂无包裹（商家审核后将拆单发货）">
+        <el-table-column prop="deliverySn" label="包裹号" min-width="160" />
+        <el-table-column prop="warehouseName" label="发货仓" width="90" />
+        <el-table-column label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag :type="parcelTag[row.status] || 'info'" size="small">{{ parcelText[row.status] || row.status }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="运单号" min-width="140">
+          <template #default="{ row }">
+            <div v-if="row.trackNo">{{ row.company }} {{ row.trackNo }}</div>
+            <span v-else>—</span>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-drawer>
+
     <el-dialog v-model="returnVisible" title="申请退货" width="520px">
       <el-form ref="returnFormRef" :model="returnForm" :rules="returnRules" label-width="90px">
         <el-form-item label="订单号">
@@ -102,12 +121,14 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { listOrders, getOrder, payOrder, confirmOrder } from '../../api/order'
 import { listReturnReasons, listMyReturns, applyReturn } from '../../api/returns'
+import { listMyDeliveries } from '../../api/delivery'
 
 const route = useRoute()
 
 // 状态机：0待付款 1已付款 2已发货 3已完成 4已关闭 5退款中 6已退款
-const statusText = ['待付款', '已付款', '已发货', '已完成', '已关闭', '退款中', '已退款']
-const statusTag = ['warning', 'success', 'primary', 'success', 'info', 'warning', 'info']
+// 状态机：0待付款 1已付款 2已发货 3已完成 4已关闭 5退款中 6已退款 7待审核 8待发货 9部分发货
+const statusText = ['待付款', '已付款', '已发货', '已完成', '已关闭', '退款中', '已退款', '待审核', '待发货', '部分发货']
+const statusTag = ['warning', 'success', 'primary', 'success', 'info', 'warning', 'info', 'warning', 'warning', 'primary']
 
 const orders = ref([])
 const loading = ref(false)
@@ -119,6 +140,24 @@ const detail = ref(null)
 const detailVisible = ref(false)
 const reasons = ref([])
 const myReturns = ref([])
+// 包裹（发货单）
+const parcelVisible = ref(false)
+
+const parcelOrderSn = ref('')
+const parcels = ref([])
+const parcelText = { 0: '待下发', 1: '已下发', 2: '已拣货', 3: '已出库', 4: '运输中', 5: '已签收', 9: '已取消' }
+const parcelTag = { 0: 'warning', 1: 'primary', 2: 'primary', 3: 'success', 4: 'success', 5: 'success', 9: 'info' }
+
+const openParcels = async (row) => {
+  parcelOrderSn.value = row.orderSn
+  parcels.value = []
+  parcelVisible.value = true
+  try {
+    parcels.value = await listMyDeliveries(row.id)
+  } catch {
+    parcels.value = []
+  }
+}
 
 /** 订单 → 售后状态文案（来自 GET /portal/returns） */
 const returnOf = (orderId) => myReturns.value.find((r) => r.orderId === orderId)

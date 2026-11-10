@@ -9,7 +9,10 @@ import {
   registerMemberApi,
   createOrderApi,
   payOrderApi,
-  shipOrderApi,
+  auditPassApi,
+  listDeliveriesApi,
+  dispatchDeliveryApi,
+  wmsCallbackApi,
   prepareSku,
   stamp
 } from './helpers.js'
@@ -41,20 +44,14 @@ test.describe('场景3 订单履约', () => {
     await page.waitForTimeout(1200)
 
     const row = page.locator('.el-table__body tr').filter({ hasText: order.orderSn }).first()
-    await expect(row, '管理员订单列表应能看到已付款订单').toBeVisible()
-    await expect(row).toContainText('已付款')
+    await expect(row, '管理员订单列表应能看到该订单').toBeVisible()
+    await expect(row, '支付后订单应进入待审核').toContainText('待审核')
 
-    // 关键断言 1：行内应有「发货」操作
-    await expect(
-      row.getByRole('button', { name: /发货/ }),
-      '【缺口】管理员订单列表缺少「发货」按钮，无法把已付款订单流转为已发货'
-    ).toBeVisible({ timeout: 5000 })
-
-    await row.getByRole('button', { name: /发货/ }).click()
-    // 弹出发货确认框
-    await page.locator('.el-message-box__btns').getByRole('button', { name: '确定' }).click()
-    await page.waitForTimeout(1500)
-    await expect(row, '发货后订单状态应为已发货').toContainText('已发货')
+    // 管理员审核通过（自动拆单）
+    await row.getByRole('button', { name: '审核' }).click()
+    await page.locator('.el-message-box__btns').getByRole('button', { name: '通过' }).click()
+    await page.waitForTimeout(2000)
+    await expect(row, '审核通过后订单应为待发货').toContainText('待发货')
 
     // 服务端复核
     const at = await adminToken(request)
@@ -62,7 +59,8 @@ test.describe('场景3 订单履约', () => {
       headers: { Authorization: `Bearer ${at}` }
     })
     const saved = (await res.json()).data.records.find((o) => o.id === order.id)
-    expect(saved.status, '服务端订单状态应为已发货(2)').toBe(2)
+    expect(saved.status, '审核通过后服务端状态应为待发货(8)').toBe(8)
+    expect(saved.splitStatus, '审核通过后应标记已拆单').toBe(1)
   })
 
   test('买家在「我的订单」确认收货，订单状态变为已完成', async ({ page, request }) => {
@@ -73,7 +71,12 @@ test.describe('场景3 订单履约', () => {
     const order = await createOrderApi(request, member.token, { skuId })
     await payOrderApi(request, member.token, order.id)
     const at = await adminToken(request)
-    await shipOrderApi(request, at, order.id) // 走发货接口 → 已发货
+    await auditPassApi(request, at, order.id)   // 待审核 → 待发货 + 拆单
+    const deliveries = await listDeliveriesApi(request, at, order.id)
+    expect(deliveries.length, '单仓订单也应生成 1 个发货单').toBe(1)
+    // 推进到已发货：下发 + WMS 出库（父订单在全部子单出库后自动流转）
+    await dispatchDeliveryApi(request, at, deliveries[0].id)
+    await wmsCallbackApi(request, at, deliveries[0].id, 'outbound')
 
     await memberLogin(page, username)
     await page.waitForTimeout(2500)

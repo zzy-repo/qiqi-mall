@@ -26,6 +26,13 @@ test.describe('场景4 售后退货', () => {
     const order = await createOrderApi(request, member.token, { skuId })
     await payOrderApi(request, member.token, order.id)
 
+    // 退货守卫是「仅 status=1 或 2」，先把订单推进到已发货(2)
+    const at = await adminToken(request)
+    await auditPassApi(request, at, order.id)
+    const deliveries = await listDeliveriesApi(request, at, order.id)
+    await dispatchDeliveryApi(request, at, deliveries[0].id)
+    await wmsCallbackApi(request, at, deliveries[0].id, 'outbound')
+
     // ---------- 1. 买家：我的订单 → 申请退货 ----------
     await memberLogin(page, username)
     await page.waitForTimeout(2500)

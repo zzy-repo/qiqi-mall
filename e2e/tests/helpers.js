@@ -168,3 +168,50 @@ export async function firstSkuId(request) {
   const body = await res.json()
   return body.data.skus[0].id
 }
+
+/** 审核通过（待审核 → 待发货，并自动拆单）；返回子发货单列表 */
+export async function auditPassApi(request, adminToken, orderId) {
+  const res = await request.post(`${API}/admin/orders/${orderId}/audit-pass`, {
+    headers: { Authorization: `Bearer ${adminToken}` }
+  })
+  const body = await res.json()
+  expect(body.code, `审核通过应成功：${body.message}`).toBe(0)
+  return body.data
+}
+
+/** 查父订单的子发货单 */
+export async function listDeliveriesApi(request, adminToken, orderId) {
+  const res = await request.get(`${API}/admin/deliveries?orderId=${orderId}`, {
+    headers: { Authorization: `Bearer ${adminToken}` }
+  })
+  return (await res.json()).data
+}
+
+/** 发货单下发 */
+export async function dispatchDeliveryApi(request, adminToken, deliveryId) {
+  const res = await request.post(`${API}/admin/deliveries/${deliveryId}/dispatch`, {
+    headers: { Authorization: `Bearer ${adminToken}` }
+  })
+  const body = await res.json()
+  expect(body.code, `下发应成功：${body.message}`).toBe(0)
+}
+
+/** WMS 回传：pick | outbound | transit | signed */
+export async function wmsCallbackApi(request, adminToken, deliveryId, event) {
+  const res = await request.post(`${API}/admin/deliveries/${deliveryId}/wms-callback?event=${event}`, {
+    headers: { Authorization: `Bearer ${adminToken}` }
+  })
+  const body = await res.json()
+  expect(body.code, `回传(${event})应成功：${body.message}`).toBe(0)
+}
+
+/** 把一个订单推进到「已发货(2)」：审核通过 → 逐个子单下发+出库 */
+export async function driveOrderToShipped(request, adminToken, orderId) {
+  await auditPassApi(request, adminToken, orderId)
+  const deliveries = await listDeliveriesApi(request, adminToken, orderId)
+  for (const d of deliveries) {
+    await dispatchDeliveryApi(request, adminToken, d.id)
+    await wmsCallbackApi(request, adminToken, d.id, 'outbound')
+  }
+  return listDeliveriesApi(request, adminToken, orderId)
+}

@@ -43,9 +43,16 @@
       <el-table-column label="支付时间" width="170">
         <template #default="{ row }">{{ row.paymentTime || '—' }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="210" fixed="right">
+      <el-table-column label="操作" width="230" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="openDetail(row)">明细</el-button>
+          <el-button
+            v-if="row.status === 7"
+            link
+            type="warning"
+            size="small"
+            @click="audit(row)"
+          >审核</el-button>
           <el-button
             v-if="row.status === 1"
             link
@@ -159,6 +166,37 @@
     <!-- 详情：明细 + 退货申请聚合展示 -->
     <el-drawer v-model="detailVisible" :title="`订单明细 - ${detail?.order?.orderSn || ''}`" size="700px">
       <template v-if="detail">
+        <h4>发货单</h4>
+        <el-table :data="deliveries" border size="small" empty-text="暂无发货单（待审核通过后自动拆单生成）">
+          <el-table-column prop="deliverySn" label="发货单号" min-width="170" />
+          <el-table-column prop="warehouseName" label="发货仓" width="100" />
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag :type="deliveryTag[row.status] || 'info'" size="small">{{ deliveryText[row.status] || row.status }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="运单号" min-width="150">
+            <template #default="{ row }">{{ row.trackNo || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="200">
+            <template #default="{ row }">
+              <el-button v-if="row.status === 0" link type="primary" size="small" @click="dispatch(row)">下发</el-button>
+              <el-button v-if="row.status === 0" link type="danger" size="small" @click="cancel(row)">取消</el-button>
+              <el-dropdown v-if="row.status >= 1 && row.status < 5" trigger="click" @command="(cmd) => callback(row, cmd)">
+                <el-button link type="primary" size="small">模拟WMS回传 ▾</el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="pick">拣货</el-dropdown-item>
+                    <el-dropdown-item command="outbound">出库</el-dropdown-item>
+                    <el-dropdown-item command="transit">揽收</el-dropdown-item>
+                    <el-dropdown-item command="signed">签收</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </template>
+          </el-table-column>
+        </el-table>
+
         <h4>商品明细</h4>
         <el-table :data="detail.items" border size="small">
           <el-table-column prop="productName" label="商品名" min-width="160" />
@@ -194,14 +232,18 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listOrders, createOrder, updateOrder, shipOrder } from '../../api/order'
+import {
+  listDeliveries, dispatchDelivery, cancelDelivery, wmsCallback, auditPassOrder, auditRejectOrder
+} from '../../api/delivery'
 import { Search } from '@element-plus/icons-vue'
 import { listMembers } from '../../api/member'
 import { listProducts } from '../../api/product'
 import { listSkus } from '../../api/sku'
 
 // 状态机：0待付款 1已付款 2已发货 3已完成 4已关闭 5退款中 6已退款
-const statusText = ['待付款', '已付款', '已发货', '已完成', '已关闭', '退款中', '已退款']
-const statusTag = ['warning', 'success', 'primary', 'success', 'info', 'warning', 'info']
+// 状态机：0待付款 1已付款 2已发货 3已完成 4已关闭 5退款中 6已退款 7待审核 8待发货 9部分发货
+const statusText = ['待付款', '已付款', '已发货', '已完成', '已关闭', '退款中', '已退款', '待审核', '待发货', '部分发货']
+const statusTag = ['warning', 'success', 'primary', 'success', 'info', 'warning', 'info', 'warning', 'warning', 'primary']
 const payText = ['未支付', '支付宝', '微信']
 
 const list = ref([])
@@ -318,6 +360,76 @@ const ship = async (row) => {
     await load()
   } catch (e) {
     ElMessage.error('发货失败：' + e.message)
+  }
+}
+
+// 发货单状态文案（0待下发1已下发2已拣货3已出库4运输中5已签收9已取消）
+const deliveryText = { 0: '待下发', 1: '已下发', 2: '已拣货', 3: '已出库', 4: '运输中', 5: '已签收', 9: '已取消' }
+const deliveryTag = { 0: 'warning', 1: 'primary', 2: 'primary', 3: 'success', 4: 'success', 5: 'success', 9: 'info' }
+const deliveries = ref([])
+
+/** 审核：通过 → 待发货并自动拆单；不通过 → 关闭订单并回补库存 */
+const audit = async (row) => {
+  const action = await ElMessageBox.confirm(
+    `订单 ${row.orderSn}：通过后自动拆单生成发货单；不通过将关闭订单并回补库存。`,
+    '订单审核',
+    { confirmButtonText: '通过', cancelButtonText: '不通过', distinguishCancelAndClose: true, type: 'warning' }
+  ).then(() => 'pass').catch((e) => (e === 'cancel' ? 'reject' : 'close'))
+  if (action === 'close') return
+  try {
+    if (action === 'pass') {
+      await auditPassOrder(row.id)
+      ElMessage.success('审核通过，已生成发货单')
+    } else {
+      await auditRejectOrder(row.id)
+      ElMessage.success('已审核不通过，订单关闭并回补库存')
+    }
+    await load()
+  } catch (e) {
+    ElMessage.error('审核失败：' + e.message)
+  }
+}
+
+const loadDeliveries = async (orderId) => {
+  try {
+    deliveries.value = await listDeliveries(orderId)
+  } catch {
+    deliveries.value = []
+  }
+}
+
+const dispatch = async (d) => {
+  try {
+    await dispatchDelivery(d.id)
+    ElMessage.success('已下发 WMS')
+    await loadDeliveries(d.orderId)
+  } catch (e) {
+    ElMessage.error('下发失败：' + e.message)
+  }
+}
+
+const cancel = async (d) => {
+  const ok = await ElMessageBox.confirm(`确认取消发货单 ${d.deliverySn}？（会回补库存）`, '提示', { type: 'warning' })
+    .then(() => true).catch(() => false)
+  if (!ok) return
+  try {
+    await cancelDelivery(d.id)
+    ElMessage.success('已取消')
+    await loadDeliveries(d.orderId)
+    await load()
+  } catch (e) {
+    ElMessage.error('取消失败：' + e.message)
+  }
+}
+
+const callback = async (d, event) => {
+  try {
+    await wmsCallback(d.id, event)
+    ElMessage.success('回传成功')
+    await loadDeliveries(d.orderId)
+    await load()
+  } catch (e) {
+    ElMessage.error('回传失败：' + e.message)
   }
 }
 
