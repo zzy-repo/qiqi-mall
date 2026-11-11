@@ -8,7 +8,10 @@ import {
   writeOversizePng,
   cleanupTempImages,
   expectImageLoaded,
-  expectAllImagesLoaded
+  expectAllImagesLoaded,
+  demoImageFile,
+  naturalName,
+  IS_DEMO
 } from '../../support/images.js'
 import { adminTokenOf, getAdminProductsApi } from '../../support/assert.js'
 
@@ -39,11 +42,12 @@ const formItemOf = (page, label) => page.locator('.el-form-item').filter({ hasTe
 
 test.describe('商家侧 5 图片上传与预览', () => {
   test('上传主图：点上传 → 预览 → 回填相对路径 → 保存 → C 端显示', async ({ page, request }) => {
-    const png = writeTempPng()
+    // demo 档用真实种子图（视频里是真实照片），默认档用纯色小图（快且可重复）
+    const png = await demoImageFile()
     try {
       await adminLogin(page)
       const token = await adminTokenOf(page)
-      const name = `E2E上传预览${stamp()}`
+      const name = naturalName(2, `E2E上传预览${stamp()}`)
 
       await openProducts(page)
       await page.getByRole('button', { name: '新增' }).click()
@@ -69,7 +73,7 @@ test.describe('商家侧 5 图片上传与预览', () => {
       await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
       await page.waitForTimeout(1000)
 
-      const saved = (await getAdminProductsApi(request, token, name))[0]
+      const saved = (await getAdminProductsApi(request, token, name)).sort((a, b) => b.id - a.id)[0]
       expect(saved, '商品应保存成功').toBeTruthy()
       expect(saved.pic, '库里的主图应是刚上传的相对路径').toBe(coverUrl)
 
@@ -131,11 +135,11 @@ test.describe('商家侧 5 图片上传与预览', () => {
   })
 
   test('相册多图：加 3 张 → 排序生效 → 保存后 C 端顺序一致', async ({ page, request }) => {
-    const png = writeTempPng()
+    const png = await demoImageFile()
     try {
       await adminLogin(page)
       const token = await adminTokenOf(page)
-      const name = `E2E相册排序${stamp()}`
+      const name = naturalName(0, `E2E相册排序${stamp()}`)
 
       await openProducts(page)
       await page.getByRole('button', { name: '新增' }).click()
@@ -172,7 +176,7 @@ test.describe('商家侧 5 图片上传与预览', () => {
       await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
       await page.waitForTimeout(1000)
 
-      const saved = (await getAdminProductsApi(request, token, name))[0]
+      const saved = (await getAdminProductsApi(request, token, name)).sort((a, b) => b.id - a.id)[0]
       const detail = (await (await request.get(`${API}/admin/products/${saved.id}`, {
         headers: { Authorization: `Bearer ${token}` }
       })).json()).data
@@ -192,18 +196,18 @@ test.describe('商家侧 5 图片上传与预览', () => {
   })
 
   test('SKU 图：列表缩略图渲染，且 C 端切规格时主图跟着换、没配图的规格回退商品主图', async ({ page, request }) => {
-    const png = writeTempPng()
+    const png = await demoImageFile()
     try {
       await adminLogin(page)
       const token = await adminTokenOf(page)
-      const name = `E2E-SKU图预览${stamp()}`
+      const name = naturalName(4, `E2E-SKU图预览${stamp()}`)
       await openProducts(page)
       await addProduct(page, { name, categoryName: '手机数码', typeName: '手机' })
-      const product = (await getAdminProductsApi(request, token, name))[0]
+      const product = (await getAdminProductsApi(request, token, name)).sort((a, b) => b.id - a.id)[0]
 
       // 商品主图（回退用的底图）
       await page.getByRole('button', { name: '新增' }).waitFor()
-      await page.locator('.el-table__body tr').filter({ hasText: name }).first()
+      await page.locator('.el-table__body tr').filter({ hasText: name }).last()  // demo 档商品名可重复，取最新一行
         .getByRole('button', { name: '编辑' }).click()
       let dialog = page.locator('.el-dialog')
       await uploadIn(page, formItemOf(page, '主图'), png)
@@ -213,7 +217,7 @@ test.describe('商家侧 5 图片上传与预览', () => {
 
       // 两个 SKU：第一个配图，第二个**不配图**（用来验回退）
       await openProducts(page)
-      await page.locator('.el-table__body tr').filter({ hasText: name }).first()
+      await page.locator('.el-table__body tr').filter({ hasText: name }).last()  // demo 档商品名可重复，取最新一行
         .getByRole('button', { name: 'SKU' }).click()
       await page.waitForURL(/\/product\/\d+\/skus/, { timeout: 15_000 })
       await page.waitForTimeout(1000)

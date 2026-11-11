@@ -6,7 +6,7 @@
  */
 import { expect } from '@playwright/test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { API } from './env.js'
+import { API, ADMIN } from './env.js'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -14,6 +14,32 @@ import { join } from 'node:path'
 const TINY_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4CAIAAAC2BqGFAAAACXBIWXMAAAABAAAAAQBPJcTWAAAA60lEQVR4nO3QAQkAIADAMOuZznjWsYXCHTzA2Zhr60Lj+cEngQbdCjToVqBBtwINuhVo0K1Ag24FGnQr0KBbgQbdCjToVqBBtwINuhVo0K1Ag24FGnQr0KBbgQbdCjToVqBBtwINuhVo0K1Ag24FGnQr0KBbgQbdCjToVqBBtwINuhVo0K1Ag24FGnQr0KBbgQbdCjToVqBBtwINuhVo0K1Ag24FGnQr0KBbgQbdCjToVqBBtwINuhVo0K1Ag24FGnQr0KBbgQbdCjToVqBBtwINuhVo0K1Ag24FGnQr0KBbgQbdCjToVqBBtzqWwblDxtk3RQAAAABJRU5ErkJggg=='
 
 let tempDir = null
+
+/** demo 档：界面/视频里要好看，图片用真实种子图而不是纯色块 */
+export const IS_DEMO = !!process.env.DEMO
+const REAL_IMAGE_PATH = '/qiqi-mall/seed/product/1-cover.webp'
+
+/**
+ * 取一张"真实图片"给上传用：
+ * - demo 档：从 MinIO（经前端 nginx 反代）下载种子商品图，写成临时文件上传 → 视频里是真实照片
+ * - 默认档：仍用纯色块小图（快、可重复、不依赖外部资源）
+ */
+export async function demoImageFile() {
+  if (!IS_DEMO) return writeTempPng()
+  const res = await fetch(`${ADMIN}${REAL_IMAGE_PATH}`)
+  if (!res.ok) throw new Error(`下载种子图失败 ${res.status}`)
+  const buf = Buffer.from(await res.arrayBuffer())
+  if (!tempDir) tempDir = mkdtempSync(join(tmpdir(), 'qiqi-e2e-img-'))
+  const file = join(tempDir, 'seed-cover.webp')
+  writeFileSync(file, buf)
+  return file
+}
+
+/** demo 档用自然中文商品名（不含 E2E/时间戳），默认档保持唯一前缀便于定位 */
+export function naturalName(index, fallback) {
+  const pool = ['手冲咖啡滤杯', '亚麻抱枕套', '陶瓷马克杯', '藤编收纳筐', '胡桃木餐具套装', '亚克力相框']
+  return IS_DEMO ? pool[index % pool.length] : fallback
+}
 
 /** 生成临时 png，返回路径；同一进程内只建一个临时目录，最后用 cleanupTempImages() 删掉 */
 export function writeTempPng(name = 'e2e-image.png') {

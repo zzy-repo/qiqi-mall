@@ -256,18 +256,53 @@ async function main() {
   const reasonRows = ["  (1, '质量问题')", "  (2, '七天无理由')", "  (3, '发错货')", "  (4, '不想要了')"]
   const warehouseRows = WAREHOUSES.map((w) => `  (${w.id}, '${esc(w.name)}', 1)`)
 
-  // ---- 2 条示例订单，让后台列表不空（不影响 e2e，e2e 按订单号定位）----
-  const p1skus = skusByProduct.get(1)
-  const p2skus = skusByProduct.get(2)
-  const orderRows = [
-    `  (1, 'QQ20261112001', 1, ${num(p1skus[0].price)}, 1, 1, '2026-11-12 10:20:00', '七七', '13800000001', '广东省深圳市南山区科技园南路 1 号 301')`,
-    `  (2, 'QQ20261112002', 2, ${num(Number(p2skus[0].price))}, 3, 2, '2026-11-11 09:05:00', '小明', '13800000002', '上海市上海市浦东新区张江路 200 号')`
+  // ---- 演示订单：让后台列表与数据概览有真实感（不影响 e2e，e2e 都按订单号定位）----
+  //   近 7 天每天都有成交，状态覆盖 已付款/已发货/已完成/待审核/待发货，
+  //   商品取前几个（销量排行榜才有意义），金额按 SKU 价格 × 数量算。
+  const orderRows = []
+  const orderItemRows = []
+  const paymentRows = []
+  const now = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  const dayOf = (offset) => {
+    const d = new Date(now.getTime() - offset * 24 * 3600 * 1000)
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  }
+  // [天数偏移, 状态, 会员id, 商品序号(0基), 件数]
+  const demoPlan = [
+    [0, 7, 1, 0, 2], [0, 8, 2, 1, 1], [0, 7, 3, 2, 1], [0, 9, 1, 5, 1],
+    [1, 2, 2, 0, 1], [1, 3, 1, 3, 2],
+    [2, 3, 3, 0, 1],
+    [3, 2, 1, 4, 1], [3, 1, 2, 6, 1],
+    [4, 3, 2, 0, 3],
+    [5, 3, 3, 7, 1], [5, 2, 1, 1, 2],
+    [6, 3, 1, 0, 1], [6, 3, 2, 8, 1]
   ]
-  const orderItemRows = [
-    `  (1, 1, 1, ${p1skus[0].id}, '${esc(i18n.products[String(products[0].id)]?.title || products[0].title)}', ${num(p1skus[0].price)}, 1)`,
-    `  (2, 2, 2, ${p2skus[0].id}, '${esc(i18n.products[String(products[1].id)]?.title || products[1].title)}', ${num(p2skus[0].price)}, 1)`
-  ]
-  const paymentRows = [`  (1, 'QQ20261112001', ${num(p1skus[0].price)}, 1, 1, 'MOCKPAY20261112000001')`]
+  let orderId = 0
+  let itemId = 0
+  let payId = 0
+  const receiverOf = { 1: ['七七', '13800000001', '广东省深圳市南山区科技园南路 1 号 301'],
+                       2: ['小明', '13800000002', '上海市上海市浦东新区张江路 200 号'],
+                       3: ['老王', '13800000003', '北京市北京市朝阳区建国路 88 号'] }
+  for (const [offset, status, memberId, productIdx, qty] of demoPlan) {
+    orderId++
+    const sku = skusByProduct.get(productIdx + 1)[0]
+    const total = Number(sku.price) * qty
+    const sn = `QQ${dayOf(offset).replace(/-/g, '')}${String(1000 + orderId)}`
+    const [rName, rPhone, rAddr] = receiverOf[memberId]
+    const payTime = status === 0 ? 'NULL' : `'${dayOf(offset)} ${pad(9 + (orderId % 9))}:${pad((orderId * 7) % 60)}:00'`
+    orderRows.push(`  (${orderId}, '${sn}', ${memberId}, ${num(total)}, ${status}, 1, ${payTime}, '${esc(rName)}', '${rPhone}', '${esc(rAddr)}')`)
+    orderItemRows.push(`  (${++itemId}, ${orderId}, ${productIdx + 1}, ${sku.id}, '${esc(i18n.products[String(products[productIdx].id)]?.title || products[productIdx].title)}', ${num(sku.price)}, ${qty})`)
+    if (status !== 0) {
+      paymentRows.push(`  (${++payId}, '${sn}', ${num(total)}, 1, 1, 'MOCKPAY${dayOf(offset).replace(/-/g, '')}${String(1000 + orderId)}')`)
+    }
+  }
+
+  // ---- 库存告警：留几个低库存 SKU，让概览页的告警列表有内容 ----
+  for (const [skuIdx, stock] of [[9, 6], [17, 3], [33, 8]]) {
+    const row = skuRows[skuIdx]
+    if (row) skuRows[skuIdx] = row.replace(/, \d+, '/, `, ${stock}, '`)
+  }
 
   // ---- 拼 SQL ----
   const tables = [
