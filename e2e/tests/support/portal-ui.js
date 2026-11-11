@@ -91,3 +91,53 @@ export async function deleteAddress(page, name) {
 /** 列表里该行是否标了「默认」 */
 export const isDefaultAddress = async (page, name) =>
   (await addressRowOf(page, name).innerText()).includes('默认')
+
+// ---------------------------------------------------------------------------
+// 首页 / 搜索 / 分类
+// ---------------------------------------------------------------------------
+
+/** 首页商品卡片 */
+export const productCards = (page) => page.locator('.grid .card')
+
+/** 打开首页 */
+export async function openHome(page) {
+  await page.goto(`${PORTAL}/`)
+  await page.waitForTimeout(1200)
+}
+
+/** 按关键词搜索（回车触发） */
+export async function searchProduct(page, keyword) {
+  const input = page.locator('input[placeholder="搜索商品"]')
+  await input.fill(keyword)
+  await input.press('Enter')
+  await page.waitForTimeout(1000)
+}
+
+/** 按分类筛选（点分类按钮） */
+export async function filterByCategory(page, categoryName) {
+  await page.locator('.el-radio-button').filter({ hasText: categoryName }).first().click()
+  await page.waitForTimeout(1000)
+}
+
+// ---------------------------------------------------------------------------
+// 商品详情 / 规格
+// ---------------------------------------------------------------------------
+
+/** 详情页规格按钮 */
+export const specButtons = (page) => page.locator('.el-radio-group .el-radio-button')
+
+/** 详情页当前价格文本（如 ¥ 1999.99） */
+export const detailPrice = (page) => page.locator('.price')
+
+/** 详情页库存文本（如 库存 1000） */
+export const detailStock = (page) => page.locator('.stock')
+
+// ---------------------------------------------------------------------------
+// 登录页
+// ---------------------------------------------------------------------------
+
+/** 登录页错误提示（el-alert） */
+export const loginError = (page) => page.locator('.login-card .el-alert')
+
+/** 登录页必填校验提示 */
+export const loginFieldError = (page, msg) => page.locator('.el-form-item__error').filter({ hasText: msg })

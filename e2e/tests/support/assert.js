@@ -79,7 +79,26 @@ export async function getMemberOrderApi(request, token, orderId) {
   return (await res.json()).data
 }
 
-/** 买家的收货地址簿 */
+/** 商品分类列表（C 端） */
+export async function getCategoriesApi(request) {
+  const res = await request.get(`${API}/portal/categories`)
+  return (await res.json()).data || []
+}
+
+/** 商品列表（C 端，可按分类过滤） */
+export async function getPublishedProductsApi(request, categoryId) {
+  const url = categoryId ? `${API}/portal/products?categoryId=${categoryId}` : `${API}/portal/products`
+  const res = await request.get(url)
+  return (await res.json()).data || []
+}
+
+/** 买家个人资料 */
+export async function getMemberProfileApi(request, token) {
+  const res = await request.get(`${API}/portal/member/profile`, auth(token))
+  return (await res.json()).data
+}
+
+/** 买家收货地址簿 */
 export async function getMemberAddressesApi(request, token) {
   const res = await request.get(`${API}/portal/member/addresses`, auth(token))
   return (await res.json()).data || []
