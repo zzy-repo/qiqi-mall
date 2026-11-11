@@ -31,6 +31,7 @@ import {
   dropReturnApply
 } from '../../support/admin-ui-config.js'
 import { adminTokenOf, getProductApi, memberTokenOf, getMemberReturnsApi } from '../../support/assert.js'
+import { uniqueDisplayName, memberNickOf, receiverOf, returnDescriptionOf } from '../../support/fixtures.js'
 
 /**
  * 04-商家-基础配置 / 3-退货原因字典
@@ -78,9 +79,10 @@ test.describe('04-商家-基础配置 › 3-退货原因字典', () => {
     test('新增 / 编辑改名 / 空名与重名拦截 / 删除', async ({ page, request }) => {
       test.setTimeout(240_000)
       const suffix = stamp()
-      const origin = `e2e_rr_包装破损_${suffix}`
-      // 注意：新名字不能包含旧名字，否则「旧名字不应再出现」会被子串匹配误命中
-      const renamed = `e2e_rr_包装损坏_${suffix}`
+      // 显示名要像真的：「包装破损（第 N 期）」，N 由库里现有名字递推，天然不重名；
+      // 改名后的名字不含原名子串，否则「旧名字不应再出现」会被子串匹配误命中
+      let origin
+      let renamed
 
       await test.step('① 管理员进入「退货原因」：菜单有入口，列表里能看到种子原因', async () => {
         await adminLoginResilient(page)
@@ -88,6 +90,11 @@ test.describe('04-商家-基础配置 › 3-退货原因字典', () => {
         await gotoReturnReasonList(page)
         await expect(returnReasonRow(page, '质量问题'), '种子原因应在列表里').toBeVisible()
         await expect(page.getByText('已被退货申请使用的原因不能删除')).toBeVisible()
+
+        const dict = await readReasonsApi(request, await adminTokenOf(page))
+        const existing = dict.map((r) => r.name)
+        origin = uniqueDisplayName('包装破损', existing)
+        renamed = uniqueDisplayName('包装损坏', existing)
       })
 
       await test.step('② 新增一条原因 → 提示保存成功，列表出现这一行', async () => {
@@ -159,8 +166,10 @@ test.describe('04-商家-基础配置 › 3-退货原因字典', () => {
     }) => {
       test.setTimeout(300_000)
       const suffix = stamp()
-      const reasonName = `e2e_rr_包装破损_${suffix}`
-      const desc = `E2E 字典验证 ${suffix}`
+      const nick = memberNickOf(suffix)
+      const receiver = receiverOf(suffix)
+      const desc = returnDescriptionOf(suffix)
+      let reasonName
       let adminToken
       let orderSn
       let orderId
@@ -169,6 +178,7 @@ test.describe('04-商家-基础配置 › 3-退货原因字典', () => {
       await test.step('① 管理员在维护页新增一条原因（真实 UI）', async () => {
         await adminLoginResilient(page)
         await gotoReturnReasonList(page)
+        reasonName = uniqueDisplayName('包装破损', (await readReasonsApi(request, await adminTokenOf(page))).map((r) => r.name))
         await openReturnReasonForm(page)
         await fillReturnReasonName(page, reasonName)
         await submitReturnReasonForm(page)
@@ -183,10 +193,10 @@ test.describe('04-商家-基础配置 › 3-退货原因字典', () => {
       })
 
       await test.step('② 买家：下单 → 已发货 → 申请退货，原因下拉里有这条新原因', async () => {
-        await memberRegisterAndLogin(page, `e2e_reason_${suffix}`)
+        await memberRegisterAndLogin(page, `e2e_reason_${suffix}`, '123456', nick)
         const { skus } = await getProductApi(request, 1)
         await addSpecToCart(page, 1, skus[0].specText)
-        orderSn = await submitCartOrder(page)
+        orderSn = await submitCartOrder(page, receiver)
 
         // 推到「已发货」：申请退货只对已付款/已发货开放
         await adminLoginResilient(page)
