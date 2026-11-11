@@ -15,13 +15,10 @@ import {
 } from '../support/ui.js'
 import {
   adminTokenOf,
+  getProductApi,
   getAdminOrderBySnApi,
   listDeliveriesApi
 } from '../support/assert.js'
-
-// 种子数据：SKU1 → 深圳仓(1)，SKU2 → 杭州仓(2)，同属商品1 → 一单两明细必然跨仓
-const SPEC_SHENZHEN = '颜色:黑,内存:256G'
-const SPEC_HANGZHOU = '颜色:白,内存:256G'
 
 /**
  * 场景5 拆单履约（docs/flows/22-拆单时序图 + 23-发货单状态图 + FIX-oms-split Commit 4）
@@ -42,9 +39,13 @@ test.describe('场景5 拆单履约', () => {
     const at = await adminTokenOf(page)
 
     // ---------- 买家真实下单：两件跨仓商品一单 → 自动支付 ----------
+    // 种子数据：商品1 的 SKU1 → 深圳仓、SKU2 → 杭州仓，一单两明细必然跨仓；
+    // 规格文本从接口读，避免写死种子数据
+    const { skus } = await getProductApi(request, 1)
+    expect(skus.length, '商品1 至少有 2 个 SKU').toBeGreaterThanOrEqual(2)
     await memberRegisterAndLogin(page, username)
-    await addSpecToCart(page, 1, SPEC_SHENZHEN)
-    await addSpecToCart(page, 1, SPEC_HANGZHOU)
+    await addSpecToCart(page, 1, skus[0].specText)
+    await addSpecToCart(page, 1, skus[1].specText)
     await expect(page.locator('.el-table__body tr'), '购物车应有 2 个 SKU 明细').toHaveCount(2)
     const orderSn = await submitCartOrder(page, { receiverName: '拆单E2E' })
     const order = await getAdminOrderBySnApi(request, at, orderSn)

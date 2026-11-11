@@ -15,12 +15,18 @@ import {
 import {
   adminTokenOf,
   memberTokenOf,
+  getProductApi,
   getAdminOrderBySnApi,
   listDeliveriesApi,
   getMemberOrderApi
 } from '../support/assert.js'
 
-const SPEC_BLACK_256 = '颜色:黑,内存:256G'   // 种子数据 SKU1
+/** 商品1 第一个 SKU 的规格文本（种子数据可能换，这里从接口读，不写死） */
+async function firstSpecOf(request, productId = 1) {
+  const { skus } = await getProductApi(request, productId)
+  expect(skus.length, '商品1 应有 SKU').toBeGreaterThan(0)
+  return skus[0].specText
+}
 
 /**
  * 场景3 订单履约（docs/flows/5-场景3-订单履约.mmd）
@@ -31,9 +37,9 @@ const SPEC_BLACK_256 = '颜色:黑,内存:256G'   // 种子数据 SKU1
  */
 
 /** 买家侧真实下单并支付：注册 → 加购 → 结算提交（提交后自动模拟支付） */
-async function buyAsNewMember(page, username) {
+async function buyAsNewMember(page, username, specText) {
   await memberRegisterAndLogin(page, username)
-  await addSpecToCart(page, 1, SPEC_BLACK_256)
+  await addSpecToCart(page, 1, specText)
   const orderSn = await submitCartOrder(page)
   await expect(
     page.locator('.el-table__body tr').filter({ hasText: orderSn }).first(),
@@ -74,7 +80,8 @@ test.describe('场景3 订单履约', () => {
     const at = await adminTokenOf(page)
 
     // 买家真实下单并支付
-    const orderSn = await buyAsNewMember(page, username)
+    const specText = await firstSpecOf(request)
+    const orderSn = await buyAsNewMember(page, username, specText)
     const order = await getAdminOrderBySnApi(request, at, orderSn)
     expect(order.status, '支付后服务端状态应为待审核(7)').toBe(7)
 
@@ -110,7 +117,8 @@ test.describe('场景3 订单履约', () => {
     const at = await adminTokenOf(page)
 
     // 买家下单支付 → 管理员审核通过 → 抽屉里下发+出库（全部真实点击）
-    const orderSn = await buyAsNewMember(page, username)
+    const specText = await firstSpecOf(request)
+    const orderSn = await buyAsNewMember(page, username, specText)
     const order = await getAdminOrderBySnApi(request, at, orderSn)
     const adminRow = await auditPassByUi(page, orderSn)
     await dispatchAndOutboundByUi(page, orderSn)

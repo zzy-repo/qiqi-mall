@@ -16,11 +16,10 @@ import {
 import {
   adminTokenOf,
   memberTokenOf,
+  getProductApi,
   getAdminOrderBySnApi,
   getMemberReturnsApi
 } from '../support/assert.js'
-
-const SPEC_BLACK_256 = '颜色:黑,内存:256G'   // 种子数据 SKU1
 
 /**
  * 场景4 售后退货（docs/flows/6-场景4-售后退货.mmd）
@@ -38,9 +37,11 @@ test.describe('场景4 售后退货', () => {
     await adminSetSkuStock(page, 1, 0, 50)
     const at = await adminTokenOf(page)
 
-    // ---------- 买家真实下单并支付 ----------
+    // ---------- 买家真实下单并支付（规格文本从接口读，避免写死种子数据）----------
+    const { skus } = await getProductApi(request, 1)
+    const specText = skus[0].specText
     await memberRegisterAndLogin(page, username)
-    await addSpecToCart(page, 1, SPEC_BLACK_256)
+    await addSpecToCart(page, 1, specText)
     const orderSn = await submitCartOrder(page)
     const order = await getAdminOrderBySnApi(request, at, orderSn)
     expect(order.status, '支付后服务端状态应为待审核(7)').toBe(7)

@@ -26,7 +26,7 @@ public class CaptchaService {
         LineCaptcha captcha = CaptchaUtil.createLineCaptcha(120, 40, 4, 20);
         String captchaId = UUID.randomUUID().toString().replace("-", "");
         store.saveCaptcha(captchaId, captcha.getCode());
-        // 仅 debug 级别输出（dev），生产 logging=info 不会落到日志
+        // 仅 debug 级别输出（dev），测试环境 logging=info 不会落到日志
         log.debug("生成验证码 captchaId={} code={}", captchaId, captcha.getCode());
 
         Map<String, String> body = new LinkedHashMap<>();

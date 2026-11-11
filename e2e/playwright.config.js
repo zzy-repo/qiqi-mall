@@ -10,7 +10,7 @@ import { defineConfig, devices } from '@playwright/test'
  *       ADMIN_BASE   http://127.0.0.1:5175
  *       API_BASE     http://127.0.0.1:8081
  *
- *  2) demo 档（`npm run demo`，即 DEMO=1）：跑容器栈（生产形态），1280x720 全量录制 + slowMo 400
+ *  2) demo 档（`npm run demo`，即 DEMO=1）：跑容器栈 = 测试环境，1280x720 全量录制 + slowMo 400
  *       PORTAL_BASE  http://127.0.0.1:5174   (portal-web 容器 nginx)
  *       ADMIN_BASE   http://127.0.0.1:5176   (admin-web 容器 nginx)
  *       API_BASE     http://127.0.0.1:18080  (gateway → server-1/server-2 + Redis)

@@ -1,4 +1,4 @@
-# 生产环境：端口 8082
+# 测试环境（容器栈部署，连独立库 qiqi_mall_test）：端口 8082
 server:
   port: ${SERVER_PORT:8082}
   address: 0.0.0.0
@@ -9,7 +9,8 @@ spring:
       port: ${REDIS_PORT:6379}
       timeout: 3s
   datasource:
-    url: jdbc:mysql://${MYSQL_HOST:mysql}:3306/qiqi_mall?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    # 库名可覆盖：容器编排用 MYSQL_DATABASE 注入（测试环境指向独立库 qiqi_mall_test，与 dev 库隔离）
+    url: jdbc:mysql://${MYSQL_HOST:mysql}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:qiqi_mall}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: ${MYSQL_USER:root}
     password: ${MYSQL_PASSWORD:qiqi123456}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -26,7 +27,7 @@ mybatis-plus:
 # 鉴权配置
 app:
   jwt:
-    # 生产环境通过环境变量 JWT_SECRET 覆盖
+    # 测试环境通过环境变量 JWT_SECRET 覆盖
     secret: ${JWT_SECRET:qiqi-mall-prod-secret-key-please-change-9876543210}
     expire-minutes: 720
   minio:

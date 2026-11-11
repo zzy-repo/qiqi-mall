@@ -70,7 +70,7 @@
         </div>
         <div class="header-right">
           <el-tag :type="env === 'prod' ? 'danger' : 'success'" size="small" effect="dark">
-            {{ env === 'prod' ? '生产环境' : '开发环境' }}
+            {{ env === 'prod' ? '测试环境' : '开发环境' }}
           </el-tag>
           <el-dropdown>
             <span class="user-info">

@@ -23,7 +23,7 @@ qiqi-mall/
 │       ├── security/       # 鉴权：JWT / 双过滤器链 / 验证码 / 登录上下文
 │       ├── common/         # 通用返回/异常
 │       └── utils/          # 工具类
-├── docker-compose.yml      # 部署编排（生产）
+├── docker-compose.yml      # 部署编排（测试环境）
 ├── sql/                    # 数据库脚本
 └── docs/                   # 文档
 ```

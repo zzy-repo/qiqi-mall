@@ -19,8 +19,10 @@ test.describe('场景2 购买下单', () => {
     await adminLogin(page)
     await adminSetSkuStock(page, 1, 0, 50)
 
-    // 基准数据（只读）：下单前库存与成交价
-    const sku = (await getProductApi(request, 1)).skus[0]
+    // 基准数据（只读）：下单前库存、成交价与商品名（种子数据会换，一律运行时从接口读，不写死）
+    const productDetail = await getProductApi(request, 1)
+    const productName = productDetail.product.name
+    const sku = productDetail.skus[0]
     const skuId = sku.id
     const skuPrice = sku.price
     const beforeStock = sku.stock
@@ -29,7 +31,7 @@ test.describe('场景2 购买下单', () => {
     // ---------- 1. 游客查看商品详情并加入购物车（存本地） ----------
     await page.goto(`${PORTAL}/product/1`)
     await page.waitForTimeout(1200)
-    await expect(page.locator('h2')).toContainText('七七 Pro 15')
+    await expect(page.locator('h2'), '详情页应显示种子里的商品名').toContainText(productName)
     await page.getByRole('button', { name: '加入购物车' }).click()
     await page.waitForURL(/\/cart/)
     await page.waitForTimeout(800)
@@ -80,7 +82,7 @@ test.describe('场景2 购买下单', () => {
 
     const items = (await getMemberOrderApi(request, token, created.id)).items
     expect(items.length).toBe(1)
-    expect(items[0].productName, '订单明细应保存商品名快照').toContain('七七 Pro 15')
+    expect(items[0].productName, '订单明细应保存商品名快照').toBe(productName)
     expect(Number(items[0].productPrice), '订单明细应保存成交价快照').toBe(Number(skuPrice))
 
     await page.screenshot({ path: 'report/shots/scenario2-orders.png', fullPage: true })

@@ -1,4 +1,4 @@
-# 部署用编排（生产）。开发不走容器，见 README「本地开发」
+# 部署用编排（测试环境：容器栈跑的就是测试环境，连独立库 qiqi_mall_test）。开发不走容器，见 README「本地开发」
 #   docker compose up -d --build
 name: qiqi-mall
 
@@ -40,6 +40,8 @@ services:
       SERVER_PORT: "8082"
       JAVA_OPTS: "-XX:MaxRAMPercentage=75"
       MYSQL_HOST: mysql
+      # 容器栈（测试环境）连独立库 qiqi_mall_test，与本地开发用的 qiqi_mall 数据彻底隔离
+      MYSQL_DATABASE: ${MYSQL_DATABASE_TEST:-qiqi_mall_test}
       MYSQL_USER: root
       MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-qiqi123456}
       JWT_SECRET: ${JWT_SECRET:-qiqi-mall-prod-secret-key-please-change-9876543210}
@@ -78,6 +80,8 @@ services:
       SERVER_PORT: "8083"
       JAVA_OPTS: "-XX:MaxRAMPercentage=75"
       MYSQL_HOST: mysql
+      # 容器栈（测试环境）连独立库 qiqi_mall_test，与本地开发用的 qiqi_mall 数据彻底隔离
+      MYSQL_DATABASE: ${MYSQL_DATABASE_TEST:-qiqi_mall_test}
       MYSQL_USER: root
       MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-qiqi123456}
       JWT_SECRET: ${JWT_SECRET:-qiqi-mall-prod-secret-key-please-change-9876543210}
