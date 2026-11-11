@@ -14,6 +14,9 @@ public class Product {
 
     private String name;
 
+    /** 商品描述（详情页展示） */
+    private String description;
+
     private Long categoryId;
 
     private Long typeId;

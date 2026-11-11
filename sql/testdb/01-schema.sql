@@ -133,6 +133,7 @@ CREATE TABLE `attribute` (
 CREATE TABLE `product` (
   `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
   `name` VARCHAR(100) NOT NULL COMMENT '商品名称（SPU）',
+  `description` TEXT COMMENT '商品描述',
   `category_id` BIGINT NOT NULL COMMENT '所属分类',
   `type_id` BIGINT NOT NULL COMMENT '所属类型',
   `publish_status` TINYINT NOT NULL DEFAULT 1 COMMENT '1上架 0下架',

@@ -37,6 +37,16 @@
         <el-form-item label="商品名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入商品名称" maxlength="100" />
         </el-form-item>
+        <el-form-item label="商品描述">
+          <el-input
+            v-model="form.description"
+            type="textarea"
+            :rows="4"
+            maxlength="500"
+            show-word-limit
+            placeholder="商品卖点/材质/适用场景等，详情页会展示"
+          />
+        </el-form-item>
         <el-form-item label="分类" prop="categoryId">
           <el-tree-select
             v-model="form.categoryId"
@@ -141,7 +151,7 @@ const visible = ref(false)
 const saving = ref(false)
 const formRef = ref()
 const blankForm = () => ({
-  id: null, name: '', categoryId: null, typeId: null, publishStatus: 1, pic: '', gallery: []
+  id: null, name: '', description: '', categoryId: null, typeId: null, publishStatus: 1, pic: '', gallery: []
 })
 const form = reactive(blankForm())
 

@@ -35,6 +35,10 @@
               </el-radio-button>
             </el-radio-group>
           </div>
+          <div class="desc" v-if="product.description">
+            <span class="label">商品描述：</span>
+            <p class="desc-text">{{ product.description }}</p>
+          </div>
           <div class="qty">
             <span class="label">数量：</span>
             <el-input-number v-model="quantity" :min="1" :precision="0" />
@@ -147,4 +151,6 @@ onMounted(load)
 .specs, .qty { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
 .label { color: #909399; font-size: 13px; }
 .stock { color: #909399; font-size: 13px; margin-left: 8px; }
+.desc { display: flex; gap: 8px; margin-bottom: 16px; align-items: flex-start; }
+.desc-text { margin: 0; color: #606266; font-size: 13px; line-height: 1.7; }
 </style>

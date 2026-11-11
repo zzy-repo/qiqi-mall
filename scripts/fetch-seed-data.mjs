@@ -206,9 +206,9 @@ async function main() {
 
     // 主图：thumbnail
     const pic = await uploadImage(p.thumbnail)
-    // 注意：product 表没有 description 列（schema 只有 return_apply.description），
-    // DummyJSON 的中文描述因此不入库，仅保留在 seed-i18n.json 里备用
-    productRows.push(`  (${productId}, '${esc(title)}', ${cat.id}, ${typeId}, 1, '${esc(pic)}')`)
+    // 商品描述：seed-i18n.json 里的中文描述（缺失时回退英文原文并计入未翻译清单）
+    const desc = tr?.description || p.description || ''
+    productRows.push(`  (${productId}, '${esc(title)}', '${esc(desc)}', ${cat.id}, ${typeId}, 1, '${esc(pic)}')`)
 
     // 相册：images[]
     const images = (p.images || []).slice(0, 3)
@@ -310,7 +310,7 @@ INSERT INTO attribute (id, type_id, name, is_filter) VALUES
 ${TYPES.flatMap((x) => x.attrs.map((a) => `  (${a.id}, ${x.id}, '${esc(a.name)}', 1)`)).join(',\n')};
 
 -- ============ 商品 / SKU / 相册 ============
-INSERT INTO product (id, name, category_id, type_id, publish_status, pic) VALUES
+INSERT INTO product (id, name, description, category_id, type_id, publish_status, pic) VALUES
 ${productRows.join(',\n')};
 
 INSERT INTO sku (id, product_id, price, stock, pic) VALUES
