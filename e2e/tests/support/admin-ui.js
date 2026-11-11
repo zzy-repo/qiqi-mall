@@ -81,6 +81,21 @@ export const searchOrderRow = async (page, orderSn) => {
   return row
 }
 
+/** 打开审核确认框（不点任何按钮，便于先看拆单方案预览） */
+export const openAuditBox = async (page, row) => {
+  await row.getByRole('button', { name: '审核' }).click()
+  const box = page.locator('.el-message-box')
+  await expect(box, '应弹出审核确认框').toBeVisible()
+  return box
+}
+
+/** 在已打开的审核确认框里点「通过」 */
+export const confirmAuditPass = async (page) => {
+  const box = page.locator('.el-message-box')
+  await box.locator('.el-message-box__btns').getByRole('button', { name: '通过', exact: true }).click()
+  await page.waitForTimeout(2000)
+}
+
 /** 点「审核」并选「通过」（走审核弹窗，不点「查看拆单方案」） */
 export const auditPassOrder = async (page, row) => {
   await row.getByRole('button', { name: '审核' }).click()
@@ -141,6 +156,45 @@ export const createOrderViaUi = async (page, { receiverName = '调整E2E', statu
   await expect(firstRow).toBeVisible()
   return (await firstRow.locator('td').first().innerText()).trim()
 }
+
+/** 点「审核」并选「不通过」（订单关闭 + 回补库存） */
+export const auditRejectOrder = async (page, row) => {
+  await row.getByRole('button', { name: '审核' }).click()
+  const box = page.locator('.el-message-box')
+  await expect(box, '应弹出审核确认框').toBeVisible()
+  await box.locator('.el-message-box__btns').getByRole('button', { name: '不通过' }).click()
+  await page.waitForTimeout(2000)
+}
+
+/** 审核弹窗里点「查看拆单方案」，返回预览弹窗里的包裹行文本 */
+export const openSplitPreview = async (page) => {
+  await page.locator('.split-preview-entry').click()
+  const dlg = page.locator('.el-dialog').filter({ hasText: '拆单方案预览' })
+  await expect(dlg, '拆单方案预览弹窗应打开').toBeVisible()
+  await page.waitForTimeout(1200)
+  return dlg.locator('.el-table__body tr').allInnerTexts()
+}
+
+/** 关掉拆单方案预览弹窗 */
+export const closeSplitPreview = async (page) => {
+  await page
+    .locator('.el-dialog')
+    .filter({ hasText: '拆单方案预览' })
+    .getByRole('button', { name: '关闭', exact: true })
+    .click()
+  await page.waitForTimeout(500)
+}
+
+/** 模拟 WMS 回传：拣货/出库/揽收/签收 */
+export const wmsCallback = async (page, row, label) => {
+  await row.getByRole('button', { name: /模拟WMS回传/ }).click()
+  await page.waitForTimeout(500)
+  await page.locator('.el-dropdown-menu__item:visible').filter({ hasText: label }).first().click()
+  await page.waitForTimeout(1500)
+}
+
+/** 订单列表某行的状态文字（第 4 列：订单号/买家/总金额/状态/包裹…） */
+export const orderStatusOf = async (row) => (await row.locator('td').nth(3).innerText()).trim()
 
 /** 点「明细」打开订单详情抽屉，返回抽屉内的发货单表格 */
 export const openOrderDrawer = async (page, row) => {
