@@ -18,8 +18,8 @@
 
         <div class="right">
           <template v-if="logged">
-            <span class="hello">你好，{{ displayName }}</span>
-            <el-button link type="primary" @click="logout">退出</el-button>
+            <span class="hello" data-testid="header-nickname">你好，{{ displayName }}</span>
+            <el-button link type="primary" data-testid="header-logout" @click="logout">退出</el-button>
           </template>
           <el-button v-else type="primary" size="small" @click="goLogin">登录 / 注册</el-button>
         </div>

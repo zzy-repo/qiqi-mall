@@ -5,7 +5,8 @@
       <div class="head">
         <div class="left">
           <div class="thumb" data-testid="product-detail-cover">
-            <el-image v-if="product.pic" :src="product.pic" fit="cover" class="cover">
+            <!-- 主图按当前规格取：规格配了图就用规格图，没配则回退商品主图（相册仍是 SPU 级） -->
+            <el-image v-if="coverPic" :src="coverPic" fit="cover" class="cover">
               <template #error><el-icon :size="60"><Goods /></el-icon></template>
             </el-image>
             <el-icon v-else :size="60"><Goods /></el-icon>
@@ -87,6 +88,8 @@ const gallery = ref([])
 const activeGallery = ref(null)
 
 const currentSku = computed(() => skus.value.find((s) => s.id === skuId.value) || null)
+/** 详情页主图：优先当前规格图，规格没配图时回退商品主图 */
+const coverPic = computed(() => currentSku.value?.pic || product.value?.pic || '')
 
 const load = async () => {
   loading.value = true
