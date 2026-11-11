@@ -10,6 +10,8 @@
  *   - 分类：两层树，4 个根（手机数码 / 服装配饰 / 美妆个护 / 食品家居）
  *   - 类型：手机、服装、美妆、食品家居，每个类型 2 个属性（is_filter=1）
  *   - SKU：按类型的 2 个属性做 2×2 笛卡尔积 → 每个商品 4 个 SKU，规格值写进 sku_spec
+ *   - SKU 图：每个 SKU 用**不同的图**（SKU1=商品主图，SKU2..4=相册里的不同角度图），
+ *     真实电商不同颜色/规格本来就配不同图，也让「详情页切规格换主图」在演示里看得出来
  *   - 分仓：SKU1→深圳仓、SKU2→杭州仓、SKU3→北京仓、SKU4→深圳仓，
  *     保证"同一个商品的两个 SKU 落在不同仓"（场景5 拆单依赖），每个 SKU 库存 1000
  *
@@ -210,10 +212,12 @@ async function main() {
     const desc = tr?.description || p.description || ''
     productRows.push(`  (${productId}, '${esc(title)}', '${esc(desc)}', ${cat.id}, ${typeId}, 1, '${esc(pic)}')`)
 
-    // 相册：images[]
+    // 相册：images[]（同时留一份给 SKU 用：同一商品的不同角度/配色图）
     const images = (p.images || []).slice(0, 3)
+    const galleryUrls = []
     for (const [i, url] of images.entries()) {
       const galleryUrl = await uploadImage(url)
+      galleryUrls.push(galleryUrl)
       galleryRows.push(`  (${++galleryId}, ${productId}, '${esc(galleryUrl)}', ${i + 1})`)
     }
 
@@ -227,7 +231,9 @@ async function main() {
       for (const v2 of a2.values) {
         const id = ++skuId
         const price = basePrice * (1 + 0.05 * k) // 不同组合轻微价差，方便演示
-        skuRows.push(`  (${id}, ${productId}, ${num(price)}, ${SKU_STOCK}, '${esc(pic)}')`)
+        // 每个 SKU 用不同的图：SKU1=商品主图，SKU2..4=相册里的不同角度图（相册不够就回退主图）
+        const skuPic = k === 0 ? pic : (galleryUrls[k - 1] || pic)
+        skuRows.push(`  (${id}, ${productId}, ${num(price)}, ${SKU_STOCK}, '${esc(skuPic)}')`)
         skuSpecRows.push(`  (${++specId}, ${id}, ${a1.id}, '${esc(v1)}')`)
         skuSpecRows.push(`  (${++specId}, ${id}, ${a2.id}, '${esc(v2)}')`)
         const wh = SKU_WAREHOUSE_CYCLE[k % SKU_WAREHOUSE_CYCLE.length]

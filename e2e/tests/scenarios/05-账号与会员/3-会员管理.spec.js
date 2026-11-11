@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { PORTAL, stamp } from '../../support/env.js'
+import { addressOf, memberNickOf, pick } from '../../support/fixtures.js'
 import { memberRegisterAndLogin, addSpecToCart } from '../../support/ui.js'
 import { addAddress, openAddresses, loginError } from '../../support/portal-ui.js'
 import {
@@ -56,8 +57,22 @@ import {
  *     有「页面无入口」的自查说明），删完用真实 reload 断言列表变化。
  */
 
-/** 本用例自己建的会员（e2e_member_ 前缀），afterEach 统一清理，绝不碰种子会员 */
+/**
+ * 本用例自己建的会员，afterEach 统一清理，绝不碰种子会员。
+ * 登录名会显示在会员列表的「登录名」列（子页标题也带它），所以不用 e2e_ 前缀，
+ * 改成「拼音名 + 4 位数字」这类真实会员号；唯一性仍然靠那 4 位数字。
+ */
 const created = []
+
+const LOGIN_BASES = ['linwan', 'shenzhiyao', 'chengxubai', 'sunian', 'guqinghe', 'yexishen', 'xuxingye', 'wenyining']
+/**
+ * 自然登录名：拼音基名 + 3 位序号 + 3 位随机数。
+ * 序号是必须的：同一个用例里连续两次 loginOf() 会落在同一毫秒，只用时间戳会撞成同名
+ * （曾经就这样让「新增会员」变成重名，toast 等不到）。
+ */
+let loginSeq = 0
+const loginOf = () =>
+  `${pick(LOGIN_BASES, stamp())}${String(loginSeq++ % 1000).padStart(3, '0')}${Math.floor(Math.random() * 900 + 100)}`
 
 test.describe.configure({ timeout: 300_000 })
 
@@ -75,21 +90,21 @@ test.afterEach(async ({ page, request }) => {
 
 test.describe('05-账号与会员 › 3-会员管理', () => {
   test('会员列表 + 收货地址子页：只看得到自己的地址', async ({ page, request }) => {
-    const withData = `e2e_member_has_${stamp()}`
-    const noData = `e2e_member_empty_${stamp()}`
+    const withData = loginOf()
+    const noData = loginOf()
     created.push(withData, noData)
-    const receiver = `会员甲${stamp()}`
+    const addr = addressOf(withData)
 
     await test.step('① 造一个「有地址」的会员：C 端注册 → 加收货地址', async () => {
-      await memberRegisterAndLogin(page, withData)
+      await memberRegisterAndLogin(page, withData, '123456', memberNickOf(withData))
       await openAddresses(page)
       await addAddress(page, {
-        name: receiver,
-        phone: '13900001111',
-        province: '广东省',
-        city: '深圳市',
-        region: '南山区',
-        detail: '会员甲路 1 号',
+        name: addr.name,
+        phone: addr.phone,
+        province: addr.province,
+        city: addr.city,
+        region: addr.region,
+        detail: addr.detail,
         isDefault: true
       })
       const token = await page.evaluate(() => localStorage.getItem('qiqi_member_token'))
@@ -107,7 +122,7 @@ test.describe('05-账号与会员 › 3-会员管理', () => {
     await test.step('③ 再新增一个「没有任何数据」的会员（后台新增）', async () => {
       await openMemberForm(page)
       await fillMemberUsername(page, noData)
-      await fillMemberNickname(page, '空数据会员')
+      await fillMemberNickname(page, memberNickOf(noData))
       await fillMemberPhone(page, '13900002222')
       await submitMemberForm(page)
       await expectToastSuccess(page)
@@ -118,13 +133,13 @@ test.describe('05-账号与会员 › 3-会员管理', () => {
       const id = await openMemberAddresses(page, memberRow(page, withData))
       await expect(memberSubPageName(page), '子页标题应标明是谁的地址').toContainText(withData)
       await expect(memberSubTableRows(page), '该会员应有 1 条地址').toHaveCount(1)
-      await expect(memberSubTableRows(page).first(), '地址应是该会员自己那条').toContainText(receiver)
+      await expect(memberSubTableRows(page).first(), '地址应是该会员自己那条').toContainText(addr.name)
 
       const adminToken = await adminTokenOf(page)
       const detail = await getMemberDetailApi(request, adminToken, id)
       expect(detail.member.username).toBe(withData)
       expect(detail.addresses.length, '聚合详情里地址应为 1 条').toBe(1)
-      expect(detail.addresses[0].name).toBe(receiver)
+      expect(detail.addresses[0].name).toBe(addr.name)
       expect(detail.carts.length, '这个会员没加购，聚合详情里购物车应为 0').toBe(0)
 
       await backToMemberList(page)
@@ -137,12 +152,12 @@ test.describe('05-账号与会员 › 3-会员管理', () => {
   })
 
   test('购物车子页：只看得到自己的购物车', async ({ page, request }) => {
-    const withCart = `e2e_member_cart_${stamp()}`
-    const noCart = `e2e_member_nocart_${stamp()}`
+    const withCart = loginOf()
+    const noCart = loginOf()
     created.push(withCart, noCart)
 
     await test.step('① 造一个「有购物车」的会员：C 端注册 → 加购一件商品', async () => {
-      await memberRegisterAndLogin(page, withCart)
+      await memberRegisterAndLogin(page, withCart, '123456', memberNickOf(withCart))
       const { product, skus } = await getProductApi(request, 1)
       await addSpecToCart(page, 1, skus[0].specText)
       test.info().annotations.push({ type: '商品', description: `${product.name} / ${skus[0].specText}` })
@@ -157,7 +172,7 @@ test.describe('05-账号与会员 › 3-会员管理', () => {
       await expect(memberRow(page, withCart), 'C 端注册的会员应出现在后台列表').toBeVisible()
       await openMemberForm(page)
       await fillMemberUsername(page, noCart)
-      await fillMemberNickname(page, '无购物车会员')
+      await fillMemberNickname(page, memberNickOf(noCart))
       await submitMemberForm(page)
       await expectToastSuccess(page)
       await expect(memberRow(page, noCart)).toBeVisible()
@@ -186,9 +201,9 @@ test.describe('05-账号与会员 › 3-会员管理', () => {
   })
 
   test('新增 → 重名 → 空必填 → 编辑 → 禁用 → 删除（删完列表消失且无法登录）', async ({ page, request }) => {
-    const username = `e2e_member_crud_${stamp()}`
-    const nickname = `会员CRUD${stamp()}`
-    const renamed = `${nickname}改`
+    const username = loginOf()
+    const nickname = memberNickOf(username)
+    const renamed = `${pick(['林晚', '沈知遥', '程叙白', '苏念'], username)}（代收）`
     created.push(username)
 
     await test.step('① 管理员登录并进入会员列表', async () => {
@@ -227,7 +242,7 @@ test.describe('05-账号与会员 › 3-会员管理', () => {
     await test.step('③ 重名：登录名唯一约束，保存失败且列表不变', async () => {
       await openMemberForm(page)
       await fillMemberUsername(page, username)
-      await fillMemberNickname(page, '重名会员')
+      await fillMemberNickname(page, memberNickOf('dup'))
       await submitMemberForm(page)
       await expectToastError(page, '已存在相同记录')
       // 弹窗不关，改成取消退出；列表行数不变
@@ -264,7 +279,24 @@ test.describe('05-账号与会员 › 3-会员管理', () => {
       expect(m.phone).toBe('13700009999')
     })
 
-    await test.step('⑥ 禁用：关掉状态开关 → 列表标记禁用，服务端 status=0', async () => {
+    await test.step('⑥ 边界：超长文本按 maxlength 就地截断（登录名/昵称 50、手机号 20）', async () => {
+      await openMemberForm(page, memberRow(page, username))
+      await fillMemberNickname(page, '昵'.repeat(60))
+      await fillMemberPhone(page, '1'.repeat(30))
+      // el-input maxlength：输入就截断，不报错、不拦截保存
+      expect((await page.locator('[data-testid="member-form-nickname"]').inputValue()).length, '昵称应截断到 50').toBe(50)
+      expect((await page.locator('[data-testid="member-form-phone"]').inputValue()).length, '手机号应截断到 20').toBe(20)
+      await submitMemberForm(page)
+      await expectToastSuccess(page)
+      await expect(page.locator('[data-testid="member-form-dialog"]')).toBeHidden({ timeout: 10_000 })
+
+      const adminToken = await adminTokenOf(page)
+      const [m] = await listMembersApi(request, adminToken, username)
+      expect(m.nickname.length, '服务端昵称长度不应超过 50').toBe(50)
+      expect(m.phone.length, '服务端手机号长度不应超过 20').toBe(20)
+    })
+
+    await test.step('⑦ 禁用：关掉状态开关 → 列表标记禁用，服务端 status=0', async () => {
       await openMemberForm(page, memberRow(page, username))
       await setMemberStatus(page, false)
       await submitMemberForm(page)
@@ -277,7 +309,7 @@ test.describe('05-账号与会员 › 3-会员管理', () => {
       expect(m.status, '服务端应记为禁用(0)').toBe(0)
     })
 
-    await test.step('⑦ 删除：页面无删除入口，走接口删除后列表 reload 真的少一行', async () => {
+    await test.step('⑧ 删除：页面无删除入口，走接口删除后列表 reload 真的少一行', async () => {
       const adminToken = await adminTokenOf(page)
       const [m] = await listMembersApi(request, adminToken, username)
       const res = await deleteMemberApi(request, adminToken, m.id)
@@ -290,9 +322,9 @@ test.describe('05-账号与会员 › 3-会员管理', () => {
   })
 
   test('账号可用性：C 端注册的会员后台可见 → 改昵称仍能登录 → 禁用拦截 → 删除后登录失败', async ({ page, request }) => {
-    const acc = `e2e_member_acc_${stamp()}`
-    const accRenamed = `会员ACC${stamp()}改`
-    const noPwd = `e2e_member_nopwd_${stamp()}`
+    const acc = loginOf()
+    const accRenamed = `${memberNickOf(acc)}（改）`
+    const noPwd = loginOf()
     created.push(acc, noPwd)
 
     const portalLogout = async () => {
@@ -313,7 +345,7 @@ test.describe('05-账号与会员 › 3-会员管理', () => {
     }
 
     await test.step('① C 端注册一个会员（注册即登录）→ 账号可用', async () => {
-      await memberRegisterAndLogin(page, acc)
+      await memberRegisterAndLogin(page, acc, '123456', memberNickOf(acc))
       const token = await page.evaluate(() => localStorage.getItem('qiqi_member_token'))
       expect(token, '注册后应写入登录令牌').toBeTruthy()
       expect((await getMemberProfileApi(request, token)).username).toBe(acc)
@@ -372,7 +404,7 @@ test.describe('05-账号与会员 › 3-会员管理', () => {
       await openMemberForm(page)
       expect(await memberFormHasPasswordField(page), '后台新增会员弹窗没有密码字段').toBe(false)
       await fillMemberUsername(page, noPwd)
-      await fillMemberNickname(page, '无密码会员')
+      await fillMemberNickname(page, memberNickOf(noPwd))
       await submitMemberForm(page)
       await expectToastSuccess(page)
       await expect(memberRow(page, noPwd)).toBeVisible()
@@ -399,7 +431,7 @@ test.describe('05-账号与会员 › 3-会员管理', () => {
       await expect(loginError(page), '账号被删后登录应失败').toContainText('用户名或密码错误', { timeout: 15_000 })
       await expect(page).toHaveURL(/\/login/)
 
-      // 顺手把⑥建的无密码账号也删掉（e2e_member_ 前缀，只动自己建的）
+      // 顺手把⑥建的无密码账号也删掉（本用例自建，只动自己建的）
       const [n] = await listMembersApi(request, adminToken, noPwd)
       if (n) await deleteMemberApi(request, adminToken, n.id)
     })

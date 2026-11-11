@@ -2,8 +2,9 @@
  * 05-账号与会员 / 2-管理员账号 专属 helper（自建，不改 support/*.js 现有文件）。
  *
  * 页面 facts（来自 admin-web/src/views/admin/index.vue 与 AdminController 实际代码）：
- *   - 表单只收集：登录名 / 昵称 / 邮箱 / 状态开关；**没有密码输入框**
- *   - 行操作只有「编辑」，**没有删除按钮**（删除只能走接口，用于清理自建账号）
+ *   - 表单收集：登录名 / 密码（新增必填、编辑留空=不改）/ 昵称 / 邮箱 / 状态开关
+ *   - 行操作有「编辑」+「删除」；删除走 ElMessageBox 确认框，
+ *     内置 admin 被前端先拦一次（黄条「系统内置账号不可删除」），后端也拒绝删它
  *   - 后端 admin.username 有唯一键：重复时接口报「已存在相同记录，请检查唯一字段」，
  *     页面表现为红色 toast「保存失败：…」，弹窗不关
  *
@@ -71,6 +72,28 @@ export const setAdminStatus = async (page, enabled) => {
 /** 点弹窗「确定」 */
 export const submitAdminForm = async (page) => {
   await page.getByTestId('admin-form-submit').click()
+}
+
+/** 行内点「删除」（还没确认）。内置 admin 会在这一步被前端拦下，直接弹黄条 */
+export const clickAdminRowDelete = async (page, row) => {
+  await row.getByTestId('admin-row-delete').click()
+  await page.waitForTimeout(600)
+}
+
+/** 确认框里点「删除」按钮（不是「确定」） */
+export const confirmAdminDeleteBox = async (page) => {
+  const box = page.locator('.el-message-box')
+  await expect(box, '应弹出删除确认框').toBeVisible()
+  await box.getByRole('button', { name: '删除', exact: true }).click()
+  await expect(box).toBeHidden({ timeout: 10_000 })
+  await page.waitForTimeout(1200)
+}
+
+/** 一条提示（可以是 warning/error/success），返回其文本，用于「内置账号不可删除」这类黄条 */
+export const toastText = async (page) => {
+  const toast = page.locator('.el-message').first()
+  await expect(toast, '应出现一条提示').toBeVisible({ timeout: 15_000 })
+  return (await toast.innerText()).trim()
 }
 
 /** 表单校验错误文案（例如「请输入登录名」） */

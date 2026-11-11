@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { stamp } from '../../support/env.js'
+import { memberNickOf, receiverOf, returnDescriptionOf } from '../../support/fixtures.js'
 import {
   adminSetSkuStock,
   adminSearchOrderRow,
@@ -63,15 +64,22 @@ import {
  *   return-apply/index.vue：审核入口对任何状态都渲染（前端没有状态守卫），拦截完全靠服务端。
  */
 
-/** 唯一后缀：多个 agent 共用一个库，账号/订单必须彼此不撞 */
+/**
+ * 唯一后缀：多个 agent 共用一个库，账号/订单必须彼此不撞。
+ * 只用于不显示的字段（登录名里的 4 位数字）；界面上的名字一律走 fixtures 的自然中文池。
+ */
 const uniq = () => `${stamp()}${Math.floor(Math.random() * 900 + 100)}`
+const serial = () => String(Math.floor(Math.random() * 9000) + 1000)
+
+/** 买家登录名：退货申请列表的「申请人」列直接显示它，所以长得像会员号而不是测试号 */
+const buyerLoginOf = (seed) => `${memberNickOf(seed)}${serial()}`
 
 /**
  * 造一笔「退款中」的退货申请（真实 UI 全链路，不碰接口）。
  * @returns {{ orderSn, skuId, stockBefore, adminToken, memberToken, totalAmount }}
  */
 async function prepareReturnRequest(page, request, { description } = {}) {
-  const username = `e2e_ret_${uniq()}`
+  const username = buyerLoginOf(uniq())
   let adminToken
   let memberToken
   let orderSn
@@ -91,7 +99,7 @@ async function prepareReturnRequest(page, request, { description } = {}) {
     const { skus } = await getProductApi(request, 1)
     skuId = skus[0].id
     await addSpecToCart(page, 1, skus[0].specText)
-    orderSn = await submitCartOrder(page, { receiverName: '退货E2E' })
+    orderSn = await submitCartOrder(page, receiverOf(username))
     totalAmount = Number((await getAdminOrderBySnApi(request, adminToken, orderSn)).totalAmount)
   })
 
@@ -164,15 +172,16 @@ test.describe('03-商家-履约 › 4-退货处理', () => {
   })
 
   test('审核拒绝：填拒绝理由 → 订单回到已付款，买家看到退货被拒绝', async ({ page, request }) => {
-    const ctx = await prepareReturnRequest(page, request, { description: 'E2E：买家说明，收到有划痕' })
-    const rejectReason = 'E2E：商品已拆封使用，不符合退货条件'
+    const buyerNote = returnDescriptionOf('reject')
+    const ctx = await prepareReturnRequest(page, request, { description: buyerNote })
+    const rejectReason = '商品已拆封使用，影响二次销售，不符合退货条件'
 
     await test.step('⑤ 管理员点审核 → 拒绝 → 填拒绝理由', async () => {
       await gotoReturnApplyList(page)
       const row = await returnApplyRow(page, ctx.orderSn)
       const dialog = await openAuditDialog(page, row)
       await pickAuditResult(dialog, '拒绝')
-      expect(await auditDescriptionValue(dialog), '说明应带出买家原说明').toContain('收到有划痕')
+      expect(await auditDescriptionValue(dialog), '说明应带出买家原说明').toBe(buyerNote)
       await fillAuditDescription(dialog, rejectReason)
       await submitAudit(dialog)
       await expectToastSuccess(page, '保存成功')
@@ -244,14 +253,15 @@ test.describe('03-商家-履约 › 4-退货处理', () => {
   })
 
   test('边界：拒绝时不填理由也能提交，说明被清空', async ({ page, request }) => {
-    const ctx = await prepareReturnRequest(page, request, { description: 'E2E：买家说明会被清空' })
+    const buyerNote = returnDescriptionOf('blank')
+    const ctx = await prepareReturnRequest(page, request, { description: buyerNote })
 
     await test.step('⑤ 管理员点审核 → 拒绝 → 把说明清空 → 提交', async () => {
       await gotoReturnApplyList(page)
       const row = await returnApplyRow(page, ctx.orderSn)
       const dialog = await openAuditDialog(page, row)
       await pickAuditResult(dialog, '拒绝')
-      expect(await auditDescriptionValue(dialog), '说明应带出买家原说明').toContain('会被清空')
+      expect(await auditDescriptionValue(dialog), '说明应带出买家原说明').toBe(buyerNote)
       await fillAuditDescription(dialog, '')          // 清空，不填任何拒绝理由
       expect(await auditDescriptionValue(dialog), '说明已被清空').toBe('')
       await submitAudit(dialog)
