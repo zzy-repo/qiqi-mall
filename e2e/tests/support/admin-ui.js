@@ -9,6 +9,7 @@
 import { expect } from '@playwright/test'
 import { ADMIN } from './env.js'
 import { adminLogin } from './ui.js'
+import { tid } from './tid.js'
 
 // ---------------------------------------------------------------------------
 // 通用：登录（带一次 500 重试）
@@ -57,8 +58,9 @@ export const confirmMessageBox = async (page) => {
   await expect(box).toBeHidden({ timeout: 10_000 })
 }
 
-/** 当前列表有多少行 */
-export const tableRowCount = (page) => page.locator('.el-table__body tr').count()
+/** 当前列表有多少行；可传表格 testid 限定是哪张表（不传则全页统计） */
+export const tableRowCount = (page, tableTid) =>
+  (tableTid ? tid(page, tableTid) : page).locator('.el-table__body tr').count()
 
 // ---------------------------------------------------------------------------
 // 03-商家-履约：订单列表 / 审核 / 订单详情抽屉 / 发货单人工调整
@@ -72,10 +74,11 @@ export const gotoOrderList = async (page) => {
 
 /** 按订单号搜索，返回目标行 */
 export const searchOrderRow = async (page, orderSn) => {
-  const input = page.locator('input[placeholder="按订单号搜索"]')
+  const input = tid(page, 'order-list-search-sn')
   await input.fill(orderSn)
   await input.press('Enter')
   await page.waitForTimeout(1500)
+  // 订单行由 el-table 渲染，没有行锚点 → 按订单号文本过滤（tid.js 未覆盖第 4 条）
   const row = page.locator('.el-table__body tr').filter({ hasText: orderSn }).first()
   await expect(row, `订单列表应能看到 ${orderSn}`).toBeVisible()
   return row
@@ -83,7 +86,7 @@ export const searchOrderRow = async (page, orderSn) => {
 
 /** 打开审核确认框（不点任何按钮，便于先看拆单方案预览） */
 export const openAuditBox = async (page, row) => {
-  await row.getByRole('button', { name: '审核' }).click()
+  await row.getByTestId('order-row-audit').click()
   const box = page.locator('.el-message-box')
   await expect(box, '应弹出审核确认框').toBeVisible()
   return box
@@ -98,7 +101,7 @@ export const confirmAuditPass = async (page) => {
 
 /** 点「审核」并选「通过」（走审核弹窗，不点「查看拆单方案」） */
 export const auditPassOrder = async (page, row) => {
-  await row.getByRole('button', { name: '审核' }).click()
+  await row.getByTestId('order-row-audit').click()
   const box = page.locator('.el-message-box')
   await expect(box, '应弹出审核确认框').toBeVisible()
   await box.locator('.el-message-box__btns').getByRole('button', { name: '通过', exact: true }).click()
@@ -111,21 +114,22 @@ export const auditPassOrder = async (page, row) => {
  * @returns 订单号（保存后列表第一行）
  */
 export const createOrderViaUi = async (page, { receiverName = '调整E2E', status = '待审核', items }) => {
+  // 订单列表页头的「新增」按钮没有 testid（本轮 testid 只覆盖了搜索/筛选/行操作），按文案点
   await page.getByRole('button', { name: '新增' }).click()
-  const dlg = page.locator('.el-dialog').filter({ hasText: '新增订单' })
+  const dlg = tid(page, 'order-form-dialog')
   await expect(dlg, '新增订单弹窗应打开').toBeVisible()
 
-  // 买家：选第一个会员
-  await dlg.locator('.el-form-item').filter({ hasText: '买家' }).locator('.el-select').click()
+  // 买家：选第一个会员（浮层选项没有 testid，按文本/序号选 —— tid.js 未覆盖第 3 条）
+  await tid(page, 'order-form-member').click()
   await page.waitForTimeout(400)
   await page.locator('.el-select-dropdown__item:visible').first().click()
 
-  await dlg.locator('.el-form-item').filter({ hasText: '收货人' }).locator('input').fill(receiverName)
-  await dlg.locator('.el-form-item').filter({ hasText: '收货电话' }).locator('input').fill('13600003333')
-  await dlg.locator('.el-form-item').filter({ hasText: '收货地址' }).locator('textarea').fill('广东省深圳市南山区E2E路 9 号')
+  await tid(page, 'order-form-receiver-name').fill(receiverName)
+  await tid(page, 'order-form-receiver-phone').fill('13600003333')
+  await tid(page, 'order-form-receiver-address').fill('广东省深圳市南山区E2E路 9 号')
 
   // 状态
-  await dlg.locator('.el-form-item').filter({ hasText: '状态' }).locator('.el-select').click()
+  await tid(page, 'order-form-status').click()
   await page.waitForTimeout(400)
   await page.locator('.el-select-dropdown__item:visible').filter({ hasText: status }).first().click()
   await page.waitForTimeout(300)
@@ -150,7 +154,7 @@ export const createOrderViaUi = async (page, { receiverName = '调整E2E', statu
     await page.waitForTimeout(200)
   }
 
-  await dlg.getByRole('button', { name: '确定' }).click()
+  await tid(page, 'order-form-submit').click()
   await page.waitForTimeout(1800)
   const firstRow = page.locator('.el-table__body tr').first()
   await expect(firstRow).toBeVisible()
@@ -159,7 +163,7 @@ export const createOrderViaUi = async (page, { receiverName = '调整E2E', statu
 
 /** 点「审核」并选「不通过」（订单关闭 + 回补库存） */
 export const auditRejectOrder = async (page, row) => {
-  await row.getByRole('button', { name: '审核' }).click()
+  await row.getByTestId('order-row-audit').click()
   const box = page.locator('.el-message-box')
   await expect(box, '应弹出审核确认框').toBeVisible()
   await box.locator('.el-message-box__btns').getByRole('button', { name: '不通过' }).click()
@@ -168,8 +172,9 @@ export const auditRejectOrder = async (page, row) => {
 
 /** 审核弹窗里点「查看拆单方案」，返回预览弹窗里的包裹行文本 */
 export const openSplitPreview = async (page) => {
+  // 「查看拆单方案」链接是 ElMessageBox 里的 h('a', ...)，拿不到 testid（tid.js 未覆盖第 2 条）
   await page.locator('.split-preview-entry').click()
-  const dlg = page.locator('.el-dialog').filter({ hasText: '拆单方案预览' })
+  const dlg = tid(page, 'order-split-preview-dialog')
   await expect(dlg, '拆单方案预览弹窗应打开').toBeVisible()
   await page.waitForTimeout(1200)
   return dlg.locator('.el-table__body tr').allInnerTexts()
@@ -177,32 +182,28 @@ export const openSplitPreview = async (page) => {
 
 /** 关掉拆单方案预览弹窗 */
 export const closeSplitPreview = async (page) => {
-  await page
-    .locator('.el-dialog')
-    .filter({ hasText: '拆单方案预览' })
-    .getByRole('button', { name: '关闭', exact: true })
-    .click()
+  await tid(page, 'order-split-preview-close').click()
   await page.waitForTimeout(500)
 }
 
 /** 模拟 WMS 回传：拣货/出库/揽收/签收 */
 export const wmsCallback = async (page, row, label) => {
-  await row.getByRole('button', { name: /模拟WMS回传/ }).click()
+  await row.getByTestId('delivery-row-wms-callback').click()
   await page.waitForTimeout(500)
   await page.locator('.el-dropdown-menu__item:visible').filter({ hasText: label }).first().click()
   await page.waitForTimeout(1500)
 }
 
-/** 订单列表某行的状态文字（第 4 列：订单号/买家/总金额/状态/包裹…） */
-export const orderStatusOf = async (row) => (await row.locator('td').nth(3).innerText()).trim()
+/** 订单列表某行的状态文字（行内状态标签有 testid，不再依赖列序） */
+export const orderStatusOf = async (row) => (await row.getByTestId('order-row-status').innerText()).trim()
 
 /** 点「明细」打开订单详情抽屉，返回抽屉内的发货单表格 */
 export const openOrderDrawer = async (page, row) => {
-  await row.getByRole('button', { name: '明细' }).click()
-  const drawer = page.locator('.el-drawer')
+  await row.getByTestId('order-row-detail').click()
+  const drawer = tid(page, 'order-detail-drawer')
   await expect(drawer, '订单详情抽屉应打开').toBeVisible()
   await expect(drawer.locator('h4').filter({ hasText: '发货单' })).toBeVisible()
-  return drawer.locator('.el-table').first()
+  return tid(page, 'order-detail-delivery-table')
 }
 
 /** 抽屉里按仓库名定位发货单行 */
@@ -216,14 +217,26 @@ export const deliveryRowBySn = (deliveryTable, deliverySn) =>
 /** 抽屉里当前有几个包裹 */
 export const deliveryRowCount = (deliveryTable) => deliveryTable.locator('.el-table__body tr').count()
 
-/** 点发货单行内某个操作（编辑/拆分/合并/删除/下发/取消） */
+/** 点发货单行内某个操作（编辑/拆分/合并/删除/下发/取消）—— 动作名 → testid 映射 */
+const DELIVERY_ACTION_TID = {
+  编辑: 'delivery-row-edit',
+  拆分: 'delivery-row-split',
+  合并: 'delivery-row-merge',
+  删除: 'delivery-row-remove',
+  下发: 'delivery-row-dispatch',
+  取消: 'delivery-row-cancel'
+}
+export const deliveryActionTid = (name) => DELIVERY_ACTION_TID[name]
+
 export const clickDeliveryAction = async (page, row, name) => {
-  await row.getByRole('button', { name, exact: true }).click()
+  const testId = DELIVERY_ACTION_TID[name]
+  if (testId) await row.getByTestId(testId).click()
+  else await row.getByRole('button', { name, exact: true }).click()   // 兜底：未知动作
   await page.waitForTimeout(900)
 }
 
-/** 编辑/拆分弹窗（两种标题共用一个选择器） */
-export const deliveryDialog = (page) => page.locator('.el-dialog').filter({ hasText: /编辑包裹|拆分包裹/ })
+/** 编辑/拆分弹窗（两种模式共用一个弹窗组件） */
+export const deliveryDialog = (page) => tid(page, 'delivery-form-dialog')
 
 /** 抽屉里某一行「发货仓」列的文字（第 2 列） */
 export const warehouseCellOf = async (row) => (await row.locator('td').nth(1).innerText()).trim()
@@ -233,8 +246,7 @@ export const warehouseCellOf = async (row) => (await row.locator('td').nth(1).in
  * 用途：改仓时避开两个包裹已有的仓，免得改完两个包同名、后面定位不清。
  */
 export const pickWarehouseExcluding = async (page, excluded = []) => {
-  const dlg = deliveryDialog(page)
-  await dlg.locator('.el-select').first().click()
+  await tid(page, 'delivery-form-warehouse').click()
   await page.waitForTimeout(400)
   const items = page.locator('.el-select-dropdown__item:visible')
   const count = await items.count()
@@ -251,8 +263,7 @@ export const pickWarehouseExcluding = async (page, excluded = []) => {
 
 /** 在编辑/拆分弹窗里选发货仓 */
 export const pickDialogWarehouse = async (page, warehouseName) => {
-  const dlg = deliveryDialog(page)
-  await dlg.locator('.el-select').first().click()
+  await tid(page, 'delivery-form-warehouse').click()
   await page.waitForTimeout(400)
   await page.locator('.el-select-dropdown__item:visible').filter({ hasText: warehouseName }).first().click()
   await page.waitForTimeout(300)
@@ -269,15 +280,14 @@ export const setDialogQty = async (page, rowIndex, qty) => {
 
 /** 提交编辑/拆分弹窗 */
 export const submitDeliveryDialog = async (page) => {
-  await deliveryDialog(page).getByRole('button', { name: '确定' }).click()
+  await tid(page, 'delivery-form-submit').click()
   await page.waitForTimeout(1500)
 }
 
 /** 合并/删除并入弹窗：选目标包裹（按发货单号） */
 export const pickMergeTarget = async (page, deliverySn) => {
-  const dlg = page.locator('.el-dialog').filter({ hasText: '合并包裹' })
-  await expect(dlg, '合并弹窗应打开').toBeVisible()
-  await dlg.locator('.el-select').first().click()
+  await expect(tid(page, 'delivery-merge-dialog'), '合并弹窗应打开').toBeVisible()
+  await tid(page, 'delivery-merge-target').click()
   await page.waitForTimeout(400)
   await page.locator('.el-select-dropdown__item:visible').filter({ hasText: deliverySn }).first().click()
   await page.waitForTimeout(300)
@@ -285,7 +295,7 @@ export const pickMergeTarget = async (page, deliverySn) => {
 
 /** 提交合并/删除并入弹窗 */
 export const submitMergeDialog = async (page) => {
-  await page.locator('.el-dialog').filter({ hasText: '合并包裹' }).getByRole('button', { name: '确定' }).click()
+  await tid(page, 'delivery-merge-submit').click()
   await page.waitForTimeout(1500)
 }
 
@@ -305,21 +315,20 @@ export const warehouseRow = (page, name) =>
 
 /** 打开新增（不传 row）或编辑（传 row）弹窗 */
 export const openWarehouseForm = async (page, row) => {
-  if (row) await row.getByRole('button', { name: '编辑' }).click()
-  else await page.getByRole('button', { name: '新增仓库' }).click()
-  await expect(page.locator('.el-dialog'), '仓库弹窗应打开').toBeVisible()
+  if (row) await row.getByTestId('warehouse-row-edit').click()
+  else await tid(page, 'warehouse-list-create').click()
+  await expect(tid(page, 'warehouse-form-dialog'), '仓库弹窗应打开').toBeVisible()
   await page.waitForTimeout(400)
 }
 
 /** 填仓库名称（空串 = 清空，用来测校验） */
 export const fillWarehouseName = async (page, name) => {
-  const input = page.locator('.el-dialog .el-form-item').filter({ hasText: '仓库名称' }).locator('input')
-  await input.fill(name)
+  await tid(page, 'warehouse-form-name').fill(name)
 }
 
 /** 切换启用/停用开关 */
 export const setWarehouseStatus = async (page, enabled) => {
-  const sw = page.locator('.el-dialog .el-switch')
+  const sw = tid(page, 'warehouse-form-status')
   const isOn = ((await sw.getAttribute('class')) || '').includes('is-checked')
   if (isOn !== enabled) await sw.click()
   await page.waitForTimeout(200)
@@ -327,20 +336,21 @@ export const setWarehouseStatus = async (page, enabled) => {
 
 /** 点弹窗「确定」 */
 export const submitWarehouseForm = async (page) => {
-  await page.locator('.el-dialog').getByRole('button', { name: '确定' }).click()
+  await tid(page, 'warehouse-form-submit').click()
 }
 
 /** 点弹窗「取消」 */
 export const cancelWarehouseForm = async (page) => {
-  await page.locator('.el-dialog').getByRole('button', { name: '取消' }).click()
-  await expect(page.locator('.el-dialog')).toBeHidden({ timeout: 10_000 })
+  await tid(page, 'warehouse-form-cancel').click()
+  await expect(tid(page, 'warehouse-form-dialog')).toBeHidden({ timeout: 10_000 })
 }
 
 /** 表单校验错误文案（例如「请输入仓库名称」） */
-export const formItemError = (page) => page.locator('.el-dialog .el-form-item__error').first()
+// 校验错误文本由 el-form-item 内部渲染（tid.js 未覆盖第 7 条），用弹窗 testid 限定范围
+export const formItemError = (page) => tid(page, 'warehouse-form-dialog').locator('.el-form-item__error').first()
 
 /** 删除某个仓库（含确认框） */
 export const deleteWarehouse = async (page, row) => {
-  await row.getByRole('button', { name: '删除' }).click()
+  await row.getByTestId('warehouse-row-remove').click()
   await confirmMessageBox(page)
 }

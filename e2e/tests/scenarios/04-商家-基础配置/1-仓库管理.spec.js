@@ -19,7 +19,9 @@ import {
   searchOrderRow,
   auditPassOrder
 } from '../../support/admin-ui.js'
-import { adminTokenOf, getProductApi, getAdminOrderBySnApi, listDeliveriesApi } from '../../support/assert.js'
+import { adminTokenOf, getAdminProductsApi, getProductApi, getAdminOrderBySnApi, listDeliveriesApi } from '../../support/assert.js'
+import { tid } from '../../support/tid.js'
+import { addressOf, warehouseNameOf } from '../../support/fixtures.js'
 
 /**
  * 04-商家-基础配置 / 1-仓库管理（docs/flows/02-业务场景/04-商家-基础配置/1-仓库管理.mmd）
@@ -36,9 +38,11 @@ import { adminTokenOf, getProductApi, getAdminOrderBySnApi, listDeliveriesApi } 
  */
 test.describe('04-商家-基础配置 › 1-仓库管理', () => {
   test('新增/编辑/删除仓库，覆盖重名、空名与被引用仓库删除失败', async ({ page, request }) => {
-    const base = `E2E仓${stamp()}`
-    const renamed = `${base}-改`
-    const dupName = `${base}-重名`
+    // 仓库名要「像真的」且不重名：自然仓名 + 库位编号后缀（B482 这种）
+    const seed = stamp()
+    const base = warehouseNameOf(seed)
+    const renamed = warehouseNameOf(`${seed}-renamed`)
+    const dupName = warehouseNameOf(`${seed}-dup`)
 
     let productName
     await test.step('① 管理员登录并进入仓库管理', async () => {
@@ -48,19 +52,23 @@ test.describe('04-商家-基础配置 › 1-仓库管理', () => {
       // 种子仓库应在列表里（拆单链路依赖这些仓）
       await expect(warehouseRow(page, '深圳仓')).toBeVisible()
       await expect(warehouseRow(page, '杭州仓')).toBeVisible()
-      const { product } = await getProductApi(request, 1)
-      productName = product.name
+      // 商品名从**后台**接口按 id=1 取：C 端接口在商品被并发下架时会返回 null，
+      // 后台接口不受上下架影响（这里只需要一个「有 SKU、能被下单引用」的商品名）
+      const token = await adminTokenOf(page)
+      const seedProduct = (await getAdminProductsApi(request, token)).find((p) => p.id === 1)
+      expect(seedProduct, '种子商品1 应存在于后台商品列表').toBeTruthy()
+      productName = seedProduct.name
     })
 
     await test.step('② 新增仓库（启用）→ 列表出现且状态为启用', async () => {
-      const before = await tableRowCount(page)
+      const before = await tableRowCount(page, 'warehouse-list-table')
       await openWarehouseForm(page)
       await fillWarehouseName(page, base)
       await setWarehouseStatus(page, true)
       await submitWarehouseForm(page)
       await expectToastSuccess(page)
       await expect(warehouseRow(page, base), '新建的仓库应出现在列表').toBeVisible()
-      expect(await tableRowCount(page), '列表应多一行').toBe(before + 1)
+      expect(await tableRowCount(page, 'warehouse-list-table'), '列表应多一行').toBe(before + 1)
       await expect(warehouseRow(page, base), '新建默认启用').toContainText('启用')
     })
 
@@ -86,14 +94,14 @@ test.describe('04-商家-基础配置 › 1-仓库管理', () => {
     })
 
     await test.step('⑤ 空名校验：清空名称点确定 → 前端拦住，弹窗不关、列表不变', async () => {
-      const before = await tableRowCount(page)
+      const before = await tableRowCount(page, 'warehouse-list-table')
       await openWarehouseForm(page, warehouseRow(page, renamed))
       await fillWarehouseName(page, '')
       await submitWarehouseForm(page)
       await expect(formItemError(page), '应提示请输入仓库名称').toContainText('请输入仓库名称')
-      await expect(page.locator('.el-dialog'), '校验不过时弹窗不能关闭').toBeVisible()
+      await expect(tid(page, 'warehouse-form-dialog'), '校验不过时弹窗不能关闭').toBeVisible()
       await cancelWarehouseForm(page)
-      expect(await tableRowCount(page), '取消后列表行数不变').toBe(before)
+      expect(await tableRowCount(page, 'warehouse-list-table'), '取消后列表行数不变').toBe(before)
     })
 
     await test.step('⑥ 删除自己新建的两个仓库 → 列表不再有', async () => {
@@ -110,7 +118,7 @@ test.describe('04-商家-基础配置 › 1-仓库管理', () => {
       // 先用一笔真实订单把这个仓库「用起来」：新增订单 → 审核通过 → 生成发货单
       await gotoOrderList(page)
       const orderSn = await createOrderViaUi(page, {
-        receiverName: '仓库引用E2E',
+        receiverName: addressOf(seed).name,
         status: '待审核',
         items: [{ productName, skuIndex: 0, quantity: 1 }]
       })
@@ -126,13 +134,13 @@ test.describe('04-商家-基础配置 › 1-仓库管理', () => {
 
       // 回仓库管理删它 → 必须失败且数据不动
       await gotoWarehouseList(page)
-      const before = await tableRowCount(page)
+      const before = await tableRowCount(page, 'warehouse-list-table')
       await deleteWarehouse(page, warehouseRow(page, usedWhName))
       await expectToastError(page, '数据处理失败')
       await expect(warehouseRow(page, usedWhName), '被引用的仓库必须还在').toBeVisible()
       await page.reload()
       await page.waitForTimeout(1500)
-      expect(await tableRowCount(page), '刷新后行数也不变').toBe(before)
+      expect(await tableRowCount(page, 'warehouse-list-table'), '刷新后行数也不变').toBe(before)
       await expect(warehouseRow(page, usedWhName), '刷新后仓库仍在').toBeVisible()
     })
   })

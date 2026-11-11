@@ -144,9 +144,11 @@ test.describe('商家侧 3 商品维护', () => {
     await openProducts(page)
 
     // ① 被订单明细引用的商品（种子商品1）→ 被拒，且提示可改为下架
-    // 用种子商品1（它被演示订单引用）——名称从接口取，不写死某套种子
-    const seedProduct = (await getAdminProductsApi(request, token))[0]
-    const usedRow = page.locator('.el-table__body tr').filter({ hasText: seedProduct.name }).first()
+    // 按 **id=1** 精确取（种子商品1 被演示订单引用）：列表第一条会随着用例不停新建商品而漂移，
+    // 全量跑时 [0] 往往已经是本轮新建的空商品，删除会成功 → 断言假失败。
+    const seedProduct = (await getAdminProductsApi(request, token)).find((p) => p.id === 1)
+    expect(seedProduct, '种子商品1 应存在于后台商品列表').toBeTruthy()
+    const usedRow = page.getByTestId('product-row-1')
     await expect(usedRow).toBeVisible()
     await usedRow.getByTestId('product-row-delete').click()
     await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()

@@ -158,9 +158,13 @@ test.describe('商家侧 4 SKU 与规格', () => {
     const token = await adminTokenOf(page)
 
     // ① 种子商品1 的第一个 SKU 被订单引用 → 被拒
+    // 按 id=1 精确取（列表第一条会随着本轮新建商品漂移，全量跑时 [0] 不是种子商品）
     await openProducts(page)
-    const seedProduct = (await getAdminProductsApi(request, token))[0]   // 种子商品1，被演示订单引用
-    await openSkus(page, seedProduct.name)
+    const seedProduct = (await getAdminProductsApi(request, token)).find((p) => p.id === 1)
+    expect(seedProduct, '种子商品1 应存在于后台商品列表').toBeTruthy()
+    await page.getByTestId('product-row-1').getByTestId('product-row-skus').click()
+    await page.waitForURL(/\/product\/1\/skus/, { timeout: 15_000 })
+    await page.waitForTimeout(1200)
     const usedSku = page.locator('.el-table__body tr').first()
     await expect(usedSku).toBeVisible()
     await usedSku.getByTestId('sku-row-delete').click()

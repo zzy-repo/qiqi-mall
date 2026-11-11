@@ -13,6 +13,7 @@ import {
 } from '../../support/catalog-ui.js'
 import { adminTokenOf, getAdminProductTypesApi, getAdminAttributesApi } from '../../support/assert.js'
 import { tid } from '../../support/tid.js'
+import { attributeNames, attributeOf, newestByName, typeNames, typeOf, uniqueDisplayName } from '../../support/fixtures.js'
 
 /**
  * 商家侧 02-商品管理 / 1-商品类型与属性
@@ -28,18 +29,19 @@ test.describe('商家侧 1 商品类型与属性', () => {
     const token = await adminTokenOf(page)
     await openProductTypes(page)
 
-    const name = `E2E类型${stamp()}`
+    const typesBefore = await getAdminProductTypesApi(request, token)
+    const name = uniqueDisplayName(typeNames[0], typesBefore.map((t) => t.name))
     await expect(typeRowOf(page, name)).toHaveCount(0)
 
     await addProductType(page, name)
     let types = await getAdminProductTypesApi(request, token)
-    expect(types.find((t) => t.name === name), '新类型应落库').toBeTruthy()
+    expect(newestByName(types, name), '新类型应落库').toBeTruthy()
 
     // 改名
-    const renamed = `${name}改`
+    const renamed = uniqueDisplayName(typeNames[1], types.map((t) => t.name))
     await renameProductType(page, name, renamed)
     types = await getAdminProductTypesApi(request, token)
-    expect(types.find((t) => t.name === renamed), '改名应落库').toBeTruthy()
+    expect(newestByName(types, renamed), '改名应落库').toBeTruthy()
     expect(types.find((t) => t.name === name), '旧名称应不存在').toBeFalsy()
   })
 
@@ -60,33 +62,37 @@ test.describe('商家侧 1 商品类型与属性', () => {
     const token = await adminTokenOf(page)
     await openProductTypes(page)
 
-    const t1 = `E2E属性类型A${stamp()}`
-    const t2 = `E2E属性类型B${stamp()}`
+    const typesNow = await getAdminProductTypesApi(request, token)
+    const existingTypeNames = typesNow.map((t) => t.name)
+    const t1 = uniqueDisplayName(typeNames[2], existingTypeNames)
+    const t2 = uniqueDisplayName(typeNames[3], [...existingTypeNames, t1])
     await addProductType(page, t1)
     await addProductType(page, t2)
+    // 属性断言按「本次新建的这个类型」过滤（其它类型下可能有同名属性，不能全局取最新）
+    const t1Id = newestByName(await getAdminProductTypesApi(request, token), t1).id
 
     // A 类型下加两个属性：一个可筛选、一个不可
     await openAttributesOf(page, t1)
-    const filterAttr = '颜色'
-    const plainAttr = '重量'
+    const filterAttr = attributeNames[0]      // 颜色（可筛选）
+    const plainAttr = attributeNames[3]       // 容量（不可筛选）
     await addAttribute(page, filterAttr, true)
     await addAttribute(page, plainAttr, false)
 
-    const attrs = await getAdminAttributesApi(request, token)
+    const attrs = await getAdminAttributesApi(request, token, t1Id)
     const mine = attrs.filter((a) => a.name === filterAttr || a.name === plainAttr)
     expect(mine.length, '两个属性都应落库').toBeGreaterThanOrEqual(2)
-    expect(mine.find((a) => a.name === filterAttr).isFilter, 'is_filter 应为 1').toBe(1)
-    expect(mine.find((a) => a.name === plainAttr).isFilter, 'is_filter 应为 0').toBe(0)
+    expect(newestByName(mine, filterAttr).isFilter, 'is_filter 应为 1').toBe(1)
+    expect(newestByName(mine, plainAttr).isFilter, 'is_filter 应为 0').toBe(0)
 
     // 列表展示：「是否筛选」列显示 是 / 否
     await expect(attrRowOf(page, filterAttr), '可筛选属性应显示「是」').toContainText('是')
     await expect(attrRowOf(page, plainAttr), '不可筛选属性应显示「否」').toContainText('否')
 
     // 改名 + 关掉 is_filter
-    const renamedAttr = '颜色(新)'
+    const renamedAttr = `${attributeNames[1]}`     // 尺码
     await editAttribute(page, filterAttr, { name: renamedAttr, isFilter: false })
     await expect(attrRowOf(page, renamedAttr), '改名后应显示「否」').toContainText('否')
-    const after = (await getAdminAttributesApi(request, token)).find((a) => a.name === renamedAttr)
+    const after = newestByName(await getAdminAttributesApi(request, token, t1Id), renamedAttr)
     expect(after.isFilter, 'is_filter 应被关成 0').toBe(0)
 
     // 聚合关系：B 类型的属性页看不到 A 的属性
@@ -107,7 +113,10 @@ test.describe('商家侧 1 商品类型与属性', () => {
     expect((await getAdminProductTypesApi(request, token)).find((t) => t.name === '手机'), '类型应仍然存在').toBeTruthy()
 
     // ② 新建的空类型 → 可以删掉
-    const empty = `E2E待删类型${stamp()}`
+    const empty = uniqueDisplayName(
+      typeOf(stamp()),
+      (await getAdminProductTypesApi(request, token)).map((t) => t.name)
+    )
     await addProductType(page, empty)
     await typeRowOf(page, empty).getByTestId('product-type-row-delete').click()
     await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
@@ -126,7 +135,10 @@ test.describe('商家侧 1 商品类型与属性', () => {
     expect((await getAdminAttributesApi(request, token)).find((a) => a.name === usedAttrName)).toBeTruthy()
 
     // ④ 新建的空属性 → 可以删掉
-    const emptyAttr = `E2E待删属性${stamp()}`
+    const emptyAttr = uniqueDisplayName(
+      attributeOf(stamp()),
+      (await getAdminAttributesApi(request, token)).map((a) => a.name)
+    )
     await addAttribute(page, emptyAttr, false)
     await attrRowOf(page, emptyAttr).getByTestId('attribute-row-delete').click()
     await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()

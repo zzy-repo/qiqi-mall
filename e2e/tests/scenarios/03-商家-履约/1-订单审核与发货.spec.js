@@ -15,6 +15,8 @@ import {
   expectToastSuccess
 } from '../../support/admin-ui.js'
 import { adminTokenOf, getProductApi, getAdminOrderBySnApi, listDeliveriesApi } from '../../support/assert.js'
+import { tid } from '../../support/tid.js'
+import { memberNickOf, receiverOf } from '../../support/fixtures.js'
 
 /**
  * 03-商家-履约 / 1-订单审核与发货（docs/flows/02-业务场景/03-商家-履约/1-订单审核与发货/1-业务时序图.mmd）
@@ -43,9 +45,10 @@ test.describe('03-商家-履约 › 1-订单审核与发货', () => {
 
     let orderSn
     await test.step('② 买家下单支付（下单即扣 1 件库存，订单进入待审核）', async () => {
-      await memberRegisterAndLogin(page, `e2e_audit_${stamp()}`)
-      await addSpecToCart(page, 1, specText)
-      orderSn = await submitCartOrder(page, { receiverName: '审核发货E2E' })
+      const buyer = `e2e_audit_${stamp()}`
+      await memberRegisterAndLogin(page, buyer, '123456', memberNickOf(buyer))
+      await addSpecToCart(page, 1, specText, skuId)
+      orderSn = await submitCartOrder(page, receiverOf(buyer))
     })
 
     await test.step('③ 管理员看到待审核订单，审核通过 → 待发货 + 生成发货单', async () => {
@@ -125,9 +128,10 @@ test.describe('03-商家-履约 › 1-订单审核与发货', () => {
 
     let orderSn
     await test.step('② 买家下单支付（下单即扣 1 件）', async () => {
-      await memberRegisterAndLogin(page, `e2e_reject_${stamp()}`)
-      await addSpecToCart(page, 1, specText)
-      orderSn = await submitCartOrder(page, { receiverName: '审核拒绝E2E' })
+      const buyer = `e2e_reject_${stamp()}`
+      await memberRegisterAndLogin(page, buyer, '123456', memberNickOf(buyer))
+      await addSpecToCart(page, 1, specText, skuId)
+      orderSn = await submitCartOrder(page, receiverOf(buyer))
     })
 
     await test.step('③ 审核不通过 → 订单变已关闭，且不生成发货单', async () => {

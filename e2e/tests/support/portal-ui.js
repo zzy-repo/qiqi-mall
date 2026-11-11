@@ -8,6 +8,7 @@
  */
 import { expect } from '@playwright/test'
 import { PORTAL } from './env.js'
+import { tid, tidPrefix } from './tid.js'
 
 // ---------------------------------------------------------------------------
 // 我的 → 收货地址
@@ -17,7 +18,7 @@ import { PORTAL } from './env.js'
 export async function openAddresses(page) {
   await page.goto(`${PORTAL}/addresses`)
   await page.waitForTimeout(1000)
-  await expect(page.locator('h3.title')).toContainText('收货地址')
+  await expect(page.getByRole('heading', { name: '收货地址' })).toBeVisible()
 }
 
 /** 地址列表里按「收件人」定位行 */
@@ -25,10 +26,7 @@ export const addressRowOf = (page, name) =>
   page.locator('.el-table__body tr').filter({ hasText: name }).first()
 
 /** 地址表单弹窗 */
-export const addressDialog = (page) => page.locator('.el-dialog').filter({ hasText: /新增地址|编辑地址/ })
-
-/** 按表单项 label 取输入框（收件人/电话/省/市/区县） */
-const fieldOf = (dialog, label) => dialog.locator('.el-form-item').filter({ hasText: label })
+export const addressDialog = (page) => tid(page, 'address-form-dialog')
 
 /**
  * 在地址弹窗里填一条地址。
@@ -37,14 +35,14 @@ const fieldOf = (dialog, label) => dialog.locator('.el-form-item').filter({ hasT
 export async function fillAddressForm(page, address) {
   const dialog = addressDialog(page)
   await expect(dialog).toBeVisible()
-  await fieldOf(dialog, '收件人').locator('input').fill(address.name)
-  await fieldOf(dialog, '电话').locator('input').fill(address.phone)
-  await fieldOf(dialog, '省').locator('input').fill(address.province)
-  await fieldOf(dialog, '市').locator('input').fill(address.city)
-  await fieldOf(dialog, '区/县').locator('input').fill(address.region)
-  await fieldOf(dialog, '详细地址').locator('textarea').fill(address.detail)
+  await tid(page, 'address-form-name').fill(address.name)
+  await tid(page, 'address-form-phone').fill(address.phone)
+  await tid(page, 'address-form-province').fill(address.province)
+  await tid(page, 'address-form-city').fill(address.city)
+  await tid(page, 'address-form-region').fill(address.region)
+  await tid(page, 'address-form-detail').fill(address.detail)
   if (address.isDefault) {
-    const sw = dialog.locator('.el-form-item').filter({ hasText: '默认地址' }).locator('.el-switch')
+    const sw = tid(page, 'address-form-default')
     const on = await sw.evaluate((el) => el.classList.contains('is-checked'))
     if (!on) await sw.click()
   }
@@ -53,9 +51,9 @@ export async function fillAddressForm(page, address) {
 
 /** 新增地址（开弹窗 → 填 → 确定 → 等保存成功） */
 export async function addAddress(page, address) {
-  await page.getByRole('button', { name: '新增地址' }).click()
-  const dialog = await fillAddressForm(page, address)
-  await dialog.getByRole('button', { name: '确定' }).click()
+  await tid(page, 'addresses-create').click()
+  await fillAddressForm(page, address)
+  await tid(page, 'address-form-submit').click()
   await expect(page.locator('.el-message--success').first(), '新增地址应保存成功').toBeVisible({ timeout: 15_000 })
   await page.waitForTimeout(800)
   await expect(addressRowOf(page, address.name), `列表里应出现「${address.name}」`).toBeVisible()
@@ -63,8 +61,8 @@ export async function addAddress(page, address) {
 
 /** 编辑地址：按收件人定位，改完保存 */
 export async function editAddress(page, currentName, patch) {
-  await addressRowOf(page, currentName).getByRole('button', { name: '编辑' }).click()
-  const dialog = await fillAddressForm(page, {
+  await addressRowOf(page, currentName).getByTestId('addresses-row-edit').click()
+  await fillAddressForm(page, {
     name: patch.name ?? currentName,
     phone: patch.phone ?? '13800001111',
     province: patch.province ?? '广东省',
@@ -73,14 +71,14 @@ export async function editAddress(page, currentName, patch) {
     detail: patch.detail ?? '科技园 1 号',
     isDefault: patch.isDefault
   })
-  await dialog.getByRole('button', { name: '确定' }).click()
+  await tid(page, 'address-form-submit').click()
   await expect(page.locator('.el-message--success').first(), '编辑地址应保存成功').toBeVisible({ timeout: 15_000 })
   await page.waitForTimeout(800)
 }
 
 /** 删除地址：确认框点确定 */
 export async function deleteAddress(page, name) {
-  await addressRowOf(page, name).getByRole('button', { name: '删除' }).click()
+  await addressRowOf(page, name).getByTestId('addresses-row-remove').click()
   const box = page.locator('.el-message-box')
   await expect(box).toBeVisible()
   await box.getByRole('button', { name: '确定' }).click()
@@ -90,14 +88,14 @@ export async function deleteAddress(page, name) {
 
 /** 列表里该行是否标了「默认」 */
 export const isDefaultAddress = async (page, name) =>
-  (await addressRowOf(page, name).innerText()).includes('默认')
+  (await addressRowOf(page, name).getByTestId('addresses-row-default').count()) > 0
 
 // ---------------------------------------------------------------------------
 // 首页 / 搜索 / 分类
 // ---------------------------------------------------------------------------
 
 /** 首页商品卡片 */
-export const productCards = (page) => page.locator('.grid .card')
+export const productCards = (page) => tid(page, 'home-product-card')
 
 /** 打开首页 */
 export async function openHome(page) {
@@ -107,15 +105,21 @@ export async function openHome(page) {
 
 /** 按关键词搜索（回车触发） */
 export async function searchProduct(page, keyword) {
-  const input = page.locator('input[placeholder="搜索商品"]')
+  const input = tid(page, 'home-search-input')
   await input.fill(keyword)
   await input.press('Enter')
   await page.waitForTimeout(1000)
 }
 
-/** 按分类筛选（点分类按钮） */
-export async function filterByCategory(page, categoryName) {
-  await page.locator('.el-radio-button').filter({ hasText: categoryName }).first().click()
+/**
+ * 按分类筛选（点分类按钮）。
+ * 分类按钮的 testid 是 `home-category-<分类id>`；不传 id 时按分类名兜底。
+ */
+export async function filterByCategory(page, categoryName, categoryId) {
+  const button = categoryId === undefined
+    ? tidPrefix(page, 'home-category-').filter({ hasText: categoryName }).first()
+    : tid(page, `home-category-${categoryId}`)
+  await button.click()
   await page.waitForTimeout(1000)
 }
 
@@ -123,21 +127,33 @@ export async function filterByCategory(page, categoryName) {
 // 商品详情 / 规格
 // ---------------------------------------------------------------------------
 
-/** 详情页规格按钮 */
-export const specButtons = (page) => page.locator('.el-radio-group .el-radio-button')
+/** 详情页规格按钮（testid 形如 product-detail-sku-<skuId>） */
+export const specButtons = (page) => page.locator('[data-testid^="product-detail-sku-"]')
 
 /** 详情页当前价格文本（如 ¥ 1999.99） */
-export const detailPrice = (page) => page.locator('.price')
+export const detailPrice = (page) => tid(page, 'product-detail-price')
 
 /** 详情页库存文本（如 库存 1000） */
-export const detailStock = (page) => page.locator('.stock')
+export const detailStock = (page) => tid(page, 'product-detail-stock')
 
 // ---------------------------------------------------------------------------
 // 登录页
 // ---------------------------------------------------------------------------
 
 /** 登录页错误提示（el-alert） */
-export const loginError = (page) => page.locator('.login-card .el-alert')
+export const loginError = (page) => tid(page, 'auth-error')
 
-/** 登录页必填校验提示 */
-export const loginFieldError = (page, msg) => page.locator('.el-form-item__error').filter({ hasText: msg })
+/**
+ * 登录页必填校验提示。
+ * `.el-form-item__error` 由 el-form-item 内部渲染，锚点落在 form-item 根节点上（tid.js 未覆盖第 7 条），
+ * 所以仍按提示文案过滤，保证断言严格程度不变。
+ */
+export const loginFieldError = (page, msg) => {
+  const fieldTid = /用户名/.test(msg)
+    ? 'auth-error-username'
+    : /密码/.test(msg)
+      ? 'auth-error-password'
+      : null
+  const scope = fieldTid ? tid(page, fieldTid) : page
+  return scope.locator('.el-form-item__error').filter({ hasText: msg })
+}

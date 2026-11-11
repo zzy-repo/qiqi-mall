@@ -16,7 +16,27 @@ import { expect } from '@playwright/test'
 import { readFileSync, statSync } from 'node:fs'
 import { ADMIN, API } from './env.js'
 
-const CAPTCHA_LOG = process.env.CAPTCHA_LOG || '/tmp/dev-server.log'
+/**
+ * 验证码明文所在的后端日志。
+ *
+ * 以前写死 /tmp/dev-server.log（只有 dev 栈 8081 有）；换到 scripts/e2e-run.sh 的分片栈后，
+ * 每个 shard 有独立后端（8091 / 8092）和自己的日志（/tmp/e2e-server-a.log / -b.log），
+ * 写死路径就读不到新验证码 → 「验证码日志里没有新记录」。这里按 API 端口自动选，
+ * 仍可用 CAPTCHA_LOG 显式覆盖。
+ */
+const resolveCaptchaLog = () => {
+  if (process.env.CAPTCHA_LOG) return process.env.CAPTCHA_LOG
+  const port = (() => {
+    try { return new URL(API).port } catch { return '' }
+  })()
+  const byPort = {
+    8081: '/tmp/dev-server.log',        // dev 栈（npm test 默认）
+    8091: '/tmp/e2e-server-a.log',      // e2e 分片 a
+    8092: '/tmp/e2e-server-b.log'       // e2e 分片 b
+  }
+  return byPort[port] || '/tmp/dev-server.log'
+}
+const CAPTCHA_LOG = resolveCaptchaLog()
 
 // ---------------------------------------------------------------------------
 // 验证码答案：从服务端 debug 日志读明文（只读日志，不动后端）

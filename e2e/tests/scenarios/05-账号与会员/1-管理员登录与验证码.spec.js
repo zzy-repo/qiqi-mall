@@ -30,7 +30,9 @@ import {
  */
 
 const WRONG = 'wrong-pass'
-const PROBE = 'e2e_captcha_probe'
+// 每次运行用独立 probe 用户名：失败计数是后端全局状态（captcha:fail:<username>，5 分钟窗口），
+// 多 shard / 多 agent 共用一个后端时，固定名字会被别人打满，导致本条「应 >=5 次」或「应清零」的断言假死。
+const PROBE = `e2e_captcha_probe_${Date.now().toString(36).slice(-5)}`
 const ADMIN_BASE = process.env.ADMIN_BASE || 'http://127.0.0.1:5175'
 
 test.afterEach(async ({ request }) => {
@@ -42,11 +44,13 @@ test.afterEach(async ({ request }) => {
 test('1-管理员登录与验证码：登录与验证码触发', async ({ page, request }) => {
   // ── 前置清零：确保 admin 当前不需要验证码 ──
   await resetLoginState(request)
-  expect(await apiCaptchaRequired(request, 'admin'), '前置：计数应为 0').toBe(false)
 
   // ── 1. 正常登录：admin/123456 → 进入后台 dashboard ──
+  // （成功的登录本身就会把 admin 的失败计数清零，所以「计数为 0」这条断言放在登录之后校验，
+  //   否则会被别的用例/别的人为操作在登录前打满的计数误伤）
   await uiLogin(page, { username: 'admin', password: '123456' })
   await expectLandedDashboard(page)
+  expect(await apiCaptchaRequired(request, 'admin'), '成功登录后 admin 的失败计数应为 0').toBe(false)
   await page.evaluate(() => localStorage.clear())   // 退登态，后续从登录页重测
 
   // ── 2. 密码错误（用专用 probe 用户名，不污染 admin）──

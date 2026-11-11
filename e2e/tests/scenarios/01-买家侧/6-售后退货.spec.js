@@ -19,6 +19,10 @@ import {
   adminTokenOf,
   memberTokenOf
 } from '../../support/assert.js'
+import { tid } from '../../support/tid.js'
+import { memberNickOf, receiverOf, returnDescriptionOf } from '../../support/fixtures.js'
+import { demoName, demoUsername } from '../../support/images.js'
+
 
 /**
  * 买家侧 06 售后退货（docs/flows/02-业务场景/01-买家侧/6-售后退货）
@@ -33,7 +37,7 @@ import {
 /** 买家把订单推进到「已发货」（管理员审核 + 下发 + 出库，真实 UI） */
 async function toShipped(page, orderSn) {
   const row = await adminSearchOrderRow(page, orderSn)
-  await row.getByRole('button', { name: '审核' }).click()
+  await row.getByTestId('order-row-audit').click()
   await page.locator('.el-message-box__btns').getByRole('button', { name: '通过', exact: true }).click()
   await page.waitForTimeout(1500)
   const table = await openOrderDrawer(page, orderSn)
@@ -46,14 +50,14 @@ async function toShipped(page, orderSn) {
 /** 买家在「我的订单」提交退货申请 */
 async function applyReturn(page, orderSn) {
   const row = await memberOrderRow(page, orderSn)
-  await row.getByRole('button', { name: '申请退货' }).click()
-  const dialog = page.locator('.el-dialog').filter({ hasText: '申请退货' })
+  await row.getByTestId('orders-row-return').click()
+  const dialog = tid(page, 'order-return-dialog')
   await expect(dialog).toBeVisible()
-  await dialog.locator('.el-form-item').filter({ hasText: '退货原因' }).locator('.el-select__wrapper').click()
+  await tid(page, 'order-return-form-reason').click()
   await page.waitForTimeout(400)
   await page.locator('.el-select-dropdown__item:visible').first().click()
-  await dialog.locator('.el-form-item').filter({ hasText: '详细说明' }).locator('textarea').fill('E2E：收到时有划痕')
-  await dialog.getByRole('button', { name: '提交申请' }).click()
+  await tid(page, 'order-return-form-description').fill(returnDescriptionOf(orderSn))
+  await tid(page, 'order-return-form-submit').click()
   await expect(page.locator('.el-message--success').first(), '退货申请应提交成功').toBeVisible({ timeout: 15_000 })
   await page.waitForTimeout(1200)
   return row
@@ -66,11 +70,11 @@ async function auditReturn(page, orderSn, approve) {
   await page.waitForTimeout(1200)
   const row = page.locator('.el-table__body tr').filter({ hasText: orderSn }).first()
   await expect(row, '后台应看到该退货申请').toBeVisible()
-  await row.getByRole('button', { name: '审核' }).click()
-  const dialog = page.locator('.el-dialog')
+  await row.getByTestId('return-apply-row-audit').click()
+  const dialog = tid(page, 'return-apply-form-dialog')
   await expect(dialog).toBeVisible()
-  await dialog.locator('.el-radio').filter({ hasText: approve ? '通过' : '拒绝' }).first().click()
-  await dialog.getByRole('button', { name: '确定' }).click()
+  await dialog.getByTestId(approve ? 'return-apply-form-status-pass' : 'return-apply-form-status-reject').click()
+  await tid(page, 'return-apply-form-submit').click()
   await expect(page.locator('.el-message--success').first(), '审核应保存成功').toBeVisible({ timeout: 15_000 })
   await page.reload()
   await page.waitForTimeout(1200)
@@ -80,19 +84,19 @@ async function auditReturn(page, orderSn, approve) {
 
 test.describe('买家侧 06 售后退货', () => {
   test('申请退货：选原因提交后进入退款中，入口消失（不能重复申请）', async ({ page, request }) => {
-    const username = `e2e_return_${stamp()}`
+    const username = demoUsername('张小雨') || `e2e_return_${stamp()}`
     await adminLogin(page)
     await adminSetSkuStock(page, 1, 0, 50)
-    await memberRegisterAndLogin(page, username)
+    await memberRegisterAndLogin(page, username, '123456', memberNickOf(username))
 
     const { skus } = await getProductApi(request, 1)
     await addSpecToCart(page, 1, skus[0].specText)
-    const orderSn = await submitCartOrder(page)
+    const orderSn = await submitCartOrder(page, receiverOf(username))
     await toShipped(page, orderSn)
 
     const row = await applyReturn(page, orderSn)
     await expect(row, '申请后售后列应显示退款处理中').toContainText('退款处理中', { timeout: 15_000 })
-    await expect(row.getByRole('button', { name: '申请退货' }), '退款中订单不应再能申请').toHaveCount(0)
+    await expect(row.getByTestId('orders-row-return'), '退款中订单不应再能申请').toHaveCount(0)
 
     // 服务端：申请为待处理(0)，订单进入退款中(5)
     const token = await memberTokenOf(page)
@@ -103,28 +107,28 @@ test.describe('买家侧 06 售后退货', () => {
   })
 
   test('仅已付款/已发货可申请：待审核订单没有申请入口', async ({ page, request }) => {
-    const username = `e2e_return_guard_${stamp()}`
-    await memberRegisterAndLogin(page, username)
+    const username = demoUsername('李思远') || `e2e_return_guard_${stamp()}`
+    await memberRegisterAndLogin(page, username, '123456', memberNickOf(username))
     const { skus } = await getProductApi(request, 1)
     await addSpecToCart(page, 1, skus[0].specText)
-    const orderSn = await submitCartOrder(page)
+    const orderSn = await submitCartOrder(page, receiverOf(username))
 
     const row = await memberOrderRow(page, orderSn)
     await expect(row, '新订单应为待审核').toContainText('待审核')
-    await expect(row.getByRole('button', { name: '申请退货' }), '待审核订单不应有申请退货入口').toHaveCount(0)
+    await expect(row.getByTestId('orders-row-return'), '待审核订单不应有申请退货入口').toHaveCount(0)
   })
 
   test('管理员审核通过：退款成功 + 库存回补，买家看到结果', async ({ page, request }) => {
-    const username = `e2e_return_pass_${stamp()}`
+    const username = demoUsername('陈可') || `e2e_return_pass_${stamp()}`
     await adminLogin(page)
     await adminSetSkuStock(page, 1, 0, 50)
     const at = await adminTokenOf(page)
-    await memberRegisterAndLogin(page, username)
+    await memberRegisterAndLogin(page, username, '123456', memberNickOf(username))
 
     const { skus } = await getProductApi(request, 1)
     const sku = skus[0]
     await addSpecToCart(page, 1, sku.specText)
-    const orderSn = await submitCartOrder(page)
+    const orderSn = await submitCartOrder(page, receiverOf(username))
     await toShipped(page, orderSn)
 
     const stockBefore = (await getProductApi(request, 1)).skus.find((s) => s.id === sku.id).stock
@@ -145,15 +149,15 @@ test.describe('买家侧 06 售后退货', () => {
   })
 
   test('管理员审核拒绝：订单回到已付款，买家看到退货被拒绝', async ({ page, request }) => {
-    const username = `e2e_return_reject_${stamp()}`
+    const username = demoUsername('王建国') || `e2e_return_reject_${stamp()}`
     await adminLogin(page)
     await adminSetSkuStock(page, 1, 0, 50)
     const at = await adminTokenOf(page)
-    await memberRegisterAndLogin(page, username)
+    await memberRegisterAndLogin(page, username, '123456', memberNickOf(username))
 
     const { skus } = await getProductApi(request, 1)
     await addSpecToCart(page, 1, skus[0].specText)
-    const orderSn = await submitCartOrder(page)
+    const orderSn = await submitCartOrder(page, receiverOf(username))
     await toShipped(page, orderSn)
     await applyReturn(page, orderSn)
     await auditReturn(page, orderSn, false)

@@ -11,6 +11,8 @@ import {
   isDefaultAddress
 } from '../../support/portal-ui.js'
 import { getMemberAddressesApi, memberTokenOf } from '../../support/assert.js'
+import { tid } from '../../support/tid.js'
+import { addressBook } from '../../support/fixtures.js'
 
 /**
  * 买家侧 07 收货地址（docs/flows/02-业务场景/01-买家侧/7-收货地址）
@@ -19,22 +21,9 @@ import { getMemberAddressesApi, memberTokenOf } from '../../support/assert.js'
  *   新增 / 编辑 / 设为默认 / 删除 / 必填校验 / 超长文本截断 / 删除后的列表状态
  * 全程真实 UI 点击；接口只用于只读断言（地址簿落库情况）。
  */
-const ADDR_A = {
-  name: '张三',
-  phone: '13800001111',
-  province: '广东省',
-  city: '深圳市',
-  region: '南山区',
-  detail: '科技园南路 1 号 301'
-}
-const ADDR_B = {
-  name: '李四',
-  phone: '13900002222',
-  province: '上海市',
-  city: '上海市',
-  region: '浦东新区',
-  detail: '张江路 200 号 8 楼'
-}
+// 地址数据取自 fixtures 的真实地址簿（姓名/地址都是自然中文，演示视频里不出现 E2E 字样）
+const ADDR_A = addressBook[0]
+const ADDR_B = addressBook[1]
 
 /** 每个用例用独立账号，互不干扰 */
 const newMember = async (page, tag) => {
@@ -65,7 +54,7 @@ test.describe('买家侧 07 收货地址', () => {
     await editAddress(page, ADDR_A.name, renamed)
     await expect(addressRowOf(page, renamed.name), '编辑后列表应显示新收件人').toBeVisible()
     // 收件人列逐格比对（不能整表 not.toContainText：'张三改' 里也含 '张三'）
-    const nameCells = await page.locator('.el-table__body tr td:first-child').allInnerTexts()
+    const nameCells = await tid(page, 'address-list-table').locator('.el-table__body tr td:first-child').allInnerTexts()
     expect(nameCells, '旧收件人不该再出现在收件人列').not.toContain(ADDR_A.name)
     await expect(addressRowOf(page, renamed.name)).toContainText(renamed.detail)
 
@@ -75,7 +64,7 @@ test.describe('买家侧 07 收货地址', () => {
       message: '设为默认后该行应标「默认」',
       timeout: 10_000
     }).toBe(true)
-    const firstRow = page.locator('.el-table__body tr').first()
+    const firstRow = tid(page, 'address-list-table').locator('.el-table__body tr').first()
     await expect(firstRow, '默认地址应排在列表第一位').toContainText(renamed.name)
 
     saved = await getMemberAddressesApi(request, token)
@@ -83,7 +72,7 @@ test.describe('买家侧 07 收货地址', () => {
 
     // ---------- 删除：只删选中的那条，其余不受影响 ----------
     await deleteAddress(page, ADDR_B.name)
-    await expect(page.locator('.el-table__body'), '被删的地址不应再出现').not.toContainText(ADDR_B.name)
+    await expect(tid(page, 'address-list-table'), '被删的地址不应再出现').not.toContainText(ADDR_B.name)
     await expect(addressRowOf(page, renamed.name), '未删除的地址应仍在').toBeVisible()
 
     saved = await getMemberAddressesApi(request, token)
@@ -95,26 +84,26 @@ test.describe('买家侧 07 收货地址', () => {
     await newMember(page, 'required')
     await openAddresses(page)
 
-    await page.getByRole('button', { name: '新增地址' }).click()
+    await tid(page, 'addresses-create').click()
     const dialog = addressDialog(page)
     await expect(dialog).toBeVisible()
-    await dialog.getByRole('button', { name: '确定' }).click()
+    await tid(page, 'address-form-submit').click()
     await page.waitForTimeout(500)
 
     // 六个必填项各自给出提示
     for (const msg of ['请输入收件人', '请输入电话', '请输入省', '请输入市', '请输入区/县', '请输入详细地址']) {
-      await expect(dialog.locator('.el-form-item__error').filter({ hasText: msg }), `应提示「${msg}」`).toBeVisible()
+      await expect(tid(page, 'address-form-dialog').locator('.el-form-item__error').filter({ hasText: msg }), `应提示「${msg}」`).toBeVisible()
     }
     // 弹窗不关闭、列表仍是空的
     await expect(dialog, '校验不通过时弹窗不应关闭').toBeVisible()
-    await expect(page.locator('.el-table__body tr'), '校验不通过不应产生数据').toHaveCount(0)
+    await expect(tid(page, 'address-list-table').locator('.el-table__body tr'), '校验不通过不应产生数据').toHaveCount(0)
 
     // 补一个必填项后再提交，其它错误提示仍在（逐项校验，不是全清）
-    await dialog.locator('.el-form-item').filter({ hasText: '收件人' }).locator('input').fill('王五')
-    await dialog.getByRole('button', { name: '确定' }).click()
-    await expect(dialog.locator('.el-form-item__error').filter({ hasText: '请输入电话' })).toBeVisible()
+    await tid(page, 'address-form-name').fill('王五')
+    await tid(page, 'address-form-submit').click()
+    await expect(tid(page, 'address-form-dialog').locator('.el-form-item__error').filter({ hasText: '请输入电话' })).toBeVisible()
 
-    await dialog.getByRole('button', { name: '取消' }).click()
+    await tid(page, 'address-form-cancel').click()
     await expect(dialog).toBeHidden()
   })
 
@@ -124,23 +113,23 @@ test.describe('买家侧 07 收货地址', () => {
 
     const longName = '长'.repeat(80)
     const longDetail = '详'.repeat(300)
-    await page.getByRole('button', { name: '新增地址' }).click()
+    await tid(page, 'addresses-create').click()
     const dialog = addressDialog(page)
     await expect(dialog).toBeVisible()
 
-    const nameInput = dialog.locator('.el-form-item').filter({ hasText: '收件人' }).locator('input')
-    const detailInput = dialog.locator('.el-form-item').filter({ hasText: '详细地址' }).locator('textarea')
+    const nameInput = tid(page, 'address-form-name')
+    const detailInput = tid(page, 'address-form-detail')
     await nameInput.fill(longName)
     await detailInput.fill(longDetail)
 
     expect((await nameInput.inputValue()).length, '收件人输入框应截断到 50 字').toBe(50)
     expect((await detailInput.inputValue()).length, '详细地址应截断到 200 字').toBe(200)
 
-    await dialog.locator('.el-form-item').filter({ hasText: '电话' }).locator('input').fill('13700003333')
-    await dialog.locator('.el-form-item').filter({ hasText: '省' }).locator('input').fill('北京市')
-    await dialog.locator('.el-form-item').filter({ hasText: '市' }).locator('input').fill('北京市')
-    await dialog.locator('.el-form-item').filter({ hasText: '区/县' }).locator('input').fill('朝阳区')
-    await dialog.getByRole('button', { name: '确定' }).click()
+    await tid(page, 'address-form-phone').fill('13700003333')
+    await tid(page, 'address-form-province').fill('北京市')
+    await tid(page, 'address-form-city').fill('北京市')
+    await tid(page, 'address-form-region').fill('朝阳区')
+    await tid(page, 'address-form-submit').click()
     await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
     await page.waitForTimeout(800)
 
@@ -190,9 +179,7 @@ test.describe('买家侧 07 收货地址', () => {
     // 三条地址，把中间那条设为默认
     await addAddress(page, ADDR_A)
     await addAddress(page, { ...ADDR_B, isDefault: true })
-    await addAddress(page, {
-      name: '赵六', phone: '13700004444', province: '北京市', city: '北京市', region: '朝阳区', detail: '建国路 88 号'
-    })
+    await addAddress(page, addressBook[2])
     await expect.poll(() => isDefaultAddress(page, ADDR_B.name), { timeout: 10_000 }).toBe(true)
 
     // 删掉默认地址 → 剩下 id 最小的那条自动成为默认
@@ -207,8 +194,8 @@ test.describe('买家侧 07 收货地址', () => {
 
     // 把剩下的全删光 → 无默认且不报错
     await deleteAddress(page, ADDR_A.name)
-    await deleteAddress(page, '赵六')
-    await expect(page.locator('.el-table__body tr'), '地址应全部删除').toHaveCount(0)
+    await deleteAddress(page, addressBook[2].name)
+    await expect(tid(page, 'address-list-table').locator('.el-table__body tr'), '地址应全部删除').toHaveCount(0)
     saved = await getMemberAddressesApi(request, token)
     expect(saved.length, '服务端应为空').toBe(0)
   })

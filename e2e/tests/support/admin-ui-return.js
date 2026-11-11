@@ -207,8 +207,16 @@ function mysqlQuery(sql, dbName) {
  * 这样同一份 spec 在两档下都能跑，不需要改断言。
  */
 export function paymentRecordsOf(orderSn) {
-  const dbs = [process.env.DB_NAME, 'qiqi_mall', 'qiqi_mall_test'].filter(Boolean)
-  const rows = []
+  // 库候选：显式 DB_NAME 优先，其次 e2e 独立库（scripts/e2e-run.sh 起的两套后端），最后才是老的 dev/DEMO 库。
+  // 注意不能「所有库都查一遍再合并」就完事：订单只存在于其中一个库，查错的库永远返回 0 行，
+  // 全量跑时会表现为「退款流水应恰好有一条，实到 0」。所以命中即返回。
+  const dbs = [
+    process.env.DB_NAME,
+    'qiqi_mall_e2e_a',
+    'qiqi_mall_e2e_b',
+    'qiqi_mall',
+    'qiqi_mall_test'
+  ].filter(Boolean)
   for (const db of dbs) {
     let out
     try {
@@ -217,13 +225,13 @@ export function paymentRecordsOf(orderSn) {
         db
       )
     } catch {
-      continue // 该库不存在 / 连不上：跳过，另一个库会给出答案
+      continue // 该库不存在 / 连不上：换下一个
     }
-    for (const [id, type, amount, tradeNo] of out) {
-      if (!rows.some((r) => r.id === id)) rows.push({ id, type: Number(type), amount: Number(amount), tradeNo })
+    if (out.length) {
+      return out.map(([id, type, amount, tradeNo]) => ({ id, type: Number(type), amount: Number(amount), tradeNo }))
     }
   }
-  return rows.sort((a, b) => a.id - b.id)
+  return []
 }
 
 // ---------------------------------------------------------------------------

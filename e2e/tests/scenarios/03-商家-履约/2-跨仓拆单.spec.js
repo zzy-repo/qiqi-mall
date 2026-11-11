@@ -15,6 +15,8 @@ import {
   expectToastSuccess
 } from '../../support/admin-ui.js'
 import { adminTokenOf, getProductApi, getAdminOrderBySnApi, listDeliveriesApi } from '../../support/assert.js'
+import { tid } from '../../support/tid.js'
+import { memberNickOf, receiverOf } from '../../support/fixtures.js'
 
 /**
  * 03-商家-履约 / 2-跨仓拆单（docs/flows/02-业务场景/03-商家-履约/2-跨仓拆单/1-业务时序图.mmd）
@@ -37,10 +39,11 @@ test.describe('03-商家-履约 › 2-跨仓拆单', () => {
 
     let crossSn
     await test.step('② 买家下单两个不同 SKU（跨仓）', async () => {
-      await memberRegisterAndLogin(page, `e2e_split_${stamp()}`)
-      await addSpecToCart(page, 1, skus[0].specText)
-      await addSpecToCart(page, 1, skus[1].specText)
-      crossSn = await submitCartOrder(page, { receiverName: '跨仓拆单E2E' })
+      const buyer = `e2e_split_${stamp()}`
+      await memberRegisterAndLogin(page, buyer, '123456', memberNickOf(buyer))
+      await addSpecToCart(page, 1, skus[0].specText, skus[0].id)
+      await addSpecToCart(page, 1, skus[1].specText, skus[1].id)
+      crossSn = await submitCartOrder(page, receiverOf(buyer))
     })
 
     await test.step('③ 审核弹窗「查看拆单方案」：预览 2 个包裹，且不落库', async () => {
@@ -101,9 +104,10 @@ test.describe('03-商家-履约 › 2-跨仓拆单', () => {
 
     let singleSn
     await test.step('② 买家下单同一个 SKU（单仓）', async () => {
-      await memberRegisterAndLogin(page, `e2e_single_${stamp()}`)
-      await addSpecToCart(page, 1, skus[0].specText)
-      singleSn = await submitCartOrder(page, { receiverName: '单仓E2E' })
+      const buyer = `e2e_single_${stamp()}`
+      await memberRegisterAndLogin(page, buyer, '123456', memberNickOf(buyer))
+      await addSpecToCart(page, 1, skus[0].specText, skus[0].id)
+      singleSn = await submitCartOrder(page, receiverOf(buyer))
     })
 
     await test.step('③ 预览只有 1 个包裹 → 通过后只生成 1 个发货单', async () => {

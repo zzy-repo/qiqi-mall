@@ -18,6 +18,7 @@ import {
   getPublishedProductsApi,
   adminTokenOf
 } from '../../support/assert.js'
+import { tid } from '../../support/tid.js'
 
 /**
  * 买家侧 02 商品浏览与搜索（docs/flows/02-业务场景/01-买家侧/2-商品浏览与搜索）
@@ -36,11 +37,11 @@ test.describe('买家侧 02 商品浏览与搜索', () => {
     expect(count, '首页商品数应大于 0').toBeGreaterThan(0)
 
     // 卡片上的图必须真的解码出来（不能靠 error 兜底）
-    await expectAllImagesLoaded(page.locator('.grid .card img'), '首页商品卡片图')
+    await expectAllImagesLoaded(tid(page, 'home-product-card').locator('img'), '首页商品卡片图')
 
     // 只返回上架商品（服务端口径复核）
     const { product } = await getProductApi(request, 1)
-    await expect(page.locator('.grid')).toContainText(product.name)
+    await expect(tid(page, 'home-product-grid')).toContainText(product.name)
   })
 
   test('分类筛选：选中分类后只剩该分类商品', async ({ page, request }) => {
@@ -56,7 +57,7 @@ test.describe('买家侧 02 商品浏览与搜索', () => {
     }
     expect(cat, '应存在一个有在架商品、且不是全量的分类').toBeTruthy()
 
-    await filterByCategory(page, cat.name)
+    await filterByCategory(page, cat.name, cat.id)
     const filtered = productCards(page)
     await expect(filtered.first(), `筛选「${cat.name}」后应有商品`).toBeVisible({ timeout: 15_000 })
     const filteredCount = await filtered.count()
@@ -83,8 +84,8 @@ test.describe('买家侧 02 商品浏览与搜索', () => {
 
     // 搜不到 → 空态
     await searchProduct(page, '不存在的商品ZZZ')
-    await expect(page.locator('.el-empty'), '搜不到应显示空态').toBeVisible({ timeout: 15_000 })
-    await expect(page.locator('.el-empty')).toContainText('暂无商品')
+    await expect(tid(page, 'home-empty'), '搜不到应显示空态').toBeVisible({ timeout: 15_000 })
+    await expect(tid(page, 'home-empty')).toContainText('暂无商品')
     await expect(productCards(page), '空态下不应有卡片').toHaveCount(0)
   })
 
@@ -94,7 +95,7 @@ test.describe('买家侧 02 商品浏览与搜索', () => {
 
     await page.goto(`${PORTAL}/product/1`)
     await page.waitForTimeout(1200)
-    await expect(page.locator('h2')).toContainText(product.name)
+    await expect(tid(page, 'product-detail-name')).toContainText(product.name)
 
     const buttons = specButtons(page)
     await expect(buttons).toHaveCount(skus.length)
@@ -126,12 +127,11 @@ test.describe('买家侧 02 商品浏览与搜索', () => {
     await page.waitForTimeout(1200)
     const row = page.locator('.el-table__body tr').filter({ hasText: name }).first()
     await expect(row).toBeVisible()
-    await row.getByRole('button', { name: '编辑' }).click()
-    const dialog = page.locator('.el-dialog')
+    await row.getByTestId('product-row-edit').click()
+    const dialog = tid(page, 'product-form-dialog')
     await expect(dialog).toBeVisible()
-    await dialog.locator('.el-form-item').filter({ hasText: '上下架' })
-      .locator('.el-radio').filter({ hasText: '下架' }).first().click()
-    await dialog.getByRole('button', { name: '确定' }).click()
+    await tid(page, 'product-form-publish').locator('.el-radio').filter({ hasText: '下架' }).first().click()
+    await tid(page, 'product-form-submit').click()
     await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
     await page.waitForTimeout(800)
 
@@ -145,9 +145,9 @@ test.describe('买家侧 02 商品浏览与搜索', () => {
 
       // ---------- C 端：列表与搜索都看不到 ----------
       await openHome(page)
-      await expect(page.locator('.grid')).not.toContainText(name)
+      await expect(tid(page, 'home-product-grid')).not.toContainText(name)
       await searchProduct(page, name.slice(0, 4))
-      await expect(page.locator('.el-empty'), '搜索下架商品应无结果').toBeVisible({ timeout: 15_000 })
+      await expect(tid(page, 'home-empty'), '搜索下架商品应无结果').toBeVisible({ timeout: 15_000 })
 
       // 直接开详情页 → 明确拒绝
       await page.goto(`${PORTAL}/product/${product.id}`)
@@ -161,12 +161,11 @@ test.describe('买家侧 02 商品浏览与搜索', () => {
       await page.goto(`${ADMIN}/product`)
       await page.waitForTimeout(1200)
       const back = page.locator('.el-table__body tr').filter({ hasText: name }).first()
-      await back.getByRole('button', { name: '编辑' }).click()
-      const d2 = page.locator('.el-dialog')
+      await back.getByTestId('product-row-edit').click()
+      const d2 = tid(page, 'product-form-dialog')
       await expect(d2).toBeVisible()
-      await d2.locator('.el-form-item').filter({ hasText: '上下架' })
-        .locator('.el-radio').filter({ hasText: '上架' }).first().click()
-      await d2.getByRole('button', { name: '确定' }).click()
+      await tid(page, 'product-form-publish').locator('.el-radio').filter({ hasText: '上架' }).first().click()
+      await tid(page, 'product-form-submit').click()
       await page.waitForTimeout(1200)
       const adminList2 = await getAdminProductsApi(request, token)
       expect(adminList2.find((p) => p.id === product.id).publishStatus, '验完应还原为在架').toBe(1)

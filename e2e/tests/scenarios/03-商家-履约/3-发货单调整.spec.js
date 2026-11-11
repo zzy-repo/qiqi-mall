@@ -17,6 +17,8 @@ import {
   pickWarehouseExcluding
 } from '../../support/admin-ui.js'
 import { adminTokenOf, getProductApi, getAdminOrderBySnApi, listDeliveriesApi } from '../../support/assert.js'
+import { tid } from '../../support/tid.js'
+import { addressOf } from '../../support/fixtures.js'
 
 /**
  * 03-商家-履约 / 3-发货单调整（docs/flows/02-业务场景/03-商家-履约/3-发货单调整.mmd）
@@ -41,10 +43,11 @@ test.describe('03-商家-履约 › 3-发货单调整', () => {
 
     let orderSn
     let table
+    const orderSnStamp = `adj-${Date.now()}`
     await test.step('② 造一笔待审核订单（同一商品两个 SKU，跨两个仓）', async () => {
       await gotoOrderList(page)
       orderSn = await createOrderViaUi(page, {
-        receiverName: '调整E2E',
+        receiverName: addressOf(orderSnStamp).name,
         status: '待审核',
         items: [
           { productName, skuIndex: 0, quantity: 2 },
@@ -58,7 +61,7 @@ test.describe('03-商家-履约 › 3-发货单调整', () => {
     await test.step('③ 审核通过 → 自动拆出 2 个待下发包裹', async () => {
       const row = await searchOrderRow(page, orderSn)
       await auditPassOrder(page, row)
-      await expect(row, '审核后订单应为待发货').toContainText('待发货')
+      await expect(row.getByTestId('order-row-status'), '审核后订单应为待发货').toContainText('待发货')
       const row2 = await searchOrderRow(page, orderSn)
       table = await openOrderDrawer(page, row2)
       const rows = table.locator('.el-table__body tr')
@@ -135,8 +138,7 @@ test.describe('03-商家-履约 › 3-发货单调整', () => {
       const keepSn = (await keepRow.locator('td').first().innerText()).trim()
 
       await clickDeliveryAction(page, victimRow, '删除')
-      const mergeDlg = page.locator('.el-dialog').filter({ hasText: '合并包裹' })
-      await expect(mergeDlg, '有明细时删除要指定并入目标').toBeVisible()
+      await expect(tid(page, 'delivery-merge-dialog'), '有明细时删除要指定并入目标').toBeVisible()
       await pickMergeTarget(page, keepSn)
       await submitMergeDialog(page)
       await expectToastSuccess(page, '已删除')
@@ -147,12 +149,17 @@ test.describe('03-商家-履约 › 3-发货单调整', () => {
     await test.step('⑨ 下发后：干预入口全部消失（只能回传/取消）', async () => {
       const row = table.locator('.el-table__body tr').first()
       await clickDeliveryAction(page, row, '下发')
-      await expect(row, '下发后应为已下发').toContainText('已下发')
-      for (const name of ['编辑', '拆分', '合并', '删除']) {
-        await expect(row.getByRole('button', { name }), `已下发不能${name}`).toHaveCount(0)
+      await expect(row.getByTestId('delivery-row-status'), '下发后应为已下发').toContainText('已下发')
+      for (const [name, testId] of [
+        ['编辑', 'delivery-row-edit'],
+        ['拆分', 'delivery-row-split'],
+        ['合并', 'delivery-row-merge'],
+        ['删除', 'delivery-row-remove']
+      ]) {
+        await expect(row.getByTestId(testId), `已下发不能${name}`).toHaveCount(0)
       }
-      await expect(row.getByRole('button', { name: '取消' }), '已下发也不能取消').toHaveCount(0)
-      await expect(row.getByRole('button', { name: /模拟WMS回传/ }), '只剩回传入口').toBeVisible()
+      await expect(row.getByTestId('delivery-row-cancel'), '已下发也不能取消').toHaveCount(0)
+      await expect(row.getByTestId('delivery-row-wms-callback'), '只剩回传入口').toBeVisible()
     })
   })
 })

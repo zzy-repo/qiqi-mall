@@ -12,6 +12,7 @@ import {
 } from '../../support/catalog-ui.js'
 import { adminTokenOf, getAdminCategoriesApi } from '../../support/assert.js'
 import { tid } from '../../support/tid.js'
+import { categoryNames, categoryOf, newestByName, productNameOf, uniqueDisplayName } from '../../support/fixtures.js'
 
 /**
  * 商家侧 02-商品管理 / 2-商品分类
@@ -28,20 +29,21 @@ test.describe('商家侧 2 商品分类', () => {
     const token = await adminTokenOf(page)
     await openCategories(page)
 
-    const parent = `E2E父分类${stamp()}`
-    const child = `${parent}-子类`
+    let catsNow = await getAdminCategoriesApi(request, token)
+    const parent = uniqueDisplayName(categoryNames[0], catsNow.map((c) => c.name))
+    const child = uniqueDisplayName(categoryNames[1], [...catsNow.map((c) => c.name), parent])
 
     // 顶级分类
     await addCategory(page, parent)
     let cats = await getAdminCategoriesApi(request, token)
-    const parentRow = cats.find((c) => c.name === parent)
+    const parentRow = newestByName(cats, parent)
     expect(parentRow, '顶级分类应落库').toBeTruthy()
     expect(parentRow.parentId, '顶级分类 parentId 应为 0').toBe(0)
 
     // 子分类：父分类用树选择（父节点可选的 check-strictly 回归点）
     await addCategory(page, child, parent)
     cats = await getAdminCategoriesApi(request, token)
-    const childRow = cats.find((c) => c.name === child)
+    const childRow = newestByName(cats, child)
     expect(childRow, '子分类应落库').toBeTruthy()
     expect(childRow.parentId, '子分类应挂到父分类下').toBe(parentRow.id)
 
@@ -53,10 +55,10 @@ test.describe('商家侧 2 商品分类', () => {
     expect(childIndent, '子分类应有缩进（体现父子层级）').not.toBe('0px')
 
     // 改名
-    const renamed = `${parent}改名`
+    const renamed = uniqueDisplayName(categoryNames[2], cats.map((c) => c.name))
     await renameCategory(page, parent, renamed)
     cats = await getAdminCategoriesApi(request, token)
-    expect(cats.find((c) => c.name === renamed), '改名应落库').toBeTruthy()
+    expect(newestByName(cats, renamed), '改名应落库').toBeTruthy()
     expect(cats.find((c) => c.name === parent), '旧名字应不存在').toBeFalsy()
   })
 
@@ -77,19 +79,20 @@ test.describe('商家侧 2 商品分类', () => {
     await openCategories(page)
 
     // 造一个「父分类 + 子分类」，然后让商品直接挂到**父分类**上
-    const parent = `E2E父分类挂商品${stamp()}`
+    const catsNow = await getAdminCategoriesApi(request, token)
+    const parent = uniqueDisplayName(categoryNames[4], catsNow.map((c) => c.name))
     await addCategory(page, parent)
     const cats = await getAdminCategoriesApi(request, token)
-    const parentId = cats.find((c) => c.name === parent).id
+    const parentId = newestByName(cats, parent).id
 
-    const productName = `E2E父分类商品${stamp()}`
+    const productName = productNameOf(parent)
     await openProducts(page)
     await addProduct(page, { name: productName, categoryName: parent, typeName: '手机' })
     await expect(productRowOf(page, productName)).toBeVisible()
 
-    const saved = (await (await request.get(`${API}/admin/products`, {
+    const saved = newestByName((await (await request.get(`${API}/admin/products`, {
       headers: { Authorization: `Bearer ${token}` }
-    })).json()).data.find((p) => p.name === productName)
+    })).json()).data, productName)
     expect(saved.categoryId, '商品应能挂到父分类上').toBe(parentId)
   })
 
@@ -105,7 +108,10 @@ test.describe('商家侧 2 商品分类', () => {
     expect((await getAdminCategoriesApi(request, token)).find((c) => c.name === '手机数码')).toBeTruthy()
 
     // ② 新建的空分类 → 可以删
-    const empty = `E2E待删分类${stamp()}`
+    const empty = uniqueDisplayName(
+      categoryOf(stamp()),
+      (await getAdminCategoriesApi(request, token)).map((c) => c.name)
+    )
     await addCategory(page, empty)
     await categoryRowOf(page, empty).getByTestId('category-row-delete').click()
     await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
