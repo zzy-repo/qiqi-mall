@@ -2,6 +2,7 @@ package com.qiqi.mall.catalog.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.CatalogDeleteGuard;
 import com.qiqi.mall.catalog.entity.Product;
 import com.qiqi.mall.catalog.entity.ProductGallery;
 import com.qiqi.mall.catalog.service.ProductGalleryService;
@@ -19,11 +20,14 @@ import java.util.Map;
 public class ProductController {
 
     private final ProductService productService;
+    private final CatalogDeleteGuard deleteGuard;
     private final ProductGalleryService productGalleryService;
 
-    public ProductController(ProductService productService, ProductGalleryService productGalleryService) {
+    public ProductController(ProductService productService, ProductGalleryService productGalleryService,
+                            CatalogDeleteGuard deleteGuard) {
         this.productService = productService;
         this.productGalleryService = productGalleryService;
+        this.deleteGuard = deleteGuard;
     }
 
     @GetMapping
@@ -71,8 +75,11 @@ public class ProductController {
         return Result.ok();
     }
 
+    /** 删除商品：被订单明细引用时不允许删（提示改为下架），购物车引用也不允许 */
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
+        String blocked = deleteGuard.checkProduct(id);
+        if (blocked != null) return Result.fail(blocked);
         productService.removeById(id);
         return Result.ok();
     }

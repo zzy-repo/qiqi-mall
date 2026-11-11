@@ -1,6 +1,7 @@
 package com.qiqi.mall.catalog.controller;
 
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.CatalogDeleteGuard;
 import com.qiqi.mall.catalog.entity.ProductType;
 import com.qiqi.mall.catalog.service.ProductTypeService;
 import org.springframework.web.bind.annotation.*;
@@ -12,9 +13,11 @@ import java.util.List;
 public class ProductTypeController {
 
     private final ProductTypeService productTypeService;
+    private final CatalogDeleteGuard deleteGuard;
 
-    public ProductTypeController(ProductTypeService productTypeService) {
+    public ProductTypeController(ProductTypeService productTypeService, CatalogDeleteGuard deleteGuard) {
         this.productTypeService = productTypeService;
+        this.deleteGuard = deleteGuard;
     }
 
     @GetMapping
@@ -41,8 +44,11 @@ public class ProductTypeController {
         return Result.ok();
     }
 
+    /** 删除类型：被属性或商品引用时不允许删，返回可读原因 */
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
+        String blocked = deleteGuard.checkProductType(id);
+        if (blocked != null) return Result.fail(blocked);
         productTypeService.removeById(id);
         return Result.ok();
     }

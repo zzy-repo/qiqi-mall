@@ -1,6 +1,7 @@
 package com.qiqi.mall.catalog.controller;
 
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.CatalogDeleteGuard;
 import com.qiqi.mall.catalog.entity.Category;
 import com.qiqi.mall.catalog.service.CategoryService;
 import org.springframework.web.bind.annotation.*;
@@ -12,9 +13,11 @@ import java.util.List;
 public class CategoryController {
 
     private final CategoryService categoryService;
+    private final CatalogDeleteGuard deleteGuard;
 
-    public CategoryController(CategoryService categoryService) {
+    public CategoryController(CategoryService categoryService, CatalogDeleteGuard deleteGuard) {
         this.categoryService = categoryService;
+        this.deleteGuard = deleteGuard;
     }
 
     @GetMapping
@@ -41,8 +44,11 @@ public class CategoryController {
         return Result.ok();
     }
 
+    /** 删除分类：有子分类或商品挂在该分类下时不允许删 */
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
+        String blocked = deleteGuard.checkCategory(id);
+        if (blocked != null) return Result.fail(blocked);
         categoryService.removeById(id);
         return Result.ok();
     }

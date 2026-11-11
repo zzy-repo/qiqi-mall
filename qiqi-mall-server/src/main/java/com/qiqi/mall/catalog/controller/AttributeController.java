@@ -1,6 +1,7 @@
 package com.qiqi.mall.catalog.controller;
 
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.CatalogDeleteGuard;
 import com.qiqi.mall.catalog.entity.Attribute;
 import com.qiqi.mall.catalog.service.AttributeService;
 import org.springframework.web.bind.annotation.*;
@@ -14,9 +15,11 @@ import java.util.List;
 public class AttributeController {
 
     private final AttributeService attributeService;
+    private final CatalogDeleteGuard deleteGuard;
 
-    public AttributeController(AttributeService attributeService) {
+    public AttributeController(AttributeService attributeService, CatalogDeleteGuard deleteGuard) {
         this.attributeService = attributeService;
+        this.deleteGuard = deleteGuard;
     }
 
     @GetMapping
@@ -45,8 +48,11 @@ public class AttributeController {
         return Result.ok();
     }
 
+    /** 删除属性：已被 SKU 规格值使用则不允许删 */
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
+        String blocked = deleteGuard.checkAttribute(id);
+        if (blocked != null) return Result.fail(blocked);
         attributeService.removeById(id);
         return Result.ok();
     }

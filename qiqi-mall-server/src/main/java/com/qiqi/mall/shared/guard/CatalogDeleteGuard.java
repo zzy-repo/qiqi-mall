@@ -1,0 +1,111 @@
+package com.qiqi.mall.shared.guard;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.qiqi.mall.catalog.entity.Attribute;
+import com.qiqi.mall.catalog.entity.Category;
+import com.qiqi.mall.catalog.entity.Product;
+import com.qiqi.mall.catalog.entity.Sku;
+import com.qiqi.mall.catalog.entity.SkuSpec;
+import com.qiqi.mall.catalog.service.AttributeService;
+import com.qiqi.mall.catalog.service.CategoryService;
+import com.qiqi.mall.catalog.service.ProductService;
+import com.qiqi.mall.catalog.service.SkuService;
+import com.qiqi.mall.catalog.service.SkuSpecService;
+import com.qiqi.mall.member.entity.Cart;
+import com.qiqi.mall.member.service.CartService;
+import com.qiqi.mall.order.entity.OrderItem;
+import com.qiqi.mall.oms.service.OrderItemService;
+import org.springframework.stereotype.Component;
+
+/**
+ * 商品模块删除前的引用检查。
+ *
+ * 为什么需要：5 个删除接口原来直接 removeById，被引用时数据库抛外键异常，
+ * 前端只能显示「数据处理失败」，用户不知道到底删不掉什么。这里在删除前把引用数查出来，
+ * 返回一句能看懂的中文原因（返回 null 表示可以删）。
+ *
+ * 口径（与业务确认过）：
+ * - 商品被订单明细引用时提示「改成下架」——历史订单必须能追溯，不能靠删商品解决；
+ * - 购物车里的引用不算硬约束（购物车是临时数据，删商品时顺手清掉更合理），
+ *   但这里仍提示，避免用户困惑；
+ * - SKU 的规格值（sku_spec）是自身明细，随 SKU 级联删除，不作为阻止条件；
+ * - 类型/分类的「子分类、属性、商品」都是硬引用，必须改名/迁移后才能删。
+ */
+@Component
+public class CatalogDeleteGuard {
+
+    private final AttributeService attributeService;
+    private final ProductService productService;
+    private final CategoryService categoryService;
+    private final SkuService skuService;
+    private final SkuSpecService skuSpecService;
+    private final OrderItemService orderItemService;
+    private final CartService cartService;
+
+    public CatalogDeleteGuard(AttributeService attributeService, ProductService productService,
+                              CategoryService categoryService, SkuService skuService,
+                              SkuSpecService skuSpecService, OrderItemService orderItemService,
+                              CartService cartService) {
+        this.attributeService = attributeService;
+        this.productService = productService;
+        this.categoryService = categoryService;
+        this.skuService = skuService;
+        this.skuSpecService = skuSpecService;
+        this.orderItemService = orderItemService;
+        this.cartService = cartService;
+    }
+
+    /** 商品类型：被「属性」「商品」引用 */
+    public String checkProductType(Long typeId) {
+        long attrs = attributeService.count(new LambdaQueryWrapper<Attribute>().eq(Attribute::getTypeId, typeId));
+        long products = productService.count(new LambdaQueryWrapper<Product>().eq(Product::getTypeId, typeId));
+        if (attrs > 0 || products > 0) {
+            return String.format("该类型下还有 %d 个属性 / %d 个商品，不能删除（请先迁移或删除它们）", attrs, products);
+        }
+        return null;
+    }
+
+    /** 属性：被「SKU 规格值」引用 */
+    public String checkAttribute(Long attributeId) {
+        long used = skuSpecService.count(new LambdaQueryWrapper<SkuSpec>().eq(SkuSpec::getAttributeId, attributeId));
+        if (used > 0) return String.format("该属性已被 %d 个 SKU 使用，不能删除", used);
+        return null;
+    }
+
+    /** 商品分类：被「子分类」「商品」引用 */
+    public String checkCategory(Long categoryId) {
+        long children = categoryService.count(new LambdaQueryWrapper<Category>().eq(Category::getParentId, categoryId));
+        long products = productService.count(new LambdaQueryWrapper<Product>().eq(Product::getCategoryId, categoryId));
+        if (children > 0 || products > 0) {
+            return String.format("该分类下还有 %d 个子分类 / %d 个商品，不能删除", children, products);
+        }
+        return null;
+    }
+
+    /** 商品：被「订单明细」「购物车」引用；有订单时建议改为下架 */
+    public String checkProduct(Long productId) {
+        long orderItems = orderItemService.count(new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getProductId, productId));
+        if (orderItems > 0) {
+            return String.format("该商品已被 %d 条订单明细引用，不能删除（可改为下架）", orderItems);
+        }
+        long carts = cartService.count(new LambdaQueryWrapper<Cart>().eq(Cart::getProductId, productId));
+        if (carts > 0) {
+            return String.format("该商品还在 %d 个买家的购物车里，不能删除（可改为下架）", carts);
+        }
+        return null;
+    }
+
+    /** SKU：被「订单明细」「购物车」引用（规格值随 SKU 级联，不算引用） */
+    public String checkSku(Long skuId) {
+        long orderItems = orderItemService.count(new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getProductSkuId, skuId));
+        if (orderItems > 0) return String.format("该规格已被 %d 条订单明细引用，不能删除", orderItems);
+        long carts = cartService.count(new LambdaQueryWrapper<Cart>().eq(Cart::getProductSkuId, skuId));
+        if (carts > 0) return String.format("该规格还在 %d 个买家的购物车里，不能删除", carts);
+        return null;
+    }
+
+    /** 商品下是否还有 SKU（删商品时一并提示，避免误删有规格的商品） */
+    public long countSkusOfProduct(Long productId) {
+        return skuService.count(new LambdaQueryWrapper<Sku>().eq(Sku::getProductId, productId));
+    }
+}

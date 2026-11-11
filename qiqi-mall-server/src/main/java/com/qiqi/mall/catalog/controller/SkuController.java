@@ -2,6 +2,7 @@ package com.qiqi.mall.catalog.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.CatalogDeleteGuard;
 import com.qiqi.mall.catalog.entity.Attribute;
 import com.qiqi.mall.catalog.entity.Product;
 import com.qiqi.mall.catalog.entity.Sku;
@@ -25,18 +26,21 @@ import java.util.Map;
 public class SkuController {
 
     private final SkuService skuService;
+    private final CatalogDeleteGuard deleteGuard;
     private final SkuSpecService skuSpecService;
     private final AttributeService attributeService;
     private final ProductService productService;
     private final SpecTextHelper specTextHelper;
 
     public SkuController(SkuService skuService, SkuSpecService skuSpecService, AttributeService attributeService,
-                         ProductService productService, SpecTextHelper specTextHelper) {
+                         ProductService productService, SpecTextHelper specTextHelper,
+                         CatalogDeleteGuard deleteGuard) {
         this.skuService = skuService;
         this.skuSpecService = skuSpecService;
         this.attributeService = attributeService;
         this.productService = productService;
         this.specTextHelper = specTextHelper;
+        this.deleteGuard = deleteGuard;
     }
 
     /** 列表：带规格文本，可按商品过滤 */
@@ -97,8 +101,11 @@ public class SkuController {
         return Result.ok();
     }
 
+    /** 删除 SKU：被订单明细 / 购物车引用时不允许删 */
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
+        String blocked = deleteGuard.checkSku(id);
+        if (blocked != null) return Result.fail(blocked);
         skuService.removeById(id);
         return Result.ok();
     }
