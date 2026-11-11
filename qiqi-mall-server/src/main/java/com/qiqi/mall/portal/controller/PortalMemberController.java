@@ -1,12 +1,14 @@
 package com.qiqi.mall.portal.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.member.entity.Member;
 import com.qiqi.mall.member.entity.MemberAddress;
 import com.qiqi.mall.shared.security.CurrentUser;
 import com.qiqi.mall.member.service.MemberAddressService;
 import com.qiqi.mall.member.service.MemberService;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -37,29 +39,70 @@ public class PortalMemberController {
                 .orderByAsc(MemberAddress::getId)));
     }
 
+    /**
+     * 新增地址。
+     * 业务口径：一个账号最多一条默认地址 —— 入参要设默认时，先清掉该会员其它地址的默认标记。
+     */
     @PostMapping("/addresses")
+    @Transactional(rollbackFor = Exception.class)
     public Result<MemberAddress> addAddress(@RequestBody MemberAddress body) {
+        Long memberId = CurrentUser.id();
         body.setId(null);
-        body.setMemberId(CurrentUser.id());
+        body.setMemberId(memberId);
+        if (Integer.valueOf(1).equals(body.getDefaultStatus())) {
+            clearOtherDefault(memberId, null);
+        }
         memberAddressService.save(body);
         return Result.ok(body);
     }
 
+    /** 编辑地址：同样保证「设默认就取消原默认」 */
     @PutMapping("/addresses/{id}")
+    @Transactional(rollbackFor = Exception.class)
     public Result<Void> updateAddress(@PathVariable Long id, @RequestBody MemberAddress body) {
         MemberAddress exist = memberAddressService.getById(id);
         if (exist == null || !exist.getMemberId().equals(CurrentUser.id())) return Result.fail("地址不存在");
+        Long memberId = CurrentUser.id();
         body.setId(id);
-        body.setMemberId(CurrentUser.id());
+        body.setMemberId(memberId);
+        if (Integer.valueOf(1).equals(body.getDefaultStatus())) {
+            clearOtherDefault(memberId, id);
+        }
         memberAddressService.updateById(body);
         return Result.ok();
     }
 
+    /**
+     * 删除地址。
+     * 业务口径：有地址就一定有默认 —— 删掉的正好是默认地址且还有其它地址时，
+     * 自动把最早创建（id 最小）的那条提升为默认；删光则保持无默认。
+     */
     @DeleteMapping("/addresses/{id}")
+    @Transactional(rollbackFor = Exception.class)
     public Result<Void> deleteAddress(@PathVariable Long id) {
         MemberAddress exist = memberAddressService.getById(id);
         if (exist == null || !exist.getMemberId().equals(CurrentUser.id())) return Result.fail("地址不存在");
+        Long memberId = CurrentUser.id();
+        boolean wasDefault = Integer.valueOf(1).equals(exist.getDefaultStatus());
         memberAddressService.removeById(id);
+        if (wasDefault) {
+            MemberAddress oldest = memberAddressService.getOne(new LambdaQueryWrapper<MemberAddress>()
+                    .eq(MemberAddress::getMemberId, memberId)
+                    .orderByAsc(MemberAddress::getId)
+                    .last("limit 1"), false);
+            if (oldest != null) {
+                oldest.setDefaultStatus(1);
+                memberAddressService.updateById(oldest);
+            }
+        }
         return Result.ok();
+    }
+
+    /** 把该会员其它地址的默认标记清零（exceptId 为当前正在设默认的地址，可为 null） */
+    private void clearOtherDefault(Long memberId, Long exceptId) {
+        memberAddressService.update(new LambdaUpdateWrapper<MemberAddress>()
+                .eq(MemberAddress::getMemberId, memberId)
+                .ne(exceptId != null, MemberAddress::getId, exceptId)
+                .set(MemberAddress::getDefaultStatus, 0));
     }
 }

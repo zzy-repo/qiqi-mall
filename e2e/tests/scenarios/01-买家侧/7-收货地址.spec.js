@@ -153,26 +153,63 @@ test.describe('买家侧 07 收货地址', () => {
     await expect(addressRowOf(page, saved[0].name.slice(0, 10))).toBeVisible()
   })
 
-  /**
-   * 【已知缺陷 · 期望失败】一个账号只应有一条默认地址。
-   * 现状：PortalMemberController 的 addAddress/updateAddress 直接保存 body，
-   * 没有「清掉其它默认」的逻辑（见 qiqi-mall-server/.../PortalMemberController.java:40-56），
-   * 所以连续把两条都设为默认，库里会出现两条 default_status=1。
-   * 这里用 test.fail() 把期望行为钉住：等后端补上唯一默认逻辑，这条会自动转为需要通过
-   * （届时应删掉 test.fail()）。
-   */
-  test.fail('设默认时应取消原默认地址（当前实现未做到，见报告）', async ({ page, request }) => {
+  test('设默认时取消原默认：一个账号只留一条默认地址', async ({ page, request }) => {
     await newMember(page, 'default')
     await openAddresses(page)
 
     await addAddress(page, { ...ADDR_A, isDefault: true })
-    await addAddress(page, { ...ADDR_B, isDefault: true })
+    await expect.poll(() => isDefaultAddress(page, ADDR_A.name), { timeout: 10_000 }).toBe(true)
 
-    expect(await isDefaultAddress(page, ADDR_B.name), 'B 应成为默认').toBe(true)
-    expect(await isDefaultAddress(page, ADDR_A.name), 'A 的原默认应被取消').toBe(false)
+    // 第二条也设默认 → 第一条的默认必须被取消
+    await addAddress(page, { ...ADDR_B, isDefault: true })
+    await expect.poll(() => isDefaultAddress(page, ADDR_B.name), {
+      message: 'B 应成为默认', timeout: 10_000
+    }).toBe(true)
+    await expect.poll(() => isDefaultAddress(page, ADDR_A.name), {
+      message: 'A 的原默认应被取消', timeout: 10_000
+    }).toBe(false)
 
     const token = await memberTokenOf(page)
     const saved = await getMemberAddressesApi(request, token)
-    expect(saved.filter((a) => a.defaultStatus === 1).length, '只应有 1 条默认地址').toBe(1)
+    expect(saved.filter((a) => a.defaultStatus === 1).length, '库里只应有 1 条默认地址').toBe(1)
+    expect(saved.find((a) => a.defaultStatus === 1).name).toBe(ADDR_B.name)
+
+    // 再把 A 改回默认，验证「编辑」路径同样会取消 B 的默认
+    await editAddress(page, ADDR_A.name, { detail: ADDR_A.detail, isDefault: true })
+    await expect.poll(() => isDefaultAddress(page, ADDR_A.name), { timeout: 10_000 }).toBe(true)
+    await expect.poll(() => isDefaultAddress(page, ADDR_B.name), {
+      message: '编辑时设默认也要取消 B 的默认', timeout: 10_000
+    }).toBe(false)
+  })
+
+  test('删除默认地址：剩下的最早一条自动补位；删光则不报错', async ({ page, request }) => {
+    await newMember(page, 'deldefault')
+    await openAddresses(page)
+    const token = await memberTokenOf(page)
+
+    // 三条地址，把中间那条设为默认
+    await addAddress(page, ADDR_A)
+    await addAddress(page, { ...ADDR_B, isDefault: true })
+    await addAddress(page, {
+      name: '赵六', phone: '13700004444', province: '北京市', city: '北京市', region: '朝阳区', detail: '建国路 88 号'
+    })
+    await expect.poll(() => isDefaultAddress(page, ADDR_B.name), { timeout: 10_000 }).toBe(true)
+
+    // 删掉默认地址 → 剩下 id 最小的那条自动成为默认
+    await deleteAddress(page, ADDR_B.name)
+    await expect.poll(() => isDefaultAddress(page, ADDR_A.name), {
+      message: '删掉默认地址后，最早创建的那条应自动成为默认', timeout: 10_000
+    }).toBe(true)
+    let saved = await getMemberAddressesApi(request, token)
+    expect(saved.length).toBe(2)
+    expect(saved.filter((a) => a.defaultStatus === 1).length, '补位后仍只有 1 条默认').toBe(1)
+    expect(saved.find((a) => a.defaultStatus === 1).name).toBe(ADDR_A.name)
+
+    // 把剩下的全删光 → 无默认且不报错
+    await deleteAddress(page, ADDR_A.name)
+    await deleteAddress(page, '赵六')
+    await expect(page.locator('.el-table__body tr'), '地址应全部删除').toHaveCount(0)
+    saved = await getMemberAddressesApi(request, token)
+    expect(saved.length, '服务端应为空').toBe(0)
   })
 })
