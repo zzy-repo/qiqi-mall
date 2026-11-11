@@ -9,7 +9,7 @@
     "test": "playwright test",
     "report": "playwright show-report report/html",
     "predemo": "node scripts/precheck-env.mjs --strict",
-    "demo": "DEMO=1 PORTAL_BASE=http://127.0.0.1:5174 ADMIN_BASE=http://127.0.0.1:5176 API_BASE=http://127.0.0.1:18080 playwright test",
+    "demo": "bash ../scripts/demo-run.sh",
     "demo:collect": "node scripts/collect-demo.mjs"
   },
   "devDependencies": {

@@ -93,6 +93,8 @@ npm run dev
 cd qiqi-mall-server && mvn -o compile
 ```
 
+⚠️ **新增 Maven 依赖后，dev 8081 必须整进程重启**（`mvn compile` 触发的 devtools 热重启救不了：JVM classpath 是启动时固定的，新依赖的类加载不到，会 `NoClassDefFoundError` 把服务带下去）。此时杀掉 8081 进程重新 `mvn spring-boot:run` 即可；e2e 后端（8091/8092）还要重跑 `scripts/e2e-classpath.sh` 刷新 `target/e2e-cp.txt`。
+
 ## 部署（容器）
 
 镜像多阶段构建，只对外暴露前端端口，详见 `docs/docker.md`。
