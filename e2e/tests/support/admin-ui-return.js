@@ -16,6 +16,7 @@
 import { expect } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { API, ADMIN, PORTAL } from './env.js'
+import { returnDescriptionOf } from './fixtures.js'
 import { adminLogin } from './ui.js'
 
 // ---------------------------------------------------------------------------
@@ -151,7 +152,7 @@ export const memberAfterSaleTextOf = async (row) => {
  * 在「我的订单」里对某笔订单点「申请退货」并提交。
  * @returns 提交后该订单行 locator
  */
-export const memberApplyReturn = async (page, orderSn, { description = 'E2E：商品有划痕，申请退货' } = {}) => {
+export const memberApplyReturn = async (page, orderSn, { description = returnDescriptionOf(orderSn) } = {}) => {
   const row = await memberOrderRowOf(page, orderSn)
   await row.getByRole('button', { name: '申请退货' }).click()
   const dialog = page.locator('.el-dialog').filter({ hasText: '申请退货' })

@@ -94,7 +94,7 @@ async function prepareReturnRequest(page, request, { description } = {}) {
   })
 
   await test.step('② 新买家注册 → 加购一件 → 结算支付', async () => {
-    await memberRegisterAndLogin(page, username)
+    await memberRegisterAndLogin(page, username, '123456', memberNickOf(username))   // 顶栏/会员列表显示的都是中文昵称
     memberToken = await memberTokenOf(page)
     const { skus } = await getProductApi(request, 1)
     skuId = skus[0].id
