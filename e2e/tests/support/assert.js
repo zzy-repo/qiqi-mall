@@ -40,6 +40,25 @@ export async function getAdminProductsApi(request, token, name) {
   return name ? list.filter((p) => p.name === name) : list
 }
 
+/** 后台商品类型列表 */
+export async function getAdminProductTypesApi(request, token) {
+  const res = await request.get(`${API}/admin/product-types`, auth(token))
+  return (await res.json()).data || []
+}
+
+/** 后台属性列表（可选按类型过滤） */
+export async function getAdminAttributesApi(request, token, typeId) {
+  const url = typeId ? `${API}/admin/attributes?typeId=${typeId}` : `${API}/admin/attributes`
+  const res = await request.get(url, auth(token))
+  return (await res.json()).data || []
+}
+
+/** 后台分类树（扁平列表） */
+export async function getAdminCategoriesApi(request, token) {
+  const res = await request.get(`${API}/admin/categories`, auth(token))
+  return (await res.json()).data || []
+}
+
 /** 后台某商品的 SKU 列表 */
 export async function getAdminSkusApi(request, token, productId) {
   const res = await request.get(`${API}/admin/skus?productId=${productId}`, auth(token))
