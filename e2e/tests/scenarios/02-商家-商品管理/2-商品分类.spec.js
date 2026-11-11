@@ -11,6 +11,7 @@ import {
   productRowOf
 } from '../../support/catalog-ui.js'
 import { adminTokenOf, getAdminCategoriesApi } from '../../support/assert.js'
+import { tid } from '../../support/tid.js'
 
 /**
  * 商家侧 02-商品管理 / 2-商品分类
@@ -62,12 +63,12 @@ test.describe('商家侧 2 商品分类', () => {
   test('必填校验：分类名称不填不让保存', async ({ page }) => {
     await adminLogin(page)
     await openCategories(page)
-    await page.getByRole('button', { name: '新增' }).click()
-    const dialog = page.locator('.el-dialog')
+    await tid(page, 'category-create').click()
+    const dialog = tid(page, 'category-form-dialog')
     await expect(dialog).toBeVisible()
-    await dialog.getByRole('button', { name: '确定' }).click()
+    await tid(page, 'category-form-submit').click()
     await expect(dialog.locator('.el-form-item__error').filter({ hasText: '请输入分类名称' })).toBeVisible()
-    await dialog.getByRole('button', { name: '取消' }).click()
+    await tid(page, 'category-form-cancel').click()
   })
 
   test('父分类可被商品直接使用（check-strictly 回归）', async ({ page, request }) => {
@@ -92,12 +93,24 @@ test.describe('商家侧 2 商品分类', () => {
     expect(saved.categoryId, '商品应能挂到父分类上').toBe(parentId)
   })
 
-  test('【已知缺口】分类没有删除入口：后台只提供新增与编辑', async ({ page }) => {
+  test('删除分类：有子分类/商品时被拒，空分类可删', async ({ page, request }) => {
     await adminLogin(page)
+    const token = await adminTokenOf(page)
     await openCategories(page)
-    const row = page.locator('.el-table__body tr').first()
-    await expect(row).toBeVisible()
-    await expect(row.getByRole('button', { name: '编辑' })).toBeVisible()
-    await expect(row.getByRole('button', { name: '删除' }), '当前后台没有删除分类的入口').toHaveCount(0)
+
+    // ① 有引用的分类（种子根分类「手机数码」下有子分类与商品）
+    await categoryRowOf(page, '手机数码').getByTestId('category-row-delete').click()
+    await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
+    await expect(page.locator('.el-message--error').first(), '有子分类/商品的分类应被拒绝').toContainText('不能删除', { timeout: 15_000 })
+    expect((await getAdminCategoriesApi(request, token)).find((c) => c.name === '手机数码')).toBeTruthy()
+
+    // ② 新建的空分类 → 可以删
+    const empty = `E2E待删分类${stamp()}`
+    await addCategory(page, empty)
+    await categoryRowOf(page, empty).getByTestId('category-row-delete').click()
+    await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
+    await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
+    await page.waitForTimeout(800)
+    expect((await getAdminCategoriesApi(request, token)).find((c) => c.name === empty), '空分类应被删除').toBeFalsy()
   })
 })

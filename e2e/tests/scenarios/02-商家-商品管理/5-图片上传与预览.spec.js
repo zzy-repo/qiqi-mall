@@ -191,7 +191,7 @@ test.describe('商家侧 5 图片上传与预览', () => {
     }
   })
 
-  test('SKU 图：列表缩略图真实渲染；并钉住「切规格主图不跟着变」的现状', async ({ page, request }) => {
+  test('SKU 图：列表缩略图渲染，且 C 端切规格时主图跟着换、没配图的规格回退商品主图', async ({ page, request }) => {
     const png = writeTempPng()
     try {
       await adminLogin(page)
@@ -201,7 +201,7 @@ test.describe('商家侧 5 图片上传与预览', () => {
       await addProduct(page, { name, categoryName: '手机数码', typeName: '手机' })
       const product = (await getAdminProductsApi(request, token, name))[0]
 
-      // 主图 + SKU 图分别上传
+      // 商品主图（回退用的底图）
       await page.getByRole('button', { name: '新增' }).waitFor()
       await page.locator('.el-table__body tr').filter({ hasText: name }).first()
         .getByRole('button', { name: '编辑' }).click()
@@ -211,19 +211,21 @@ test.describe('商家侧 5 图片上传与预览', () => {
       await dialog.getByRole('button', { name: '确定' }).click()
       await page.waitForTimeout(1000)
 
-      // 两个 SKU，各自一张图
+      // 两个 SKU：第一个配图，第二个**不配图**（用来验回退）
       await openProducts(page)
       await page.locator('.el-table__body tr').filter({ hasText: name }).first()
         .getByRole('button', { name: 'SKU' }).click()
       await page.waitForURL(/\/product\/\d+\/skus/, { timeout: 15_000 })
       await page.waitForTimeout(1000)
-      const skuPics = []
+      let skuPicUrl = ''
       for (const [idx, value] of ['黑色款', '白色款'].entries()) {
         await page.getByRole('button', { name: '新增 SKU' }).click()
         dialog = page.locator('.el-dialog')
         await expect(dialog).toBeVisible()
-        await uploadIn(page, formItemOf(page, 'SKU 图片'), png)
-        skuPics.push(await formItemOf(page, 'SKU 图片').locator('input[type="text"]').inputValue())
+        if (idx === 0) {
+          await uploadIn(page, formItemOf(page, 'SKU 图片'), png)
+          skuPicUrl = await formItemOf(page, 'SKU 图片').locator('input[type="text"]').inputValue()
+        }
         await page.getByRole('button', { name: '添加规格值' }).click()
         await page.waitForTimeout(300)
         const specRow = page.locator('.spec-row').first()
@@ -237,24 +239,29 @@ test.describe('商家侧 5 图片上传与预览', () => {
         await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
         await page.waitForTimeout(1000)
       }
-      expect(new Set(skuPics).size, '两个 SKU 的图应是两份不同对象').toBe(2)
+      expect(skuPicUrl, '第一个 SKU 应有图').toMatch(/^\/qiqi-mall\//)
 
       // 后台 SKU 列表缩略图真实渲染
       await expect(page.locator('.el-table__body tr'), '应有 2 个 SKU').toHaveCount(2)
       await expectAllImagesLoaded(page.locator('.el-table__body tr img'), 'SKU 列表缩略图')
 
-      // C 端：切规格时主图**不会**跟着 SKU 图变（现状：详情页主图只绑 product.pic）
+      // C 端：切到配了图的规格 → 主图变成 SKU 图；切到没配图的规格 → 回退商品主图
       await page.goto(`${PORTAL}/product/${product.id}`)
       await page.waitForTimeout(1500)
       const specs = page.locator('.el-radio-group .el-radio-button')
       await expect(specs, '应有两个规格按钮').toHaveCount(2)
-      const coverBefore = await page.locator('.thumb img').getAttribute('src')
+
+      await specs.nth(0).click()
+      await page.waitForTimeout(500)
+      const coverOfSku1 = await page.locator('.thumb img').getAttribute('src')
+      expect(coverOfSku1, '选中有图的规格时主图应是该 SKU 的图').toContain(skuPicUrl)
+
       await specs.nth(1).click()
       await page.waitForTimeout(500)
-      const coverAfter = await page.locator('.thumb img').getAttribute('src')
-      expect(coverBefore, '主图仍是商品主图').toContain(coverUrl)
-      expect(coverAfter, '【现状】切换规格不会换主图（详情页只绑 product.pic）').toBe(coverBefore)
-      expect(skuPics, 'SKU 图确实存在（只是详情页没拿来展示）').not.toContain(coverAfter)
+      const coverOfSku2 = await page.locator('.thumb img').getAttribute('src')
+      expect(coverOfSku2, '选中没配图的规格时应回退到商品主图').toContain(coverUrl)
+
+      await expectImageLoaded(page.locator('.thumb img'), '切换后的主图真实加载')
     } finally {
       cleanupTempImages()
     }

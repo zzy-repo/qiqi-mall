@@ -9,6 +9,7 @@ import {
 } from '../../support/catalog-ui.js'
 import { writeTempPng, cleanupTempImages, uploadImageApi, expectImageLoaded } from '../../support/images.js'
 import { adminTokenOf, getAdminProductsApi, getProductApi } from '../../support/assert.js'
+import { tid } from '../../support/tid.js'
 
 /**
  * 商家侧 02-商品管理 / 3-商品维护
@@ -32,27 +33,29 @@ test.describe('商家侧 3 商品维护', () => {
       const name = `E2E维护商品${stamp()}`
       const desc = 'E2E 商品描述：用于验证后台新增与编辑链路。'
       await openProducts(page)
-      await page.getByRole('button', { name: '新增' }).click()
-      const dialog = page.locator('.el-dialog')
+      await tid(page, 'product-list-create').click()
+      const dialog = tid(page, 'product-form-dialog')
       await expect(dialog).toBeVisible()
-      await dialog.locator('.el-form-item').filter({ hasText: '商品名称' }).locator('input').fill(name)
-      await dialog.locator('.el-form-item').filter({ hasText: '商品描述' }).locator('textarea').fill(desc)
+      await tid(page, 'product-form-name').fill(name)
+      await tid(page, 'product-form-description').fill(desc)
       // 分类 / 类型
-      await dialog.locator('.el-form-item').filter({ hasText: '分类' }).locator('.el-select__wrapper').click()
+      await tid(page, 'product-form-category').first().click()
       await page.waitForTimeout(400)
       await page.locator('.el-tree-select__popper:visible li.el-select-dropdown__item').first().click()
-      await dialog.locator('.el-form-item').filter({ hasText: '类型' }).locator('.el-select__wrapper').click()
+      await tid(page, 'product-form-type').first().click()
       await page.waitForTimeout(400)
       await page.locator('.el-select-dropdown__item:visible').first().click()
       // 主图 + 两张相册（排序 1 / 2）
-      await dialog.locator('.el-form-item').filter({ hasText: '主图' }).locator('input[type="text"]').fill(cover)
-      await expectImageLoaded(dialog.locator('.el-form-item').filter({ hasText: '主图' }).locator('.preview img'), '主图预览')
-      await page.getByRole('button', { name: '添加图片' }).click()
-      await page.locator('.gallery-row').first().locator('input[type="text"]').fill(g1)
-      await page.getByRole('button', { name: '添加图片' }).click()
-      await page.locator('.gallery-row').nth(1).locator('input[type="text"]').fill(g2)
-      await page.locator('.gallery-row').nth(1).locator('.el-input-number input').fill('2')
-      await dialog.getByRole('button', { name: '确定' }).click()
+      await tid(page, 'product-form-cover').locator('input[type="text"]').fill(cover)
+      await expectImageLoaded(tid(page, 'product-form-cover').locator('.preview img'), '主图预览')
+      await tid(page, 'product-form-gallery-add').click()
+      await tid(page, 'product-form-gallery-row').first().getByTestId('product-form-gallery-url')
+        .locator('input[type="text"]').fill(g1)
+      await tid(page, 'product-form-gallery-add').click()
+      await tid(page, 'product-form-gallery-row').nth(1).getByTestId('product-form-gallery-url')
+        .locator('input[type="text"]').fill(g2)
+      await tid(page, 'product-form-gallery-row').nth(1).getByTestId('product-form-gallery-sort').locator('input').fill('2')
+      await tid(page, 'product-form-submit').click()
       await expect(page.locator('.el-message--success').first(), '新增商品应成功').toBeVisible({ timeout: 15_000 })
       await page.waitForTimeout(1000)
       await expect(productRowOf(page, name), '列表应出现新商品').toBeVisible()
@@ -72,20 +75,20 @@ test.describe('商家侧 3 商品维护', () => {
       // C 端详情能看到（在架 + 图片真实加载）
       await page.goto(`${PORTAL}/product/${saved.id}`)
       await page.waitForTimeout(1200)
-      await expect(page.locator('h2')).toContainText(name)
-      await expect(page.locator('.desc-text')).toContainText(desc)
-      await expectImageLoaded(page.locator('.thumb img'), 'C 端主图')
+      await expect(tid(page, 'product-detail-name')).toContainText(name)
+      await expect(tid(page, 'product-detail-desc')).toContainText(desc)
+      await expectImageLoaded(tid(page, 'product-detail-cover').locator('img'), 'C 端主图')
 
       // ---------- 编辑：改名 + 改描述 ----------
       await openProducts(page)
       const newName = `${name}-改`
-      await page.getByRole('button', { name: '新增' }).waitFor() // 确保页面就绪
-      await productRowOf(page, name).getByRole('button', { name: '编辑' }).click()
-      const d2 = page.locator('.el-dialog')
+      await tid(page, 'product-list-create').waitFor() // 确保页面就绪
+      await productRowOf(page, name).getByTestId('product-row-edit').click()
+      const d2 = tid(page, 'product-form-dialog')
       await expect(d2).toBeVisible()
-      await d2.locator('.el-form-item').filter({ hasText: '商品名称' }).locator('input').fill(newName)
-      await d2.locator('.el-form-item').filter({ hasText: '商品描述' }).locator('textarea').fill(desc + '（已改）')
-      await d2.getByRole('button', { name: '确定' }).click()
+      await tid(page, 'product-form-name').fill(newName)
+      await tid(page, 'product-form-description').fill(desc + '（已改）')
+      await tid(page, 'product-form-submit').click()
       await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
       await page.waitForTimeout(1000)
       const edited = (await getAdminProductsApi(request, token, newName))[0]
@@ -105,11 +108,10 @@ test.describe('商家侧 3 商品维护', () => {
       await openProducts(page)
       await addProduct(page, { name, categoryName: '手机数码', typeName: '手机' })
       // 补一张主图（新建时不带图也能建，这里补上便于 C 端可见性断言）
-      await page.getByRole('button', { name: '新增' }).waitFor()
-      await productRowOf(page, name).getByRole('button', { name: '编辑' }).click()
-      const dialog = page.locator('.el-dialog')
-      await dialog.locator('.el-form-item').filter({ hasText: '主图' }).locator('input[type="text"]').fill(cover)
-      await dialog.getByRole('button', { name: '确定' }).click()
+      await tid(page, 'product-list-create').waitFor()
+      await productRowOf(page, name).getByTestId('product-row-edit').click()
+      await tid(page, 'product-form-cover').locator('input[type="text"]').fill(cover)
+      await tid(page, 'product-form-submit').click()
       await page.waitForTimeout(1200)
 
       // 下架
@@ -122,7 +124,7 @@ test.describe('商家侧 3 商品维护', () => {
       // C 端：列表没有、详情被拒
       await page.goto(`${PORTAL}/`)
       await page.waitForTimeout(1200)
-      await expect(page.locator('.grid'), 'C 端首页不应出现下架商品').not.toContainText(name)
+      await expect(tid(page, 'home-product-grid'), 'C 端首页不应出现下架商品').not.toContainText(name)
       await page.goto(`${PORTAL}/product/${saved.id}`)
       await page.waitForTimeout(1200)
       await expect(page.locator('.el-message--error, .el-alert').first()).toContainText('商品不存在或已下架', { timeout: 10_000 })
@@ -139,13 +141,40 @@ test.describe('商家侧 3 商品维护', () => {
     }
   })
 
-  test('【已知缺口】商品没有删除入口：后台只提供编辑与 SKU 入口', async ({ page }) => {
+  test('删除商品：被订单引用时被拒并提示改为下架，无引用可删', async ({ page, request }) => {
     await adminLogin(page)
+    const token = await adminTokenOf(page)
     await openProducts(page)
-    const row = page.locator('.el-table__body tr').first()
-    await expect(row).toBeVisible()
-    await expect(row.getByRole('button', { name: '编辑' })).toBeVisible()
-    await expect(row.getByRole('button', { name: 'SKU' })).toBeVisible()
-    await expect(row.getByRole('button', { name: '删除' }), '当前后台没有删除商品的入口').toHaveCount(0)
+
+    // ① 被订单明细引用的商品（种子商品1）→ 被拒，且提示可改为下架
+    const usedRow = page.locator('.el-table__body tr').filter({ hasText: '七七 Pro 15 智能手机' }).first()
+    await expect(usedRow).toBeVisible()
+    await usedRow.getByTestId('product-row-delete').click()
+    await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
+    const errText = page.locator('.el-message--error').first()
+    await expect(errText, '被订单引用的商品应被拒绝').toContainText('不能删除', { timeout: 15_000 })
+    await expect(errText).toContainText('下架')
+    expect((await getAdminProductsApi(request, token, '七七 Pro 15 智能手机')).length, '商品应仍存在').toBe(1)
+
+    // ② 新建的空商品 → 可以删
+    const empty = `E2E待删商品${stamp()}`
+    await page.getByRole('button', { name: '新增' }).click()
+    const dialog = page.locator('.el-dialog')
+    await dialog.getByTestId('product-form-name').fill(empty)
+    await dialog.locator('.el-form-item').filter({ hasText: '分类' }).locator('.el-select__wrapper').click()
+    await page.waitForTimeout(400)
+    await page.locator('.el-tree-select__popper:visible li.el-select-dropdown__item').first().click()
+    await dialog.locator('.el-form-item').filter({ hasText: '类型' }).locator('.el-select__wrapper').click()
+    await page.waitForTimeout(400)
+    await page.locator('.el-select-dropdown__item:visible').first().click()
+    await dialog.getByTestId('product-form-submit').click()
+    await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
+    await page.waitForTimeout(1000)
+
+    await page.locator('.el-table__body tr').filter({ hasText: empty }).first().getByTestId('product-row-delete').click()
+    await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
+    await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
+    await page.waitForTimeout(800)
+    expect((await getAdminProductsApi(request, token, empty)).length, '空商品应被删除').toBe(0)
   })
 })

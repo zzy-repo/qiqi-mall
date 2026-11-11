@@ -29,6 +29,16 @@
         <el-form-item label="登录名" prop="username">
           <el-input v-model="form.username" data-testid="admin-form-username" maxlength="50" />
         </el-form-item>
+        <el-form-item label="密码" prop="password">
+          <el-input
+            v-model="form.password"
+            data-testid="admin-form-password"
+            type="password"
+            show-password
+            maxlength="50"
+            :placeholder="form.id ? '留空表示不修改密码' : '新增管理员必须设置密码'"
+          />
+        </el-form-item>
         <el-form-item label="昵称">
           <el-input v-model="form.nickname" data-testid="admin-form-nickname" maxlength="50" />
         </el-form-item>
@@ -48,7 +58,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { listAdmins, createAdmin, updateAdmin } from '../../api/admin'
@@ -70,14 +80,19 @@ const load = async () => {
 const visible = ref(false)
 const saving = ref(false)
 const formRef = ref()
-const form = reactive({ id: null, username: '', nickname: '', email: '', status: 1 })
+const form = reactive({ id: null, username: '', password: '', nickname: '', email: '', status: 1 })
 
-const rules = {
-  username: [{ required: true, message: '请输入登录名', trigger: 'blur' }]
-}
+const rules = computed(() => ({
+  username: [{ required: true, message: '请输入登录名', trigger: 'blur' }],
+  // 新增必须填密码；编辑时留空表示不修改
+  password: form.id ? [] : [{ required: true, message: '请输入密码', trigger: 'blur' }]
+}))
 
 const openForm = (row) => {
-  Object.assign(form, row ? { ...row } : { id: null, username: '', nickname: '', email: '', status: 1 })
+  // 编辑时不要把后端返回的密码/hash 带进表单，留空即「不修改」
+  Object.assign(form, row
+    ? { id: row.id, username: row.username, password: '', nickname: row.nickname, email: row.email, status: row.status }
+    : { id: null, username: '', password: '', nickname: '', email: '', status: 1 })
   visible.value = true
   formRef.value?.clearValidate()
 }
@@ -87,8 +102,16 @@ const submit = async () => {
   if (!valid) return
   saving.value = true
   try {
-    if (form.id) await updateAdmin(form.id, form)
-    else await createAdmin(form)
+    const payload = {
+      username: form.username,
+      nickname: form.nickname,
+      email: form.email,
+      status: form.status
+    }
+    // 密码：新增必传；编辑时为空则不传（后端据此不改密码）
+    if (form.password) payload.password = form.password
+    if (form.id) await updateAdmin(form.id, payload)
+    else await createAdmin(payload)
     ElMessage.success('保存成功')
     visible.value = false
     await load()

@@ -8,6 +8,7 @@
  */
 import { expect } from '@playwright/test'
 import { ADMIN } from './env.js'
+import { tid } from './tid.js'
 
 // ---------------------------------------------------------------------------
 // 商品类型
@@ -24,11 +25,11 @@ export const typeRowOf = (page, name) =>
 
 /** 新增类型 */
 export async function addProductType(page, name) {
-  await page.getByRole('button', { name: '新增' }).click()
-  const dialog = page.locator('.el-dialog')
+  await tid(page, 'product-type-create').click()
+  const dialog = tid(page, 'product-type-form-dialog')
   await expect(dialog).toBeVisible()
-  await dialog.locator('.el-form-item').filter({ hasText: '类型名称' }).locator('input').fill(name)
-  await dialog.getByRole('button', { name: '确定' }).click()
+  await tid(page, 'product-type-form-name').fill(name)
+  await tid(page, 'product-type-form-submit').click()
   await expect(page.locator('.el-message--success').first(), '新增类型应成功').toBeVisible({ timeout: 15_000 })
   await page.waitForTimeout(800)
   await expect(typeRowOf(page, name), `列表应出现类型「${name}」`).toBeVisible()
@@ -36,12 +37,11 @@ export async function addProductType(page, name) {
 
 /** 编辑类型名称 */
 export async function renameProductType(page, from, to) {
-  await typeRowOf(page, from).getByRole('button', { name: '编辑' }).click()
-  const dialog = page.locator('.el-dialog')
+  await typeRowOf(page, from).getByTestId('product-type-row-edit').click()
+  const dialog = tid(page, 'product-type-form-dialog')
   await expect(dialog).toBeVisible()
-  const input = dialog.locator('.el-form-item').filter({ hasText: '类型名称' }).locator('input')
-  await input.fill(to)
-  await dialog.getByRole('button', { name: '确定' }).click()
+  await tid(page, 'product-type-form-name').fill(to)
+  await tid(page, 'product-type-form-submit').click()
   await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
   await page.waitForTimeout(800)
   await expect(typeRowOf(page, to), `列表应显示新名称「${to}」`).toBeVisible()
@@ -49,7 +49,7 @@ export async function renameProductType(page, from, to) {
 
 /** 进入该类型的属性页 */
 export async function openAttributesOf(page, typeName) {
-  await typeRowOf(page, typeName).getByRole('button', { name: '属性' }).click()
+  await typeRowOf(page, typeName).getByTestId('product-type-row-attributes').click()
   await page.waitForURL(/\/product-type\/\d+\/attributes/, { timeout: 15_000 })
   await page.waitForTimeout(1000)
   await expect(page.locator('.card-header')).toContainText('属性管理')
@@ -64,16 +64,16 @@ export const attrRowOf = (page, name) =>
 
 /** 新增属性（可选 isFilter） */
 export async function addAttribute(page, name, isFilter = false) {
-  await page.getByRole('button', { name: '新增属性' }).click()
-  const dialog = page.locator('.el-dialog')
+  await tid(page, 'attribute-create').click()
+  const dialog = tid(page, 'attribute-form-dialog')
   await expect(dialog).toBeVisible()
-  await dialog.locator('.el-form-item').filter({ hasText: '属性名称' }).locator('input').fill(name)
+  await tid(page, 'attribute-form-name').fill(name)
   if (isFilter) {
-    const sw = dialog.locator('.el-form-item').filter({ hasText: '是否可筛选' }).locator('.el-switch')
+    const sw = tid(page, 'attribute-form-filter')
     const on = await sw.evaluate((el) => el.classList.contains('is-checked'))
     if (!on) await sw.click()
   }
-  await dialog.getByRole('button', { name: '确定' }).click()
+  await tid(page, 'attribute-form-submit').click()
   await expect(page.locator('.el-message--success').first(), '新增属性应成功').toBeVisible({ timeout: 15_000 })
   await page.waitForTimeout(800)
   await expect(attrRowOf(page, name), `属性列表应出现「${name}」`).toBeVisible()
@@ -81,18 +81,18 @@ export async function addAttribute(page, name, isFilter = false) {
 
 /** 编辑属性（改名 / 切换是否可筛选） */
 export async function editAttribute(page, from, { name, isFilter } = {}) {
-  await attrRowOf(page, from).getByRole('button', { name: '编辑' }).click()
-  const dialog = page.locator('.el-dialog')
+  await attrRowOf(page, from).getByTestId('attribute-row-edit').click()
+  const dialog = tid(page, 'attribute-form-dialog')
   await expect(dialog).toBeVisible()
   if (name) {
-    await dialog.locator('.el-form-item').filter({ hasText: '属性名称' }).locator('input').fill(name)
+    await tid(page, 'attribute-form-name').fill(name)
   }
   if (typeof isFilter === 'boolean') {
-    const sw = dialog.locator('.el-form-item').filter({ hasText: '是否可筛选' }).locator('.el-switch')
+    const sw = tid(page, 'attribute-form-filter')
     const on = await sw.evaluate((el) => el.classList.contains('is-checked'))
     if (on !== isFilter) await sw.click()
   }
-  await dialog.getByRole('button', { name: '确定' }).click()
+  await tid(page, 'attribute-form-submit').click()
   await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
   await page.waitForTimeout(800)
 }
@@ -112,18 +112,19 @@ export const categoryRowOf = (page, name) =>
 
 /** 新增分类（parentName 为空 = 顶级） */
 export async function addCategory(page, name, parentName) {
-  await page.getByRole('button', { name: '新增' }).click()
-  const dialog = page.locator('.el-dialog')
+  await tid(page, 'category-create').click()
+  const dialog = tid(page, 'category-form-dialog')
   await expect(dialog).toBeVisible()
-  await dialog.locator('.el-form-item').filter({ hasText: '分类名称' }).locator('input').fill(name)
+  await tid(page, 'category-form-name').fill(name)
   if (parentName) {
-    await dialog.locator('.el-form-item').filter({ hasText: '父分类' }).locator('.el-select__wrapper').click()
+    // 树下拉的浮层节点没有 testid，按节点文本选（tid.js 未覆盖第 3 条）
+    await tid(page, 'category-form-parent').first().click()  // tree-select 有两个同名节点（含隐藏树）
     await page.waitForTimeout(400)
     const node = page.locator('.el-tree-select__popper:visible li.el-select-dropdown__item')
       .filter({ hasText: new RegExp(`^${parentName}$`) }).first()
     await node.click()
   }
-  await dialog.getByRole('button', { name: '确定' }).click()
+  await tid(page, 'category-form-submit').click()
   await expect(page.locator('.el-message--success').first(), '新增分类应成功').toBeVisible({ timeout: 15_000 })
   await page.waitForTimeout(800)
   await expect(categoryRowOf(page, name), `分类树应出现「${name}」`).toBeVisible()
@@ -131,11 +132,11 @@ export async function addCategory(page, name, parentName) {
 
 /** 改名分类 */
 export async function renameCategory(page, from, to) {
-  await categoryRowOf(page, from).getByRole('button', { name: '编辑' }).click()
-  const dialog = page.locator('.el-dialog')
+  await categoryRowOf(page, from).getByTestId('category-row-edit').click()
+  const dialog = tid(page, 'category-form-dialog')
   await expect(dialog).toBeVisible()
-  await dialog.locator('.el-form-item').filter({ hasText: '分类名称' }).locator('input').fill(to)
-  await dialog.getByRole('button', { name: '确定' }).click()
+  await tid(page, 'category-form-name').fill(to)
+  await tid(page, 'category-form-submit').click()
   await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
   await page.waitForTimeout(800)
   await expect(categoryRowOf(page, to)).toBeVisible()
@@ -156,23 +157,23 @@ export const productRowOf = (page, name) =>
 
 /** 新增商品（名称/分类/类型/可选描述） */
 export async function addProduct(page, { name, categoryName, typeName, description }) {
-  await page.getByRole('button', { name: '新增' }).click()
-  const dialog = page.locator('.el-dialog')
+  await tid(page, 'product-list-create').click()
+  const dialog = tid(page, 'product-form-dialog')
   await expect(dialog).toBeVisible()
-  await dialog.locator('.el-form-item').filter({ hasText: '商品名称' }).locator('input').fill(name)
+  await tid(page, 'product-form-name').fill(name)
   if (description) {
-    await dialog.locator('.el-form-item').filter({ hasText: '商品描述' }).locator('textarea').fill(description)
+    await tid(page, 'product-form-description').fill(description)
   }
   // 分类用树选择（父分类也可选，check-strictly 回归点）
-  await dialog.locator('.el-form-item').filter({ hasText: '分类' }).locator('.el-select__wrapper').click()
+  await tid(page, 'product-form-category').first().click()
   await page.waitForTimeout(400)
   await page.locator('.el-tree-select__popper:visible li.el-select-dropdown__item')
     .filter({ hasText: new RegExp(`^${categoryName}$`) }).first().click()
   // 类型
-  await dialog.locator('.el-form-item').filter({ hasText: '类型' }).locator('.el-select__wrapper').click()
+  await tid(page, 'product-form-type').first().click()
   await page.waitForTimeout(400)
   await page.locator('.el-select-dropdown__item:visible').filter({ hasText: typeName }).first().click()
-  await dialog.getByRole('button', { name: '确定' }).click()
+  await tid(page, 'product-form-submit').click()
   await expect(page.locator('.el-message--success').first(), '新增商品应成功').toBeVisible({ timeout: 15_000 })
   await page.waitForTimeout(1000)
   await expect(productRowOf(page, name), `商品列表应出现「${name}」`).toBeVisible()
@@ -180,25 +181,25 @@ export async function addProduct(page, { name, categoryName, typeName, descripti
 
 /** 编辑商品：改名 / 切换上下架 */
 export async function editProduct(page, currentName, { name, publish } = {}) {
-  await productRowOf(page, currentName).getByRole('button', { name: '编辑' }).click()
-  const dialog = page.locator('.el-dialog')
+  await productRowOf(page, currentName).getByTestId('product-row-edit').click()
+  const dialog = tid(page, 'product-form-dialog')
   await expect(dialog).toBeVisible()
   if (name) {
-    await dialog.locator('.el-form-item').filter({ hasText: '商品名称' }).locator('input').fill(name)
+    await tid(page, 'product-form-name').fill(name)
   }
   if (typeof publish === 'boolean') {
+    // 上下架是 el-radio-group（有 testid），单个 radio 选项没有 testid → 组内按文案选（未覆盖第 4/5 条同理）
     const label = publish ? '上架' : '下架'
-    await dialog.locator('.el-form-item').filter({ hasText: '上下架' })
-      .locator('.el-radio').filter({ hasText: label }).first().click()
+    await tid(page, 'product-form-publish').locator('.el-radio').filter({ hasText: label }).first().click()
   }
-  await dialog.getByRole('button', { name: '确定' }).click()
+  await tid(page, 'product-form-submit').click()
   await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
   await page.waitForTimeout(1000)
 }
 
 /** 进入商品 SKU 管理页 */
 export async function openSkus(page, productName) {
-  await productRowOf(page, productName).getByRole('button', { name: 'SKU' }).click()
+  await productRowOf(page, productName).getByTestId('product-row-skus').click()
   await page.waitForURL(/\/product\/\d+\/skus/, { timeout: 15_000 })
   await page.waitForTimeout(1200)
   await expect(page.locator('.card-header')).toContainText('SKU 管理')
@@ -206,39 +207,40 @@ export async function openSkus(page, productName) {
 
 /** 新增 SKU：规格值 + 价格 + 库存（规格值传 [{attrName, value}]） */
 export async function addSku(page, { specs, price, stock }) {
-  await page.getByRole('button', { name: '新增 SKU' }).click()
-  const dialog = page.locator('.el-dialog')
+  await tid(page, 'sku-create').click()
+  const dialog = tid(page, 'sku-form-dialog')
   await expect(dialog).toBeVisible()
   // 新增 SKU 时规格值是空列表：**每一行**都要先点「添加规格值」再填
   for (const [i, sp] of specs.entries()) {
-    await page.getByRole('button', { name: '添加规格值' }).click()
+    await tid(page, 'sku-form-spec-add').click()
     await page.waitForTimeout(300)
-    const row = page.locator('.spec-row').nth(i)
-    await row.locator('.el-select__wrapper').click()
+    const row = tid(page, 'sku-form-spec-row').nth(i)
+    await row.getByTestId('sku-form-spec-attr').click()
     await page.waitForTimeout(400)
     await page.locator('.el-select-dropdown__item:visible').filter({ hasText: sp.attrName }).first().click()
-    await row.locator('input').nth(1).fill(sp.value)
+    await row.getByTestId('sku-form-spec-value').fill(sp.value)
   }
-  await dialog.locator('.el-form-item').filter({ hasText: '价格' }).locator('input').first().fill(String(price))
-  await dialog.locator('.el-form-item').filter({ hasText: '库存' }).locator('input').first().fill(String(stock))
-  await dialog.getByRole('button', { name: '确定' }).click()
+  await tid(page, 'sku-form-price').locator('input').first().fill(String(price))
+  await tid(page, 'sku-form-stock').locator('input').first().fill(String(stock))
+  await tid(page, 'sku-form-submit').click()
   await expect(page.locator('.el-message--success').first(), '新增 SKU 应成功').toBeVisible({ timeout: 15_000 })
   await page.waitForTimeout(1000)
 }
 
 /** 编辑某个 SKU（按规格文本定位）：改价格/库存 */
 export async function editSku(page, specText, { price, stock }) {
+  // SKU 行没有行锚点 → 按规格文本定位到行（tid.js 未覆盖第 4 条），行内按钮用 testid
   const row = page.locator('.el-table__body tr').filter({ hasText: specText }).first()
-  await row.getByRole('button', { name: '编辑' }).click()
-  const dialog = page.locator('.el-dialog')
+  await row.getByTestId('sku-row-edit').click()
+  const dialog = tid(page, 'sku-form-dialog')
   await expect(dialog).toBeVisible()
   if (price !== undefined) {
-    await dialog.locator('.el-form-item').filter({ hasText: '价格' }).locator('input').first().fill(String(price))
+    await tid(page, 'sku-form-price').locator('input').first().fill(String(price))
   }
   if (stock !== undefined) {
-    await dialog.locator('.el-form-item').filter({ hasText: '库存' }).locator('input').first().fill(String(stock))
+    await tid(page, 'sku-form-stock').locator('input').first().fill(String(stock))
   }
-  await dialog.getByRole('button', { name: '确定' }).click()
+  await tid(page, 'sku-form-submit').click()
   await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
   await page.waitForTimeout(1000)
 }

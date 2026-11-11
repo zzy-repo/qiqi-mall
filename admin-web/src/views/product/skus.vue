@@ -32,11 +32,16 @@
           <span data-testid="sku-row-price">¥ {{ Number(row.price).toFixed(2) }}</span>
         </template>
       </el-table-column>
-      <el-table-column prop="stock" label="库存" width="100" />
+      <el-table-column prop="stock" label="库存" width="100">
+        <template #default="{ row }">
+          <span data-testid="sku-row-stock">{{ row.stock }}</span>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="100" fixed="right">
         <template #default="{ row }">
           <span :data-testid="`sku-row-${row.id}`">
             <el-button link type="primary" size="small" data-testid="sku-row-edit" @click="openForm(row)">编辑</el-button>
+          <el-button link type="danger" size="small" data-testid="sku-row-delete" @click="remove(row)">删除</el-button>
           </span>
         </template>
       </el-table-column>
@@ -115,9 +120,9 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { Plus, ArrowLeft } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import ImageUploader from '../../components/ImageUploader.vue'
-import { listSkus, getSku, createSku, updateSku, listSkuAttributes } from '../../api/sku'
+import { listSkus, getSku, createSku, updateSku, listSkuAttributes, deleteSku } from '../../api/sku'
 import { getProduct } from '../../api/product'
 
 const route = useRoute()
@@ -203,6 +208,22 @@ const submit = async () => {
     ElMessage.error('保存失败：' + e.message)
   } finally {
     saving.value = false
+  }
+}
+
+/** 删除 SKU：被订单明细/购物车引用时后端会拦住并说明原因 */
+const remove = async (row) => {
+  const ok = await ElMessageBox.confirm(
+    `确认删除该规格「${row.specText || row.id}」？删除后不可恢复。`, '删除确认',
+    { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+  ).then(() => true).catch(() => false)
+  if (!ok) return
+  try {
+    await deleteSku(row.id)
+    ElMessage.success('已删除')
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
   }
 }
 

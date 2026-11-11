@@ -29,6 +29,7 @@
           <span :data-testid="`product-row-${row.id}`">
             <el-button link type="primary" size="small" data-testid="product-row-edit" @click="openForm(row)">编辑</el-button>
             <el-button link type="primary" size="small" data-testid="product-row-skus" @click="openSkus(row)">SKU</el-button>
+            <el-button link type="danger" size="small" data-testid="product-row-delete" @click="remove(row)">删除</el-button>
           </span>
         </template>
       </el-table-column>
@@ -123,10 +124,10 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import ImageUploader from '../../components/ImageUploader.vue'
-import { listProducts, getProduct, createProduct, updateProduct } from '../../api/product'
+import { listProducts, getProduct, createProduct, updateProduct, deleteProduct } from '../../api/product'
 import { listCategories } from '../../api/category'
 import { listProductTypes } from '../../api/productType'
 
@@ -231,6 +232,22 @@ const submit = async () => {
     ElMessage.error('保存失败：' + e.message)
   } finally {
     saving.value = false
+  }
+}
+
+/** 删除商品：被订单明细引用时后端会拦住并提示「可改为下架」，这里原样展示 */
+const remove = async (row) => {
+  const ok = await ElMessageBox.confirm(
+    `确认删除商品「${row.name}」？删除后不可恢复；已被订单引用的商品请改为下架。`, '删除确认',
+    { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+  ).then(() => true).catch(() => false)
+  if (!ok) return
+  try {
+    await deleteProduct(row.id)
+    ElMessage.success('已删除')
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
   }
 }
 

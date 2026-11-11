@@ -12,6 +12,7 @@ import {
   editAttribute
 } from '../../support/catalog-ui.js'
 import { adminTokenOf, getAdminProductTypesApi, getAdminAttributesApi } from '../../support/assert.js'
+import { tid } from '../../support/tid.js'
 
 /**
  * 商家侧 02-商品管理 / 1-商品类型与属性
@@ -45,13 +46,13 @@ test.describe('商家侧 1 商品类型与属性', () => {
   test('必填校验：类型名称不填不让保存', async ({ page }) => {
     await adminLogin(page)
     await openProductTypes(page)
-    await page.getByRole('button', { name: '新增' }).click()
-    const dialog = page.locator('.el-dialog')
+    await tid(page, 'product-type-create').click()
+    const dialog = tid(page, 'product-type-form-dialog')
     await expect(dialog).toBeVisible()
-    await dialog.getByRole('button', { name: '确定' }).click()
+    await tid(page, 'product-type-form-submit').click()
     await expect(dialog.locator('.el-form-item__error').filter({ hasText: '请输入类型名称' })).toBeVisible()
     await expect(dialog, '校验不通过弹窗不应关闭').toBeVisible()
-    await dialog.getByRole('button', { name: '取消' }).click()
+    await tid(page, 'product-type-form-cancel').click()
   })
 
   test('属性聚合于类型：新增 / 改名 / is_filter 开关，且只显示本类型属性', async ({ page, request }) => {
@@ -91,22 +92,46 @@ test.describe('商家侧 1 商品类型与属性', () => {
     // 聚合关系：B 类型的属性页看不到 A 的属性
     await openProductTypes(page)
     await openAttributesOf(page, t2)
-    await expect(page.locator('.el-table__body'), 'B 类型属性页不应出现 A 的属性').not.toContainText(renamedAttr)
+    await expect(tid(page, 'attribute-list-table'), 'B 类型属性页不应出现 A 的属性').not.toContainText(renamedAttr)
   })
 
-  test('【已知缺口】类型/属性没有删除入口：后台只提供新增与编辑', async ({ page }) => {
+  test('删除类型/属性：被引用时被拒并给出中文原因，空的可正常删除', async ({ page, request }) => {
     await adminLogin(page)
+    const token = await adminTokenOf(page)
     await openProductTypes(page)
-    const row = page.locator('.el-table__body tr').first()
-    await expect(row).toBeVisible()
-    // 记录现状：操作列只有「编辑」「属性」，没有「删除」（接口存在但 UI 未接）
-    await expect(row.getByRole('button', { name: '编辑' })).toBeVisible()
-    await expect(row.getByRole('button', { name: '删除' }), '当前后台没有删除类型的入口').toHaveCount(0)
 
-    await openAttributesOf(page, (await row.innerText()).split('\t')[0].trim())
-    const attrRow = page.locator('.el-table__body tr').first()
-    if (await attrRow.count()) {
-      await expect(attrRow.getByRole('button', { name: '删除' }), '当前后台没有删除属性的入口').toHaveCount(0)
-    }
+    // ① 被引用的类型（种子「手机」有属性也有商品）→ 删除被拒
+    await typeRowOf(page, '手机').getByTestId('product-type-row-delete').click()
+    await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
+    await expect(page.locator('.el-message--error').first(), '被引用的类型应被拒绝').toContainText('不能删除', { timeout: 15_000 })
+    expect((await getAdminProductTypesApi(request, token)).find((t) => t.name === '手机'), '类型应仍然存在').toBeTruthy()
+
+    // ② 新建的空类型 → 可以删掉
+    const empty = `E2E待删类型${stamp()}`
+    await addProductType(page, empty)
+    await typeRowOf(page, empty).getByTestId('product-type-row-delete').click()
+    await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
+    await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
+    await page.waitForTimeout(800)
+    expect((await getAdminProductTypesApi(request, token)).find((t) => t.name === empty), '空类型应被删除').toBeFalsy()
+
+    // ③ 被 SKU 规格值引用的属性 → 删除被拒
+    await openProductTypes(page)
+    await openAttributesOf(page, '手机')
+    const usedAttrRow = page.locator('.el-table__body tr').first()
+    const usedAttrName = (await usedAttrRow.locator('td').nth(2).innerText()).trim()
+    await usedAttrRow.getByTestId('attribute-row-delete').click()
+    await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
+    await expect(page.locator('.el-message--error').first(), '被 SKU 使用的属性应被拒绝').toContainText('不能删除', { timeout: 15_000 })
+    expect((await getAdminAttributesApi(request, token)).find((a) => a.name === usedAttrName)).toBeTruthy()
+
+    // ④ 新建的空属性 → 可以删掉
+    const emptyAttr = `E2E待删属性${stamp()}`
+    await addAttribute(page, emptyAttr, false)
+    await attrRowOf(page, emptyAttr).getByTestId('attribute-row-delete').click()
+    await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
+    await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
+    await page.waitForTimeout(800)
+    expect((await getAdminAttributesApi(request, token)).find((a) => a.name === emptyAttr), '空属性应被删除').toBeFalsy()
   })
 })

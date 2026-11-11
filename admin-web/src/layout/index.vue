@@ -38,6 +38,7 @@
           </template>
           <el-menu-item index="/order" data-testid="nav-order">订单列表</el-menu-item>
           <el-menu-item index="/return-apply" data-testid="nav-return-apply">退货申请</el-menu-item>
+          <el-menu-item index="/return-reason" data-testid="nav-return-reason">退货原因</el-menu-item>
           <el-menu-item index="/order-setting" data-testid="nav-order-setting">订单设置</el-menu-item>
           <el-menu-item index="/warehouse" data-testid="nav-warehouse">仓库管理</el-menu-item>
         </el-sub-menu>

@@ -75,6 +75,12 @@ const routes = [
         meta: { title: '退货申请' }
       },
       {
+        path: 'return-reason',
+        name: 'ReturnReason',
+        component: () => import('../views/return-reason/index.vue'),
+        meta: { title: '退货原因' }
+      },
+      {
         path: 'warehouse',
         name: 'Warehouse',
         component: () => import('../views/warehouse/index.vue'),

@@ -13,6 +13,7 @@
         <template #default="{ row }">
           <span :data-testid="`category-row-${row.id}`">
             <el-button link type="primary" size="small" data-testid="category-row-edit" @click="openForm(row)">编辑</el-button>
+            <el-button link type="danger" size="small" data-testid="category-row-delete" @click="remove(row)">删除</el-button>
           </span>
         </template>
       </el-table-column>
@@ -47,8 +48,8 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
-import { listCategories, createCategory, updateCategory } from '../../api/category'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { listCategories, createCategory, updateCategory, deleteCategory } from '../../api/category'
 
 const list = ref([])
 const loading = ref(false)
@@ -126,6 +127,22 @@ const submit = async () => {
     ElMessage.error('保存失败：' + e.message)
   } finally {
     saving.value = false
+  }
+}
+
+/** 删除分类：有子分类或商品挂在该分类下时后端会拦住并说明原因 */
+const remove = async (row) => {
+  const ok = await ElMessageBox.confirm(
+    `确认删除分类「${row.name}」？删除后不可恢复。`, '删除确认',
+    { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+  ).then(() => true).catch(() => false)
+  if (!ok) return
+  try {
+    await deleteCategory(row.id)
+    ElMessage.success('已删除')
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
   }
 }
 

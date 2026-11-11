@@ -27,6 +27,7 @@
         <template #default="{ row }">
           <span :data-testid="`attribute-row-${row.id}`">
             <el-button link type="primary" size="small" data-testid="attribute-row-edit" @click="openForm(row)">编辑</el-button>
+            <el-button link type="danger" size="small" data-testid="attribute-row-delete" @click="remove(row)">删除</el-button>
           </span>
         </template>
       </el-table-column>
@@ -56,8 +57,8 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { Plus, ArrowLeft } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
-import { listAttributes, createAttribute, updateAttribute } from '../../api/attribute'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { listAttributes, createAttribute, updateAttribute, deleteAttribute } from '../../api/attribute'
 import { getProductType } from '../../api/productType'
 
 const route = useRoute()
@@ -112,6 +113,22 @@ const submit = async () => {
     ElMessage.error('保存失败：' + e.message)
   } finally {
     saving.value = false
+  }
+}
+
+/** 删除属性：被 SKU 规格值使用时后端会拦住并说明原因 */
+const remove = async (row) => {
+  const ok = await ElMessageBox.confirm(
+    `确认删除属性「${row.name}」？删除后不可恢复。`, '删除确认',
+    { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+  ).then(() => true).catch(() => false)
+  if (!ok) return
+  try {
+    await deleteAttribute(row.id)
+    ElMessage.success('已删除')
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
   }
 }
 
