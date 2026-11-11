@@ -9,7 +9,8 @@ export default defineConfig(({ mode }) => ({
     // 开发：C 端接口 /portal 代理到后端 dev 8081
     proxy: {
       '/portal': {
-        target: mode === 'production' ? 'http://127.0.0.1:8082' : 'http://127.0.0.1:8081',
+        // 只有本地起 dev server 才会用到这里；test 模式指测试环境（容器后端 8082），默认走 dev 后端 8081
+        target: mode === 'test' ? 'http://127.0.0.1:8082' : 'http://127.0.0.1:8081',
         changeOrigin: true
       }
     }

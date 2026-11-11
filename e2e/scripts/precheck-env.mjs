@@ -31,9 +31,9 @@ const STRICT = process.argv.includes('--strict')
 
 /** 服务 → { 源码目录, 镜像名, 重建命令 } */
 const SERVICES = [
-  { name: 'admin-web', src: join(REPO_DIR, 'admin-web/src'), image: 'qiqi-admin-web:prod', fix: 'docker compose up -d --build admin-web' },
-  { name: 'portal-web', src: join(REPO_DIR, 'portal-web/src'), image: 'qiqi-portal-web:prod', fix: 'docker compose up -d --build portal-web' },
-  { name: 'server', src: join(REPO_DIR, 'qiqi-mall-server/src'), image: 'qiqi-mall-server:prod', fix: 'docker compose up -d --build server-1 server-2' }
+  { name: 'admin-web', src: join(REPO_DIR, 'admin-web/src'), image: 'qiqi-admin-web:test', fix: 'docker compose up -d --build admin-web' },
+  { name: 'portal-web', src: join(REPO_DIR, 'portal-web/src'), image: 'qiqi-portal-web:test', fix: 'docker compose up -d --build portal-web' },
+  { name: 'server', src: join(REPO_DIR, 'qiqi-mall-server/src'), image: 'qiqi-mall-server:test', fix: 'docker compose up -d --build server-1 server-2' }
 ]
 
 const IGNORE_DIRS = new Set(['node_modules', 'target', 'dist', '.git', '.vite', 'test-results', 'report'])

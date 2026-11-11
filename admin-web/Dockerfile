@@ -7,8 +7,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --registry=https://registry.npmmirror.com
 
 COPY . .
-# 构建模式由 compose 传入：development / production
-ARG BUILD_MODE=production
+# 构建模式由 compose 传入：development / test（test = 测试环境，加载 .env.test）
+ARG BUILD_MODE=test
 RUN npx vite build --mode ${BUILD_MODE}
 
 # ---------- 运行阶段 ----------

@@ -69,8 +69,8 @@
           </el-breadcrumb>
         </div>
         <div class="header-right">
-          <el-tag :type="env === 'prod' ? 'danger' : 'success'" size="small" effect="dark">
-            {{ env === 'prod' ? '测试环境' : '开发环境' }}
+          <el-tag :type="env === 'test' ? 'danger' : 'success'" size="small" effect="dark">
+            {{ env === 'test' ? '测试环境' : '开发环境' }}
           </el-tag>
           <el-dropdown>
             <span class="user-info">
