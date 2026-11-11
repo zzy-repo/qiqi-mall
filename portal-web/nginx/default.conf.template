@@ -27,6 +27,16 @@ server {
         proxy_read_timeout 60s;
     }
 
+
+    # 商品图片：MinIO 直出。库里存相对路径 /qiqi-mall/**，所以从任何地址访问都能取到图
+    location /qiqi-mall/ {
+        # 注意：proxy_pass 不带 URI，原样透传 /qiqi-mall/** 给 MinIO（bucket 名就在路径里）
+        proxy_pass http://minio:9000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        expires 7d;
+    }
+
     # history 路由回退
     location / {
         try_files $uri $uri/ /index.html;

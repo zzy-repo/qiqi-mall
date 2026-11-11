@@ -30,6 +30,23 @@ export async function getProductApi(request, productId = 1) {
 }
 
 // ---------------------------------------------------------------------------
+// 管理端商品 / SKU（只读）
+// ---------------------------------------------------------------------------
+
+/** 后台商品列表（可按名字过滤） */
+export async function getAdminProductsApi(request, token, name) {
+  const res = await request.get(`${API}/admin/products`, auth(token))
+  const list = (await res.json()).data || []
+  return name ? list.filter((p) => p.name === name) : list
+}
+
+/** 后台某商品的 SKU 列表 */
+export async function getAdminSkusApi(request, token, productId) {
+  const res = await request.get(`${API}/admin/skus?productId=${productId}`, auth(token))
+  return (await res.json()).data || []
+}
+
+// ---------------------------------------------------------------------------
 // 管理端订单 / 发货单
 // ---------------------------------------------------------------------------
 

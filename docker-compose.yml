@@ -47,7 +47,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:-qiqi-mall-prod-secret-key-please-change-9876543210}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-qiqiadmin}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-qiqi123456}
-      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-http://127.0.0.1:9000}
+      # 留空 = 库里存相对路径 /qiqi-mall/**（图片由前端 nginx 反代 MinIO，不绑访问地址）
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-}
       # 多实例共享验证码 / 幂等令牌
       KV_STORE: ${KV_STORE:-redis}
       REDIS_HOST: redis
@@ -87,7 +88,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:-qiqi-mall-prod-secret-key-please-change-9876543210}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-qiqiadmin}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-qiqi123456}
-      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-http://127.0.0.1:9000}
+      # 留空 = 库里存相对路径 /qiqi-mall/**（图片由前端 nginx 反代 MinIO，不绑访问地址）
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-}
       KV_STORE: ${KV_STORE:-redis}
       REDIS_HOST: redis
     depends_on:

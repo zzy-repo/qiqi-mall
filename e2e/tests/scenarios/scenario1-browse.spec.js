@@ -1,6 +1,14 @@
 import { test, expect } from '@playwright/test'
 import { PORTAL, ADMIN, API, stamp } from '../support/env.js'
 import { adminLogin, pickSelect, pickTreeSelect, dismissPoppers } from '../support/ui.js'
+import { adminTokenOf } from '../support/assert.js'
+import {
+  writeTempPng,
+  cleanupTempImages,
+  uploadImageApi,
+  expectImageLoaded,
+  expectAllImagesLoaded
+} from '../support/images.js'
 
 /**
  * 场景1 商品浏览（docs/flows/3-场景1-商品浏览.mmd）
@@ -8,13 +16,19 @@ import { adminLogin, pickSelect, pickTreeSelect, dismissPoppers } from '../suppo
  *   买家打开首页 → 浏览分类/搜索 → 查看商品详情（SPU + SKU规格 + 图片）→ 选中想买的 SKU
  */
 test.describe('场景1 商品浏览', () => {
-  test('管理员上架商品（主图/相册/SKU规格）后，买家能浏览、搜索、看详情并选中规格', async ({ page, browser }) => {
+  test('管理员上架商品（主图/相册/SKU规格）后，买家能浏览、搜索、看详情并选中规格', async ({ page, browser, request }) => {
     const suffix = stamp()
     const productName = `E2E场景1商品${suffix}`
 
     // ---------- 1. 管理员登录 ----------
     await adminLogin(page)
     await expect(page).toHaveURL(/dashboard/)
+
+    // 真实图片：先调一次上传接口把一张真 png 传进 MinIO，拿回相对路径给主图/相册/SKU 复用
+    // （以前这里填的是外部不可达域名的假 URL，前端 error 兜底成灰图标，
+    //   断言照样绿 —— 那种"图片全挂也发现不了"的口子在这里堵掉）
+    const pngPath = writeTempPng()
+    const realImageUrl = await uploadImageApi(request, await adminTokenOf(page), pngPath)
 
     // ---------- 2. 上架商品（主图 + 相册） ----------
     await page.goto(`${ADMIN}/product`)
@@ -24,10 +38,12 @@ test.describe('场景1 商品浏览', () => {
     await page.locator('.el-form-item').filter({ hasText: '商品名称' }).locator('input').fill(productName)
     await pickTreeSelect(page, '分类', '手机数码') // 父分类：验证 check-strictly 修复
     await pickSelect(page, '类型', '手机')
-    // 主图现在是「URL 输入 + 上传按钮」组合，填 URL 文本框（type=text）
-    await page.locator('.el-form-item').filter({ hasText: '主图' }).locator('input[type="text"]').fill('https://example.com/cover.jpg')
+    // 主图现在是「URL 输入 + 上传按钮」组合，填刚上传得到的真实相对路径
+    const mainPicItem = page.locator('.el-form-item').filter({ hasText: '主图' })
+    await mainPicItem.locator('input[type="text"]').fill(realImageUrl)
+    await expectImageLoaded(mainPicItem.locator('.preview img'), '主图预览（真实图片）')
     await page.getByRole('button', { name: '添加图片' }).click()
-    await page.locator('.gallery-row input[type="text"]').first().fill('https://example.com/1.jpg')
+    await page.locator('.gallery-row input[type="text"]').first().fill(realImageUrl)
     await page.getByRole('button', { name: '确定' }).click()
     await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
     await page.waitForTimeout(800)
@@ -49,7 +65,7 @@ test.describe('场景1 商品浏览', () => {
     await page.waitForURL(/\/product\/\d+\/skus/)
     await page.getByRole('button', { name: '新增 SKU' }).click()
     await page.waitForTimeout(800)
-    await page.locator('.el-form-item').filter({ hasText: 'SKU 图片' }).locator('input[type="text"]').fill('https://example.com/sku.jpg')
+    await page.locator('.el-form-item').filter({ hasText: 'SKU 图片' }).locator('input[type="text"]').fill(realImageUrl)
 
     // 新增 SKU 时规格值为空，先点「添加规格值」创建第一行
     await page.getByRole('button', { name: '添加规格值' }).click()
@@ -76,10 +92,9 @@ test.describe('场景1 商品浏览', () => {
     await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
     await page.waitForTimeout(800)
 
-    await expect(
-      page.locator('.el-table__body tr').filter({ hasText: '深空黑' }).first(),
-      'SKU 列表应显示由 sku_spec 拼出的规格文本'
-    ).toBeVisible()
+    const skuRow = page.locator('.el-table__body tr').filter({ hasText: '深空黑' }).first()
+    await expect(skuRow, 'SKU 列表应显示由 sku_spec 拼出的规格文本').toBeVisible()
+    await expectImageLoaded(skuRow.locator('img'), 'SKU 列表缩略图（真实图片）')
     await page.screenshot({ path: 'report/shots/scenario1-admin-sku.png', fullPage: true })
 
     // ---------- 4. 买家首页能看到新商品 ----------
@@ -106,8 +121,9 @@ test.describe('场景1 商品浏览', () => {
     const specBtn = bp.locator('.el-radio-button', { hasText: '深空黑' }).first()
     await expect(specBtn, '详情页规格按钮应来自 sku_spec').toBeVisible()
     await expect(specBtn).toContainText('512G')
-    await expect(bp.locator('.thumb'), '详情页应有主图区域').toBeVisible()
+    await expectImageLoaded(bp.locator('.thumb img'), '详情页主图（真实图片）')
     await expect(bp.locator('.gallery-item'), '详情页应展示商品相册').toHaveCount(1)
+    await expectAllImagesLoaded(bp.locator('.gallery-item img'), '详情页相册（真实图片）')
     await expect(bp.locator('.price')).toContainText('6666.00')
 
     // ---------- 6. 选中想买的 SKU ----------
@@ -116,5 +132,6 @@ test.describe('场景1 商品浏览', () => {
     await expect(bp.locator('.stock')).toContainText('12')
     await bp.screenshot({ path: 'report/shots/scenario1-detail.png', fullPage: true })
     await buyerCtx.close()
+    cleanupTempImages()
   })
 })
