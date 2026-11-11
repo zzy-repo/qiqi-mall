@@ -1,22 +1,36 @@
 import { test, expect } from '@playwright/test'
-import { PORTAL, API, memberRegister, prepareSku, stamp } from './helpers.js'
+import {
+  PORTAL,
+  API,
+  adminLogin,
+  adminSetSkuStock,
+  memberRegister,
+  stamp
+} from './helpers.js'
 
 /**
  * 场景2 购买下单（docs/flows/4-场景2-购买下单.mmd）
  *   查看详情 → 加购（匿名存本地）→ 未登录被拦截 → 注册即登录 → 合并购物车
  *   → 结算 → 提交订单（快照 + 扣库存）→ 模拟支付 → 订单已付款
+ *
+ * 全部业务动作走真实 UI（含把 SKU 库存补足这一步：admin「SKU 管理」页有库存编辑入口）。
  */
 test.describe('场景2 购买下单', () => {
-  test('游客加购→登录拦截→注册合并→结算下单→模拟支付', async ({ page, playwright }) => {
+  test('游客加购→登录拦截→注册合并→结算下单→模拟支付', async ({ page, request }) => {
     const username = `e2e_buy_${stamp()}`
-    const API_BASE = API
 
-    // 记录下单前的库存，用于断言扣库存（先把库存补足，保证可重复运行）
-    const api = await playwright.request.newContext({ baseURL: API_BASE })
-    const prepared = await prepareSku(api)
-    const skuId = prepared.skuId
-    const skuPrice = prepared.price
-    const beforeStock = prepared.stock
+    // 数据准备：商品1 第一个 SKU 的库存补到 50（admin SKU 页「编辑」弹窗里改库存，真实 UI），
+    // 保证用例可重复运行（每次下单都会扣 1 件）
+    await adminLogin(page)
+    await adminSetSkuStock(page, 1, 0, 50)
+
+    // 基准数据（只读）：下单前库存与成交价
+    const detailBefore = await request.get(`${API}/portal/products/1`)
+    const sku = (await detailBefore.json()).data.skus[0]
+    const skuId = sku.id
+    const skuPrice = sku.price
+    const beforeStock = sku.stock
+    expect(beforeStock, '库存补足后基准库存应为 50').toBe(50)
 
     // ---------- 1. 游客查看商品详情并加入购物车（存本地） ----------
     await page.goto(`${PORTAL}/product/1`)
@@ -56,14 +70,16 @@ test.describe('场景2 购买下单', () => {
     // 口径②：支付成功后自动进入「待审核」
     await expect(firstRow).toContainText('待审核')
 
-    // ---------- 5. 断言服务端：快照 + 金额 + 扣库存 ----------
-    const detail = await api.get(`/portal/products/1`)
-    const afterStock = (await detail.json()).data.skus.find((s) => s.id === skuId).stock
+    // ---------- 5. 断言服务端：快照 + 金额 + 扣库存（只读） ----------
+    const detailAfter = await request.get(`${API}/portal/products/1`)
+    const afterStock = (await detailAfter.json()).data.skus.find((s) => s.id === skuId).stock
     expect(afterStock, '下单应扣减库存').toBe(beforeStock - 1)
 
     // 订单明细快照：下单时商品名与成交价
     const token = await page.evaluate(() => localStorage.getItem('qiqi_member_token'))
-    const ordersRes = await api.get(`/portal/orders?page=1&size=10`, { headers: { Authorization: `Bearer ${token}` } })
+    const ordersRes = await request.get(`${API}/portal/orders?page=1&size=10`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
     const pageData = (await ordersRes.json()).data
     expect(pageData.total, '分页响应应包含 total').toBeGreaterThan(0)
     expect(Array.isArray(pageData.records), '分页响应应包含 records 数组').toBeTruthy()
@@ -72,13 +88,14 @@ test.describe('场景2 购买下单', () => {
     expect(created.receiverName).toBe('E2E买家')
     expect(Number(created.totalAmount)).toBe(Number(skuPrice))
 
-    const orderDetail = await api.get(`/portal/orders/${created.id}`, { headers: { Authorization: `Bearer ${token}` } })
+    const orderDetail = await request.get(`${API}/portal/orders/${created.id}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
     const items = (await orderDetail.json()).data.items
     expect(items.length).toBe(1)
     expect(items[0].productName, '订单明细应保存商品名快照').toContain('七七 Pro 15')
     expect(Number(items[0].productPrice), '订单明细应保存成交价快照').toBe(Number(skuPrice))
 
     await page.screenshot({ path: 'report/shots/scenario2-orders.png', fullPage: true })
-    await api.dispose()
   })
 })

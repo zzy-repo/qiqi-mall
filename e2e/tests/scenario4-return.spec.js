@@ -1,51 +1,74 @@
 import { test, expect } from '@playwright/test'
 import {
-  PORTAL,
   ADMIN,
   API,
   adminLogin,
-  adminToken,
+  adminTokenOf,
+  adminSetSkuStock,
   memberLogin,
-  registerMemberApi,
-  createOrderApi,
-  payOrderApi,
-  auditPassApi,
-  listDeliveriesApi,
-  dispatchDeliveryApi,
-  wmsCallbackApi,
-  prepareSku,
+  memberRegisterAndLogin,
+  addSpecToCart,
+  submitCartOrder,
+  memberOrderRow,
+  adminSearchOrderRow,
+  openOrderDrawer,
+  clickDispatch,
+  clickWmsCallback,
   stamp
 } from './helpers.js'
 
+const SPEC_BLACK_256 = '颜色:黑,内存:256G'   // 种子数据 SKU1
+
+/** 只读：按订单号取订单（断言用） */
+async function getOrderBySn(request, token, orderSn) {
+  const res = await request.get(`${API}/admin/orders?page=1&size=10&orderSn=${orderSn}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  return (await res.json()).data.records.find((o) => o.orderSn === orderSn)
+}
+
 /**
  * 场景4 售后退货（docs/flows/6-场景4-售后退货.mmd）
- *   买家「我的订单」选已收货订单 → 选退货原因 + 填说明 → 提交退货申请
+ *   买家「我的订单」选已发货订单 → 选退货原因 + 填说明 → 提交退货申请
  *   → 管理员「退货申请」页审核（通过/拒绝）→ 结果回传买家 → 售后闭环
+ *
+ * 前置履约（下单支付→审核→下发→出库）也全部走真实 UI 点击；接口只用于只读断言。
  */
 test.describe('场景4 售后退货', () => {
   test('买家提交退货申请 → 管理员审核通过 → 买家能看到审核结果', async ({ page, request }) => {
-    // 准备：一个已付款订单（文档要求「已收货订单」，但确认收货能力缺失，见场景3）
     const username = `e2e_return_${stamp()}`
-    const member = await registerMemberApi(request, username)
-    const { skuId } = await prepareSku(request)
-    const order = await createOrderApi(request, member.token, { skuId })
-    await payOrderApi(request, member.token, order.id)
 
-    // 退货守卫是「仅 status=1 或 2」，先把订单推进到已发货(2)
-    const at = await adminToken(request)
-    await auditPassApi(request, at, order.id)
-    const deliveries = await listDeliveriesApi(request, at, order.id)
-    await dispatchDeliveryApi(request, at, deliveries[0].id)
-    await wmsCallbackApi(request, at, deliveries[0].id, 'outbound')
+    // ---------- 数据准备（UI）：补库存 ----------
+    await adminLogin(page)
+    await adminSetSkuStock(page, 1, 0, 50)
+    const at = await adminTokenOf(page)
+
+    // ---------- 买家真实下单并支付 ----------
+    await memberRegisterAndLogin(page, username)
+    await addSpecToCart(page, 1, SPEC_BLACK_256)
+    const orderSn = await submitCartOrder(page)
+    const order = await getOrderBySn(request, at, orderSn)
+    expect(order.status, '支付后服务端状态应为待审核(7)').toBe(7)
+
+    // ---------- 管理员审核通过 → 抽屉里「下发」+「出库」→ 订单已发货 ----------
+    const adminRow = await adminSearchOrderRow(page, orderSn)
+    await adminRow.getByRole('button', { name: '审核' }).click()
+    await page.locator('.el-message-box__btns').getByRole('button', { name: '通过', exact: true }).click()
+    await page.waitForTimeout(2000)
+    await expect(adminRow, '审核通过后订单应为待发货').toContainText('待发货')
+
+    const deliveryTable = await openOrderDrawer(page, orderSn)
+    await expect(deliveryTable.locator('.el-table__body tr'), '单仓订单应生成 1 个发货单').toHaveCount(1)
+    const deliveryRow = deliveryTable.locator('.el-table__body tr').first()
+    await clickDispatch(page, deliveryRow)
+    await clickWmsCallback(page, deliveryRow, '出库', '已出库')
+    await expect(adminRow, '出库后订单应为已发货').toContainText('已发货')
+    expect((await getOrderBySn(request, at, orderSn)).status, '服务端订单应为已发货(2)').toBe(2)
 
     // ---------- 1. 买家：我的订单 → 申请退货 ----------
-    await memberLogin(page, username)
-    await page.waitForTimeout(2500)
-    await page.goto(`${PORTAL}/orders`)
-    await page.waitForTimeout(1200)
-
-    const row = page.locator('.el-table__body tr').filter({ hasText: order.orderSn }).first()
-    await expect(row).toBeVisible()
+    const row = await memberOrderRow(page, orderSn)
+    await expect(row, '已发货订单应有申请退货入口').toContainText('已发货')
+    const memberToken = await page.evaluate(() => localStorage.getItem('qiqi_member_token'))
     await row.getByRole('button', { name: '申请退货' }).click()
     await page.waitForTimeout(800)
 
@@ -58,8 +81,10 @@ test.describe('场景4 售后退货', () => {
     await page.waitForTimeout(1500)
     await expect(page.locator('.el-message--success').first(), '买家提交退货申请应成功').toBeVisible()
 
-    // 服务端复核：申请已落库且为待处理
-    const api = await request.get(`${API}/portal/returns`, { headers: { Authorization: `Bearer ${member.token}` } })
+    // 服务端复核（只读）：申请已落库且为待处理
+    const api = await request.get(`${API}/portal/returns`, {
+      headers: { Authorization: `Bearer ${memberToken}` }
+    })
     const returns = (await api.json()).data
     const apply = returns.find((r) => r.orderId === order.id)
     expect(apply, '退货申请应能在 C 端接口查到').toBeTruthy()
@@ -68,10 +93,9 @@ test.describe('场景4 售后退货', () => {
     // ---------- 2. 管理员：退货申请页审核通过 ----------
     await adminLogin(page)
     await page.goto(`${ADMIN}/return-apply`)
-    await page.waitForTimeout(1200)
+    await page.waitForTimeout(1500)
 
-    await page.waitForTimeout(1200)
-    const applyRow = page.locator('.el-table__body tr').filter({ hasText: order.orderSn }).first()
+    const applyRow = page.locator('.el-table__body tr').filter({ hasText: orderSn }).first()
     await expect(applyRow, '管理员退货申请列表应出现新申请').toBeVisible()
     await applyRow.getByRole('button', { name: '审核' }).click()
     await page.waitForTimeout(800)
@@ -83,20 +107,19 @@ test.describe('场景4 售后退货', () => {
     await page.reload()
     await page.waitForTimeout(1200)
     await expect(
-      page.locator('.el-table__body tr').filter({ hasText: order.orderSn }).first(),
+      page.locator('.el-table__body tr').filter({ hasText: orderSn }).first(),
       '审核通过后列表状态应为已通过'
     ).toContainText('已通过')
 
-    // ---------- 3. 买家：应能看到审核结果 ----------
+    // ---------- 3. 买家：重新登录后应能看到审核结果 ----------
     await memberLogin(page, username)
-    await page.waitForTimeout(2500)
-    await page.goto(`${PORTAL}/orders`)
     await page.waitForTimeout(1500)
+    await memberOrderRow(page, orderSn)
 
     // 文档要求「收到审核结果通知」：买家端应能看到该订单的退货审核结果
     const buyerRowText = await page
       .locator('.el-table__body tr')
-      .filter({ hasText: order.orderSn })
+      .filter({ hasText: orderSn })
       .first()
       .innerText()
       .catch(() => '')
