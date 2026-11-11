@@ -59,8 +59,15 @@ public class AdminController {
         return Result.ok();
     }
 
+    /**
+     * 删除管理员：内置 admin 账号系统保留，谁都删不掉
+     * （否则唯一管理员被删后整个后台就没人能进了）。
+     */
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
+        Admin exist = adminService.getById(id);
+        if (exist == null) return Result.fail("管理员不存在");
+        if ("admin".equalsIgnoreCase(exist.getUsername())) return Result.fail("系统内置账号不可删除");
         adminService.removeById(id);
         return Result.ok();
     }

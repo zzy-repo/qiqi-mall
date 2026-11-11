@@ -17,9 +17,12 @@
         </template>
       </el-table-column>
       <el-table-column prop="createTime" label="创建时间" width="180" />
-      <el-table-column label="操作" width="100" fixed="right">
+      <el-table-column label="操作" width="150" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" data-testid="admin-row-edit" @click="openForm(row)">编辑</el-button>
+          <span :data-testid="`admin-row-${row.id}`">
+            <el-button link type="primary" size="small" data-testid="admin-row-edit" @click="openForm(row)">编辑</el-button>
+            <el-button link type="danger" size="small" data-testid="admin-row-delete" @click="remove(row)">删除</el-button>
+          </span>
         </template>
       </el-table-column>
     </el-table>
@@ -60,8 +63,8 @@
 <script setup>
 import { computed, ref, reactive, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
-import { listAdmins, createAdmin, updateAdmin } from '../../api/admin'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { listAdmins, createAdmin, updateAdmin, deleteAdmin } from '../../api/admin'
 
 const list = ref([])
 const loading = ref(false)
@@ -119,6 +122,26 @@ const submit = async () => {
     ElMessage.error('保存失败：' + e.message)
   } finally {
     saving.value = false
+  }
+}
+
+/** 删除管理员：内置 admin 账号后端会拒绝，这里也先提示一次 */
+const remove = async (row) => {
+  if (row.username === 'admin') {
+    ElMessage.warning('系统内置账号不可删除')
+    return
+  }
+  const ok = await ElMessageBox.confirm(
+    `确认删除管理员「${row.username}」？删除后该账号立即无法登录。`, '删除确认',
+    { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+  ).then(() => true).catch(() => false)
+  if (!ok) return
+  try {
+    await deleteAdmin(row.id)
+    ElMessage.success('已删除')
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message)
   }
 }
 
