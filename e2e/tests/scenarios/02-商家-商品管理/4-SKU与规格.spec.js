@@ -2,9 +2,10 @@ import { test, expect } from '@playwright/test'
 import { PORTAL, API, stamp } from '../../support/env.js'
 import { adminLogin } from '../../support/ui.js'
 import { openProducts, addProduct, openSkus, addSku, editSku } from '../../support/catalog-ui.js'
-import { writeTempPng, cleanupTempImages, uploadImageApi, expectImageLoaded } from '../../support/images.js'
+import { expectImageLoaded } from '../../support/images.js'
 import { adminTokenOf, getAdminProductsApi, getAdminSkusApi } from '../../support/assert.js'
 import { tid, tidPrefix } from '../../support/tid.js'
+import { attributeValues, newestByName, productNameOf, realGalleryImages, realSkuImages } from '../../support/fixtures.js'
 
 /**
  * 商家侧 02-商品管理 / 4-SKU 与规格
@@ -19,7 +20,7 @@ import { tid, tidPrefix } from '../../support/tid.js'
 async function newProduct(page, request, token, name) {
   await openProducts(page)
   await addProduct(page, { name, categoryName: '手机数码', typeName: '手机' })
-  const saved = (await getAdminProductsApi(request, token, name))[0]
+  const saved = newestByName(await getAdminProductsApi(request, token, name), name)
   expect(saved, '商品应创建成功').toBeTruthy()
   return saved
 }
@@ -28,30 +29,30 @@ test.describe('商家侧 4 SKU 与规格', () => {
   test('按类型属性生成 SKU → 改价格库存 → 规格值整组替换', async ({ page, request }) => {
     await adminLogin(page)
     const token = await adminTokenOf(page)
-    const name = `E2E-SKU商品${stamp()}`
+    const name = productNameOf(`${stamp()}-sku`)
     const product = await newProduct(page, request, token, name)
 
     await openSkus(page, name)
-    await addSku(page, { specs: [{ attrName: '颜色', value: '曜石黑' }, { attrName: '内存', value: '256G' }], price: 1999, stock: 100 })
+    await addSku(page, { specs: [{ attrName: '颜色', value: attributeValues[0] }, { attrName: '内存', value: '256G' }], price: 1999, stock: 100 })
 
     let skus = await getAdminSkusApi(request, token, product.id)
     expect(skus.length, '应有 1 个 SKU').toBe(1)
     expect(Number(skus[0].price), '价格应落库').toBe(1999)
     expect(skus[0].stock, '库存应落库').toBe(100)
-    expect(skus[0].specText, '规格文本应由两个属性拼出').toContain('颜色:曜石黑')
+    expect(skus[0].specText, '规格文本应由两个属性拼出').toContain(`颜色:${attributeValues[0]}`)
     expect(skus[0].specText).toContain('内存:256G')
 
     // 改价格 / 库存
-    await editSku(page, '曜石黑', { price: 1888, stock: 66 })
+    await editSku(page, attributeValues[0], { price: 1888, stock: 66 })
     skus = await getAdminSkusApi(request, token, product.id)
     expect(Number(skus[0].price), '改价应落库').toBe(1888)
     expect(skus[0].stock, '改库存应落库').toBe(66)
     await expect(tid(page, 'sku-list-table').locator('.el-table__body tr').first(), '列表应展示新价格').toContainText('1888.00')
 
     // 规格值整组替换：把内存改成 512G
-    await editSku(page, '曜石黑', {})
+    await editSku(page, attributeValues[0], {})
     // 上一步只做校验会直接保存；这里重新打开编辑改规格值
-    const row = page.locator('.el-table__body tr').filter({ hasText: '曜石黑' }).first()
+    const row = page.locator('.el-table__body tr').filter({ hasText: attributeValues[0] }).first()
     await row.getByTestId('sku-row-edit').click()
     const dialog = tid(page, 'sku-form-dialog')
     await expect(dialog).toBeVisible()
@@ -78,14 +79,15 @@ test.describe('商家侧 4 SKU 与规格', () => {
   })
 
   test('SKU 图：上传后列表与 C 端都能显示', async ({ page, request }) => {
-    const png = writeTempPng()
-    try {
+    const seed = `${stamp()}-pic`
+    {
       await adminLogin(page)
       const token = await adminTokenOf(page)
-      const name = `E2E-SKU图${stamp()}`
+      const name = productNameOf(seed)
       const product = await newProduct(page, request, token, name)
-      const skuPic = await uploadImageApi(request, token, png)
-      const cover = await uploadImageApi(request, token, png)
+      // 用种子真图：SKU 图取 sku 池，商品主图取封面池
+      const { cover } = realGalleryImages(seed)
+      const skuPic = realSkuImages(seed)      // sku 池 9 张都验证过可加载
 
       // 商品主图（C 端展示用）
       await openProducts(page)
@@ -125,15 +127,13 @@ test.describe('商家侧 4 SKU 与规格', () => {
       await page.goto(`${PORTAL}/product/${product.id}`)
       await page.waitForTimeout(1200)
       await expectImageLoaded(tid(page, 'product-detail-cover').locator('img'), 'C 端主图')
-    } finally {
-      cleanupTempImages()
     }
   })
 
   test('必填校验：价格/库存不填不让保存', async ({ page, request }) => {
     await adminLogin(page)
     const token = await adminTokenOf(page)
-    const name = `E2E-SKU必填${stamp()}`
+    const name = productNameOf(`${stamp()}-req`)
     await newProduct(page, request, token, name)
     await openSkus(page, name)
 
@@ -159,7 +159,8 @@ test.describe('商家侧 4 SKU 与规格', () => {
 
     // ① 种子商品1 的第一个 SKU 被订单引用 → 被拒
     await openProducts(page)
-    await openSkus(page, '七七 Pro 15 智能手机')
+    const seedProduct = (await getAdminProductsApi(request, token))[0]   // 种子商品1，被演示订单引用
+    await openSkus(page, seedProduct.name)
     const usedSku = page.locator('.el-table__body tr').first()
     await expect(usedSku).toBeVisible()
     await usedSku.getByTestId('sku-row-delete').click()
@@ -167,13 +168,13 @@ test.describe('商家侧 4 SKU 与规格', () => {
     await expect(page.locator('.el-message--error').first(), '被订单引用的 SKU 应被拒绝').toContainText('不能删除', { timeout: 15_000 })
 
     // ② 新商品的 SKU（无引用）→ 可以删
-    const name = `E2E待删SKU${stamp()}`
+    const name = productNameOf(`${stamp()}-del`)
     await openProducts(page)
     await addProduct(page, { name, categoryName: '手机数码', typeName: '手机' })
-    const product = (await getAdminProductsApi(request, token, name))[0]
+    const product = newestByName(await getAdminProductsApi(request, token, name), name)
     await openProducts(page)
     await openSkus(page, name)
-    await addSku(page, { specs: [{ attrName: '颜色', value: '待删灰' }], price: 1, stock: 1 })
+    await addSku(page, { specs: [{ attrName: '颜色', value: attributeValues[1] }], price: 1, stock: 1 })
     expect((await getAdminSkusApi(request, token, product.id)).length, '应有 1 个 SKU').toBe(1)
 
     await page.locator('.el-table__body tr').first().getByTestId('sku-row-delete').click()

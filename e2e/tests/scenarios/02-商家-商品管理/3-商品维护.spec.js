@@ -7,9 +7,10 @@ import {
   editProduct,
   productRowOf
 } from '../../support/catalog-ui.js'
-import { writeTempPng, cleanupTempImages, uploadImageApi, expectImageLoaded } from '../../support/images.js'
+import { expectImageLoaded } from '../../support/images.js'
 import { adminTokenOf, getAdminProductsApi, getProductApi } from '../../support/assert.js'
 import { tid } from '../../support/tid.js'
+import { newestByName, productDescriptionOf, productNameOf, realGalleryImages, realImage } from '../../support/fixtures.js'
 
 /**
  * 商家侧 02-商品管理 / 3-商品维护
@@ -22,16 +23,16 @@ import { tid } from '../../support/tid.js'
 
 test.describe('商家侧 3 商品维护', () => {
   test('新增商品（主图+相册+描述）→ 编辑 → 落库与 C 端展示都正确', async ({ page, request }) => {
-    const png = writeTempPng()
-    try {
+    const seed = stamp()
+    {
       await adminLogin(page)
       const token = await adminTokenOf(page)
-      const cover = await uploadImageApi(request, token, png)
-      const g1 = await uploadImageApi(request, token, png)
-      const g2 = await uploadImageApi(request, token, png)
+      // MinIO 上的真实种子图（视频里是商品实拍，不是纯色块）
+      const { cover, gallery } = realGalleryImages(seed)
+      const [g1, g2] = gallery
 
-      const name = `E2E维护商品${stamp()}`
-      const desc = 'E2E 商品描述：用于验证后台新增与编辑链路。'
+      const name = productNameOf(seed)
+      const desc = productDescriptionOf(seed)
       await openProducts(page)
       await tid(page, 'product-list-create').click()
       const dialog = tid(page, 'product-form-dialog')
@@ -61,7 +62,7 @@ test.describe('商家侧 3 商品维护', () => {
       await expect(productRowOf(page, name), '列表应出现新商品').toBeVisible()
 
       // 落库复核：主图、相册排序、描述
-      const saved = (await getAdminProductsApi(request, token, name))[0]
+      const saved = newestByName(await getAdminProductsApi(request, token, name), name)
       expect(saved, '商品应落库').toBeTruthy()
       expect(saved.pic, '主图应保存相对路径').toBe(cover)
       expect(saved.description, '描述应保存').toBe(desc)
@@ -81,7 +82,7 @@ test.describe('商家侧 3 商品维护', () => {
 
       // ---------- 编辑：改名 + 改描述 ----------
       await openProducts(page)
-      const newName = `${name}-改`
+      const newName = productNameOf(`${seed}-edit`)
       await tid(page, 'product-list-create').waitFor() // 确保页面就绪
       await productRowOf(page, name).getByTestId('product-row-edit').click()
       const d2 = tid(page, 'product-form-dialog')
@@ -91,20 +92,18 @@ test.describe('商家侧 3 商品维护', () => {
       await tid(page, 'product-form-submit').click()
       await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
       await page.waitForTimeout(1000)
-      const edited = (await getAdminProductsApi(request, token, newName))[0]
+      const edited = newestByName(await getAdminProductsApi(request, token, newName), newName)
       expect(edited.description).toContain('（已改）')
-    } finally {
-      cleanupTempImages()
     }
   })
 
   test('上下架切换：下架后 C 端列表与详情都不可见，上架后恢复', async ({ page, request }) => {
-    const png = writeTempPng()
-    try {
+    const seed = stamp()
+    {
       await adminLogin(page)
       const token = await adminTokenOf(page)
-      const cover = await uploadImageApi(request, token, png)
-      const name = `E2E上下架${stamp()}`
+      const { cover } = realGalleryImages(seed)
+      const name = productNameOf(`${seed}-pub`)
       await openProducts(page)
       await addProduct(page, { name, categoryName: '手机数码', typeName: '手机' })
       // 补一张主图（新建时不带图也能建，这里补上便于 C 端可见性断言）
@@ -118,7 +117,7 @@ test.describe('商家侧 3 商品维护', () => {
       await openProducts(page)
       await productRowOf(page, name).waitFor()
       await editProduct(page, name, { publish: false })
-      const saved = (await getAdminProductsApi(request, token, name))[0]
+      const saved = newestByName(await getAdminProductsApi(request, token, name), name)
       expect(saved.publishStatus, '后台应为下架(0)').toBe(0)
 
       // C 端：列表没有、详情被拒
@@ -133,11 +132,9 @@ test.describe('商家侧 3 商品维护', () => {
       await openProducts(page)
       await productRowOf(page, name).waitFor()
       await editProduct(page, name, { publish: true })
-      expect((await getAdminProductsApi(request, token, name))[0].publishStatus, '应恢复上架(1)').toBe(1)
+      expect(newestByName(await getAdminProductsApi(request, token, name), name).publishStatus, '应恢复上架(1)').toBe(1)
       const cProducts = (await getProductApi(request, saved.id).catch(() => null))
       expect(cProducts, '上架后 C 端应能取到该商品').toBeTruthy()
-    } finally {
-      cleanupTempImages()
     }
   })
 
@@ -147,17 +144,19 @@ test.describe('商家侧 3 商品维护', () => {
     await openProducts(page)
 
     // ① 被订单明细引用的商品（种子商品1）→ 被拒，且提示可改为下架
-    const usedRow = page.locator('.el-table__body tr').filter({ hasText: '七七 Pro 15 智能手机' }).first()
+    // 用种子商品1（它被演示订单引用）——名称从接口取，不写死某套种子
+    const seedProduct = (await getAdminProductsApi(request, token))[0]
+    const usedRow = page.locator('.el-table__body tr').filter({ hasText: seedProduct.name }).first()
     await expect(usedRow).toBeVisible()
     await usedRow.getByTestId('product-row-delete').click()
     await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
     const errText = page.locator('.el-message--error').first()
     await expect(errText, '被订单引用的商品应被拒绝').toContainText('不能删除', { timeout: 15_000 })
     await expect(errText).toContainText('下架')
-    expect((await getAdminProductsApi(request, token, '七七 Pro 15 智能手机')).length, '商品应仍存在').toBe(1)
+    expect((await getAdminProductsApi(request, token, seedProduct.name)).length, '商品应仍存在').toBe(1)
 
     // ② 新建的空商品 → 可以删
-    const empty = `E2E待删商品${stamp()}`
+    const empty = productNameOf(stamp())
     await page.getByRole('button', { name: '新增' }).click()
     const dialog = page.locator('.el-dialog')
     await dialog.getByTestId('product-form-name').fill(empty)
