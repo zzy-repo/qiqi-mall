@@ -1,5 +1,5 @@
 <template>
-  <div class="page-placeholder">
+  <div class="page-placeholder" data-testid="dashboard-page">
     <el-empty description="主内容区域" />
   </div>
 </template>

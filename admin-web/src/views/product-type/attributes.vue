@@ -8,7 +8,7 @@
           <span>属性管理</span>
           <el-tag v-if="typeName" size="small" type="info">{{ typeName }}</el-tag>
         </div>
-        <el-button type="primary" :icon="Plus" data-testid="attribute-list-create" @click="openForm()">新增属性</el-button>
+        <el-button type="primary" :icon="Plus" data-testid="attribute-create" @click="openForm()">新增属性</el-button>
       </div>
     </template>
 
@@ -18,14 +18,16 @@
       <el-table-column prop="name" label="属性名称" />
       <el-table-column label="是否筛选" width="120">
         <template #default="{ row }">
-          <el-tag :type="row.isFilter ? 'success' : 'info'" size="small">
+          <el-tag :type="row.isFilter ? 'success' : 'info'" size="small" data-testid="attribute-row-filter">
             {{ row.isFilter ? '是' : '否' }}
           </el-tag>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="100" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" data-testid="attribute-row-edit" @click="openForm(row)">编辑</el-button>
+          <span :data-testid="`attribute-row-${row.id}`">
+            <el-button link type="primary" size="small" data-testid="attribute-row-edit" @click="openForm(row)">编辑</el-button>
+          </span>
         </template>
       </el-table-column>
     </el-table>
@@ -39,7 +41,7 @@
           <el-input v-model="form.name" data-testid="attribute-form-name" placeholder="如：颜色、内存" maxlength="50" />
         </el-form-item>
         <el-form-item label="是否可筛选">
-          <el-switch v-model="form.isFilter" data-testid="attribute-form-is-filter" :active-value="1" :inactive-value="0" />
+          <el-switch v-model="form.isFilter" data-testid="attribute-form-filter" :active-value="1" :inactive-value="0" />
         </el-form-item>
       </el-form>
       <template #footer>

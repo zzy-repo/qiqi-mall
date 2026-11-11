@@ -10,7 +10,7 @@
     <el-table v-loading="loading" :data="list" border data-testid="product-list-table">
       <el-table-column label="主图" width="90">
         <template #default="{ row }">
-          <el-image v-if="row.pic" :src="row.pic" fit="cover" class="thumb">
+          <el-image v-if="row.pic" :src="row.pic" fit="cover" class="thumb" data-testid="product-row-cover">
             <template #error><span class="empty-pic">无图</span></template>
           </el-image>
           <span v-else class="empty-pic">—</span>
@@ -19,15 +19,17 @@
       <el-table-column prop="name" label="商品名称" min-width="200" />
       <el-table-column label="上下架" width="110">
         <template #default="{ row }">
-          <el-tag :type="row.publishStatus ? 'success' : 'info'" size="small">
+          <el-tag :type="row.publishStatus ? 'success' : 'info'" size="small" data-testid="product-row-status">
             {{ row.publishStatus ? '上架' : '下架' }}
           </el-tag>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="150" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" data-testid="product-row-edit" @click="openForm(row)">编辑</el-button>
-          <el-button link type="primary" size="small" data-testid="product-row-sku" @click="openSkus(row)">SKU</el-button>
+          <span :data-testid="`product-row-${row.id}`">
+            <el-button link type="primary" size="small" data-testid="product-row-edit" @click="openForm(row)">编辑</el-button>
+            <el-button link type="primary" size="small" data-testid="product-row-skus" @click="openSkus(row)">SKU</el-button>
+          </span>
         </template>
       </el-table-column>
     </el-table>
@@ -66,7 +68,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="主图">
-          <ImageUploader v-model="form.pic" data-testid="product-form-pic" placeholder="主图URL（可直接上传）" />
+          <ImageUploader v-model="form.pic" data-testid="product-form-cover" placeholder="主图URL（可直接上传）" />
         </el-form-item>
         <el-form-item label="商品相册">
           <div class="gallery">
@@ -76,7 +78,7 @@
               class="gallery-row"
               data-testid="product-form-gallery-row"
             >
-              <ImageUploader v-model="img.url" class="grow" data-testid="product-form-gallery-input" placeholder="相册图URL" />
+              <ImageUploader v-model="img.url" class="grow" data-testid="product-form-gallery-url" placeholder="相册图URL" />
               <el-input-number
                 v-model="img.sort"
                 data-testid="product-form-gallery-sort"
@@ -104,7 +106,7 @@
           </div>
         </el-form-item>
         <el-form-item label="上下架">
-          <el-radio-group v-model="form.publishStatus" data-testid="product-form-publish-status">
+          <el-radio-group v-model="form.publishStatus" data-testid="product-form-publish">
             <el-radio :value="1">上架</el-radio>
             <el-radio :value="0">下架</el-radio>
           </el-radio-group>

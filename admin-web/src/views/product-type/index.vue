@@ -3,7 +3,7 @@
     <template #header>
       <div class="card-header">
         <span>商品类型</span>
-        <el-button type="primary" :icon="Plus" data-testid="product-type-list-create" @click="openForm()">新增</el-button>
+        <el-button type="primary" :icon="Plus" data-testid="product-type-create" @click="openForm()">新增</el-button>
       </div>
     </template>
 
@@ -11,8 +11,10 @@
       <el-table-column prop="name" label="类型名称" />
       <el-table-column label="操作" width="150" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" data-testid="product-type-row-edit" @click="openForm(row)">编辑</el-button>
-          <el-button link type="primary" size="small" data-testid="product-type-row-attributes" @click="openAttributes(row)">属性</el-button>
+          <span :data-testid="`product-type-row-${row.id}`">
+            <el-button link type="primary" size="small" data-testid="product-type-row-edit" @click="openForm(row)">编辑</el-button>
+            <el-button link type="primary" size="small" data-testid="product-type-row-attributes" @click="openAttributes(row)">属性</el-button>
+          </span>
         </template>
       </el-table-column>
     </el-table>

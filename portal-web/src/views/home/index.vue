@@ -3,7 +3,7 @@
     <div class="toolbar">
       <el-input
         v-model="keyword"
-        data-testid="home-search-keyword"
+        data-testid="home-search-input"
         placeholder="搜索商品"
         clearable
         style="width: 260px"
@@ -15,15 +15,20 @@
         </template>
       </el-input>
 
-      <el-radio-group v-model="categoryId" size="default" data-testid="home-category-filter" @change="load">
-        <el-radio-button :value="null" data-testid="home-category-option">全部</el-radio-button>
-        <el-radio-button v-for="c in categories" :key="c.id" :value="c.id" data-testid="home-category-option">
+      <el-radio-group v-model="categoryId" size="default" @change="load">
+        <el-radio-button :value="null" data-testid="home-category-all">全部</el-radio-button>
+        <el-radio-button
+          v-for="c in categories"
+          :key="c.id"
+          :value="c.id"
+          :data-testid="`home-category-${c.id}`"
+        >
           {{ c.name }}
         </el-radio-button>
       </el-radio-group>
     </div>
 
-    <div v-loading="loading" class="grid">
+    <div v-loading="loading" class="grid" data-testid="home-product-grid">
       <el-card
         v-for="p in products"
         :key="p.id"
@@ -38,10 +43,10 @@
           </el-image>
           <el-icon v-else :size="40"><Goods /></el-icon>
         </div>
-        <div class="name">{{ p.name }}</div>
+        <div class="name" data-testid="home-product-card-name">{{ p.name }}</div>
         <div class="cta">查看详情 →</div>
       </el-card>
-      <el-empty v-if="!loading && !products.length" description="暂无商品" />
+      <el-empty v-if="!loading && !products.length" description="暂无商品" data-testid="home-empty" />
     </div>
   </div>
 </template>

@@ -23,15 +23,15 @@
           </el-select>
         </el-form-item>
         <el-form-item label="收货人" required>
-          <el-input v-model="form.receiverName" data-testid="checkout-form-receiver-name" maxlength="50" />
+          <el-input v-model="form.receiverName" data-testid="checkout-input-receiver" maxlength="50" />
         </el-form-item>
         <el-form-item label="电话">
-          <el-input v-model="form.receiverPhone" data-testid="checkout-form-receiver-phone" maxlength="20" />
+          <el-input v-model="form.receiverPhone" data-testid="checkout-input-phone" maxlength="20" />
         </el-form-item>
         <el-form-item label="收货地址" required>
           <el-input
             v-model="form.receiverAddress"
-            data-testid="checkout-form-receiver-address"
+            data-testid="checkout-input-address"
             type="textarea"
             :rows="2"
             maxlength="255"
@@ -45,7 +45,9 @@
       <el-table :data="items" border size="small">
         <el-table-column prop="productName" label="商品" min-width="180" />
         <el-table-column label="规格" min-width="160">
-          <template #default="{ row }">{{ row.specText || '默认规格' }}</template>
+          <template #default="{ row }">
+            <span :data-testid="`checkout-item-row-${row.productSkuId}`">{{ row.specText || '默认规格' }}</span>
+          </template>
         </el-table-column>
         <el-table-column label="单价" width="110">
           <template #default="{ row }">¥ {{ Number(row.price).toFixed(2) }}</template>
@@ -57,12 +59,12 @@
       </el-table>
 
       <div class="footer">
-        <span class="total">应付：<b>¥ {{ total }}</b></span>
+        <span class="total" data-testid="checkout-total">应付：<b>¥ {{ total }}</b></span>
         <el-button
           type="primary"
           size="large"
           :loading="submitting"
-          data-testid="checkout-form-submit"
+          data-testid="checkout-submit"
           @click="submit"
         >提交订单</el-button>
       </div>

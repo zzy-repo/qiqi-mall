@@ -1,6 +1,8 @@
 <template>
   <div>
-    <h3 class="title">购物车<span v-if="!logged" class="hint">（未登录，暂存在本浏览器）</span></h3>
+    <h3 class="title">
+      购物车<span v-if="!logged" class="hint" data-testid="cart-local-hint">（未登录，暂存在本浏览器）</span>
+    </h3>
 
     <el-card shadow="never">
       <el-table v-loading="loading" :data="rows" border data-testid="cart-list-table">
@@ -13,14 +15,16 @@
         </el-table-column>
         <el-table-column label="数量" width="150">
           <template #default="{ row }">
-            <el-input-number
-              :model-value="row.quantity"
-              data-testid="cart-row-quantity"
-              :min="1"
-              :precision="0"
-              size="small"
-              @change="(v) => changeQty(row, v)"
-            />
+            <span :data-testid="`cart-row-${row.productSkuId}`">
+              <el-input-number
+                :model-value="row.quantity"
+                data-testid="cart-row-qty"
+                :min="1"
+                :precision="0"
+                size="small"
+                @change="(v) => changeQty(row, v)"
+              />
+            </span>
           </template>
         </el-table-column>
         <el-table-column label="小计" width="130">
@@ -34,12 +38,12 @@
       </el-table>
 
       <div class="footer">
-        <span class="total">合计：<b>¥ {{ total }}</b></span>
+        <span class="total" data-testid="cart-total">合计：<b>¥ {{ total }}</b></span>
         <el-button
           type="primary"
           size="large"
           :disabled="!rows.length"
-          data-testid="cart-checkout-submit"
+          data-testid="cart-checkout"
           @click="checkout"
         >去结算</el-button>
       </div>

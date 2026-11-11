@@ -3,7 +3,7 @@
     <template #header>
       <div class="card-header">
         <span>商品分类</span>
-        <el-button type="primary" :icon="Plus" data-testid="category-list-create" @click="openForm()">新增</el-button>
+        <el-button type="primary" :icon="Plus" data-testid="category-create" @click="openForm()">新增</el-button>
       </div>
     </template>
 
@@ -11,7 +11,9 @@
       <el-table-column prop="name" label="分类名称" />
       <el-table-column label="操作" width="100" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" data-testid="category-row-edit" @click="openForm(row)">编辑</el-button>
+          <span :data-testid="`category-row-${row.id}`">
+            <el-button link type="primary" size="small" data-testid="category-row-edit" @click="openForm(row)">编辑</el-button>
+          </span>
         </template>
       </el-table-column>
     </el-table>

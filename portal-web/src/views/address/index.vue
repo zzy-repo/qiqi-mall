@@ -2,7 +2,7 @@
   <div>
     <div class="head">
       <h3 class="title">收货地址</h3>
-      <el-button type="primary" :icon="Plus" data-testid="address-list-create" @click="openForm()">新增地址</el-button>
+      <el-button type="primary" :icon="Plus" data-testid="addresses-create" @click="openForm()">新增地址</el-button>
     </div>
 
     <el-card shadow="never">
@@ -15,14 +15,16 @@
         <el-table-column prop="detail" label="详细地址" min-width="200" show-overflow-tooltip />
         <el-table-column label="默认" width="80">
           <template #default="{ row }">
-            <el-tag v-if="row.defaultStatus" type="success" size="small" data-testid="address-row-default-tag">默认</el-tag>
+            <el-tag v-if="row.defaultStatus" type="success" size="small" data-testid="addresses-row-default">默认</el-tag>
             <span v-else>—</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="130" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" data-testid="address-row-edit" @click="openForm(row)">编辑</el-button>
-            <el-button link type="danger" size="small" data-testid="address-row-remove" @click="remove(row)">删除</el-button>
+            <span :data-testid="`addresses-row-${row.id}`">
+              <el-button link type="primary" size="small" data-testid="addresses-row-edit" @click="openForm(row)">编辑</el-button>
+              <el-button link type="danger" size="small" data-testid="addresses-row-remove" @click="remove(row)">删除</el-button>
+            </span>
           </template>
         </el-table-column>
       </el-table>

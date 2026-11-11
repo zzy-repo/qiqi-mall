@@ -4,7 +4,7 @@
     <el-card v-if="product" shadow="never" class="detail">
       <div class="head">
         <div class="left">
-          <div class="thumb" data-testid="product-detail-main-image">
+          <div class="thumb" data-testid="product-detail-cover">
             <el-image v-if="product.pic" :src="product.pic" fit="cover" class="cover">
               <template #error><el-icon :size="60"><Goods /></el-icon></template>
             </el-image>
@@ -15,7 +15,7 @@
               v-for="g in gallery"
               :key="g.id"
               :src="g.url"
-              data-testid="product-detail-gallery-thumb"
+              data-testid="product-detail-gallery-item"
               class="gallery-item"
               :class="{ active: g.id === activeGallery }"
               fit="cover"
@@ -26,24 +26,29 @@
           </div>
         </div>
         <div class="info">
-          <h2>{{ product.name }}</h2>
-          <div class="price">¥ {{ currentSku ? Number(currentSku.price).toFixed(2) : '—' }}</div>
+          <h2 data-testid="product-detail-name">{{ product.name }}</h2>
+          <div class="price" data-testid="product-detail-price">¥ {{ currentSku ? Number(currentSku.price).toFixed(2) : '—' }}</div>
           <div class="specs">
             <span class="label">规格：</span>
-            <el-radio-group v-model="skuId" data-testid="product-detail-spec-group">
-              <el-radio-button v-for="s in skus" :key="s.id" :value="s.id" data-testid="product-detail-spec-option">
+            <el-radio-group v-model="skuId">
+              <el-radio-button
+                v-for="s in skus"
+                :key="s.id"
+                :value="s.id"
+                :data-testid="`product-detail-sku-${s.id}`"
+              >
                 {{ s.specText || '默认规格' }}
               </el-radio-button>
             </el-radio-group>
           </div>
           <div class="desc" v-if="product.description">
             <span class="label">商品描述：</span>
-            <p class="desc-text">{{ product.description }}</p>
+            <p class="desc-text" data-testid="product-detail-desc">{{ product.description }}</p>
           </div>
           <div class="qty">
             <span class="label">数量：</span>
-            <el-input-number v-model="quantity" data-testid="product-detail-quantity" :min="1" :precision="0" />
-            <span class="stock" v-if="currentSku">库存 {{ currentSku.stock }}</span>
+            <el-input-number v-model="quantity" data-testid="product-detail-qty" :min="1" :precision="0" />
+            <span class="stock" v-if="currentSku" data-testid="product-detail-stock">库存 {{ currentSku.stock }}</span>
           </div>
           <el-button
             type="primary"

@@ -10,13 +10,15 @@
         </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="statusTag[row.status]" size="small" data-testid="order-row-status">{{ statusText[row.status] }}</el-tag>
+            <el-tag :type="statusTag[row.status]" size="small" data-testid="orders-row-status">
+              {{ statusText[row.status] }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="receiverName" label="收货人" width="100" />
         <el-table-column label="售后" width="110">
           <template #default="{ row }">
-            <el-tag v-if="afterSaleText(row.id)" :type="afterSaleTag(row.id)" size="small">
+            <el-tag v-if="afterSaleText(row.id)" :type="afterSaleTag(row.id)" size="small" data-testid="orders-row-aftersale">
               {{ afterSaleText(row.id) }}
             </el-tag>
             <span v-else>—</span>
@@ -27,25 +29,34 @@
         </el-table-column>
         <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" data-testid="order-row-detail" @click="openDetail(row)">详情</el-button>
-            <el-button link type="primary" size="small" data-testid="order-row-parcels" @click="openParcels(row)">包裹</el-button>
-            <el-button v-if="row.status === 0" link type="primary" size="small" @click="pay(row)">模拟支付</el-button>
-            <el-button
-              v-if="row.status === 2"
-              link
-              type="success"
-              size="small"
-              data-testid="order-row-confirm-receive"
-              @click="confirmReceive(row)"
-            >确认收货</el-button>
-            <el-button
-              v-if="row.status === 1 || row.status === 2"
-              link
-              type="warning"
-              size="small"
-              data-testid="order-row-return"
-              @click="openReturn(row)"
-            >申请退货</el-button>
+            <span :data-testid="`orders-row-${row.orderSn}`">
+              <el-button link type="primary" size="small" data-testid="orders-row-detail" @click="openDetail(row)">详情</el-button>
+              <el-button link type="primary" size="small" data-testid="orders-row-parcels" @click="openParcels(row)">包裹</el-button>
+              <el-button
+                v-if="row.status === 0"
+                link
+                type="primary"
+                size="small"
+                data-testid="orders-row-pay"
+                @click="pay(row)"
+              >模拟支付</el-button>
+              <el-button
+                v-if="row.status === 2"
+                link
+                type="success"
+                size="small"
+                data-testid="orders-row-confirm"
+                @click="confirmReceive(row)"
+              >确认收货</el-button>
+              <el-button
+                v-if="row.status === 1 || row.status === 2"
+                link
+                type="warning"
+                size="small"
+                data-testid="orders-row-return"
+                @click="openReturn(row)"
+              >申请退货</el-button>
+            </span>
           </template>
         </el-table-column>
       </el-table>
@@ -66,7 +77,9 @@
     <el-dialog v-model="detailVisible" title="订单详情" width="620px" data-testid="order-detail-dialog">
       <template v-if="detail">
         <el-descriptions :column="2" border size="small">
-          <el-descriptions-item label="订单号">{{ detail.order.orderSn }}</el-descriptions-item>
+          <el-descriptions-item label="订单号">
+            <span data-testid="order-detail-sn">{{ detail.order.orderSn }}</span>
+          </el-descriptions-item>
           <el-descriptions-item label="状态">{{ statusText[detail.order.status] }}</el-descriptions-item>
           <el-descriptions-item label="收货人">{{ detail.order.receiverName }}</el-descriptions-item>
           <el-descriptions-item label="电话">{{ detail.order.receiverPhone || '—' }}</el-descriptions-item>
@@ -84,12 +97,7 @@
       </template>
     </el-dialog>
 
-    <el-drawer
-      v-model="parcelVisible"
-      :title="`包裹 - ${parcelOrderSn}`"
-      size="480px"
-      data-testid="order-parcel-drawer"
-    >
+    <el-drawer v-model="parcelVisible" :title="`包裹 - ${parcelOrderSn}`" size="480px" data-testid="parcel-drawer">
       <el-table :data="parcels" border size="small" empty-text="暂无包裹（商家审核后将拆单发货）">
         <el-table-column prop="deliverySn" label="包裹号" min-width="160" />
         <el-table-column prop="warehouseName" label="发货仓" width="90" />
@@ -100,8 +108,10 @@
         </el-table-column>
         <el-table-column label="运单号" min-width="140">
           <template #default="{ row }">
-            <div v-if="row.trackNo">{{ row.company }} {{ row.trackNo }}</div>
-            <span v-else>—</span>
+            <span :data-testid="`parcel-row-${row.id}`">
+              <span v-if="row.trackNo" data-testid="parcel-row-track">{{ row.company }} {{ row.trackNo }}</span>
+              <span v-else>—</span>
+            </span>
           </template>
         </el-table-column>
       </el-table>

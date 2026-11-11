@@ -6,23 +6,23 @@
         <span>七七商城</span>
       </div>
 
-      <el-tabs v-model="tab" stretch data-testid="login-tabs">
+      <el-tabs v-model="tab" stretch>
         <el-tab-pane name="login">
-          <template #label><span data-testid="login-tab-login">登录</span></template>
+          <template #label><span data-testid="auth-tab-login">登录</span></template>
         </el-tab-pane>
         <el-tab-pane name="register">
-          <template #label><span data-testid="login-tab-register">注册</span></template>
+          <template #label><span data-testid="auth-tab-register">注册</span></template>
         </el-tab-pane>
       </el-tabs>
 
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="submit">
-        <el-form-item label="用户名" prop="username">
-          <el-input v-model="form.username" data-testid="login-form-username" size="large" placeholder="请输入用户名" />
+        <el-form-item label="用户名" prop="username" data-testid="auth-error-username">
+          <el-input v-model="form.username" data-testid="auth-input-username" size="large" placeholder="请输入用户名" />
         </el-form-item>
-        <el-form-item label="密码" prop="password">
+        <el-form-item label="密码" prop="password" data-testid="auth-error-password">
           <el-input
             v-model="form.password"
-            data-testid="login-form-password"
+            data-testid="auth-input-password"
             type="password"
             size="large"
             show-password
@@ -33,19 +33,27 @@
           <el-form-item label="昵称" prop="nickname">
             <el-input
               v-model="form.nickname"
-              data-testid="login-form-nickname"
+              data-testid="auth-input-nickname"
               size="large"
               placeholder="选填，默认与用户名相同"
             />
           </el-form-item>
           <el-form-item label="手机号" prop="phone">
-            <el-input v-model="form.phone" data-testid="login-form-phone" size="large" placeholder="选填" />
+            <el-input v-model="form.phone" data-testid="auth-input-phone" size="large" placeholder="选填" />
           </el-form-item>
         </template>
 
-        <el-alert v-if="errorText" :title="errorText" type="error" :closable="false" show-icon class="error" />
+        <el-alert
+          v-if="errorText"
+          data-testid="auth-error"
+          :title="errorText"
+          type="error"
+          :closable="false"
+          show-icon
+          class="error"
+        />
 
-        <el-button type="primary" size="large" class="submit" data-testid="login-form-submit" :loading="loading" @click="submit">
+        <el-button type="primary" size="large" class="submit" data-testid="auth-submit" :loading="loading" @click="submit">
           {{ tab === 'login' ? '登录' : '注册并登录' }}
         </el-button>
         <div class="tip">

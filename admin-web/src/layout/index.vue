@@ -21,34 +21,34 @@
             <el-icon><HomeFilled /></el-icon>
             <span>首页</span>
           </template>
-          <el-menu-item index="/dashboard">数据概览</el-menu-item>
+          <el-menu-item index="/dashboard" data-testid="nav-dashboard">数据概览</el-menu-item>
         </el-sub-menu>
         <el-sub-menu index="member">
           <template #title>
             <el-icon><User /></el-icon>
             <span>用户</span>
           </template>
-          <el-menu-item index="/member">会员列表</el-menu-item>
-          <el-menu-item index="/admin">管理员</el-menu-item>
+          <el-menu-item index="/member" data-testid="nav-member">会员列表</el-menu-item>
+          <el-menu-item index="/admin" data-testid="nav-admin">管理员</el-menu-item>
         </el-sub-menu>
         <el-sub-menu index="order">
           <template #title>
             <el-icon><List /></el-icon>
             <span>订单</span>
           </template>
-          <el-menu-item index="/order">订单列表</el-menu-item>
-          <el-menu-item index="/return-apply">退货申请</el-menu-item>
-          <el-menu-item index="/order-setting">订单设置</el-menu-item>
-          <el-menu-item index="/warehouse">仓库管理</el-menu-item>
+          <el-menu-item index="/order" data-testid="nav-order">订单列表</el-menu-item>
+          <el-menu-item index="/return-apply" data-testid="nav-return-apply">退货申请</el-menu-item>
+          <el-menu-item index="/order-setting" data-testid="nav-order-setting">订单设置</el-menu-item>
+          <el-menu-item index="/warehouse" data-testid="nav-warehouse">仓库管理</el-menu-item>
         </el-sub-menu>
         <el-sub-menu index="product">
           <template #title>
             <el-icon><Goods /></el-icon>
             <span>商品</span>
           </template>
-          <el-menu-item index="/product">商品列表</el-menu-item>
-          <el-menu-item index="/category">商品分类</el-menu-item>
-          <el-menu-item index="/product-type">商品类型</el-menu-item>
+          <el-menu-item index="/product" data-testid="nav-product">商品列表</el-menu-item>
+          <el-menu-item index="/category" data-testid="nav-category">商品分类</el-menu-item>
+          <el-menu-item index="/product-type" data-testid="nav-product-type">商品类型</el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>
@@ -63,7 +63,11 @@
           </el-icon>
           <el-breadcrumb separator="/">
             <el-breadcrumb-item :to="{ path: '/dashboard' }">首页</el-breadcrumb-item>
-            <el-breadcrumb-item v-for="item in breadcrumbs" :key="item.path">
+            <el-breadcrumb-item
+              v-for="item in breadcrumbs"
+              :key="item.path"
+              :data-testid="item === breadcrumbs[breadcrumbs.length - 1] ? 'breadcrumb-current' : undefined"
+            >
               {{ item.title }}
             </el-breadcrumb-item>
           </el-breadcrumb>
