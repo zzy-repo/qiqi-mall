@@ -40,9 +40,10 @@ test.describe('04-商家-基础配置 › 1-仓库管理', () => {
   test('新增/编辑/删除仓库，覆盖重名、空名与被引用仓库删除失败', async ({ page, request }) => {
     // 仓库名要「像真的」且不重名：自然仓名 + 库位编号后缀（B482 这种）
     const seed = stamp()
-    const base = warehouseNameOf(seed)
-    const renamed = warehouseNameOf(`${seed}-renamed`)
-    const dupName = warehouseNameOf(`${seed}-dup`)
+    const base = warehouseNameOf(seed, 'base')
+    const renamed = warehouseNameOf(seed, 'renamed')
+    const dupName = warehouseNameOf(seed, 'dup')
+    expect(new Set([base, renamed, dupName]).size, '三个仓库名必须两两不同（否则按文本定位会取错行）').toBe(3)
 
     let productName
     await test.step('① 管理员登录并进入仓库管理', async () => {

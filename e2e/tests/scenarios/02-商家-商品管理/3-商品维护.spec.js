@@ -5,6 +5,7 @@ import {
   openProducts,
   addProduct,
   editProduct,
+  editProductById,
   productRowOf
 } from '../../support/catalog-ui.js'
 import { expectImageLoaded } from '../../support/images.js'
@@ -106,18 +107,21 @@ test.describe('商家侧 3 商品维护', () => {
       const name = productNameOf(`${seed}-pub`)
       await openProducts(page)
       await addProduct(page, { name, categoryName: '手机数码', typeName: '手机' })
+      // 拿到本轮这条的 id，后续一律按 id 定位（同名商品在库里会累积，按文本会取到旧那条）
+      const created = newestByName(await getAdminProductsApi(request, token, name), name)
+      expect(created, '商品应创建成功').toBeTruthy()
       // 补一张主图（新建时不带图也能建，这里补上便于 C 端可见性断言）
       await tid(page, 'product-list-create').waitFor()
-      await productRowOf(page, name).getByTestId('product-row-edit').click()
+      await tid(page, `product-row-${created.id}`).getByTestId('product-row-edit').click()
       await tid(page, 'product-form-cover').locator('input[type="text"]').fill(cover)
       await tid(page, 'product-form-submit').click()
       await page.waitForTimeout(1200)
 
-      // 下架
+      // 下架（按 id）
       await openProducts(page)
-      await productRowOf(page, name).waitFor()
-      await editProduct(page, name, { publish: false })
-      const saved = newestByName(await getAdminProductsApi(request, token, name), name)
+      await tid(page, `product-row-${created.id}`).waitFor()
+      await editProductById(page, created.id, { publish: false })
+      const saved = (await getAdminProductsApi(request, token, name)).find((p) => p.id === created.id)
       expect(saved.publishStatus, '后台应为下架(0)').toBe(0)
 
       // C 端：列表没有、详情被拒
@@ -130,9 +134,9 @@ test.describe('商家侧 3 商品维护', () => {
 
       // 上架恢复
       await openProducts(page)
-      await productRowOf(page, name).waitFor()
-      await editProduct(page, name, { publish: true })
-      expect(newestByName(await getAdminProductsApi(request, token, name), name).publishStatus, '应恢复上架(1)').toBe(1)
+      await tid(page, `product-row-${created.id}`).waitFor()
+      await editProductById(page, created.id, { publish: true })
+      expect((await getAdminProductsApi(request, token, name)).find((p) => p.id === created.id).publishStatus, '应恢复上架(1)').toBe(1)
       const cProducts = (await getProductApi(request, saved.id).catch(() => null))
       expect(cProducts, '上架后 C 端应能取到该商品').toBeTruthy()
     }

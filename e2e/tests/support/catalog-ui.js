@@ -197,6 +197,32 @@ export async function editProduct(page, currentName, { name, publish } = {}) {
   await page.waitForTimeout(1000)
 }
 
+/**
+ * 按商品 id 编辑（比按名字稳：同名商品在库里会累积，按文本取到的是旧那条）。
+ * @param productId 商品 id（data-testid 行锚点 product-row-<id>）
+ */
+export async function editProductById(page, productId, { name, publish } = {}) {
+  await tid(page, `product-row-${productId}`).getByTestId('product-row-edit').click()
+  const dialog = tid(page, 'product-form-dialog')
+  await expect(dialog).toBeVisible()
+  if (name) await tid(page, 'product-form-name').fill(name)
+  if (typeof publish === 'boolean') {
+    const label = publish ? '上架' : '下架'
+    await tid(page, 'product-form-publish').locator('.el-radio').filter({ hasText: label }).first().click()
+  }
+  await tid(page, 'product-form-submit').click()
+  await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
+  await page.waitForTimeout(1000)
+}
+
+/** 按商品 id 直接进入该商品的 SKU 管理页（不按名字点行，避免同名商品取错） */
+export async function openSkusById(page, productId) {
+  await tid(page, `product-row-${productId}`).getByTestId('product-row-skus').click()
+  await page.waitForURL(new RegExp(`/product/${productId}/skus`), { timeout: 15_000 })
+  await page.waitForTimeout(1200)
+  await expect(page.locator('.card-header')).toContainText('SKU 管理')
+}
+
 /** 进入商品 SKU 管理页 */
 export async function openSkus(page, productName) {
   await productRowOf(page, productName).getByTestId('product-row-skus').click()

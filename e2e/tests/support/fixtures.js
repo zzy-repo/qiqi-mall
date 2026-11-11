@@ -140,9 +140,15 @@ export const receiverOf = (seed) => {
 
 /** 仓库名：好听 + 带一个像库位编号的后缀，保证多轮跑不重名 */
 export const warehouseBases = ['杭州云栖仓', '北京亦庄仓', '广州南沙仓', '成都双流仓', '武汉东西湖仓', '西安沣东仓']
-export function warehouseNameOf(seed) {
-  const code = String(Math.abs(parseInt(String(seed ?? '0').replace(/\D/g, '') || '7', 10)) % 900 + 100)
-  return `${pick(warehouseBases, seed)}（B${code}）`
+/**
+ * @param salt 同一次用例里要造多个仓库时传不同的 salt，保证三个名字两两不同
+ *             （只用 seed 时 base / renamed / dup 的数字来源相同，会撞成同名 → 按文本定位会取错行）
+ */
+export function warehouseNameOf(seed, salt = '') {
+  const key = `${seed}#${salt}`
+  let h = 0
+  for (let i = 0; i < key.length; i++) h = (h * 131 + key.charCodeAt(i)) % 100000
+  return `${pick(warehouseBases, key)}（B${(h % 900) + 100}）`
 }
 
 /** 管理员昵称（列表里的「昵称」列会显示） */

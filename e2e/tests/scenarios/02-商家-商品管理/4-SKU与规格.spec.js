@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { PORTAL, API, stamp } from '../../support/env.js'
 import { adminLogin } from '../../support/ui.js'
-import { openProducts, addProduct, openSkus, addSku, editSku } from '../../support/catalog-ui.js'
+import { openProducts, addProduct, openSkus, openSkusById, addSku, editSku } from '../../support/catalog-ui.js'
 import { expectImageLoaded } from '../../support/images.js'
 import { adminTokenOf, getAdminProductsApi, getAdminSkusApi } from '../../support/assert.js'
 import { tid, tidPrefix } from '../../support/tid.js'
@@ -177,7 +177,8 @@ test.describe('商家侧 4 SKU 与规格', () => {
     await addProduct(page, { name, categoryName: '手机数码', typeName: '手机' })
     const product = newestByName(await getAdminProductsApi(request, token, name), name)
     await openProducts(page)
-    await openSkus(page, name)
+    // 按 id 进 SKU 页：同名商品会累积，按名字点行可能点到旧那条，SKU 就加到了别的商品上
+    await openSkusById(page, product.id)
     await addSku(page, { specs: [{ attrName: '颜色', value: attributeValues[1] }], price: 1, stock: 1 })
     expect((await getAdminSkusApi(request, token, product.id)).length, '应有 1 个 SKU').toBe(1)
 
