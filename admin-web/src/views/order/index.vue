@@ -423,6 +423,9 @@ const detailVisible = ref(false)
 const openDetail = async (row) => {
   const { getOrder } = await import('../../api/order')
   detail.value = await getOrder(row.id)
+  // 打开抽屉即加载发货单：此前 deliveries 只在 dispatch/cancel/callback 之后刷新，
+  // 首次打开「发货单」区块永远为空，下发/回传入口不可达
+  await loadDeliveries(row.id)
   detailVisible.value = true
 }
 
