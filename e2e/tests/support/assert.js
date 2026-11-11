@@ -79,6 +79,12 @@ export async function getMemberOrderApi(request, token, orderId) {
   return (await res.json()).data
 }
 
+/** 买家的收货地址簿 */
+export async function getMemberAddressesApi(request, token) {
+  const res = await request.get(`${API}/portal/member/addresses`, auth(token))
+  return (await res.json()).data || []
+}
+
 /** 买家的退货申请列表 */
 export async function getMemberReturnsApi(request, token) {
   const res = await request.get(`${API}/portal/returns`, auth(token))

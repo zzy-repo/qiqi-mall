@@ -1,0 +1,178 @@
+import { test, expect } from '@playwright/test'
+import { stamp } from '../../support/env.js'
+import { memberRegisterAndLogin } from '../../support/ui.js'
+import {
+  openAddresses,
+  addressRowOf,
+  addressDialog,
+  addAddress,
+  editAddress,
+  deleteAddress,
+  isDefaultAddress
+} from '../../support/portal-ui.js'
+import { getMemberAddressesApi, memberTokenOf } from '../../support/assert.js'
+
+/**
+ * 买家侧 07 收货地址（docs/flows/02-业务场景/01-买家侧/7-收货地址）
+ *
+ * 覆盖「我的 → 收货地址」的全部已实现操作：
+ *   新增 / 编辑 / 设为默认 / 删除 / 必填校验 / 超长文本截断 / 删除后的列表状态
+ * 全程真实 UI 点击；接口只用于只读断言（地址簿落库情况）。
+ */
+const ADDR_A = {
+  name: '张三',
+  phone: '13800001111',
+  province: '广东省',
+  city: '深圳市',
+  region: '南山区',
+  detail: '科技园南路 1 号 301'
+}
+const ADDR_B = {
+  name: '李四',
+  phone: '13900002222',
+  province: '上海市',
+  city: '上海市',
+  region: '浦东新区',
+  detail: '张江路 200 号 8 楼'
+}
+
+/** 每个用例用独立账号，互不干扰 */
+const newMember = async (page, tag) => {
+  const username = `e2e_addr_${tag}_${stamp()}`
+  await memberRegisterAndLogin(page, username)
+  return username
+}
+
+test.describe('买家侧 07 收货地址', () => {
+  test('新增 → 编辑 → 设为默认 → 删除：地址簿全流程', async ({ page, request }) => {
+    await newMember(page, 'flow')
+    await openAddresses(page)
+
+    // ---------- 新增两条 ----------
+    await addAddress(page, ADDR_A)
+    await addAddress(page, ADDR_B)
+    expect(await isDefaultAddress(page, ADDR_A.name), '新增时不勾默认，列表不应标默认').toBe(false)
+    expect(await isDefaultAddress(page, ADDR_B.name)).toBe(false)
+
+    // 只读复核：两条都落库了，且此时没有默认地址
+    const token = await memberTokenOf(page)
+    let saved = await getMemberAddressesApi(request, token)
+    expect(saved.length, '应有 2 条地址').toBe(2)
+    expect(saved.filter((a) => a.defaultStatus === 1).length, '此时不应有默认地址').toBe(0)
+
+    // ---------- 编辑：改写收件人与详细地址 ----------
+    const renamed = { name: '王小明', detail: '科技园南路 2 号 302' }
+    await editAddress(page, ADDR_A.name, renamed)
+    await expect(addressRowOf(page, renamed.name), '编辑后列表应显示新收件人').toBeVisible()
+    // 收件人列逐格比对（不能整表 not.toContainText：'张三改' 里也含 '张三'）
+    const nameCells = await page.locator('.el-table__body tr td:first-child').allInnerTexts()
+    expect(nameCells, '旧收件人不该再出现在收件人列').not.toContain(ADDR_A.name)
+    await expect(addressRowOf(page, renamed.name)).toContainText(renamed.detail)
+
+    // ---------- 设为默认：默认标记落到该条，且排到列表第一位 ----------
+    await editAddress(page, renamed.name, { detail: renamed.detail, isDefault: true })
+    await expect.poll(() => isDefaultAddress(page, renamed.name), {
+      message: '设为默认后该行应标「默认」',
+      timeout: 10_000
+    }).toBe(true)
+    const firstRow = page.locator('.el-table__body tr').first()
+    await expect(firstRow, '默认地址应排在列表第一位').toContainText(renamed.name)
+
+    saved = await getMemberAddressesApi(request, token)
+    expect(saved.find((a) => a.name === renamed.name).defaultStatus, '服务端应记为默认(1)').toBe(1)
+
+    // ---------- 删除：只删选中的那条，其余不受影响 ----------
+    await deleteAddress(page, ADDR_B.name)
+    await expect(page.locator('.el-table__body'), '被删的地址不应再出现').not.toContainText(ADDR_B.name)
+    await expect(addressRowOf(page, renamed.name), '未删除的地址应仍在').toBeVisible()
+
+    saved = await getMemberAddressesApi(request, token)
+    expect(saved.length, '删除后服务端只剩 1 条').toBe(1)
+    expect(saved[0].name).toBe(renamed.name)
+  })
+
+  test('必填校验：六项必填都不填，就地报错且不提交', async ({ page }) => {
+    await newMember(page, 'required')
+    await openAddresses(page)
+
+    await page.getByRole('button', { name: '新增地址' }).click()
+    const dialog = addressDialog(page)
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole('button', { name: '确定' }).click()
+    await page.waitForTimeout(500)
+
+    // 六个必填项各自给出提示
+    for (const msg of ['请输入收件人', '请输入电话', '请输入省', '请输入市', '请输入区/县', '请输入详细地址']) {
+      await expect(dialog.locator('.el-form-item__error').filter({ hasText: msg }), `应提示「${msg}」`).toBeVisible()
+    }
+    // 弹窗不关闭、列表仍是空的
+    await expect(dialog, '校验不通过时弹窗不应关闭').toBeVisible()
+    await expect(page.locator('.el-table__body tr'), '校验不通过不应产生数据').toHaveCount(0)
+
+    // 补一个必填项后再提交，其它错误提示仍在（逐项校验，不是全清）
+    await dialog.locator('.el-form-item').filter({ hasText: '收件人' }).locator('input').fill('王五')
+    await dialog.getByRole('button', { name: '确定' }).click()
+    await expect(dialog.locator('.el-form-item__error').filter({ hasText: '请输入电话' })).toBeVisible()
+
+    await dialog.getByRole('button', { name: '取消' }).click()
+    await expect(dialog).toBeHidden()
+  })
+
+  test('超长文本：收件人 50、详细地址 200 字上限生效', async ({ page, request }) => {
+    await newMember(page, 'maxlen')
+    await openAddresses(page)
+
+    const longName = '长'.repeat(80)
+    const longDetail = '详'.repeat(300)
+    await page.getByRole('button', { name: '新增地址' }).click()
+    const dialog = addressDialog(page)
+    await expect(dialog).toBeVisible()
+
+    const nameInput = dialog.locator('.el-form-item').filter({ hasText: '收件人' }).locator('input')
+    const detailInput = dialog.locator('.el-form-item').filter({ hasText: '详细地址' }).locator('textarea')
+    await nameInput.fill(longName)
+    await detailInput.fill(longDetail)
+
+    expect((await nameInput.inputValue()).length, '收件人输入框应截断到 50 字').toBe(50)
+    expect((await detailInput.inputValue()).length, '详细地址应截断到 200 字').toBe(200)
+
+    await dialog.locator('.el-form-item').filter({ hasText: '电话' }).locator('input').fill('13700003333')
+    await dialog.locator('.el-form-item').filter({ hasText: '省' }).locator('input').fill('北京市')
+    await dialog.locator('.el-form-item').filter({ hasText: '市' }).locator('input').fill('北京市')
+    await dialog.locator('.el-form-item').filter({ hasText: '区/县' }).locator('input').fill('朝阳区')
+    await dialog.getByRole('button', { name: '确定' }).click()
+    await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
+    await page.waitForTimeout(800)
+
+    // 落库也是截断后的长度（不是前端骗人）
+    const token = await memberTokenOf(page)
+    const saved = await getMemberAddressesApi(request, token)
+    expect(saved.length).toBe(1)
+    expect(saved[0].name.length, '库里收件人应为 50 字').toBe(50)
+    expect(saved[0].detail.length, '库里详细地址应为 200 字').toBe(200)
+    await expect(addressRowOf(page, saved[0].name.slice(0, 10))).toBeVisible()
+  })
+
+  /**
+   * 【已知缺陷 · 期望失败】一个账号只应有一条默认地址。
+   * 现状：PortalMemberController 的 addAddress/updateAddress 直接保存 body，
+   * 没有「清掉其它默认」的逻辑（见 qiqi-mall-server/.../PortalMemberController.java:40-56），
+   * 所以连续把两条都设为默认，库里会出现两条 default_status=1。
+   * 这里用 test.fail() 把期望行为钉住：等后端补上唯一默认逻辑，这条会自动转为需要通过
+   * （届时应删掉 test.fail()）。
+   */
+  test.fail('设默认时应取消原默认地址（当前实现未做到，见报告）', async ({ page, request }) => {
+    await newMember(page, 'default')
+    await openAddresses(page)
+
+    await addAddress(page, { ...ADDR_A, isDefault: true })
+    await addAddress(page, { ...ADDR_B, isDefault: true })
+
+    expect(await isDefaultAddress(page, ADDR_B.name), 'B 应成为默认').toBe(true)
+    expect(await isDefaultAddress(page, ADDR_A.name), 'A 的原默认应被取消').toBe(false)
+
+    const token = await memberTokenOf(page)
+    const saved = await getMemberAddressesApi(request, token)
+    expect(saved.filter((a) => a.defaultStatus === 1).length, '只应有 1 条默认地址').toBe(1)
+  })
+})
