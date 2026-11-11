@@ -9,4 +9,3 @@ export const updateOrder = (id, data) => request.put(`${BASE}/${id}`, data)
 export const deleteOrder = (id) => request.delete(`${BASE}/${id}`)
 
 /** 发货：已付款 → 已发货（后端带守卫） */
-export const shipOrder = (id) => request.post(`${BASE}/${id}/ship`)

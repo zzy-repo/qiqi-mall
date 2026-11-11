@@ -54,12 +54,12 @@
             @click="audit(row)"
           >审核</el-button>
           <el-button
-            v-if="row.status === 1"
+            v-if="row.status === 8"
             link
             type="success"
             size="small"
-            @click="ship(row)"
-          >发货</el-button>
+            @click="openDetail(row)"
+          >发货单</el-button>
           <el-button link type="primary" size="small" @click="openForm(row)">编辑</el-button>
         </template>
       </el-table-column>
@@ -231,7 +231,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { listOrders, createOrder, updateOrder, shipOrder } from '../../api/order'
+import { listOrders, createOrder, updateOrder } from '../../api/order'
 import {
   listDeliveries, dispatchDelivery, cancelDelivery, wmsCallback, auditPassOrder, auditRejectOrder
 } from '../../api/delivery'
@@ -240,7 +240,6 @@ import { listMembers } from '../../api/member'
 import { listProducts } from '../../api/product'
 import { listSkus } from '../../api/sku'
 
-// 状态机：0待付款 1已付款 2已发货 3已完成 4已关闭 5退款中 6已退款
 // 状态机：0待付款 1已付款 2已发货 3已完成 4已关闭 5退款中 6已退款 7待审核 8待发货 9部分发货
 const statusText = ['待付款', '已付款', '已发货', '已完成', '已关闭', '退款中', '已退款', '待审核', '待发货', '部分发货']
 const statusTag = ['warning', 'success', 'primary', 'success', 'info', 'warning', 'info', 'warning', 'warning', 'primary']
@@ -346,20 +345,6 @@ const submit = async () => {
     ElMessage.error('保存失败：' + e.message)
   } finally {
     saving.value = false
-  }
-}
-
-/** 发货（状态 1→2，服务端有守卫） */
-const ship = async (row) => {
-  const ok = await ElMessageBox.confirm(`确认对订单 ${row.orderSn} 发货？`, '发货确认', { type: 'warning' })
-    .then(() => true).catch(() => false)
-  if (!ok) return
-  try {
-    await shipOrder(row.id)
-    ElMessage.success('发货成功')
-    await load()
-  } catch (e) {
-    ElMessage.error('发货失败：' + e.message)
   }
 }
 
