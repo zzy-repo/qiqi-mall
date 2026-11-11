@@ -34,7 +34,12 @@ SLICE="${E2E_SVC_SLICE:-qiqi-svc.slice}"
 ACTION="${1:-start}"
 
 # shard → 端口 / 库 / redis db
-SHARDS=("a:8091:qiqi_mall_e2e_a:1" "b:8092:qiqi_mall_e2e_b:2")
+# 默认起前 N 个（N=E2E_SHARD_N，默认 2）；要跑「4 shard × 1 worker」就 E2E_SHARD_N=4，
+# 前提是 c/d 的库已建好：./scripts/reset-e2e-db.sh --all（同样认 E2E_SHARD_N）。
+ALL_SHARDS=("a:8091:qiqi_mall_e2e_a:1" "b:8092:qiqi_mall_e2e_b:2" \
+            "c:8093:qiqi_mall_e2e_c:3" "d:8094:qiqi_mall_e2e_d:4")
+SHARD_N="${E2E_SHARD_N:-2}"
+SHARDS=("${ALL_SHARDS[@]:0:$SHARD_N}")
 unit_of() { echo "qiqi-e2e-server-$(echo "$1" | cut -d: -f1)"; }
 port_of() { echo "$1" | cut -d: -f2; }
 db_of()   { echo "$1" | cut -d: -f3; }

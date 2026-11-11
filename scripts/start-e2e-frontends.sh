@@ -29,7 +29,9 @@ ACTION="${1:-start}"
 SLICE="${E2E_SVC_SLICE:-qiqi-svc.slice}"
 
 # shard → portal端口/admin端口/后端端口
-SHARDS=("a:5183:5185:8091" "b:5193:5195:8092")
+ALL_SHARDS=("a:5183:5185:8091" "b:5193:5195:8092" "c:5203:5205:8093" "d:5213:5215:8094")
+SHARD_N="${E2E_SHARD_N:-2}"
+SHARDS=("${ALL_SHARDS[@]:0:$SHARD_N}")
 
 health() {
   local code

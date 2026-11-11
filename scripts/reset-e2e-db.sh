@@ -24,7 +24,9 @@ DB_PASS="${MYSQL_PASSWORD:-qiqi123456}"
 SCHEMA="$REPO_DIR/sql/testdb/01-schema.sql"
 SEED="$REPO_DIR/sql/testdb/02-seed.sql"
 SOURCE_DB="qiqi_mall_test"
-SHARDS=("qiqi_mall_e2e_a" "qiqi_mall_e2e_b")
+ALL_SHARDS=("qiqi_mall_e2e_a" "qiqi_mall_e2e_b" "qiqi_mall_e2e_c" "qiqi_mall_e2e_d")
+SHARD_N="${E2E_SHARD_N:-2}"
+SHARDS=("${ALL_SHARDS[@]:0:$SHARD_N}")
 
 if [[ "${1:-}" == "--all" ]]; then
   TARGETS=("${SHARDS[@]}")

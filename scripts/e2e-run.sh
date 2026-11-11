@@ -29,12 +29,19 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SLICE="qiqi-e2e.slice"
-LIMITS=(--property=MemoryMax=4G --property=MemoryHigh=3G --property=MemorySwapMax=1G)
 
 # shard → portal端口 / admin端口 / 后端端口
-SHARDS=("a:5183:5185:8091" "b:5193:5195:8092")
+# 前两个是常态配置；c/d 是为「4 shard × 1 worker」准备的（需要先建库并起对应的
+# 后端/前端：scripts/start-e2e-backends.sh / start-e2e-frontends.sh 里同步加条目）。
+SHARDS=("a:5183:5185:8091" "b:5193:5195:8092" "c:5203:5205:8093" "d:5213:5215:8094")
+# 可用 shard 数 = 探测到的「后端端口活着」的个数，避免 E2E_SHARDS 喊得比实际起的多
+AVAIL_SHARDS="${AVAIL_SHARDS:-2}"
 
 WANT_SHARDS="${E2E_SHARDS:-2}"
+# 本次跑的标签：用来把自己的 scope 记账，--kill-stale 只清记账里的那些
+TAG="${E2E_RUN_TAG:-$(date +%s)-$$}"
+SCOPE_DIR=/tmp/e2e-scopes
+mkdir -p "$SCOPE_DIR"
 WORKERS="${E2E_WORKERS:-1}"
 DO_RESET=1
 PASS_ARGS=()
@@ -42,6 +49,9 @@ OUT_PREFIX=""
 
 for a in "$@"; do
   case "$a" in
+    --kill-stale) KILL_STALE=1 ;;
+    -h|--help)
+      sed -n '2,30p' "$0" | sed 's/^# \?//'; exit 0 ;;
     --no-reset) DO_RESET=0 ;;
     --output=*) OUT_PREFIX="${a#--output=}" ;;     # 我们自己按 shard 加后缀，别让两进程抢同一目录
     --list) LIST=1; PASS_ARGS+=("$a") ;;
@@ -57,6 +67,31 @@ if [[ -z "${E2E_SHARDS:-}" ]]; then
     WANT_SHARDS=1
     break
   done
+fi
+
+# ── --kill-stale：清掉「自己启动、但外层 unit 已经被停」的残留 scope ────────────
+# 为什么需要：`systemd-run --scope` 建的 scope 是 qiqi-e2e.slice 的**兄弟**，不是触发它的
+# unit 的子节点。所以 `systemctl stop <外层unit>` 停不掉里面跑着的 playwright，它们会变成
+# 孤儿继续占 CPU/内存/库。
+# 为什么只清记账里的：同一个 slice 里还有**别人的录片/测试**在跑，
+# 按 `--slice=qiqi-e2e.slice` 全量过滤会误伤（本项目已经踩过一次，导致别人的录片被杀）。
+if [[ "${KILL_STALE:-0}" == "1" ]]; then
+  found=0
+  for f in "$SCOPE_DIR"/*; do
+    [[ -f "$f" ]] || continue
+    tag="$(basename "$f")"; unit="$(cat "$f" 2>/dev/null || true)"
+    [[ -z "$unit" ]] && { rm -f "$f"; continue; }
+    found=1
+    if systemctl is-active --quiet "$unit" 2>/dev/null; then
+      echo "▶ 停残留 scope $unit（tag $tag）"
+      systemctl stop "$unit" 2>/dev/null || true
+    else
+      echo "· $unit 已经不在了"
+    fi
+    rm -f "$f"
+  done
+  [[ "$found" == "0" ]] && echo "· 没有记账的残留 scope（别人的跑不动，见脚本注释）"
+  exit 0
 fi
 
 if [[ "${LIST:-0}" == "1" ]]; then
@@ -86,7 +121,25 @@ if [[ "$DO_RESET" == "1" ]]; then
   ( cd "$REPO_DIR" && ./scripts/reset-e2e-db.sh --all ) | grep -E '^▶|^✓|^✅|^❌' || true
 fi
 
-INNER="$(mktemp /tmp/e2e-inner-XXXX.sh)"
+# ── 分片策略 ────────────────────────────────────────────────────────────────
+# weight（默认）：按用例数/历史耗时做 LPT 贪心装箱，直接把文件列给 playwright。
+#   `--shard=i/N` 是按**文件数**均分的，23 个文件 12/11 看着公平，实测 a 9.2 分钟
+#   跑完、b 要 19.7 分钟，墙钟被最慢的那半拖住，2 并发只有 1.38×。
+# file：退回 playwright 自带的 --shard=i/N（要复现老行为时用）。
+SHARD_MODE="${E2E_SHARD_MODE:-weight}"
+MAPFILE=""
+if [[ "$WANT_SHARDS" -gt 1 && "$SHARD_MODE" == "weight" && "${#PASS_ARGS[@]}" -eq 0 ]]; then
+  MAPFILE="$(mktemp /tmp/e2e-shardmap-XXXX.tsv)"
+  if ! node "$REPO_DIR/scripts/e2e-shard.mjs" --shards="$WANT_SHARDS" > "$MAPFILE"; then
+    echo "⚠ 权重分片失败，退回 --shard 按文件均分" >&2
+    MAPFILE=""; SHARD_MODE="file"
+  else
+    echo "▶ 权重分片（LPT 贪心，按用例数/历史耗时）"
+    E2E_SHARD_VERBOSE=1 node "$REPO_DIR/scripts/e2e-shard.mjs" --shards="$WANT_SHARDS" 2>&1 >/dev/null | sed 's/^/  /'
+  fi
+fi
+
+INNER="/tmp/e2e-inner-$TAG.sh"
 cat > "$INNER" <<'INNER_EOF'
 #!/usr/bin/env bash
 # 在 scope 内部跑：按 shard 起 playwright，各自一套 env，收齐退出码
@@ -99,7 +152,8 @@ OUT_PREFIX="$1"; shift
 UNLOCKED="$1"; shift
 cd "$REPO_DIR/e2e"
 
-SHARDS=("a:5183:5185:8091" "b:5193:5195:8092")
+SHARDS=("a:5183:5185:8091" "b:5193:5195:8092" "c:5203:5205:8093" "d:5213:5215:8094")
+MAPFILE="${E2E_MAPFILE:-}"
 declare -A PIDS
 
 i=0
@@ -109,8 +163,14 @@ for s in "${SHARDS[@]:0:$WANT_SHARDS}"; do
   out="${OUT_PREFIX:-/tmp/pwout}-$name"
   log="/tmp/e2e-shard-$name${E2E_LOG_SUFFIX:-}.log"
   extra=()
-  [[ "$WANT_SHARDS" -gt 1 ]] && extra+=("--shard=$i/$WANT_SHARDS")
-  echo "▶ shard $name: 5183→$pport / admin→$aport / api→$backend  输出 $out"
+  if [[ -n "${MAPFILE:-}" ]]; then
+    # 权重分片：直接列该 shard 该跑的文件
+    mapfile -t shard_files < <(awk -F'\t' -v sh="$name" '$1==sh {for(i=2;i<=NF;i++) print $i}' "$MAPFILE")
+    extra+=("${shard_files[@]}")
+  elif [[ "$WANT_SHARDS" -gt 1 ]]; then
+    extra+=("--shard=$i/$WANT_SHARDS")
+  fi
+  echo "▶ shard $name: portal→$pport / admin→$aport / api→$backend  输出 $out"
   env PORTAL_BASE="http://127.0.0.1:$pport" \
       ADMIN_BASE="http://127.0.0.1:$aport" \
       API_BASE="http://127.0.0.1:$backend" \
@@ -143,20 +203,44 @@ exit "$fail"
 INNER_EOF
 chmod +x "$INNER"
 
+# 内存限额按「并发浏览器数」缩放：一组 chrome+node 实测约 700~800MB，
+# 3G 的 MemoryHigh 只够 2 并发；4 并发时被限流到每条用例 53 秒（串行才 17 秒），
+# 实测 high 事件飙到 160 万次、墙钟反而变长。所以按 shard 数给额度：
+#   1~2 shard → high 3G / max 4G
+#   3~4 shard → high 6G / max 8G
+# 可用 E2E_MEM_HIGH / E2E_MEM_MAX 覆盖。注意：这是**本次 run 的 scope** 额度，
+# 同时 qiqi-e2e.slice 自己的 MemoryHigh/Max 也不能比它小，否则照样限流。
+if [[ "${WANT_SHARDS:-2}" -le 2 ]]; then
+  DEF_HIGH=3G; DEF_MAX=4G
+else
+  DEF_HIGH=6G; DEF_MAX=8G
+fi
+LIMITS=(--property=MemoryMax="${E2E_MEM_MAX:-$DEF_MAX}" --property=MemoryHigh="${E2E_MEM_HIGH:-$DEF_HIGH}" --property=MemorySwapMax=1G)
+
 echo "▶ 在 $SLICE 里跑（shards=$WANT_SHARDS, workers/shard=$WORKERS）"
 START=$(date +%s)
 set +e
 if [[ "${E2E_UNLOCKED:-1}" == "1" ]]; then
-  systemd-run --scope --quiet --slice="$SLICE" "${LIMITS[@]}" -- \
+  E2E_MAPFILE="$MAPFILE" systemd-run --scope --quiet --slice="$SLICE" "${LIMITS[@]}" -- \
     "$INNER" "$REPO_DIR" "$WANT_SHARDS" "$WORKERS" "$OUT_PREFIX" 1 "${PASS_ARGS[@]}"
 else
-  systemd-run --scope --quiet --slice="$SLICE" "${LIMITS[@]}" -- \
+  E2E_MAPFILE="$MAPFILE" systemd-run --scope --quiet --slice="$SLICE" "${LIMITS[@]}" -- \
     flock /tmp/e2e.lock "$INNER" "$REPO_DIR" "$WANT_SHARDS" "$WORKERS" "$OUT_PREFIX" 0 "${PASS_ARGS[@]}"
 fi
 rc=$?
 set -e
 ELAPSED=$(( $(date +%s) - START ))
-rm -f "$INNER"
+
+# 把本次 run 的 scope 名记下来（供 --kill-stale 精确清理）
+for _ in 1 2 3; do
+  u="$(for x in $(systemctl list-units --all --plain --no-legend 'run-*.scope' 2>/dev/null | awk '{print $1}'); do
+         d="$(systemctl show "$x" -p Description --value 2>/dev/null)"
+         [[ "$d" == *"e2e-inner-$TAG.sh"* ]] && echo "$x" && break
+       done | head -1)"
+  [[ -n "$u" ]] && { echo "$u" > "$SCOPE_DIR/$TAG"; break; }
+  sleep 0.5
+done
+rm -f "$INNER" "${MAPFILE:-}" 2>/dev/null || true
 
 echo
 echo "════ 总耗时 $((ELAPSED/60))m$((ELAPSED%60))s  退出码 $rc ════"
