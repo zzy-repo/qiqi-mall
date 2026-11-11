@@ -1,9 +1,7 @@
 import { test, expect } from '@playwright/test'
+import { PORTAL, stamp } from '../support/env.js'
 import {
-  PORTAL,
-  API,
   adminLogin,
-  adminTokenOf,
   adminSetSkuStock,
   memberRegisterAndLogin,
   addSpecToCart,
@@ -12,10 +10,15 @@ import {
   adminSearchOrderRow,
   openOrderDrawer,
   clickDispatch,
-  clickWmsCallback,
+  clickWmsCallback
+} from '../support/ui.js'
+import {
+  adminTokenOf,
+  memberTokenOf,
+  getAdminOrderBySnApi,
   listDeliveriesApi,
-  stamp
-} from './helpers.js'
+  getMemberOrderApi
+} from '../support/assert.js'
 
 const SPEC_BLACK_256 = '颜色:黑,内存:256G'   // 种子数据 SKU1
 
@@ -61,14 +64,6 @@ async function dispatchAndOutboundByUi(page, orderSn) {
   return { deliveryTable, deliveryRow }
 }
 
-/** 只读：按订单号取订单（断言用） */
-async function getOrderBySn(request, token, orderSn) {
-  const res = await request.get(`${API}/admin/orders?page=1&size=10&orderSn=${orderSn}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  })
-  return (await res.json()).data.records.find((o) => o.orderSn === orderSn)
-}
-
 test.describe('场景3 订单履约', () => {
   test('管理员在订单列表发货，订单状态变为已发货', async ({ page, request }) => {
     const username = `e2e_ship_${stamp()}`
@@ -80,12 +75,12 @@ test.describe('场景3 订单履约', () => {
 
     // 买家真实下单并支付
     const orderSn = await buyAsNewMember(page, username)
-    const order = await getOrderBySn(request, at, orderSn)
+    const order = await getAdminOrderBySnApi(request, at, orderSn)
     expect(order.status, '支付后服务端状态应为待审核(7)').toBe(7)
 
     // 管理员审核通过（自动拆单）
     const row = await auditPassByUi(page, orderSn)
-    const saved = await getOrderBySn(request, at, orderSn)
+    const saved = await getAdminOrderBySnApi(request, at, orderSn)
     expect(saved.status, '审核通过后服务端状态应为待发货(8)').toBe(8)
     expect(saved.splitStatus, '审核通过后应标记已拆单').toBe(1)
 
@@ -102,7 +97,7 @@ test.describe('场景3 订单履约', () => {
     expect(deliveries.length, '单仓订单应只有 1 个发货单').toBe(1)
     expect(deliveries[0].status, '发货单状态应为已出库(3)').toBe(3)
     expect(deliveries[0].trackNo, '出库后发货单应有运单号').toBeTruthy()
-    expect((await getOrderBySn(request, at, orderSn)).status,
+    expect((await getAdminOrderBySnApi(request, at, orderSn)).status,
       '服务端订单状态应为已发货(2)').toBe(2)
   })
 
@@ -116,7 +111,7 @@ test.describe('场景3 订单履约', () => {
 
     // 买家下单支付 → 管理员审核通过 → 抽屉里下发+出库（全部真实点击）
     const orderSn = await buyAsNewMember(page, username)
-    const order = await getOrderBySn(request, at, orderSn)
+    const order = await getAdminOrderBySnApi(request, at, orderSn)
     const adminRow = await auditPassByUi(page, orderSn)
     await dispatchAndOutboundByUi(page, orderSn)
     await expect(adminRow, '全部子单出库后订单应为已发货').toContainText('已发货')
@@ -130,7 +125,7 @@ test.describe('场景3 订单履约', () => {
     const row = await memberOrderRow(page, orderSn)
     await expect(row, '发货后买家侧应显示已发货').toContainText('已发货')
     // 买家令牌（只读断言用，从已登录的 portal 页面取）
-    const token = await page.evaluate(() => localStorage.getItem('qiqi_member_token'))
+    const token = await memberTokenOf(page)
 
     // 确认收货 → 已完成
     await row.getByRole('button', { name: /确认收货/ }).click()
@@ -138,10 +133,8 @@ test.describe('场景3 订单履约', () => {
     await expect(row, '确认收货后订单状态应为已完成').toContainText('已完成')
 
     // 服务端复核（只读）
-    const res = await request.get(`${API}/portal/orders/${order.id}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    expect((await res.json()).data.order.status, '服务端订单状态应为已完成(3)').toBe(3)
+    const after = await getMemberOrderApi(request, token, order.id)
+    expect(after.order.status, '服务端订单状态应为已完成(3)').toBe(3)
 
     // 顺带确认：买家「我的订单」页此刻仍在已完成状态（防止状态被缓存）
     await page.goto(`${PORTAL}/orders`)

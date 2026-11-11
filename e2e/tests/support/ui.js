@@ -1,11 +1,13 @@
+/**
+ * 真实 UI 操作 helper —— 五个业务场景的所有业务动作都在这里，靠真实点击完成：
+ * 登录/注册、下拉选择、加购、结算下单、审核、发货单下发、WMS 回传、确认收货、申请退货……
+ *
+ * 规则：本文件只允许出现 page 上的真实交互（goto / click / fill / 断言可见性），
+ * 不允许出现 request.post/put/delete 之类的接口直调推进业务状态。
+ * 断言读取请用 ./assert.js；页面无入口的数据准备请用 ./data.js（当前为空）。
+ */
 import { expect } from '@playwright/test'
-
-export const PORTAL = process.env.PORTAL_BASE || 'http://127.0.0.1:5173'
-export const ADMIN = process.env.ADMIN_BASE || 'http://127.0.0.1:5175'
-export const API = process.env.API_BASE || 'http://127.0.0.1:8081'
-
-/** 每次运行唯一后缀，避免唯一键冲突 */
-export const stamp = () => Date.now().toString().slice(-8)
+import { PORTAL, ADMIN } from './env.js'
 
 /**
  * 已经在登录态时，/login 会被路由守卫重定向走（页面上没有表单），
@@ -15,6 +17,10 @@ async function waitLoginForm(page, timeout = 6000) {
   const input = page.locator('.el-form-item').filter({ hasText: '用户名' }).locator('input')
   return input.waitFor({ state: 'visible', timeout }).then(() => true).catch(() => false)
 }
+
+// ---------------------------------------------------------------------------
+// 登录 / 注册
+// ---------------------------------------------------------------------------
 
 /** 后台登录（走真实登录页；已登录则直接复用会话） */
 export async function adminLogin(page, username = 'admin', password = '123456') {
@@ -53,15 +59,17 @@ export async function memberRegister(page, username, password = '123456', nickna
   await page.getByRole('button', { name: '注册并登录' }).click()
 }
 
-/** 直接调接口拿 admin token（数据准备用） */
-export async function adminToken(request) {
-  const res = await request.post(`${API}/admin/auth/login`, {
-    data: { username: 'admin', password: '123456' }
-  })
-  expect(res.ok(), 'admin 登录接口应返回 200').toBeTruthy()
-  const body = await res.json()
-  return body.data.accessToken
+/** 注册并登录（真实登录页 → 注册 tab → 注册并登录，等离开登录页） */
+export async function memberRegisterAndLogin(page, username, password = '123456') {
+  await page.goto(`${PORTAL}/login`)
+  await memberRegister(page, username, password)
+  await expect(page, '注册后应离开登录页').not.toHaveURL(/\/login/, { timeout: 20_000 })
+  await page.waitForTimeout(1200)
 }
+
+// ---------------------------------------------------------------------------
+// Element Plus 通用交互
+// ---------------------------------------------------------------------------
 
 /** 关掉可能残留的下拉浮层（点弹窗标题，不会触发关闭对话框） */
 export async function dismissPoppers(page) {
@@ -74,7 +82,6 @@ export async function dismissPoppers(page) {
 
 /**
  * 在弹窗里按表单项 label 选择一个下拉值。
- * @param page
  * @param labelText 表单项 label 文本，如 '类型'
  * @param optionText 选项文本，如 '手机'
  */
@@ -95,7 +102,7 @@ export async function pickTreeSelect(page, labelText, nodeText, { exact = true }
   const item = page.locator('.el-form-item').filter({ hasText: labelText }).last()
   await item.locator('.el-select__wrapper').first().click()
   await page.waitForTimeout(400)
-  // 注意：优先按「叶子节点精确文本」匹配，父节点在单选模式下点选不生效（见 e2e/FINDINGS.md）
+  // 注意：优先按「叶子节点精确文本」匹配，父节点在单选模式下点选不生效（商品弹窗已加 check-strictly）
   const options = page.locator('.el-tree-select__popper:visible li.el-select-dropdown__item')
   const target = nodeText
     ? options.filter({ hasText: exact ? new RegExp(`^${nodeText}$`) : nodeText }).first()
@@ -104,120 +111,33 @@ export async function pickTreeSelect(page, labelText, nodeText, { exact = true }
   await dismissPoppers(page)
 }
 
-/** 通过接口注册会员，返回 {token, memberId, username} */
-export async function registerMemberApi(request, username, password = '123456') {
-  const res = await request.post(`${API}/portal/auth/register`, {
-    data: { username, password, nickname: 'E2E接口买家' }
-  })
-  expect(res.ok(), 'C 端注册接口应成功').toBeTruthy()
-  const body = await res.json()
-  // 后端字段是 accessToken，测试里统一叫 token
-  return { ...body.data, token: body.data.accessToken, username }
-}
-
-/** 通过接口下单（不支付），返回订单详情。需先领幂等令牌（后端要求） */
-export async function createOrderApi(request, token, { skuId, quantity = 1, receiverName = 'E2E接口买家' } = {}) {
-  const tokenRes = await request.get(`${API}/portal/orders/idempotent-token`, {
-    headers: { Authorization: `Bearer ${token}` }
-  })
-  const idempotentToken = (await tokenRes.json()).data.tokenId
-  const res = await request.post(`${API}/portal/orders`, {
-    headers: { Authorization: `Bearer ${token}` },
-    data: {
-      receiverName,
-      receiverPhone: '13600003333',
-      receiverAddress: '广东省深圳市南山区接口路 1 号',
-      items: [{ productSkuId: skuId, quantity }],
-      idempotentToken
-    }
-  })
-  const body = await res.json()
-  expect(body.code, `下单应成功：${body.message}`).toBe(0)
-  return body.data.order
-}
-
-/** 模拟支付 */
-export async function payOrderApi(request, token, orderId) {
-  const res = await request.post(`${API}/portal/orders/${orderId}/pay?payType=1`, {
-    headers: { Authorization: `Bearer ${token}` }
-  })
-  const body = await res.json()
-  expect(body.code, `支付应成功：${body.message}`).toBe(0)
-  return body.data.order
-}
+// ---------------------------------------------------------------------------
+// 管理端：商品 / SKU
+// ---------------------------------------------------------------------------
 
 /**
- * 准备一个可下单的 SKU：取商品1的第一个 SKU，并把库存补到至少 50，
- * 让测试可以重复运行（下单会扣库存）。
+ * 在「SKU 管理」页把第 rowIndex 个 SKU 的库存改成固定值。
+ * SKU 弹窗有「库存」输入框（el-input-number），这里真实点击+输入+失焦保存。
  */
-export async function prepareSku(request, productId = 1) {
-  const at = await adminToken(request)
-  const res = await request.get(`${API}/admin/skus?productId=${productId}`, {
-    headers: { Authorization: `Bearer ${at}` }
-  })
-  const skus = (await res.json()).data
-  expect(skus.length, '商品应至少有一个 SKU').toBeGreaterThan(0)
-  // 详情页默认选中的是第一个 SKU，这里固定补足它，保证下单链路可重复
-  const sku = skus[0]
-  const targetStock = Math.max(Number(sku.stock) || 0, 50)
-  await request.put(`${API}/admin/skus/${sku.id}`, {
-    headers: { Authorization: `Bearer ${at}` },
-    data: { sku: { productId, price: sku.price, stock: targetStock } }
-  })
-  return { skuId: sku.id, price: sku.price, stock: targetStock }
-}
-
-/** 取第一个可用 SKU */
-export async function firstSkuId(request) {
-  const res = await request.get(`${API}/portal/products/1`)
-  const body = await res.json()
-  return body.data.skus[0].id
-}
-
-/** 审核通过（待审核 → 待发货，并自动拆单）；返回子发货单列表 */
-export async function auditPassApi(request, adminToken, orderId) {
-  const res = await request.post(`${API}/admin/orders/${orderId}/audit-pass`, {
-    headers: { Authorization: `Bearer ${adminToken}` }
-  })
-  const body = await res.json()
-  expect(body.code, `审核通过应成功：${body.message}`).toBe(0)
-  return body.data
-}
-
-/** 查父订单的子发货单 */
-export async function listDeliveriesApi(request, adminToken, orderId) {
-  const res = await request.get(`${API}/admin/deliveries?orderId=${orderId}`, {
-    headers: { Authorization: `Bearer ${adminToken}` }
-  })
-  return (await res.json()).data
-}
-
-/*
- * 下面两个接口 helper 仅作为「数据准备/断言」的备用工具保留：
- * 五个业务场景的履约主流程一律走真实 UI 点击（订单列表 → 明细抽屉 → 下发 / 模拟WMS回传），
- * 不得用它们推进订单状态。
- */
-
-/** 发货单下发（备用，勿用于场景主流程） */
-export async function dispatchDeliveryApi(request, adminToken, deliveryId) {
-  const res = await request.post(`${API}/admin/deliveries/${deliveryId}/dispatch`, {
-    headers: { Authorization: `Bearer ${adminToken}` }
-  })
-  const body = await res.json()
-  expect(body.code, `下发应成功：${body.message}`).toBe(0)
-}
-
-/** WMS 回传：pick | outbound | transit | signed */
-export async function wmsCallbackApi(request, adminToken, deliveryId, event) {
-  const res = await request.post(`${API}/admin/deliveries/${deliveryId}/wms-callback?event=${event}`, {
-    headers: { Authorization: `Bearer ${adminToken}` }
-  })
-  const body = await res.json()
-  expect(body.code, `回传(${event})应成功：${body.message}`).toBe(0)
+export async function adminSetSkuStock(page, productId, rowIndex = 0, stock = 50) {
+  await page.goto(`${ADMIN}/product/${productId}/skus`)
+  await page.waitForTimeout(1200)
+  const row = page.locator('.el-table__body tr').nth(rowIndex)
+  await expect(row, `SKU 列表应有第 ${rowIndex + 1} 个 SKU`).toBeVisible()
+  await row.getByRole('button', { name: '编辑' }).click()
+  const dialog = page.locator('.el-dialog')
+  await expect(dialog).toBeVisible()
+  const stockInput = dialog.locator('.el-form-item').filter({ hasText: '库存' }).locator('input')
+  await stockInput.click()
+  await stockInput.fill(String(stock))
+  await stockInput.press('Tab')            // 失焦触发 el-input-number 的 change
+  await dialog.getByRole('button', { name: '确定' }).click()
+  await expect(page.locator('.el-message--success').first(), '库存保存应成功').toBeVisible({ timeout: 15_000 })
+  await page.waitForTimeout(600)
 }
 
 // ---------------------------------------------------------------------------
-// 管理端「发货单」真实 UI 操作（订单列表 → 明细抽屉 → 下发 / 模拟WMS回传）
+// 管理端：订单列表 → 详情抽屉 → 发货单下发 / 模拟WMS回传
 // ---------------------------------------------------------------------------
 
 /** 订单列表按订单号搜索，返回目标行（订单量大，必须先搜） */
@@ -272,51 +192,8 @@ export async function clickWmsCallback(page, row, label, expectText) {
 }
 
 // ---------------------------------------------------------------------------
-// 令牌读取（只读，不发请求）：断言用的 GET 直接复用页面里已登录的令牌
+// 门户侧：加购 → 结算下单 → 我的订单
 // ---------------------------------------------------------------------------
-
-/** 管理端令牌（admin 已通过真实登录页登录后从 localStorage 读取） */
-export const adminTokenOf = (page) => page.evaluate(() => localStorage.getItem('qiqi_admin_token'))
-
-/** 买家令牌（portal 已通过真实登录页登录后从 localStorage 读取） */
-export const memberTokenOf = (page) => page.evaluate(() => localStorage.getItem('qiqi_member_token'))
-
-// ---------------------------------------------------------------------------
-// 管理端：SKU 库存（页面有编辑入口，走真实 UI，保证用例可重复运行）
-// ---------------------------------------------------------------------------
-
-/**
- * 在「SKU 管理」页把第 rowIndex 个 SKU 的库存改成固定值。
- * admin 的 SKU 弹窗有「库存」输入框（el-input-number），这里真实点击+输入+失焦保存。
- */
-export async function adminSetSkuStock(page, productId, rowIndex = 0, stock = 50) {
-  await page.goto(`${ADMIN}/product/${productId}/skus`)
-  await page.waitForTimeout(1200)
-  const row = page.locator('.el-table__body tr').nth(rowIndex)
-  await expect(row, `SKU 列表应有第 ${rowIndex + 1} 个 SKU`).toBeVisible()
-  await row.getByRole('button', { name: '编辑' }).click()
-  const dialog = page.locator('.el-dialog')
-  await expect(dialog).toBeVisible()
-  const stockInput = dialog.locator('.el-form-item').filter({ hasText: '库存' }).locator('input')
-  await stockInput.click()
-  await stockInput.fill(String(stock))
-  await stockInput.press('Tab')            // 失焦触发 el-input-number 的 change
-  await dialog.getByRole('button', { name: '确定' }).click()
-  await expect(page.locator('.el-message--success').first(), '库存保存应成功').toBeVisible({ timeout: 15_000 })
-  await page.waitForTimeout(600)
-}
-
-// ---------------------------------------------------------------------------
-// 门户侧：注册 → 加购 → 结算下单（全真实 UI）
-// ---------------------------------------------------------------------------
-
-/** 注册并登录（真实登录页 → 注册 tab → 注册并登录） */
-export async function memberRegisterAndLogin(page, username, password = '123456') {
-  await page.goto(`${PORTAL}/login`)
-  await memberRegister(page, username, password)
-  await expect(page, '注册后应离开登录页').not.toHaveURL(/\/login/, { timeout: 20_000 })
-  await page.waitForTimeout(1200)
-}
 
 /** 详情页选中指定规格（规格文本形如「颜色:黑,内存:256G」）并加入购物车 */
 export async function addSpecToCart(page, productId, specText) {
@@ -355,10 +232,6 @@ export async function submitCartOrder(page, {
   const orderSn = (await firstRow.locator('td').first().innerText()).trim()
   return orderSn
 }
-
-// ---------------------------------------------------------------------------
-// 门户侧：我的订单行
-// ---------------------------------------------------------------------------
 
 /** 我的订单页，按订单号定位行 */
 export async function memberOrderRow(page, orderSn) {

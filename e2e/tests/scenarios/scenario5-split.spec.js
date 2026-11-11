@@ -1,9 +1,7 @@
 import { test, expect } from '@playwright/test'
+import { PORTAL, stamp } from '../support/env.js'
 import {
-  PORTAL,
-  API,
   adminLogin,
-  adminTokenOf,
   adminSetSkuStock,
   memberRegisterAndLogin,
   addSpecToCart,
@@ -13,22 +11,17 @@ import {
   openOrderDrawer,
   deliveryRowOf,
   clickDispatch,
-  clickWmsCallback,
-  listDeliveriesApi,
-  stamp
-} from './helpers.js'
+  clickWmsCallback
+} from '../support/ui.js'
+import {
+  adminTokenOf,
+  getAdminOrderBySnApi,
+  listDeliveriesApi
+} from '../support/assert.js'
 
 // 种子数据：SKU1 → 深圳仓(1)，SKU2 → 杭州仓(2)，同属商品1 → 一单两明细必然跨仓
 const SPEC_SHENZHEN = '颜色:黑,内存:256G'
 const SPEC_HANGZHOU = '颜色:白,内存:256G'
-
-/** 只读：按订单号取订单（断言用） */
-async function getOrderBySn(request, token, orderSn) {
-  const res = await request.get(`${API}/admin/orders?page=1&size=10&orderSn=${orderSn}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  })
-  return (await res.json()).data.records.find((o) => o.orderSn === orderSn)
-}
 
 /**
  * 场景5 拆单履约（docs/flows/22-拆单时序图 + 23-发货单状态图 + FIX-oms-split Commit 4）
@@ -54,7 +47,7 @@ test.describe('场景5 拆单履约', () => {
     await addSpecToCart(page, 1, SPEC_HANGZHOU)
     await expect(page.locator('.el-table__body tr'), '购物车应有 2 个 SKU 明细').toHaveCount(2)
     const orderSn = await submitCartOrder(page, { receiverName: '拆单E2E' })
-    const order = await getOrderBySn(request, at, orderSn)
+    const order = await getAdminOrderBySnApi(request, at, orderSn)
     expect(order.status, '支付后服务端状态应为待审核(7)').toBe(7)
 
     // ---------- 管理员审核通过（UI）→ 自动拆单 ----------
@@ -82,14 +75,14 @@ test.describe('场景5 拆单履约', () => {
     await clickDispatch(page, szRow)
     await clickWmsCallback(page, szRow, '出库', '已出库')
     await expect(adminRow, '部分出库时订单应为部分发货').toContainText('部分发货')
-    expect((await getOrderBySn(request, at, orderSn)).status, '部分出库时订单应为部分发货(9)').toBe(9)
+    expect((await getAdminOrderBySnApi(request, at, orderSn)).status, '部分出库时订单应为部分发货(9)').toBe(9)
 
     // ---------- 第二个子单（杭州仓）：下发 + 出库 → 订单才变「已发货」 ----------
     const hzRow = deliveryRowOf(table, '杭州仓')
     await clickDispatch(page, hzRow)
     await clickWmsCallback(page, hzRow, '出库', '已出库')
     await expect(adminRow, '全部出库后订单才变已发货').toContainText('已发货')
-    expect((await getOrderBySn(request, at, orderSn)).status, '全部出库后订单才变已发货(2)').toBe(2)
+    expect((await getAdminOrderBySnApi(request, at, orderSn)).status, '全部出库后订单才变已发货(2)').toBe(2)
     // 出库后每个包裹都有运单号
     await expect(table, '两个包裹都应有运单号').toContainText(/SF\d{6,}/)
 
@@ -115,7 +108,7 @@ test.describe('场景5 拆单履约', () => {
       await clickWmsCallback(page, r, '签收', '已签收')
     }
     await expect(table2.locator('.el-table__body tr'), '两个发货单都应为已签收').toHaveCount(2)
-    expect((await getOrderBySn(request, at, orderSn)).status, '全部签收后订单应已完成(3)').toBe(3)
+    expect((await getAdminOrderBySnApi(request, at, orderSn)).status, '全部签收后订单应已完成(3)').toBe(3)
 
     // 买家侧也应看到已完成
     await page.goto(`${PORTAL}/orders`)

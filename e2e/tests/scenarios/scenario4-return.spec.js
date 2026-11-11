@@ -1,9 +1,7 @@
 import { test, expect } from '@playwright/test'
+import { ADMIN, stamp } from '../support/env.js'
 import {
-  ADMIN,
-  API,
   adminLogin,
-  adminTokenOf,
   adminSetSkuStock,
   memberLogin,
   memberRegisterAndLogin,
@@ -13,19 +11,16 @@ import {
   adminSearchOrderRow,
   openOrderDrawer,
   clickDispatch,
-  clickWmsCallback,
-  stamp
-} from './helpers.js'
+  clickWmsCallback
+} from '../support/ui.js'
+import {
+  adminTokenOf,
+  memberTokenOf,
+  getAdminOrderBySnApi,
+  getMemberReturnsApi
+} from '../support/assert.js'
 
 const SPEC_BLACK_256 = '颜色:黑,内存:256G'   // 种子数据 SKU1
-
-/** 只读：按订单号取订单（断言用） */
-async function getOrderBySn(request, token, orderSn) {
-  const res = await request.get(`${API}/admin/orders?page=1&size=10&orderSn=${orderSn}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  })
-  return (await res.json()).data.records.find((o) => o.orderSn === orderSn)
-}
 
 /**
  * 场景4 售后退货（docs/flows/6-场景4-售后退货.mmd）
@@ -47,7 +42,7 @@ test.describe('场景4 售后退货', () => {
     await memberRegisterAndLogin(page, username)
     await addSpecToCart(page, 1, SPEC_BLACK_256)
     const orderSn = await submitCartOrder(page)
-    const order = await getOrderBySn(request, at, orderSn)
+    const order = await getAdminOrderBySnApi(request, at, orderSn)
     expect(order.status, '支付后服务端状态应为待审核(7)').toBe(7)
 
     // ---------- 管理员审核通过 → 抽屉里「下发」+「出库」→ 订单已发货 ----------
@@ -63,12 +58,12 @@ test.describe('场景4 售后退货', () => {
     await clickDispatch(page, deliveryRow)
     await clickWmsCallback(page, deliveryRow, '出库', '已出库')
     await expect(adminRow, '出库后订单应为已发货').toContainText('已发货')
-    expect((await getOrderBySn(request, at, orderSn)).status, '服务端订单应为已发货(2)').toBe(2)
+    expect((await getAdminOrderBySnApi(request, at, orderSn)).status, '服务端订单应为已发货(2)').toBe(2)
 
     // ---------- 1. 买家：我的订单 → 申请退货 ----------
     const row = await memberOrderRow(page, orderSn)
     await expect(row, '已发货订单应有申请退货入口').toContainText('已发货')
-    const memberToken = await page.evaluate(() => localStorage.getItem('qiqi_member_token'))
+    const memberToken = await memberTokenOf(page)
     await row.getByRole('button', { name: '申请退货' }).click()
     await page.waitForTimeout(800)
 
@@ -82,10 +77,7 @@ test.describe('场景4 售后退货', () => {
     await expect(page.locator('.el-message--success').first(), '买家提交退货申请应成功').toBeVisible()
 
     // 服务端复核（只读）：申请已落库且为待处理
-    const api = await request.get(`${API}/portal/returns`, {
-      headers: { Authorization: `Bearer ${memberToken}` }
-    })
-    const returns = (await api.json()).data
+    const returns = await getMemberReturnsApi(request, memberToken)
     const apply = returns.find((r) => r.orderId === order.id)
     expect(apply, '退货申请应能在 C 端接口查到').toBeTruthy()
     expect(apply.status, '新申请应为待处理(0)').toBe(0)

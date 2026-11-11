@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
-import { PORTAL, ADMIN, adminLogin, pickSelect, pickTreeSelect, dismissPoppers, stamp } from './helpers.js'
+import { PORTAL, ADMIN, API, stamp } from '../support/env.js'
+import { adminLogin, pickSelect, pickTreeSelect, dismissPoppers } from '../support/ui.js'
 
 /**
  * 场景1 商品浏览（docs/flows/3-场景1-商品浏览.mmd）
@@ -37,7 +38,7 @@ test.describe('场景1 商品浏览', () => {
     // P4 回归：选中「父分类」也应真正保存（此前点父节点不生效）
     const api = await page.request
     const token = await page.evaluate(() => localStorage.getItem('qiqi_admin_token'))
-    const listRes = await api.get(`${process.env.API_BASE || 'http://127.0.0.1:8081'}/admin/products`, {
+    const listRes = await api.get(`${API}/admin/products`, {
       headers: { Authorization: `Bearer ${token}` }
     })
     const saved = (await listRes.json()).data.find((p) => p.name === productName)
