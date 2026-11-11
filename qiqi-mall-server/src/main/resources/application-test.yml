@@ -23,6 +23,19 @@ spring:
 logging:
   level:
     com.qiqi.mall: info
+# 接口文档（springdoc-openapi）：dev 打开；将来若新增 prod profile，把 enabled 置 false 即可关闭
+# 安全放行见 shared/security/SecurityConfig（/v3/api-docs/**、/swagger-ui/** 走 openChain）
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+    enabled: true
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+    operations-sorter: alpha
+    tags-sorter: alpha
+  packages-to-scan: com.qiqi.mall
+
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true

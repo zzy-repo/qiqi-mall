@@ -8,10 +8,12 @@ import com.qiqi.mall.member.entity.MemberAddress;
 import com.qiqi.mall.member.service.CartService;
 import com.qiqi.mall.member.service.MemberAddressService;
 import com.qiqi.mall.member.service.MemberService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+@Tag(name = "管理端-会员", description = "会员账号维护")
 @RestController
 @RequestMapping("/admin/members")
 public class MemberController {

@@ -9,11 +9,14 @@ import com.qiqi.mall.shared.security.CurrentUser;
 import com.qiqi.mall.oms.service.OrderService;
 import com.qiqi.mall.oms.service.ReturnApplyService;
 import com.qiqi.mall.oms.service.ReturnReasonService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 /** C 端申请退货 */
+@Tag(name = "买家端-申请退货", description = "买家提交退货申请，仅已付款/已发货可申请且不能重复申请")
 @RestController
 @RequestMapping("/portal/returns")
 public class PortalReturnController {
@@ -42,6 +45,7 @@ public class PortalReturnController {
     }
 
     /** 提交退货申请，守卫：仅「已付款 / 已发货」订单可申请，且不能重复申请 */
+    @Operation(summary = "买家提交退货申请")
     @PostMapping
     public Result<ReturnApply> apply(@RequestBody ApplyRequest request) {
         Order order = orderService.getById(request.getOrderId());

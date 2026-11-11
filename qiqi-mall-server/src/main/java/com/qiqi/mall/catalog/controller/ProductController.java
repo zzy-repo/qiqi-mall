@@ -7,6 +7,7 @@ import com.qiqi.mall.catalog.entity.Product;
 import com.qiqi.mall.catalog.entity.ProductGallery;
 import com.qiqi.mall.catalog.service.ProductGalleryService;
 import com.qiqi.mall.catalog.service.ProductService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -15,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 /** 管理后台：商品（SPU，含商品相册，相册聚合于商品） */
+@Tag(name = "管理端-商品", description = "商品（SPU）与商品相册维护")
 @RestController
 @RequestMapping("/admin/products")
 public class ProductController {

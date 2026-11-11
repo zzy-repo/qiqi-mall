@@ -11,6 +11,7 @@ import com.qiqi.mall.catalog.service.ProductService;
 import com.qiqi.mall.catalog.service.ProductGalleryService;
 import com.qiqi.mall.catalog.service.SkuService;
 import com.qiqi.mall.catalog.service.SpecTextHelper;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 
 /** C 端商品浏览（游客可访问） */
+@Tag(name = "买家端-商品浏览", description = "商品/分类/SKU 浏览，游客可访问")
 @RestController
 @RequestMapping("/portal")
 public class PortalCatalogController {

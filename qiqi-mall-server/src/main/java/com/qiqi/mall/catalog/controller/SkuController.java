@@ -12,6 +12,7 @@ import com.qiqi.mall.catalog.service.ProductService;
 import com.qiqi.mall.catalog.service.SkuService;
 import com.qiqi.mall.catalog.service.SkuSpecService;
 import com.qiqi.mall.catalog.service.SpecTextHelper;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 
 /** 管理后台：SKU（含规格值，规格值聚合于 SKU） */
+@Tag(name = "管理端-SKU", description = "SKU 与规格值维护，含整组替换与库存/价格")
 @RestController
 @RequestMapping("/admin/skus")
 public class SkuController {

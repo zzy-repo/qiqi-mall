@@ -17,6 +17,8 @@ import com.qiqi.mall.oms.service.PaymentRecordService;
 import com.qiqi.mall.member.entity.Cart;
 import com.qiqi.mall.member.service.CartService;
 import com.qiqi.mall.shared.security.IdempotentTokenStore;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -28,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 
 /** C 端下单、我的订单、模拟支付 */
+@Tag(name = "买家端-下单与我的订单", description = "下单、我的订单、确认收货与模拟支付")
 @RestController
 @RequestMapping("/portal/orders")
 public class PortalOrderController {
@@ -88,6 +91,7 @@ public class PortalOrderController {
     }
 
     /** 提交订单：{receiverName, receiverPhone, receiverAddress, items:[{productSkuId, quantity}], fromCart, idempotentToken} */
+    @Operation(summary = "买家下单")
     @PostMapping
     public Result<Map<String, Object>> create(@RequestBody CreateRequest request) {
         Long memberId = CurrentUser.id();

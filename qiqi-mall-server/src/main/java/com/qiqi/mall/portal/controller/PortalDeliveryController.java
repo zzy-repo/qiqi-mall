@@ -13,6 +13,7 @@ import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.oms.service.OrderService;
 import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.shared.security.CurrentUser;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
@@ -21,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 
 /** 买家查看自己订单的包裹与物流（方案 3b） */
+@Tag(name = "买家端-包裹物流", description = "买家查看自己订单的包裹与运单号")
 @RestController
 @RequestMapping("/portal/deliveries")
 public class PortalDeliveryController {

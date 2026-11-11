@@ -8,12 +8,14 @@ import com.qiqi.mall.member.entity.MemberAddress;
 import com.qiqi.mall.shared.security.CurrentUser;
 import com.qiqi.mall.member.service.MemberAddressService;
 import com.qiqi.mall.member.service.MemberService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 /** C 端个人资料与收货地址 */
+@Tag(name = "买家端-个人资料与地址", description = "会员个人资料与收货地址簿")
 @RestController
 @RequestMapping("/portal/member")
 public class PortalMemberController {

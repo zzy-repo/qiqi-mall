@@ -74,14 +74,30 @@ public class SecurityConfig {
         return http.build();
     }
 
-    /** 其余路径（健康检查等）放行 */
+    /**
+     * 其余路径（健康检查、接口文档等）放行。
+     *
+     * 接口文档（springdoc-openapi）在这里显式列出，原因有两条：
+     *  1) 文档路径既不属于 /admin/** 也不属于 /portal/**，本来就落到这条链上；
+     *     显式写出来是为了让「谁能匿名访问」一目了然，不依赖隐式兜底。
+     *  2) 文档开关不在这里控制，而在 application-{dev,test}.yml 的
+     *     `springdoc.api-docs.enabled` / `springdoc.swagger-ui.enabled`：
+     *     将来加 prod profile 就把它们置 false（路径照样放行，但没有内容可出）。
+     */
     @Bean
     @Order(3)
     public SecurityFilterChain openChain(HttpSecurity http) throws Exception {
         http.csrf(AbstractHttpConfigurer::disable)
                 .cors(c -> c.configurationSource(corsConfigurationSource()))
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(
+                                "/v3/api-docs/**",
+                                "/v3/api-docs.yaml",
+                                "/swagger-ui/**",
+                                "/swagger-ui.html",
+                                "/swagger-resources/**").permitAll()
+                        .anyRequest().permitAll());
         return http.build();
     }
 

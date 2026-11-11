@@ -4,10 +4,12 @@ import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.shared.guard.CatalogDeleteGuard;
 import com.qiqi.mall.oms.entity.ReturnReason;
 import com.qiqi.mall.oms.service.ReturnReasonService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+@Tag(name = "管理端-退货原因字典", description = "C 端「申请退货」下拉用的原因字典，被引用时不允许删除")
 @RestController
 @RequestMapping("/admin/return-reasons")
 public class ReturnReasonController {

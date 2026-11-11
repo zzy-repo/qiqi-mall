@@ -4,12 +4,14 @@ import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.shared.guard.CatalogDeleteGuard;
 import com.qiqi.mall.catalog.entity.Attribute;
 import com.qiqi.mall.catalog.service.AttributeService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 
 import java.util.List;
 
+@Tag(name = "管理端-商品属性", description = "商品属性与属性值维护，供商品类型绑定")
 @RestController
 @RequestMapping("/admin/attributes")
 public class AttributeController {

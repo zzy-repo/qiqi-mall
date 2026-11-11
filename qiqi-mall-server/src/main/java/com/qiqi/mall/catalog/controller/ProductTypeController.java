@@ -4,10 +4,12 @@ import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.shared.guard.CatalogDeleteGuard;
 import com.qiqi.mall.catalog.entity.ProductType;
 import com.qiqi.mall.catalog.service.ProductTypeService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+@Tag(name = "管理端-商品类型", description = "商品类型维护，决定该类型下有哪些属性与规格")
 @RestController
 @RequestMapping("/admin/product-types")
 public class ProductTypeController {

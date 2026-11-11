@@ -4,10 +4,12 @@ import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.shared.guard.CatalogDeleteGuard;
 import com.qiqi.mall.catalog.entity.Category;
 import com.qiqi.mall.catalog.service.CategoryService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+@Tag(name = "管理端-商品分类", description = "商品分类树维护，含被商品引用时的删除拦截")
 @RestController
 @RequestMapping("/admin/categories")
 public class CategoryController {

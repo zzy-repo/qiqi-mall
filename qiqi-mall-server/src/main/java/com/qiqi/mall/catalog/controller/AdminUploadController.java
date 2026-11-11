@@ -2,6 +2,8 @@ package com.qiqi.mall.catalog.controller;
 
 import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.shared.storage.MinioStorageService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -16,6 +18,7 @@ import java.util.UUID;
  * 后台图片上传（见 docs/flows/9-图片上传时序图）：
  * 独立于商品提交；校验文件类型白名单 + 大小上限；重写文件名；PutObject 到 MinIO；返回可直连 URL。
  */
+@Tag(name = "管理端-图片上传", description = "商品图与相册图上传（MinIO），限 5MB、仅图片类型")
 @RestController
 @RequestMapping("/admin/upload")
 public class AdminUploadController {
@@ -29,6 +32,7 @@ public class AdminUploadController {
         this.storage = storage;
     }
 
+    @Operation(summary = "上传图片到对象存储，返回可直接访问的地址")
     @PostMapping("/image")
     public ResponseEntity<Result<java.util.Map<String, String>>> uploadImage(@RequestParam("file") MultipartFile file) {
         if (file == null || file.isEmpty()) {

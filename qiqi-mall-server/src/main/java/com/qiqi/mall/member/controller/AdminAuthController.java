@@ -7,6 +7,7 @@ import com.qiqi.mall.shared.security.CaptchaService;
 import com.qiqi.mall.shared.security.CaptchaStore;
 import com.qiqi.mall.shared.security.JwtService;
 import com.qiqi.mall.member.service.AdminService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -16,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** 后台登录：无注册入口；失败累计 5 次后要求验证码 */
+@Tag(name = "管理端-登录鉴权", description = "后台登录、登录失败计数与图形验证码")
 @RestController
 @RequestMapping("/admin/auth")
 public class AdminAuthController {

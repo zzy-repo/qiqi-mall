@@ -3,8 +3,10 @@ package com.qiqi.mall.oms.controller;
 import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.oms.entity.OrderSetting;
 import com.qiqi.mall.oms.service.OrderSettingService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
 
+@Tag(name = "管理端-订单设置", description = "订单相关全局设置（如自动审核、超时关闭）")
 @RestController
 @RequestMapping("/admin/order-setting")
 public class OrderSettingController {

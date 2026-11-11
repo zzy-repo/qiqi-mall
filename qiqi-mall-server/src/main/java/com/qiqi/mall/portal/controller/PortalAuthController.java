@@ -5,6 +5,7 @@ import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.member.entity.Member;
 import com.qiqi.mall.shared.security.JwtService;
 import com.qiqi.mall.member.service.MemberService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -14,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** C 端登录/注册：注册成功即自动登录发 token */
+@Tag(name = "买家端-登录注册", description = "C 端注册即登录，返回会员令牌")
 @RestController
 @RequestMapping("/portal/auth")
 public class PortalAuthController {

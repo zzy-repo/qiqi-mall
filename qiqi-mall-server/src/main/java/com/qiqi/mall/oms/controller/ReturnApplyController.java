@@ -11,6 +11,8 @@ import com.qiqi.mall.oms.service.OrderService;
 import com.qiqi.mall.oms.service.PaymentRecordService;
 import com.qiqi.mall.oms.service.ReturnApplyService;
 import com.qiqi.mall.catalog.service.SkuService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
@@ -18,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+@Tag(name = "管理端-退货审核", description = "退货申请审核：通过=退款+回补库存，拒绝=订单回已付款")
 @RestController
 @RequestMapping("/admin/return-applies")
 public class ReturnApplyController {
@@ -82,6 +85,7 @@ public class ReturnApplyController {
      * 守门：仅「待处理」可审核；审核通过 → 订单退款中(5)→已退款(6) + 退款流水 + 库存回补；
      *       审核拒绝 → 订单退回已付款(1)。
      */
+    @Operation(summary = "审核退货申请（status 1 通过 / 2 拒绝；仅待处理可审）")
     @PutMapping("/{id}")
     @org.springframework.transaction.annotation.Transactional
     public Result<Void> update(@PathVariable Long id, @RequestBody ReturnApply body) {

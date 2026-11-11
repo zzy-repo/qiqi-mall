@@ -10,6 +10,7 @@ import com.qiqi.mall.member.service.CartService;
 import com.qiqi.mall.catalog.service.ProductService;
 import com.qiqi.mall.catalog.service.SkuService;
 import com.qiqi.mall.catalog.service.SpecTextHelper;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 
 /** C 端购物车（登录后云端购物车；支持匿名本地购物车合并） */
+@Tag(name = "买家端-购物车", description = "云端购物车，支持匿名本地购物车登录后合并")
 @RestController
 @RequestMapping("/portal/cart")
 public class PortalCartController {

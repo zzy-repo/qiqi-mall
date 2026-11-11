@@ -13,6 +13,7 @@ import com.qiqi.mall.oms.service.OrderItemService;
 import com.qiqi.mall.oms.service.OrderService;
 import com.qiqi.mall.oms.service.ReturnApplyService;
 import com.qiqi.mall.shared.common.Result;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -43,6 +44,7 @@ import java.util.stream.Collectors;
  *
  * 数据量都在几千行级别，直接在服务端聚合（走真实表、不引入缓存/定时任务）。
  */
+@Tag(name = "管理端-数据概览", description = "首页概览指标：订单/销售额/商品/会员等统计")
 @RestController
 @RequestMapping("/admin/dashboard")
 public class AdminDashboardController {

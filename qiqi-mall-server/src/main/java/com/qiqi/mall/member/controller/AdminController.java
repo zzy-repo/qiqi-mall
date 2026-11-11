@@ -4,11 +4,13 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.member.entity.Admin;
 import com.qiqi.mall.member.service.AdminService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+@Tag(name = "管理端-管理员账号", description = "后台管理员账号维护")
 @RestController
 @RequestMapping("/admin/admins")
 public class AdminController {
