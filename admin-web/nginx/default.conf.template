@@ -4,6 +4,9 @@ server {
     root   /usr/share/nginx/html;
     index  index.html;
 
+    # 图片上传（前端 nginx 的默认 1MB 会把 5MB 图片直接拦成 413 HTML）
+    client_max_body_size 6m;
+
     # gzip
     gzip on;
     gzip_min_length 1k;

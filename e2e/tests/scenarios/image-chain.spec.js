@@ -133,22 +133,17 @@ test.describe('图片链路', () => {
       expect(wrongType.status(), '非图片类型应 415').toBe(415)
       expect((await wrongType.json()).message).toContain('jpg')
 
-      // ③ 超过体积上限 → 必须被拒绝
-      //    实测：服务端 spring.servlet.multipart 的默认上限（1MB）先拦下来，返回 HTTP 200 +
-      //    code!=0「Maximum upload size exceeded」，所以 controller 里的 413 分支当前走不到。
-      //    这里断言「拒绝」这个事实，同时把 413 也算通过，两种契约都不放过。
+      // ③ 超过 5MB 上限 → 真正的 HTTP 413（不是 200 + 错误码）
+      //    上限对齐：application-*.yml 的 spring.servlet.multipart.max-file-size=5MB，
+      //    前端 nginx client_max_body_size=6m，GlobalExceptionHandler 把
+      //    MaxUploadSizeExceededException 映射成 413 + 「图片不能超过 5MB」
       const tooBig = await request.post(`${ADMIN}/admin/upload/image`, {
         headers: { Authorization: `Bearer ${token}` },
         multipart: { file: { name: 'big.png', mimeType: 'image/png', buffer: readFileSync(big) } }
       })
+      expect(tooBig.status(), '超过 5MB 应返回 413').toBe(413)
       const bigBody = await tooBig.json().catch(() => ({}))
-      const rejected = tooBig.status() === 413 || (tooBig.ok() && bigBody.code !== 0)
-      expect(rejected, `超大文件应被拒绝，实际 HTTP ${tooBig.status()} / ${JSON.stringify(bigBody)}`).toBe(true)
-      // 说明：不同入口的拒绝层级不一样——dev 直连后端是 Spring 的「Maximum upload size exceeded」，
-      // 容器栈经 nginx 时是 nginx 自己的 413（HTML，没有 JSON message）。所以这里只在有 message 时校验它
-      if (bigBody.message) {
-        expect(String(bigBody.message), '拒绝原因应说明体积超限').toMatch(/Maximum upload size|5MB|超过/)
-      }
+      expect(String(bigBody.message || ''), '413 文案应说明体积超限').toContain('5MB')
 
       // 反向确认：正常小图仍然是 200（避免上面三条因为别的故障而"恰好"通过）
       const okUrl = await uploadImageApi(request, token, png)

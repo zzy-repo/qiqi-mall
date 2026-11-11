@@ -2,7 +2,10 @@ package com.qiqi.mall.shared.common;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DeadlockLoserDataAccessException;
@@ -20,6 +23,16 @@ public class GlobalExceptionHandler {
     public Result<Void> handle(Exception e) {
         log.error("请求处理失败", e);
         return Result.fail(e.getMessage());
+    }
+
+    /**
+     * 上传文件超限：返回真正的 HTTP 413（不是 200 + 错误码），前端 el-upload 才能按体积错误处理。
+     * 上限见 application-*.yml 的 spring.servlet.multipart.max-file-size（5MB）。
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<Result<Void>> handleMaxUploadSize(MaxUploadSizeExceededException e) {
+        log.warn("上传文件超出限制: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(Result.fail("图片不能超过 5MB"));
     }
 
     /** 唯一约束冲突（如用户名重复）给出可读提示 */

@@ -3,6 +3,12 @@ server:
   port: ${SERVER_PORT:8081}
   address: 0.0.0.0
 spring:
+  servlet:
+    multipart:
+      # 图片上传上限：与 AdminUploadController 的 5MB 校验对齐（此前走 Spring 默认 1MB，
+      # 导致 controller 里的 413 分支根本走不到）
+      max-file-size: 5MB
+      max-request-size: 6MB
   data:
     redis:
       host: 127.0.0.1

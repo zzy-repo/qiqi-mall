@@ -31,11 +31,11 @@ export function cleanupTempImages() {
   }
 }
 
-/** 一张 6MB 的 PNG（越界用）：头 8 字节是真 PNG 魔数，其余填充，后端按体积先拦 */
+/** 一张 5.5MB 的 PNG（越界用）：超过后端 5MB 上限、小于前端 nginx 的 6m，确保能打到后端的 413 */
 export function writeOversizePng(name = 'e2e-oversize.png') {
   if (!tempDir) tempDir = mkdtempSync(join(tmpdir(), 'qiqi-e2e-img-'))
   const file = join(tempDir, name)
-  const buf = Buffer.alloc(6 * 1024 * 1024, 0x41)
+  const buf = Buffer.alloc(Math.round(5.5 * 1024 * 1024), 0x41)
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(buf, 0)
   writeFileSync(file, buf)
   return file
