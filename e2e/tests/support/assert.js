@@ -98,6 +98,12 @@ export async function getMemberProfileApi(request, token) {
   return (await res.json()).data
 }
 
+/** 买家的购物车（含商品名/规格/价格） */
+export async function getMemberCartApi(request, token) {
+  const res = await request.get(`${API}/portal/cart`, auth(token))
+  return (await res.json()).data || []
+}
+
 /** 买家收货地址簿 */
 export async function getMemberAddressesApi(request, token) {
   const res = await request.get(`${API}/portal/member/addresses`, auth(token))
