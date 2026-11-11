@@ -217,6 +217,23 @@ else
 fi
 LIMITS=(--property=MemoryMax="${E2E_MEM_MAX:-$DEF_MAX}" --property=MemoryHigh="${E2E_MEM_HIGH:-$DEF_HIGH}" --property=MemorySwapMax=1G)
 
+# ── 机器级互斥：全量跑必须独占 ──────────────────────────────────────────────
+# 为什么：两个 agent 同时跑全量会互相重置库、抢 4 个后端和 CPU，两边都拿不到可信结果
+# （实测被对方的重置打断过 3 次，Terminated 143）。
+# 单条 spec（带文件过滤，WANT_SHARDS=1）不加锁，方便调试时和别人的全量并行。
+# 锁在 scope 外层拿：等锁期间不占 e2e slice 的内存额度。
+QUIET_LOCK=/tmp/e2e-quiet.lock
+LOCK_WAIT="${E2E_LOCK_WAIT:-1800}"
+if [[ "$WANT_SHARDS" -gt 1 ]]; then
+  exec 9>"$QUIET_LOCK"
+  if ! flock -w "$LOCK_WAIT" 9; then
+    echo "✗ 等机器级互斥锁超时（$QUIET_LOCK）：现在有别的全量在跑。" >&2
+    echo "  看占用者： fuser -v $QUIET_LOCK   /   ps -ef | grep playwright" >&2
+    exit 3
+  fi
+  echo "▶ 已拿到机器级互斥锁 $QUIET_LOCK（同一时刻只有一个全量）"
+fi
+
 echo "▶ 在 $SLICE 里跑（shards=$WANT_SHARDS, workers/shard=$WORKERS）"
 START=$(date +%s)
 set +e
@@ -231,15 +248,18 @@ rc=$?
 set -e
 ELAPSED=$(( $(date +%s) - START ))
 
-# 把本次 run 的 scope 名记下来（供 --kill-stale 精确清理）
+# 把本次 run 的 scope 名记下来（供 --kill-stale 精确清理）。
+# 注意别用 `... | head -1`：找到目标时 head 提前关管道会给上游 SIGPIPE(141)，
+# 在 set -e 下会让整个脚本以 1 退出——表现就是「83 条全绿却 exit 1」，踩过一次。
 for _ in 1 2 3; do
-  u="$(for x in $(systemctl list-units --all --plain --no-legend 'run-*.scope' 2>/dev/null | awk '{print $1}'); do
-         d="$(systemctl show "$x" -p Description --value 2>/dev/null)"
-         [[ "$d" == *"e2e-inner-$TAG.sh"* ]] && echo "$x" && break
-       done | head -1)"
-  [[ -n "$u" ]] && { echo "$u" > "$SCOPE_DIR/$TAG"; break; }
+  u=""
+  for x in $(systemctl list-units --all --plain --no-legend 'run-*.scope' 2>/dev/null | awk '{print $1}'); do
+    d="$(systemctl show "$x" -p Description --value 2>/dev/null || true)"
+    if [[ "$d" == *"e2e-inner-$TAG.sh"* ]]; then u="$x"; break; fi
+  done
+  if [[ -n "$u" ]]; then echo "$u" > "$SCOPE_DIR/$TAG"; break; fi
   sleep 0.5
-done
+done || true
 rm -f "$INNER" "${MAPFILE:-}" 2>/dev/null || true
 
 echo
