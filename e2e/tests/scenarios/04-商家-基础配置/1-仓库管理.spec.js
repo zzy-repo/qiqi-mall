@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
-import { ADMIN, stamp } from '../../support/env.js'
-import { adminLogin } from '../../support/ui.js'
+import { stamp } from '../../support/env.js'
 import {
+  adminLoginHardened,
   gotoWarehouseList,
   warehouseRow,
   openWarehouseForm,
@@ -35,12 +35,8 @@ test.describe('04-商家-基础配置 › 1-仓库管理', () => {
     const dupName = `${base}-重名`
 
     await test.step('① 管理员登录并进入仓库管理', async () => {
-      // 后端重启窗口里登录接口偶发 500：重试一次，别把环境波动算成业务失败
-      await adminLogin(page).catch(async () => {
-        await page.goto(`${ADMIN}/login`)
-        await page.waitForTimeout(1500)
-        await adminLogin(page)
-      })
+      // 后端刚重启时首个请求可能 500（重试一次即可）；401/403 等真实故障不会被重试掩盖
+      await adminLoginHardened(page)
       await gotoWarehouseList(page)
       // 种子仓库应在列表里（拆单链路依赖这三个仓）
       await expect(warehouseRow(page, '深圳仓')).toBeVisible()

@@ -303,7 +303,8 @@
             <el-table-column label="明细（订单明细 / SKU）" min-width="200">
               <template #default="{ row }">#{{ row.orderItemId }} / SKU {{ row.productSkuId }}</template>
             </el-table-column>
-            <el-table-column prop="max" label="当前数量" width="95" />
+            <el-table-column prop="current" label="当前数量" width="95" />
+            <el-table-column prop="max" label="可改上限" width="95" />
             <el-table-column label="改后数量" width="150">
               <template #default="{ row }">
                 <el-input-number v-model="row.quantity" :min="0" :max="row.max" size="small" />
@@ -562,12 +563,19 @@ const mergeDeliveryRow = ref(null)
 const mergeTargetId = ref(null)
 const mergeOptions = ref([])
 
+// 改量的上限是「该订单明细的下单数量」，这样既能减也能加回来
+const orderItemMax = (orderItemId) => {
+  const it = (detail.value?.items || []).find((x) => x.id === orderItemId)
+  return it ? it.productQuantity : null
+}
+
 const itemsToDialogRows = (delivery, mode) =>
   (delivery.items || []).map((i) => ({
     deliveryItemId: i.id,
     orderItemId: i.orderItemId,
     productSkuId: i.productSkuId,
-    max: i.quantity,
+    current: i.quantity,
+    max: orderItemMax(i.orderItemId) || i.quantity,
     // 编辑默认保持原数量；拆分默认 0（由管理员决定拆多少出去）
     quantity: mode === 'edit' ? i.quantity : 0
   }))
@@ -595,7 +603,7 @@ const submitDeliveryDialog = async () => {
   try {
     if (dlgMode.value === 'edit') {
       const items = dlgItems.value
-        .filter((r) => r.quantity !== null && r.quantity !== undefined && r.quantity !== r.max)
+        .filter((r) => r.quantity !== null && r.quantity !== undefined && r.quantity !== r.current)
         .map((r) => ({ deliveryItemId: r.deliveryItemId, quantity: r.quantity }))
       await updateDelivery(d.id, { warehouseId: dlgWarehouseId.value || null, items })
       ElMessage.success('已保存（该包裹标记为人工调整）')
