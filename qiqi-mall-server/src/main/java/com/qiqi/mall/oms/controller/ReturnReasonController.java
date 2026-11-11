@@ -1,6 +1,7 @@
 package com.qiqi.mall.oms.controller;
 
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.CatalogDeleteGuard;
 import com.qiqi.mall.oms.entity.ReturnReason;
 import com.qiqi.mall.oms.service.ReturnReasonService;
 import org.springframework.web.bind.annotation.*;
@@ -12,9 +13,11 @@ import java.util.List;
 public class ReturnReasonController {
 
     private final ReturnReasonService returnReasonService;
+    private final CatalogDeleteGuard deleteGuard;
 
-    public ReturnReasonController(ReturnReasonService returnReasonService) {
+    public ReturnReasonController(ReturnReasonService returnReasonService, CatalogDeleteGuard deleteGuard) {
         this.returnReasonService = returnReasonService;
+        this.deleteGuard = deleteGuard;
     }
 
     @GetMapping
@@ -36,8 +39,11 @@ public class ReturnReasonController {
         return Result.ok();
     }
 
+    /** 删除原因：已被退货申请引用时不允许删（历史申请要能追溯原因） */
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
+        String blocked = deleteGuard.checkReturnReason(id);
+        if (blocked != null) return Result.fail(blocked);
         returnReasonService.removeById(id);
         return Result.ok();
     }

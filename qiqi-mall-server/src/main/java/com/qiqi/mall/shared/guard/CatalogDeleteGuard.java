@@ -13,8 +13,10 @@ import com.qiqi.mall.catalog.service.SkuService;
 import com.qiqi.mall.catalog.service.SkuSpecService;
 import com.qiqi.mall.member.entity.Cart;
 import com.qiqi.mall.member.service.CartService;
-import com.qiqi.mall.order.entity.OrderItem;
+import com.qiqi.mall.oms.entity.ReturnApply;
 import com.qiqi.mall.oms.service.OrderItemService;
+import com.qiqi.mall.oms.service.ReturnApplyService;
+import com.qiqi.mall.order.entity.OrderItem;
 import org.springframework.stereotype.Component;
 
 /**
@@ -41,11 +43,12 @@ public class CatalogDeleteGuard {
     private final SkuSpecService skuSpecService;
     private final OrderItemService orderItemService;
     private final CartService cartService;
+    private final ReturnApplyService returnApplyService;
 
     public CatalogDeleteGuard(AttributeService attributeService, ProductService productService,
                               CategoryService categoryService, SkuService skuService,
                               SkuSpecService skuSpecService, OrderItemService orderItemService,
-                              CartService cartService) {
+                              CartService cartService, ReturnApplyService returnApplyService) {
         this.attributeService = attributeService;
         this.productService = productService;
         this.categoryService = categoryService;
@@ -53,6 +56,7 @@ public class CatalogDeleteGuard {
         this.skuSpecService = skuSpecService;
         this.orderItemService = orderItemService;
         this.cartService = cartService;
+        this.returnApplyService = returnApplyService;
     }
 
     /** 商品类型：被「属性」「商品」引用 */
@@ -101,6 +105,14 @@ public class CatalogDeleteGuard {
         if (orderItems > 0) return String.format("该规格已被 %d 条订单明细引用，不能删除", orderItems);
         long carts = cartService.count(new LambdaQueryWrapper<Cart>().eq(Cart::getProductSkuId, skuId));
         if (carts > 0) return String.format("该规格还在 %d 个买家的购物车里，不能删除", carts);
+        return null;
+    }
+
+    /** 退货原因：被「退货申请」引用（字典项一旦用过就不能删，否则历史申请说不清原因） */
+    public String checkReturnReason(Long reasonId) {
+        long used = returnApplyService.count(new LambdaQueryWrapper<ReturnApply>()
+                .eq(ReturnApply::getReasonId, reasonId));
+        if (used > 0) return String.format("该原因已被 %d 条退货申请使用，不能删除", used);
         return null;
     }
 
