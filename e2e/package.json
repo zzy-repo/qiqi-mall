@@ -11,7 +11,9 @@
     "test:s3": "playwright test scenario3-fulfillment.spec.js",
     "test:s4": "playwright test scenario4-return.spec.js",
     "test:s5": "playwright test scenario5-split.spec.js",
-    "report": "playwright show-report"
+    "report": "playwright show-report report/html",
+    "demo": "DEMO=1 PORTAL_BASE=http://127.0.0.1:5174 ADMIN_BASE=http://127.0.0.1:5176 API_BASE=http://127.0.0.1:18080 playwright test",
+    "demo:collect": "node scripts/collect-demo.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1"

@@ -66,6 +66,28 @@ API_BASE=http://127.0.0.1:18080 \
 npm test
 ```
 
+### demo 录制档（同一份 spec，两档共用）
+
+验收档要快、要干净；出片另开一档，`DEMO=1` 切换，**断言一行不改**：
+
+| | 验收档 `npm test` | demo 档 `npm run demo` |
+|---|---|---|
+| 环境 | 本地开发栈 5173 / 5175 / 8081 | **容器栈** 5174 / 5176 / 18080（生产形态） |
+| 视频 | `retain-on-failure`（不占空间） | `on`，1280×720 全量录制 |
+| 视口 | 1440×950 | 1280×720 |
+| 降速 | 0 | `slowMo: 400`（人眼看得到点击） |
+| 用例超时 | 120s | 300s（降速后墙钟变长） |
+| 产物 | `test-results/` | `report/videos/raw/` |
+
+```bash
+npm run demo            # 跑容器栈并录制（env 已写进脚本，无需手工 export）
+npm run demo:collect    # 改名 + 合并：report/videos/01-商品浏览.webm … 05-拆单履约.webm
+                        #               report/videos/demo-全流程.webm + .mp4
+```
+
+`demo:collect` 会把场景3 的两个用例合成一条，再按 1→5 顺序拼成全流程片，最后打印每段
+时长与体积（`report/` 已被 `.gitignore` 覆盖，视频不进仓库）。
+
 ## 用例与文档对应
 
 | 文件 | 场景 | 文档 |
