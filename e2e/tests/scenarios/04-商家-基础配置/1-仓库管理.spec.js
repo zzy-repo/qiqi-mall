@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { stamp } from '../../support/env.js'
+import { API, stamp } from '../../support/env.js'
 import {
   adminLoginHardened,
   gotoWarehouseList,
@@ -13,35 +13,43 @@ import {
   deleteWarehouse,
   expectToastSuccess,
   expectToastError,
-  tableRowCount
+  tableRowCount,
+  gotoOrderList,
+  createOrderViaUi,
+  searchOrderRow,
+  auditPassOrder
 } from '../../support/admin-ui.js'
+import { adminTokenOf, getProductApi, getAdminOrderBySnApi, listDeliveriesApi } from '../../support/assert.js'
 
 /**
  * 04-商家-基础配置 / 1-仓库管理（docs/flows/02-业务场景/04-商家-基础配置/1-仓库管理.mmd）
  *
  * 完整走一遍管理员维护仓库的所有操作，不只 happy path：
  *   列表 → 新增（启用）→ 重名也允许（现状无唯一校验）→ 编辑改名 + 停用
- *   → 空名校验（拦在前端）→ 删除空仓（成功）
- *   → 删除被发货单引用的仓库（后端 500 兜底提示，数据不动）
+ *   → 空名校验（拦在前端）→ 删除自建仓库（成功）
+ *   → 删除被发货单引用的仓库（后端兜底报错，数据不动）
  *
  * 断言口径来自代码实际行为：
- *   WarehouseController.create/update/delete 无唯一校验、删除无存在性校验；
- *   warehouse.name 传给 delivery_order.warehouse_id 有外键，被引用时删除会失败。
+ *   WarehouseController.create/update/delete 无唯一校验、删除不校验存在性；
+ *   delivery_order.warehouse_id 有外键，被引用时删除会失败。
+ *   为了让「被引用」这条在任何库上都成立，第 ⑦ 步会先造一笔真实订单并审核通过。
  */
 test.describe('04-商家-基础配置 › 1-仓库管理', () => {
-  test('新增/编辑/删除仓库，覆盖重名、空名与被引用仓库删除失败', async ({ page }) => {
+  test('新增/编辑/删除仓库，覆盖重名、空名与被引用仓库删除失败', async ({ page, request }) => {
     const base = `E2E仓${stamp()}`
     const renamed = `${base}-改`
     const dupName = `${base}-重名`
 
+    let productName
     await test.step('① 管理员登录并进入仓库管理', async () => {
       // 后端刚重启时首个请求可能 500（重试一次即可）；401/403 等真实故障不会被重试掩盖
       await adminLoginHardened(page)
       await gotoWarehouseList(page)
-      // 种子仓库应在列表里（拆单链路依赖这三个仓）
+      // 种子仓库应在列表里（拆单链路依赖这些仓）
       await expect(warehouseRow(page, '深圳仓')).toBeVisible()
       await expect(warehouseRow(page, '杭州仓')).toBeVisible()
-      await expect(warehouseRow(page, '北京仓')).toBeVisible()
+      const { product } = await getProductApi(request, 1)
+      productName = product.name
     })
 
     await test.step('② 新增仓库（启用）→ 列表出现且状态为启用', async () => {
@@ -99,15 +107,33 @@ test.describe('04-商家-基础配置 › 1-仓库管理', () => {
     })
 
     await test.step('⑦ 删除被发货单引用的仓库 → 明确报错，数据不动', async () => {
+      // 先用一笔真实订单把这个仓库「用起来」：新增订单 → 审核通过 → 生成发货单
+      await gotoOrderList(page)
+      const orderSn = await createOrderViaUi(page, {
+        receiverName: '仓库引用E2E',
+        status: '待审核',
+        items: [{ productName, skuIndex: 0, quantity: 1 }]
+      })
+      await auditPassOrder(page, await searchOrderRow(page, orderSn))
+
+      const token = await adminTokenOf(page)
+      const order = await getAdminOrderBySnApi(request, token, orderSn)
+      const [delivery] = await listDeliveriesApi(request, token, order.id)
+      const whRes = await request.get(`${API}/admin/warehouses`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      const usedWhName = (await whRes.json()).data.find((w) => w.id === delivery.warehouseId).name
+
+      // 回仓库管理删它 → 必须失败且数据不动
+      await gotoWarehouseList(page)
       const before = await tableRowCount(page)
-      await deleteWarehouse(page, warehouseRow(page, '深圳仓'))
-      // 后端把外键异常兜底成「数据处理失败，请稍后重试」
+      await deleteWarehouse(page, warehouseRow(page, usedWhName))
       await expectToastError(page, '数据处理失败')
-      await expect(warehouseRow(page, '深圳仓'), '被引用的仓库必须还在').toBeVisible()
+      await expect(warehouseRow(page, usedWhName), '被引用的仓库必须还在').toBeVisible()
       await page.reload()
       await page.waitForTimeout(1500)
       expect(await tableRowCount(page), '刷新后行数也不变').toBe(before)
-      await expect(warehouseRow(page, '深圳仓'), '刷新后仓库仍在').toBeVisible()
+      await expect(warehouseRow(page, usedWhName), '刷新后仓库仍在').toBeVisible()
     })
   })
 })
