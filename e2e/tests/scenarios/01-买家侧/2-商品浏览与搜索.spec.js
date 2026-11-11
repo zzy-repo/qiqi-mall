@@ -47,20 +47,22 @@ test.describe('买家侧 02 商品浏览与搜索', () => {
     await openHome(page)
     const allCount = await productCards(page).count()
 
-    // 取一个真实存在且有商品的分类（用分类按钮上的文案，不写死 id）
-    const categoryBtn = page.locator('.el-radio-button').nth(1)
-    const categoryName = (await categoryBtn.innerText()).trim()
-    await filterByCategory(page, categoryName)
+    // 挑一个「确实有在架商品」的分类（不同环境种子不同，不能写死第几个按钮）
+    const categories = await getCategoriesApi(request)
+    let cat = null
+    for (const c of categories) {
+      const items = await getPublishedProductsApi(request, c.id)
+      if (items.length > 0 && items.length < allCount) { cat = c; break }
+    }
+    expect(cat, '应存在一个有在架商品、且不是全量的分类').toBeTruthy()
 
+    await filterByCategory(page, cat.name)
     const filtered = productCards(page)
-    await expect(filtered.first()).toBeVisible()
+    await expect(filtered.first(), `筛选「${cat.name}」后应有商品`).toBeVisible({ timeout: 15_000 })
     const filteredCount = await filtered.count()
-    expect(filteredCount, `筛选「${categoryName}」后数量应少于全部（${allCount}）`).toBeLessThan(allCount)
+    expect(filteredCount, `筛选「${cat.name}」后数量应少于全部（${allCount}）`).toBeLessThan(allCount)
 
     // 服务端交叉校验：页面显示的商品名集合 == 该分类下的在架商品
-    const categories = await getCategoriesApi(request)
-    const cat = categories.find((c) => c.name === categoryName)
-    expect(cat, `接口里应存在分类「${categoryName}」`).toBeTruthy()
     const expected = (await getPublishedProductsApi(request, cat.id)).map((p) => p.name).sort()
     const shown = (await filtered.allInnerTexts())
       .map((t) => t.split('查看详情')[0].trim())
