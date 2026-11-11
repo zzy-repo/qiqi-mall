@@ -31,7 +31,7 @@ import {
   dropReturnApply
 } from '../../support/admin-ui-config.js'
 import { adminTokenOf, getProductApi, memberTokenOf, getMemberReturnsApi } from '../../support/assert.js'
-import { uniqueDisplayName, memberNickOf, receiverOf, returnDescriptionOf } from '../../support/fixtures.js'
+import { memberNickOf, receiverOf, returnDescriptionOf } from '../../support/fixtures.js'
 
 /**
  * 04-商家-基础配置 / 3-退货原因字典
@@ -50,11 +50,29 @@ import { uniqueDisplayName, memberNickOf, receiverOf, returnDescriptionOf } from
  *   - 退货申请单里存的是 reason_id + 提交那一刻的原因名称（PortalReturnController.apply），
  *     所以改名不影响历史申请显示。
  *
- * 清理纪律：只删本次自己造的 e2e_ 项，种子原因（质量问题/七天无理由/发错货/不想要了）一个不碰。
+ * 显示名一律用「像真的」中文名（包装破损 / 包装礼盒压损 / 包装破损件）：
+ * 这些名字会出现在演示视频里，不能带 e2e_ 前缀或时间戳。代价是上一轮若异常退出会留下同名行，
+ * 所以每个用例开头先用接口把它们清掉（selfHealReasonNames），保证「新增」这一步一定干净。
+ * 清理纪律：只碰下面 MINE_NAMES 这三个名字自建的行，种子原因（质量问题/七天无理由/发错货/不想要了）一个不碰。
  */
 test.describe('04-商家-基础配置 › 3-退货原因字典', () => {
   // 本次运行自己造的字典项 id：无论用例成败，afterEach 都清掉，绝不给别人留脏数据
   let createdIds = []
+
+  // 本 spec 独占的三个显示名（自然中文、出现在视频里）
+  const MINE_NAMES = ['包装破损', '包装礼盒压损', '包装破损件']
+
+  /** 上轮异常退出留下的同名行先清掉，否则「新增」会被前端重名提示挡住 */
+  const selfHealReasonNames = async (page, request) => {
+    const token = await adminTokenOf(page)
+    const dict = await readReasonsApi(request, token)
+    for (const row of dict.filter((r) => MINE_NAMES.includes(r.name))) {
+      const res = await dropReason(request, token, row.id)
+      if (res.code !== 0) {
+        throw new Error(`残留的「${row.name}」清不掉：${res.message}（可能被别人引用，请人工确认）`)
+      }
+    }
+  }
 
   const trackCreated = async (page, request, name) => {
     const token = await adminTokenOf(page)
@@ -79,10 +97,8 @@ test.describe('04-商家-基础配置 › 3-退货原因字典', () => {
     test('新增 / 编辑改名 / 空名与重名拦截 / 删除', async ({ page, request }) => {
       test.setTimeout(240_000)
       const suffix = stamp()
-      // 显示名要像真的：「包装破损（第 N 期）」，N 由库里现有名字递推，天然不重名；
-      // 改名后的名字不含原名子串，否则「旧名字不应再出现」会被子串匹配误命中
-      let origin
-      let renamed
+      const origin = '包装破损'
+      const renamed = '包装礼盒压损'   // 不含原名子串，否则「旧名字不应再出现」会被子串匹配误命中
 
       await test.step('① 管理员进入「退货原因」：菜单有入口，列表里能看到种子原因', async () => {
         await adminLoginResilient(page)
@@ -91,10 +107,7 @@ test.describe('04-商家-基础配置 › 3-退货原因字典', () => {
         await expect(returnReasonRow(page, '质量问题'), '种子原因应在列表里').toBeVisible()
         await expect(page.getByText('已被退货申请使用的原因不能删除')).toBeVisible()
 
-        const dict = await readReasonsApi(request, await adminTokenOf(page))
-        const existing = dict.map((r) => r.name)
-        origin = uniqueDisplayName('包装破损', existing)
-        renamed = uniqueDisplayName('包装损坏', existing)
+        await selfHealReasonNames(page, request)
       })
 
       await test.step('② 新增一条原因 → 提示保存成功，列表出现这一行', async () => {
@@ -169,7 +182,7 @@ test.describe('04-商家-基础配置 › 3-退货原因字典', () => {
       const nick = memberNickOf(suffix)
       const receiver = receiverOf(suffix)
       const desc = returnDescriptionOf(suffix)
-      let reasonName
+      const reasonName = '包装破损件'
       let adminToken
       let orderSn
       let orderId
@@ -178,7 +191,7 @@ test.describe('04-商家-基础配置 › 3-退货原因字典', () => {
       await test.step('① 管理员在维护页新增一条原因（真实 UI）', async () => {
         await adminLoginResilient(page)
         await gotoReturnReasonList(page)
-        reasonName = uniqueDisplayName('包装破损', (await readReasonsApi(request, await adminTokenOf(page))).map((r) => r.name))
+        await selfHealReasonNames(page, request)
         await openReturnReasonForm(page)
         await fillReturnReasonName(page, reasonName)
         await submitReturnReasonForm(page)
