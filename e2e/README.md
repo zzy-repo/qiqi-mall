@@ -88,6 +88,25 @@ npm run demo:collect    # 改名 + 合并：report/videos/01-商品浏览.webm �
 `demo:collect` 会把场景3 的两个用例合成一条，再按 1→5 顺序拼成全流程片，最后打印每段
 时长与体积（`report/` 已被 `.gitignore` 覆盖，视频不进仓库）。
 
+### 环境 pre-check（防「改完没发布」）
+
+容器镜像是构建时快照，源码改了不会自动生效。`scripts/precheck-env.mjs` 会比较
+`admin-web/src`、`portal-web/src`、`qiqi-mall-server/src` 的最新 mtime 与对应镜像的 Created 时间：
+
+```bash
+npm test        # pretest 钩子：只警告不阻断（dev 栈测试不需要重建镜像）
+npm run demo    # predemo 钩子：--strict，镜像过期直接 exit 1（demo 打容器栈，旧代码必错）
+node scripts/precheck-env.mjs --strict   # 也可手动跑
+```
+
+过期时输出「哪个服务过期 + 源码时间 + 镜像时间 + 修复命令」。docker 不可用 / 镜像不存在 /
+命令超时会打印「无法检测，跳过」并 exit 0——检查本身不能把测试搞挂。
+
+已知局限：mtime 会因 `git checkout`、解压、`touch` 而失真（`touch` 只改时间不改内容时，
+docker 按内容缓存也不会重建镜像，会一直判过期，此时用 `docker compose build --no-cache <svc>`）。
+更可靠的做法是构建时给镜像打 git commit label（`--label git.commit=$(git rev-parse HEAD)`），
+运行时比对 HEAD，属后续升级。
+
 ## 用例与文档对应
 
 | 文件 | 场景 | 文档 |

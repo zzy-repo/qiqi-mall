@@ -5,6 +5,7 @@
   "description": "七七商城五个业务场景的 Playwright E2E 测试（全真实 UI 点击驱动）",
   "type": "module",
   "scripts": {
+    "pretest": "node scripts/precheck-env.mjs",
     "test": "playwright test",
     "test:s1": "playwright test scenario1-browse.spec.js",
     "test:s2": "playwright test scenario2-checkout.spec.js",
@@ -12,6 +13,7 @@
     "test:s4": "playwright test scenario4-return.spec.js",
     "test:s5": "playwright test scenario5-split.spec.js",
     "report": "playwright show-report report/html",
+    "predemo": "node scripts/precheck-env.mjs --strict",
     "demo": "DEMO=1 PORTAL_BASE=http://127.0.0.1:5174 ADMIN_BASE=http://127.0.0.1:5176 API_BASE=http://127.0.0.1:18080 playwright test",
     "demo:collect": "node scripts/collect-demo.mjs"
   },
