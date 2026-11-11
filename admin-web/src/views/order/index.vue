@@ -35,6 +35,19 @@
           <el-tag :type="statusTag[row.status]" size="small">{{ statusText[row.status] }}</el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="包裹" width="110">
+        <template #default="{ row }">
+          <el-tag
+            v-if="packageCount(row.id) > 0"
+            class="pkg-tag"
+            size="small"
+            type="success"
+            effect="plain"
+            @click="openDetail(row)"
+          >{{ packageCount(row.id) }} 个包裹</el-tag>
+          <span v-else class="snapshot">—</span>
+        </template>
+      </el-table-column>
       <el-table-column label="支付方式" width="100">
         <template #default="{ row }">{{ payText[row.payType] }}</template>
       </el-table-column>
@@ -164,7 +177,7 @@
     </el-dialog>
 
     <!-- 详情：明细 + 退货申请聚合展示 -->
-    <el-drawer v-model="detailVisible" :title="`订单明细 - ${detail?.order?.orderSn || ''}`" size="700px">
+    <el-drawer v-model="detailVisible" :title="`订单明细 - ${detail?.order?.orderSn || ''}`" size="960px">
       <template v-if="detail">
         <h4>发货单</h4>
         <el-table :data="deliveries" border size="small" empty-text="暂无发货单（待审核通过后自动拆单生成）">
@@ -175,13 +188,24 @@
               <el-tag :type="deliveryTag[row.status] || 'info'" size="small">{{ deliveryText[row.status] || row.status }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="运单号" min-width="150">
+          <el-table-column label="运单号" min-width="140">
             <template #default="{ row }">{{ row.trackNo || '—' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="200">
+          <el-table-column label="来源" width="95">
+            <template #default="{ row }">
+              <el-tag :type="row.source === 1 ? 'warning' : 'info'" size="small" effect="plain">
+                {{ row.source === 1 ? '人工调整' : '自动拆单' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="300" fixed="right">
             <template #default="{ row }">
               <el-button v-if="row.status === 0" link type="primary" size="small" @click="dispatch(row)">下发</el-button>
               <el-button v-if="row.status === 0" link type="danger" size="small" @click="cancel(row)">取消</el-button>
+              <el-button v-if="row.status === 0" link type="warning" size="small" @click="openDeliveryEdit(row)">编辑</el-button>
+              <el-button v-if="row.status === 0" link type="warning" size="small" @click="openDeliverySplit(row)">拆分</el-button>
+              <el-button v-if="row.status === 0" link type="warning" size="small" @click="openDeliveryMerge(row)">合并</el-button>
+              <el-button v-if="row.status === 0" link type="danger" size="small" @click="removeDelivery(row)">删除</el-button>
               <el-dropdown v-if="row.status >= 1 && row.status < 5" trigger="click" @command="(cmd) => callback(row, cmd)">
                 <el-button link type="primary" size="small">模拟WMS回传 ▾</el-button>
                 <template #dropdown>
@@ -224,17 +248,117 @@
         <el-empty v-if="!detail.returnApplies.length" description="无退货申请" :image-size="60" />
       </template>
     </el-drawer>
+
+    <!-- 审核弹窗里的「查看拆单方案」：dry-run 预览，不落库 -->
+    <el-dialog v-model="previewVisible" title="拆单方案预览（只预览，不生成发货单）" width="560px">
+      <div v-loading="previewLoading">
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          title="点「通过」才会真正生成这些包裹；现在是只读预览。"
+          style="margin-bottom: 12px"
+        />
+        <el-table :data="previewPlan" border size="small" empty-text="没有可拆的明细">
+          <el-table-column type="index" label="#" width="50" />
+          <el-table-column prop="warehouseName" label="发货仓" width="110" />
+          <el-table-column label="包含明细" min-width="240">
+            <template #default="{ row }">
+              <div v-for="it in row.items" :key="it.orderItemId" class="preview-line">
+                {{ it.productName || ('明细 #' + it.orderItemId) }} × {{ it.quantity }}
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div class="preview-tip">共 {{ previewPlan.length }} 个包裹</div>
+      </div>
+      <template #footer>
+        <el-button @click="previewVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑 / 拆分待下发包裹 -->
+    <el-dialog
+      v-model="dlgVisible"
+      :title="dlgMode === 'edit' ? '编辑包裹（改仓 / 改量）' : '拆分包裹'"
+      width="600px"
+    >
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        :title="dlgMode === 'edit'
+          ? '只有「待下发」的包裹可以改；保存后该包裹标记为人工调整。'
+          : '把指定数量拆到一个新包裹；拆完后原包裹若已空会被自动删掉。'"
+        style="margin-bottom: 12px"
+      />
+      <el-form label-width="88px">
+        <el-form-item :label="dlgMode === 'edit' ? '发货仓' : '新包裹仓'">
+          <el-select v-model="dlgWarehouseId" placeholder="沿用原仓库" clearable style="width: 200px">
+            <el-option v-for="w in warehouses" :key="w.id" :label="w.name" :value="w.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="明细数量">
+          <el-table :data="dlgItems" border size="small">
+            <el-table-column label="明细（订单明细 / SKU）" min-width="200">
+              <template #default="{ row }">#{{ row.orderItemId }} / SKU {{ row.productSkuId }}</template>
+            </el-table-column>
+            <el-table-column prop="max" label="当前数量" width="95" />
+            <el-table-column label="改后数量" width="150">
+              <template #default="{ row }">
+                <el-input-number v-model="row.quantity" :min="0" :max="row.max" size="small" />
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="dlgVisible = false">取消</el-button>
+        <el-button type="primary" :loading="dlgSaving" @click="submitDeliveryDialog">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 合并待下发包裹 -->
+    <el-dialog v-model="mergeVisible" title="合并包裹" width="480px">
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        :title="mergeMode === 'delete'
+          ? '该包裹还有明细，删除等同于并入另一个包裹。'
+          : '把当前包裹并入另一个「待下发」包裹，合并后当前包裹消失。'"
+        style="margin-bottom: 12px"
+      />
+      <el-form label-width="88px">
+        <el-form-item label="并入到">
+          <el-select v-model="mergeTargetId" placeholder="选择同订单的待下发包裹" style="width: 260px">
+            <el-option
+              v-for="d in mergeOptions"
+              :key="d.id"
+              :label="`${d.deliverySn}（${d.warehouseName}）`"
+              :value="d.id"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="mergeVisible = false">取消</el-button>
+        <el-button type="primary" :loading="mergeSaving" @click="submitMerge">确定</el-button>
+      </template>
+    </el-dialog>
   </el-card>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, h } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listOrders, createOrder, updateOrder } from '../../api/order'
 import {
-  listDeliveries, dispatchDelivery, cancelDelivery, wmsCallback, auditPassOrder, auditRejectOrder
+  listDeliveries, dispatchDelivery, cancelDelivery, wmsCallback, auditPassOrder, auditRejectOrder,
+  deliveryCounts, splitPreviewOrder, updateDelivery, splitDelivery, mergeDelivery, deleteDelivery
 } from '../../api/delivery'
+import { listWarehouses } from '../../api/warehouse'
 import { Search } from '@element-plus/icons-vue'
 import { listMembers } from '../../api/member'
 import { listProducts } from '../../api/product'
@@ -291,6 +415,7 @@ const load = async () => {
     })
     list.value = pageData.records || []
     total.value = Number(pageData.total || 0)
+    await loadPackageCounts()
   } catch (e) {
     ElMessage.error('加载失败：' + e.message)
   } finally {
@@ -355,11 +480,24 @@ const deliveries = ref([])
 
 /** 审核：通过 → 待发货并自动拆单；不通过 → 关闭订单并回补库存 */
 const audit = async (row) => {
-  const action = await ElMessageBox.confirm(
-    `订单 ${row.orderSn}：通过后自动拆单生成发货单；不通过将关闭订单并回补库存。`,
-    '订单审核',
-    { confirmButtonText: '通过', cancelButtonText: '不通过', distinguishCancelAndClose: true, type: 'warning' }
-  ).then(() => 'pass').catch((e) => (e === 'cancel' ? 'reject' : 'close'))
+  // 默认一键通过；「查看拆单方案」是二级入口，不增加正常单的操作步数
+  const message = h('div', { class: 'audit-box' }, [
+    h('div', `订单 ${row.orderSn}：通过后自动拆单生成发货单；不通过将关闭订单并回补库存。`),
+    h(
+      'a',
+      {
+        class: 'split-preview-entry',
+        onClick: () => openSplitPreview(row)
+      },
+      '查看拆单方案 ▸'
+    )
+  ])
+  const action = await ElMessageBox.confirm(message, '订单审核', {
+    confirmButtonText: '通过',
+    cancelButtonText: '不通过',
+    distinguishCancelAndClose: true,
+    type: 'warning'
+  }).then(() => 'pass').catch((e) => (e === 'cancel' ? 'reject' : 'close'))
   if (action === 'close') return
   try {
     if (action === 'pass') {
@@ -372,6 +510,181 @@ const audit = async (row) => {
     await load()
   } catch (e) {
     ElMessage.error('审核失败：' + e.message)
+  }
+}
+
+// ---------------- 包裹数（列表页标签） ----------------
+const packageCounts = ref({})
+const packageCount = (orderId) => packageCounts.value[orderId] || 0
+const loadPackageCounts = async () => {
+  const ids = list.value.map((r) => r.id)
+  if (!ids.length) {
+    packageCounts.value = {}
+    return
+  }
+  try {
+    packageCounts.value = (await deliveryCounts(ids)) || {}
+  } catch {
+    packageCounts.value = {}
+  }
+}
+
+// ---------------- 审核弹窗：拆单方案预览（dry-run，不落库） ----------------
+const previewVisible = ref(false)
+const previewLoading = ref(false)
+const previewPlan = ref([])
+const openSplitPreview = async (row) => {
+  previewVisible.value = true
+  previewLoading.value = true
+  previewPlan.value = []
+  try {
+    previewPlan.value = (await splitPreviewOrder(row.id)) || []
+  } catch (e) {
+    ElMessage.error('预览失败：' + e.message)
+    previewVisible.value = false
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+// ---------------- 待下发包裹的人工干预：编辑 / 拆分 / 合并 / 删除 ----------------
+const warehouses = ref([])
+const dlgVisible = ref(false)
+const dlgSaving = ref(false)
+const dlgMode = ref('edit')          // edit 改仓改量 | split 拆分
+const dlgDelivery = ref(null)
+const dlgWarehouseId = ref(null)
+const dlgItems = ref([])
+const mergeVisible = ref(false)
+const mergeSaving = ref(false)
+const mergeMode = ref('merge')       // merge 合并 | delete 删除并入
+const mergeDeliveryRow = ref(null)
+const mergeTargetId = ref(null)
+const mergeOptions = ref([])
+
+const itemsToDialogRows = (delivery, mode) =>
+  (delivery.items || []).map((i) => ({
+    deliveryItemId: i.id,
+    orderItemId: i.orderItemId,
+    productSkuId: i.productSkuId,
+    max: i.quantity,
+    // 编辑默认保持原数量；拆分默认 0（由管理员决定拆多少出去）
+    quantity: mode === 'edit' ? i.quantity : 0
+  }))
+
+const openDeliveryEdit = (d) => {
+  dlgMode.value = 'edit'
+  dlgDelivery.value = d
+  dlgWarehouseId.value = d.warehouseId
+  dlgItems.value = itemsToDialogRows(d, 'edit')
+  dlgVisible.value = true
+}
+
+const openDeliverySplit = (d) => {
+  dlgMode.value = 'split'
+  dlgDelivery.value = d
+  dlgWarehouseId.value = null            // 默认沿用原仓
+  dlgItems.value = itemsToDialogRows(d, 'split')
+  dlgVisible.value = true
+}
+
+const submitDeliveryDialog = async () => {
+  const d = dlgDelivery.value
+  if (!d) return
+  dlgSaving.value = true
+  try {
+    if (dlgMode.value === 'edit') {
+      const items = dlgItems.value
+        .filter((r) => r.quantity !== null && r.quantity !== undefined && r.quantity !== r.max)
+        .map((r) => ({ deliveryItemId: r.deliveryItemId, quantity: r.quantity }))
+      await updateDelivery(d.id, { warehouseId: dlgWarehouseId.value || null, items })
+      ElMessage.success('已保存（该包裹标记为人工调整）')
+    } else {
+      const items = dlgItems.value
+        .filter((r) => r.quantity > 0)
+        .map((r) => ({ deliveryItemId: r.deliveryItemId, quantity: r.quantity }))
+      if (!items.length) {
+        ElMessage.warning('请至少给一条明细填写要拆出的数量')
+        dlgSaving.value = false
+        return
+      }
+      await splitDelivery(d.id, { newWarehouseId: dlgWarehouseId.value || null, items })
+      ElMessage.success('已拆分')
+    }
+    dlgVisible.value = false
+    await loadDeliveries(d.orderId)
+    await load()
+  } catch (e) {
+    ElMessage.error('操作失败：' + e.message)
+  } finally {
+    dlgSaving.value = false
+  }
+}
+
+const openDeliveryMerge = (d) => {
+  mergeMode.value = 'merge'
+  mergeDeliveryRow.value = d
+  mergeTargetId.value = null
+  mergeOptions.value = deliveries.value.filter((x) => x.status === 0 && x.id !== d.id)
+  if (!mergeOptions.value.length) {
+    ElMessage.warning('没有其他「待下发」包裹可以合并')
+    return
+  }
+  mergeVisible.value = true
+}
+
+const submitMerge = async () => {
+  const d = mergeDeliveryRow.value
+  if (!d) return
+  if (!mergeTargetId.value) {
+    ElMessage.warning('请选择要并入的包裹')
+    return
+  }
+  mergeSaving.value = true
+  try {
+    if (mergeMode.value === 'delete') {
+      await deleteDelivery(d.id, mergeTargetId.value)
+      ElMessage.success('已删除（明细已并入目标包裹）')
+    } else {
+      await mergeDelivery(d.id, mergeTargetId.value)
+      ElMessage.success('已合并')
+    }
+    mergeVisible.value = false
+    await loadDeliveries(d.orderId)
+    await load()
+  } catch (e) {
+    ElMessage.error('操作失败：' + e.message)
+  } finally {
+    mergeSaving.value = false
+  }
+}
+
+const removeDelivery = async (d) => {
+  // 有明细的包裹不能凭空删掉，必须指定并入目标（等同合并到别处）
+  if ((d.items || []).length) {
+    const others = deliveries.value.filter((x) => x.status === 0 && x.id !== d.id)
+    if (!others.length) {
+      ElMessage.warning('这是唯一的待下发包裹，无法删除；如需放弃请用「取消」')
+      return
+    }
+    mergeMode.value = 'delete'
+    mergeDeliveryRow.value = d
+    mergeTargetId.value = null
+    mergeOptions.value = others
+    mergeVisible.value = true
+    return
+  }
+  const ok = await ElMessageBox.confirm(`确认删除空包裹 ${d.deliverySn}？`, '提示', { type: 'warning' })
+    .then(() => true)
+    .catch(() => false)
+  if (!ok) return
+  try {
+    await deleteDelivery(d.id)
+    ElMessage.success('已删除')
+    await loadDeliveries(d.orderId)
+    await load()
+  } catch (e) {
+    ElMessage.error('删除失败：' + e.message)
   }
 }
 
@@ -432,10 +745,11 @@ const openDetail = async (row) => {
 onMounted(async () => {
   load()
   try {
-    const [mems, prods, allSkus] = await Promise.all([listMembers(), listProducts(), listSkus()])
+    const [mems, prods, allSkus, whs] = await Promise.all([listMembers(), listProducts(), listSkus(), listWarehouses()])
     members.value = mems
     products.value = prods
     skus.value = allSkus
+    warehouses.value = whs
   } catch (e) {
     // 参照数据失败不阻塞列表
   }
@@ -448,4 +762,8 @@ onMounted(async () => {
 .pager { display: flex; justify-content: flex-end; margin-top: 12px; }
 .add-item { margin-top: 10px; width: 100%; }
 .snapshot { color: #606266; }
+.pkg-tag { cursor: pointer; }
+.audit-box .split-preview-entry { display: inline-block; margin-top: 8px; color: #409eff; cursor: pointer; font-size: 13px; }
+.preview-line { line-height: 1.6; }
+.preview-tip { margin-top: 10px; color: #909399; font-size: 13px; }
 </style>

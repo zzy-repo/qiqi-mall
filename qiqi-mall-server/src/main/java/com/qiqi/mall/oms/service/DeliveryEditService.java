@@ -1,0 +1,295 @@
+package com.qiqi.mall.oms.service;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.qiqi.mall.oms.dto.DeliveryItemQty;
+import com.qiqi.mall.oms.entity.DeliveryItem;
+import com.qiqi.mall.oms.entity.DeliveryOrder;
+import com.qiqi.mall.oms.entity.Warehouse;
+import com.qiqi.mall.order.entity.Order;
+import com.qiqi.mall.order.entity.OrderItem;
+import com.qiqi.mall.shared.common.DeliverySnGenerator;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 待下发包裹的人工干预（docs/flows/06-拆单履约：发货单状态图 / 拆单时序图 / ER-拆单合单）。
+ *
+ * 统一守卫：**只有 delivery_order.status = 0 待下发 的包裹可以被改**；已下发及之后的状态一律拒绝，
+ * 并返回明确错误（不静默降级）。
+ *
+ * 统一记账：任何一次人工改动，把被改的发货单（含拆分出来的新包、被合并到的目标包）的
+ * source 置 1（人工调整），并重算父订单的 split_status。
+ *
+ * 四个动作：
+ *   update 改仓 / 改量（部分拆量）
+ *   split  拆成两个待下发包裹
+ *   merge  与同一订单的另一个待下发包裹合并
+ *   delete 删除待下发包裹（还有明细时必须指定并入目标，等同合并到别处）
+ */
+@Service
+public class DeliveryEditService {
+
+    private final DeliveryOrderService deliveryOrderService;
+    private final DeliveryItemService deliveryItemService;
+    private final OrderItemService orderItemService;
+    private final OrderService orderService;
+    private final WarehouseService warehouseService;
+
+    public DeliveryEditService(DeliveryOrderService deliveryOrderService, DeliveryItemService deliveryItemService,
+                               OrderItemService orderItemService, OrderService orderService,
+                               WarehouseService warehouseService) {
+        this.deliveryOrderService = deliveryOrderService;
+        this.deliveryItemService = deliveryItemService;
+        this.orderItemService = orderItemService;
+        this.orderService = orderService;
+        this.warehouseService = warehouseService;
+    }
+
+    // ------------------------------------------------------------------
+    // 1. 改仓 / 改量
+    // ------------------------------------------------------------------
+
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> update(Long deliveryId, Long warehouseId, List<DeliveryItemQty> items) {
+        DeliveryOrder delivery = requirePending(deliveryId, "编辑");
+        if (warehouseId != null) {
+            if (warehouseService.getById(warehouseId) == null) {
+                throw new IllegalStateException("仓库不存在：" + warehouseId);
+            }
+            delivery.setWarehouseId(warehouseId);
+        }
+        if (items != null && !items.isEmpty()) {
+            for (DeliveryItemQty row : items) {
+                DeliveryItem item = requireItem(row.getDeliveryItemId(), deliveryId);
+                int qty = requirePositive(row.getQuantity());
+                item.setQuantity(qty);
+                deliveryItemService.updateById(item);
+            }
+            assertQuantityNotExceeded(delivery.getOrderId());
+        }
+        markManual(delivery);
+        return summary(delivery.getOrderId());
+    }
+
+    // ------------------------------------------------------------------
+    // 2. 拆分：从原包裹按数量拆出一部分，生成新的待下发包裹
+    // ------------------------------------------------------------------
+
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> split(Long deliveryId, Long newWarehouseId, List<DeliveryItemQty> items) {
+        DeliveryOrder source = requirePending(deliveryId, "拆分");
+        if (items == null || items.isEmpty()) {
+            throw new IllegalStateException("请指定要拆出的明细与数量");
+        }
+        Long targetWarehouseId = newWarehouseId == null ? source.getWarehouseId() : newWarehouseId;
+        if (warehouseService.getById(targetWarehouseId) == null) {
+            throw new IllegalStateException("仓库不存在：" + targetWarehouseId);
+        }
+
+        DeliveryOrder created = new DeliveryOrder();
+        created.setDeliverySn(DeliverySnGenerator.next());
+        created.setOrderId(source.getOrderId());
+        created.setWarehouseId(targetWarehouseId);
+        created.setStatus(DeliveryOrder.PENDING);
+        created.setSource(DeliveryOrder.SOURCE_MANUAL);       // 拆出来的包是人拆的
+        created.setReceiverName(source.getReceiverName());
+        created.setReceiverPhone(source.getReceiverPhone());
+        created.setReceiverAddress(source.getReceiverAddress());
+        created.setCreatedAt(LocalDateTime.now());
+        deliveryOrderService.save(created);
+
+        for (DeliveryItemQty row : items) {
+            DeliveryItem item = requireItem(row.getDeliveryItemId(), deliveryId);
+            int moveQty = requirePositive(row.getQuantity());
+            if (moveQty > item.getQuantity()) {
+                throw new IllegalStateException("拆出数量 " + moveQty + " 超过该明细现有数量 " + item.getQuantity());
+            }
+            DeliveryItem newItem = new DeliveryItem();
+            newItem.setDeliveryId(created.getId());
+            newItem.setOrderItemId(item.getOrderItemId());
+            newItem.setProductSkuId(item.getProductSkuId());
+            newItem.setQuantity(moveQty);
+            deliveryItemService.save(newItem);
+
+            int left = item.getQuantity() - moveQty;
+            if (left > 0) {
+                item.setQuantity(left);
+                deliveryItemService.updateById(item);
+            } else {
+                deliveryItemService.removeById(item.getId());      // 整条拆走
+            }
+        }
+
+        assertQuantityNotExceeded(source.getOrderId());
+        markManual(source);                                        // 源包 source=1
+        if (itemsOf(source.getId()).isEmpty()) {                   // 全拆走 → 源包已空，删掉
+            deliveryOrderService.removeById(source.getId());
+        }
+        return summary(source.getOrderId());
+    }
+
+    // ------------------------------------------------------------------
+    // 3. 合并：把当前包裹并入同订单的另一个待下发包裹
+    // ------------------------------------------------------------------
+
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> merge(Long deliveryId, Long targetDeliveryId) {
+        DeliveryOrder source = requirePending(deliveryId, "合并");
+        if (targetDeliveryId == null) {
+            throw new IllegalStateException("请指定要并入的目标包裹");
+        }
+        if (targetDeliveryId.equals(deliveryId)) {
+            throw new IllegalStateException("不能与自己合并");
+        }
+        DeliveryOrder target = requirePending(targetDeliveryId, "合并");
+        if (!source.getOrderId().equals(target.getOrderId())) {
+            throw new IllegalStateException("只能与同一订单下的包裹合并");
+        }
+
+        for (DeliveryItem item : itemsOf(source.getId())) {
+            DeliveryItem exist = findItem(target.getId(), item.getOrderItemId());
+            if (exist != null) {                                   // 同一订单明细 → 数量相加
+                exist.setQuantity(exist.getQuantity() + item.getQuantity());
+                deliveryItemService.updateById(exist);
+                deliveryItemService.removeById(item.getId());
+            } else {                                               // 直接搬过去
+                item.setDeliveryId(target.getId());
+                deliveryItemService.updateById(item);
+            }
+        }
+        deliveryOrderService.removeById(source.getId());
+        markManual(target);
+        return summary(target.getOrderId());
+    }
+
+    // ------------------------------------------------------------------
+    // 4. 删除：还有明细时必须指定并入目标（等同合并到别处）
+    // ------------------------------------------------------------------
+
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> delete(Long deliveryId, Long targetDeliveryId) {
+        DeliveryOrder delivery = requirePending(deliveryId, "删除");
+        List<DeliveryItem> items = itemsOf(deliveryId);
+        if (!items.isEmpty()) {
+            if (targetDeliveryId == null) {
+                throw new IllegalStateException("该包裹还有 " + items.size()
+                        + " 条明细，删除前请指定并入的目标包裹 targetId（等同于合并到别处）");
+            }
+            return merge(deliveryId, targetDeliveryId);
+        }
+        deliveryOrderService.removeById(deliveryId);
+        recomputeSplitStatus(delivery.getOrderId());
+        return summary(delivery.getOrderId());
+    }
+
+    // ------------------------------------------------------------------
+    // 内部
+    // ------------------------------------------------------------------
+
+    /** 统一守卫：只有待下发可以改 */
+    private DeliveryOrder requirePending(Long deliveryId, String action) {
+        DeliveryOrder delivery = deliveryOrderService.getById(deliveryId);
+        if (delivery == null) throw new IllegalStateException("发货单不存在：" + deliveryId);
+        if (delivery.getStatus() == null || delivery.getStatus() != DeliveryOrder.PENDING) {
+            throw new IllegalStateException("只有待下发包裹可以" + action
+                    + "（当前状态 " + delivery.getStatus() + "，已下发的只能取消）");
+        }
+        return delivery;
+    }
+
+    private DeliveryItem requireItem(Long deliveryItemId, Long deliveryId) {
+        DeliveryItem item = deliveryItemId == null ? null : deliveryItemService.getById(deliveryItemId);
+        if (item == null) throw new IllegalStateException("发货单明细不存在：" + deliveryItemId);
+        if (!deliveryId.equals(item.getDeliveryId())) {
+            throw new IllegalStateException("明细 " + deliveryItemId + " 不属于发货单 " + deliveryId);
+        }
+        return item;
+    }
+
+    private int requirePositive(Integer quantity) {
+        if (quantity == null || quantity <= 0) throw new IllegalStateException("数量必须大于 0");
+        return quantity;
+    }
+
+    /** 人工改动记账：source=1 + 重算 split_status */
+    private void markManual(DeliveryOrder delivery) {
+        delivery.setSource(DeliveryOrder.SOURCE_MANUAL);
+        deliveryOrderService.updateById(delivery);
+        recomputeSplitStatus(delivery.getOrderId());
+    }
+
+    /** 订单拆单标记：还有未取消的子单 → 已拆(1)，否则未拆(0) */
+    private void recomputeSplitStatus(Long orderId) {
+        Order order = orderService.getById(orderId);
+        if (order == null) return;
+        long active = deliveryOrderService.count(new LambdaQueryWrapper<DeliveryOrder>()
+                .eq(DeliveryOrder::getOrderId, orderId)
+                .ne(DeliveryOrder::getStatus, DeliveryOrder.CANCELLED));
+        order.setSplitStatus(active > 0 ? 1 : 0);
+        orderService.updateById(order);
+    }
+
+    /** 拆量不能超过下单数量（按 order_item 汇总所有未取消包裹） */
+    private void assertQuantityNotExceeded(Long orderId) {
+        Map<Long, Integer> used = new HashMap<>();
+        List<DeliveryOrder> deliveries = deliveryOrderService.list(new LambdaQueryWrapper<DeliveryOrder>()
+                .eq(DeliveryOrder::getOrderId, orderId)
+                .ne(DeliveryOrder::getStatus, DeliveryOrder.CANCELLED));
+        for (DeliveryOrder d : deliveries) {
+            for (DeliveryItem item : itemsOf(d.getId())) {
+                used.merge(item.getOrderItemId(), item.getQuantity(), Integer::sum);
+            }
+        }
+        for (OrderItem orderItem : orderItemService.list(new LambdaQueryWrapper<OrderItem>()
+                .eq(OrderItem::getOrderId, orderId))) {
+            int sum = used.getOrDefault(orderItem.getId(), 0);
+            if (sum > orderItem.getProductQuantity()) {
+                throw new IllegalStateException("订单明细 " + orderItem.getId() + " 的拆量合计 " + sum
+                        + " 超过下单数量 " + orderItem.getProductQuantity());
+            }
+        }
+    }
+
+    private List<DeliveryItem> itemsOf(Long deliveryId) {
+        return deliveryItemService.list(new LambdaQueryWrapper<DeliveryItem>()
+                .eq(DeliveryItem::getDeliveryId, deliveryId).orderByAsc(DeliveryItem::getId));
+    }
+
+    private DeliveryItem findItem(Long deliveryId, Long orderItemId) {
+        return deliveryItemService.getOne(new LambdaQueryWrapper<DeliveryItem>()
+                .eq(DeliveryItem::getDeliveryId, deliveryId)
+                .eq(DeliveryItem::getOrderItemId, orderItemId).last("limit 1"), false);
+    }
+
+    /** 编辑后的包裹结构（前端拿到即可整体刷新抽屉） */
+    private Map<String, Object> summary(Long orderId) {
+        List<DeliveryOrder> deliveries = deliveryOrderService.list(new LambdaQueryWrapper<DeliveryOrder>()
+                .eq(DeliveryOrder::getOrderId, orderId).orderByAsc(DeliveryOrder::getId));
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (DeliveryOrder d : deliveries) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", d.getId());
+            row.put("deliverySn", d.getDeliverySn());
+            row.put("warehouseId", d.getWarehouseId());
+            Warehouse wh = warehouseService.getById(d.getWarehouseId());
+            row.put("warehouseName", wh == null ? "" : wh.getName());
+            row.put("status", d.getStatus());
+            row.put("source", d.getSource());
+            row.put("items", itemsOf(d.getId()));
+            list.add(row);
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("orderId", orderId);
+        Order order = orderService.getById(orderId);
+        result.put("splitStatus", order == null ? null : order.getSplitStatus());
+        result.put("deliveries", list);
+        return result;
+    }
+}

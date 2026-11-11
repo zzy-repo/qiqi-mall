@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.qiqi.mall.oms.entity.DeliveryItem;
 import com.qiqi.mall.oms.entity.DeliveryOrder;
 import com.qiqi.mall.oms.entity.Inventory;
+import com.qiqi.mall.oms.entity.Warehouse;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.order.entity.OrderItem;
 import com.qiqi.mall.shared.common.DeliverySnGenerator;
@@ -35,15 +36,55 @@ public class SplitOrderService {
     private final InventoryService inventoryService;
     private final DeliveryOrderService deliveryOrderService;
     private final DeliveryItemService deliveryItemService;
+    private final WarehouseService warehouseService;
 
     public SplitOrderService(OrderService orderService, OrderItemService orderItemService,
                              InventoryService inventoryService, DeliveryOrderService deliveryOrderService,
-                             DeliveryItemService deliveryItemService) {
+                             DeliveryItemService deliveryItemService, WarehouseService warehouseService) {
         this.orderService = orderService;
         this.orderItemService = orderItemService;
         this.inventoryService = inventoryService;
         this.deliveryOrderService = deliveryOrderService;
         this.deliveryItemService = deliveryItemService;
+        this.warehouseService = warehouseService;
+    }
+
+    /**
+     * 拆单方案预览（dry-run）：只算不落库。
+     * 守卫：仅 status=7 待审核 可预览（此刻还没拆出任何发货单）。
+     * 返回：[{warehouseId, warehouseName, items:[{orderItemId, productSkuId, productName, quantity}]}]
+     * 不写任何表、不改状态、不校验库存——调用前后 delivery_order 行数必须一致。
+     */
+    public List<Map<String, Object>> preview(Long orderId) {
+        Order order = orderService.getById(orderId);
+        if (order == null) throw new IllegalStateException("订单不存在");
+        if (order.getStatus() == null || order.getStatus() != 7) {
+            throw new IllegalStateException("只有待审核订单可以预览拆单方案");
+        }
+        List<OrderItem> items = orderItemService.list(new LambdaQueryWrapper<OrderItem>()
+                .eq(OrderItem::getOrderId, orderId).orderByAsc(OrderItem::getId));
+        if (items.isEmpty()) throw new IllegalStateException("订单没有明细，无法预览拆单方案");
+
+        Map<Long, List<OrderItem>> byWarehouse = groupByWarehouse(items);
+        List<Map<String, Object>> plan = new ArrayList<>();
+        for (Map.Entry<Long, List<OrderItem>> entry : byWarehouse.entrySet()) {
+            Map<String, Object> pkg = new LinkedHashMap<>();
+            pkg.put("warehouseId", entry.getKey());
+            Warehouse wh = warehouseService.getById(entry.getKey());
+            pkg.put("warehouseName", wh == null ? "" : wh.getName());
+            List<Map<String, Object>> lines = new ArrayList<>();
+            for (OrderItem item : entry.getValue()) {
+                Map<String, Object> line = new LinkedHashMap<>();
+                line.put("orderItemId", item.getId());
+                line.put("productSkuId", item.getProductSkuId());
+                line.put("productName", item.getProductName());
+                line.put("quantity", item.getProductQuantity());
+                lines.add(line);
+            }
+            pkg.put("items", lines);
+            plan.add(pkg);
+        }
+        return plan;
     }
 
     /**
@@ -68,11 +109,7 @@ public class SplitOrderService {
         if (items.isEmpty()) throw new IllegalStateException("订单没有明细，无法拆单");
 
         // 按「发货仓」分组；同 SKU 多仓时取库存最多的仓（归属标记口径）
-        Map<Long, List<OrderItem>> byWarehouse = new LinkedHashMap<>();
-        for (OrderItem item : items) {
-            Long warehouseId = resolveWarehouse(item.getProductSkuId());
-            byWarehouse.computeIfAbsent(warehouseId, k -> new ArrayList<>()).add(item);
-        }
+        Map<Long, List<OrderItem>> byWarehouse = groupByWarehouse(items);
 
         List<DeliveryOrder> created = new ArrayList<>();
         for (Map.Entry<Long, List<OrderItem>> entry : byWarehouse.entrySet()) {
@@ -81,6 +118,7 @@ public class SplitOrderService {
             delivery.setOrderId(order.getId());
             delivery.setWarehouseId(entry.getKey());
             delivery.setStatus(DeliveryOrder.PENDING);
+            delivery.setSource(DeliveryOrder.SOURCE_AUTO);   // 自动拆单
             // 收货三件套快照：多包各自贴单
             delivery.setReceiverName(order.getReceiverName());
             delivery.setReceiverPhone(order.getReceiverPhone() == null ? "" : order.getReceiverPhone());
@@ -102,6 +140,16 @@ public class SplitOrderService {
         order.setSplitStatus(1);
         orderService.updateById(order);
         return created;
+    }
+
+    /** 按发货仓分组（split 与 preview 共用同一套归属口径，保证「预览即所得」） */
+    private Map<Long, List<OrderItem>> groupByWarehouse(List<OrderItem> items) {
+        Map<Long, List<OrderItem>> byWarehouse = new LinkedHashMap<>();
+        for (OrderItem item : items) {
+            Long warehouseId = resolveWarehouse(item.getProductSkuId());
+            byWarehouse.computeIfAbsent(warehouseId, k -> new ArrayList<>()).add(item);
+        }
+        return byWarehouse;
     }
 
     /** SKU 的发货仓：取库存最多的仓；该 SKU 无分仓记录时退回库存最多/任一个仓并保持稳定排序 */

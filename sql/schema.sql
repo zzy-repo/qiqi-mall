@@ -274,6 +274,8 @@ CREATE TABLE `delivery_order` (
   `receiver_name` VARCHAR(50) NOT NULL COMMENT '收货人快照（多包各自贴单）',
   `receiver_phone` VARCHAR(20) NOT NULL COMMENT '收货电话快照',
   `receiver_address` VARCHAR(255) NOT NULL COMMENT '收货地址快照',
+  `source` TINYINT NOT NULL DEFAULT 0 COMMENT '来源：0自动拆单 1人工调整（改仓/改量/拆分/合并/删除）',
+  `split_rule_id` BIGINT NULL COMMENT '预留：命中的拆单规则ID，层次二规则引擎启用',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_delivery_sn` (`delivery_sn`),

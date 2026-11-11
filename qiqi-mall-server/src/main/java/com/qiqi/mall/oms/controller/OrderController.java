@@ -125,6 +125,16 @@ public class OrderController {
     }
 
     /**
+     * 拆单方案预览（dry-run）：只算不落库，守卫：仅 status=7 待审核。
+     * 返回 [{warehouseId, warehouseName, items:[{orderItemId, productSkuId, productName, quantity}]}]
+     * 审核弹窗里的「查看拆单方案」就走这里；调用前后 delivery_order 行数不变。
+     */
+    @PostMapping("/{id}/split-preview")
+    public Result<java.util.List<java.util.Map<String, Object>>> splitPreview(@PathVariable Long id) {
+        return Result.ok(splitOrderService.preview(id));
+    }
+
+    /**
      * 审核不通过：待审核(7) → 已关闭(4)，守卫：仅 status=7；联动回补库存（下单即扣模型）。
      */
     @PostMapping("/{id}/audit-reject")
