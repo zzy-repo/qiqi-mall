@@ -35,6 +35,16 @@ export async function demoImageFile() {
   return file
 }
 
+/** demo 档用自然中文名（客户名/商品名/分类名），默认档保留 E2E 唯一前缀便于定位 */
+export function demoName(demoValue, fallbackValue) {
+  return IS_DEMO ? demoValue : fallbackValue
+}
+
+/** demo 档用自然用户名（像真实会员号），默认档返回 null 由调用方用 e2e_ 前缀 */
+export function demoUsername(base) {
+  return IS_DEMO ? `${base}${String(Date.now()).slice(-4)}` : null
+}
+
 /** demo 档用自然中文商品名（不含 E2E/时间戳），默认档保持唯一前缀便于定位 */
 export function naturalName(index, fallback) {
   const pool = ['手冲咖啡滤杯', '亚麻抱枕套', '陶瓷马克杯', '藤编收纳筐', '胡桃木餐具套装', '亚克力相框']
