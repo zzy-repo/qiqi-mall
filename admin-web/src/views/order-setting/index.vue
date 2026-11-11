@@ -2,15 +2,27 @@
   <el-card shadow="never" header="订单设置">
     <el-form v-loading="loading" ref="formRef" :model="form" :rules="rules" label-width="180px" style="max-width: 520px">
       <el-form-item label="自动收货天数" prop="autoConfirmDays">
-        <el-input-number v-model="form.autoConfirmDays" :min="1" :precision="0" style="width: 100%" />
+        <el-input-number
+          v-model="form.autoConfirmDays"
+          data-testid="order-setting-form-auto-confirm-days"
+          :min="1"
+          :precision="0"
+          style="width: 100%"
+        />
         <div class="tip">发货后 N 天自动确认收货</div>
       </el-form-item>
       <el-form-item label="未付款自动关单（分钟）" prop="autoCloseMinutes">
-        <el-input-number v-model="form.autoCloseMinutes" :min="1" :precision="0" style="width: 100%" />
+        <el-input-number
+          v-model="form.autoCloseMinutes"
+          data-testid="order-setting-form-auto-close-minutes"
+          :min="1"
+          :precision="0"
+          style="width: 100%"
+        />
         <div class="tip">下单后 N 分钟未付款自动关闭订单</div>
       </el-form-item>
       <el-form-item>
-        <el-button type="primary" :loading="saving" @click="submit">保存</el-button>
+        <el-button type="primary" :loading="saving" data-testid="order-setting-form-submit" @click="submit">保存</el-button>
       </el-form-item>
     </el-form>
   </el-card>

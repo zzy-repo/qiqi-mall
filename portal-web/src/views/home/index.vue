@@ -3,6 +3,7 @@
     <div class="toolbar">
       <el-input
         v-model="keyword"
+        data-testid="home-search-keyword"
         placeholder="搜索商品"
         clearable
         style="width: 260px"
@@ -10,13 +11,15 @@
         @clear="load"
       >
         <template #append>
-          <el-button :icon="Search" @click="load" />
+          <el-button :icon="Search" data-testid="home-search-submit" @click="load" />
         </template>
       </el-input>
 
-      <el-radio-group v-model="categoryId" size="default" @change="load">
-        <el-radio-button :value="null">全部</el-radio-button>
-        <el-radio-button v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</el-radio-button>
+      <el-radio-group v-model="categoryId" size="default" data-testid="home-category-filter" @change="load">
+        <el-radio-button :value="null" data-testid="home-category-option">全部</el-radio-button>
+        <el-radio-button v-for="c in categories" :key="c.id" :value="c.id" data-testid="home-category-option">
+          {{ c.name }}
+        </el-radio-button>
       </el-radio-group>
     </div>
 
@@ -26,6 +29,7 @@
         :key="p.id"
         class="card"
         shadow="hover"
+        data-testid="home-product-card"
         @click="$router.push(`/product/${p.id}`)"
       >
         <div class="thumb">

@@ -4,7 +4,7 @@
     <el-card v-if="product" shadow="never" class="detail">
       <div class="head">
         <div class="left">
-          <div class="thumb">
+          <div class="thumb" data-testid="product-detail-main-image">
             <el-image v-if="product.pic" :src="product.pic" fit="cover" class="cover">
               <template #error><el-icon :size="60"><Goods /></el-icon></template>
             </el-image>
@@ -15,6 +15,7 @@
               v-for="g in gallery"
               :key="g.id"
               :src="g.url"
+              data-testid="product-detail-gallery-thumb"
               class="gallery-item"
               :class="{ active: g.id === activeGallery }"
               fit="cover"
@@ -29,8 +30,8 @@
           <div class="price">¥ {{ currentSku ? Number(currentSku.price).toFixed(2) : '—' }}</div>
           <div class="specs">
             <span class="label">规格：</span>
-            <el-radio-group v-model="skuId">
-              <el-radio-button v-for="s in skus" :key="s.id" :value="s.id">
+            <el-radio-group v-model="skuId" data-testid="product-detail-spec-group">
+              <el-radio-button v-for="s in skus" :key="s.id" :value="s.id" data-testid="product-detail-spec-option">
                 {{ s.specText || '默认规格' }}
               </el-radio-button>
             </el-radio-group>
@@ -41,11 +42,17 @@
           </div>
           <div class="qty">
             <span class="label">数量：</span>
-            <el-input-number v-model="quantity" :min="1" :precision="0" />
+            <el-input-number v-model="quantity" data-testid="product-detail-quantity" :min="1" :precision="0" />
             <span class="stock" v-if="currentSku">库存 {{ currentSku.stock }}</span>
           </div>
-          <el-button type="primary" size="large" :icon="ShoppingCart" @click="addCart">加入购物车</el-button>
-          <el-button size="large" @click="goCheckout">立即购买</el-button>
+          <el-button
+            type="primary"
+            size="large"
+            :icon="ShoppingCart"
+            data-testid="product-detail-add-cart"
+            @click="addCart"
+          >加入购物车</el-button>
+          <el-button size="large" data-testid="product-detail-buy-now" @click="goCheckout">立即购买</el-button>
         </div>
       </div>
     </el-card>

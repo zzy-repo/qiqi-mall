@@ -3,11 +3,11 @@
     <template #header>
       <div class="card-header">
         <span>会员列表</span>
-        <el-button type="primary" :icon="Plus" @click="openForm()">新增</el-button>
+        <el-button type="primary" :icon="Plus" data-testid="member-list-create" @click="openForm()">新增</el-button>
       </div>
     </template>
 
-    <el-table v-loading="loading" :data="list" border>
+    <el-table v-loading="loading" :data="list" border data-testid="member-list-table">
       <el-table-column prop="username" label="登录名" min-width="140" />
       <el-table-column prop="nickname" label="昵称" width="120" />
       <el-table-column prop="phone" label="手机号" width="140" />
@@ -19,31 +19,31 @@
       <el-table-column prop="createTime" label="注册时间" width="180" />
       <el-table-column label="操作" width="180" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="openAddresses(row)">收货地址</el-button>
-          <el-button link type="primary" size="small" @click="openCarts(row)">购物车</el-button>
-          <el-button link type="primary" size="small" @click="openForm(row)">编辑</el-button>
+          <el-button link type="primary" size="small" data-testid="member-row-addresses" @click="openAddresses(row)">收货地址</el-button>
+          <el-button link type="primary" size="small" data-testid="member-row-carts" @click="openCarts(row)">购物车</el-button>
+          <el-button link type="primary" size="small" data-testid="member-row-edit" @click="openForm(row)">编辑</el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="visible" :title="form.id ? '编辑会员' : '新增会员'" width="500px">
+    <el-dialog v-model="visible" :title="form.id ? '编辑会员' : '新增会员'" width="500px" data-testid="member-form-dialog">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
         <el-form-item label="登录名" prop="username">
-          <el-input v-model="form.username" maxlength="50" />
+          <el-input v-model="form.username" data-testid="member-form-username" maxlength="50" />
         </el-form-item>
         <el-form-item label="昵称">
-          <el-input v-model="form.nickname" maxlength="50" />
+          <el-input v-model="form.nickname" data-testid="member-form-nickname" maxlength="50" />
         </el-form-item>
         <el-form-item label="手机号">
-          <el-input v-model="form.phone" maxlength="20" />
+          <el-input v-model="form.phone" data-testid="member-form-phone" maxlength="20" />
         </el-form-item>
         <el-form-item label="状态">
-          <el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" />
+          <el-switch v-model="form.status" data-testid="member-form-status" :active-value="1" :inactive-value="0" active-text="启用" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="visible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submit">确定</el-button>
+        <el-button data-testid="member-form-cancel" @click="visible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" data-testid="member-form-submit" @click="submit">确定</el-button>
       </template>
     </el-dialog>
   </el-card>

@@ -8,11 +8,12 @@
 
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="submit">
         <el-form-item label="用户名" prop="username">
-          <el-input v-model="form.username" placeholder="请输入用户名" size="large" @blur="checkCaptcha" />
+          <el-input v-model="form.username" data-testid="login-form-username" placeholder="请输入用户名" size="large" @blur="checkCaptcha" />
         </el-form-item>
         <el-form-item label="密码" prop="password">
           <el-input
             v-model="form.password"
+            data-testid="login-form-password"
             type="password"
             placeholder="请输入密码"
             size="large"
@@ -23,7 +24,13 @@
 
         <el-form-item v-if="needCaptcha" label="验证码" prop="captchaCode">
           <div class="captcha-row">
-            <el-input v-model="form.captchaCode" placeholder="请输入验证码" size="large" maxlength="4" />
+            <el-input
+              v-model="form.captchaCode"
+              data-testid="login-form-captcha"
+              placeholder="请输入验证码"
+              size="large"
+              maxlength="4"
+            />
             <img
               v-if="captchaImage"
               :src="captchaImage"
@@ -37,7 +44,7 @@
 
         <el-alert v-if="errorText" :title="errorText" type="error" :closable="false" show-icon class="error" />
 
-        <el-button type="primary" size="large" class="submit" :loading="loading" @click="submit">登录</el-button>
+        <el-button type="primary" size="large" class="submit" data-testid="login-form-submit" :loading="loading" @click="submit">登录</el-button>
         <div class="tip">连续输错 5 次后将要求输入验证码</div>
       </el-form>
     </el-card>

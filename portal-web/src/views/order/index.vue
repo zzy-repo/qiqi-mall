@@ -3,14 +3,14 @@
     <h3 class="title">我的订单</h3>
 
     <el-card shadow="never">
-      <el-table v-loading="loading" :data="orders" border>
+      <el-table v-loading="loading" :data="orders" border data-testid="order-list-table">
         <el-table-column prop="orderSn" label="订单号" min-width="170" />
         <el-table-column label="金额" width="120">
           <template #default="{ row }">¥ {{ Number(row.totalAmount).toFixed(2) }}</template>
         </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="statusTag[row.status]" size="small">{{ statusText[row.status] }}</el-tag>
+            <el-tag :type="statusTag[row.status]" size="small" data-testid="order-row-status">{{ statusText[row.status] }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="receiverName" label="收货人" width="100" />
@@ -27,15 +27,23 @@
         </el-table-column>
         <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="openDetail(row)">详情</el-button>
-            <el-button link type="primary" size="small" @click="openParcels(row)">包裹</el-button>
+            <el-button link type="primary" size="small" data-testid="order-row-detail" @click="openDetail(row)">详情</el-button>
+            <el-button link type="primary" size="small" data-testid="order-row-parcels" @click="openParcels(row)">包裹</el-button>
             <el-button v-if="row.status === 0" link type="primary" size="small" @click="pay(row)">模拟支付</el-button>
-            <el-button v-if="row.status === 2" link type="success" size="small" @click="confirmReceive(row)">确认收货</el-button>
+            <el-button
+              v-if="row.status === 2"
+              link
+              type="success"
+              size="small"
+              data-testid="order-row-confirm-receive"
+              @click="confirmReceive(row)"
+            >确认收货</el-button>
             <el-button
               v-if="row.status === 1 || row.status === 2"
               link
               type="warning"
               size="small"
+              data-testid="order-row-return"
               @click="openReturn(row)"
             >申请退货</el-button>
           </template>
@@ -45,6 +53,7 @@
       <div class="pager">
         <el-pagination
           v-model:current-page="page"
+          data-testid="list-pagination"
           :page-size="size"
           :total="total"
           layout="prev, pager, next, total"
@@ -54,7 +63,7 @@
       </div>
     </el-card>
 
-    <el-dialog v-model="detailVisible" title="订单详情" width="620px">
+    <el-dialog v-model="detailVisible" title="订单详情" width="620px" data-testid="order-detail-dialog">
       <template v-if="detail">
         <el-descriptions :column="2" border size="small">
           <el-descriptions-item label="订单号">{{ detail.order.orderSn }}</el-descriptions-item>
@@ -75,7 +84,12 @@
       </template>
     </el-dialog>
 
-    <el-drawer v-model="parcelVisible" :title="`包裹 - ${parcelOrderSn}`" size="480px">
+    <el-drawer
+      v-model="parcelVisible"
+      :title="`包裹 - ${parcelOrderSn}`"
+      size="480px"
+      data-testid="order-parcel-drawer"
+    >
       <el-table :data="parcels" border size="small" empty-text="暂无包裹（商家审核后将拆单发货）">
         <el-table-column prop="deliverySn" label="包裹号" min-width="160" />
         <el-table-column prop="warehouseName" label="发货仓" width="90" />
@@ -93,23 +107,39 @@
       </el-table>
     </el-drawer>
 
-    <el-dialog v-model="returnVisible" title="申请退货" width="520px">
+    <el-dialog v-model="returnVisible" title="申请退货" width="520px" data-testid="order-return-dialog">
       <el-form ref="returnFormRef" :model="returnForm" :rules="returnRules" label-width="90px">
         <el-form-item label="订单号">
           <el-input :model-value="returnForm.orderSn" disabled />
         </el-form-item>
         <el-form-item label="退货原因" prop="reasonId">
-          <el-select v-model="returnForm.reasonId" placeholder="请选择原因" style="width: 100%">
+          <el-select
+            v-model="returnForm.reasonId"
+            data-testid="order-return-form-reason"
+            placeholder="请选择原因"
+            style="width: 100%"
+          >
             <el-option v-for="r in reasons" :key="r.id" :label="r.name" :value="r.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="详细说明">
-          <el-input v-model="returnForm.description" type="textarea" :rows="3" maxlength="500" />
+          <el-input
+            v-model="returnForm.description"
+            data-testid="order-return-form-description"
+            type="textarea"
+            :rows="3"
+            maxlength="500"
+          />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="returnVisible = false">取消</el-button>
-        <el-button type="primary" :loading="returning" @click="submitReturn">提交申请</el-button>
+        <el-button
+          type="primary"
+          :loading="returning"
+          data-testid="order-return-form-submit"
+          @click="submitReturn"
+        >提交申请</el-button>
       </template>
     </el-dialog>
   </div>

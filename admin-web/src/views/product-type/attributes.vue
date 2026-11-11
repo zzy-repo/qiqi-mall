@@ -8,11 +8,11 @@
           <span>属性管理</span>
           <el-tag v-if="typeName" size="small" type="info">{{ typeName }}</el-tag>
         </div>
-        <el-button type="primary" :icon="Plus" @click="openForm()">新增属性</el-button>
+        <el-button type="primary" :icon="Plus" data-testid="attribute-list-create" @click="openForm()">新增属性</el-button>
       </div>
     </template>
 
-    <el-table v-loading="loading" :data="list" border>
+    <el-table v-loading="loading" :data="list" border data-testid="attribute-list-table">
       <el-table-column prop="id" label="属性ID" width="100" />
       <el-table-column prop="typeId" label="所属类型ID" width="120" />
       <el-table-column prop="name" label="属性名称" />
@@ -25,26 +25,26 @@
       </el-table-column>
       <el-table-column label="操作" width="100" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="openForm(row)">编辑</el-button>
+          <el-button link type="primary" size="small" data-testid="attribute-row-edit" @click="openForm(row)">编辑</el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="visible" :title="form.id ? '编辑属性' : '新增属性'" width="500px">
+    <el-dialog v-model="visible" :title="form.id ? '编辑属性' : '新增属性'" width="500px" data-testid="attribute-form-dialog">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="110px">
         <el-form-item label="所属类型">
           <el-input :model-value="typeName || form.typeId" disabled />
         </el-form-item>
         <el-form-item label="属性名称" prop="name">
-          <el-input v-model="form.name" placeholder="如：颜色、内存" maxlength="50" />
+          <el-input v-model="form.name" data-testid="attribute-form-name" placeholder="如：颜色、内存" maxlength="50" />
         </el-form-item>
         <el-form-item label="是否可筛选">
-          <el-switch v-model="form.isFilter" :active-value="1" :inactive-value="0" />
+          <el-switch v-model="form.isFilter" data-testid="attribute-form-is-filter" :active-value="1" :inactive-value="0" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="visible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submit">确定</el-button>
+        <el-button data-testid="attribute-form-cancel" @click="visible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" data-testid="attribute-form-submit" @click="submit">确定</el-button>
       </template>
     </el-dialog>
   </el-card>

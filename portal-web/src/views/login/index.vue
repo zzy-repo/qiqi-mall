@@ -6,30 +6,46 @@
         <span>七七商城</span>
       </div>
 
-      <el-tabs v-model="tab" stretch>
-        <el-tab-pane label="登录" name="login" />
-        <el-tab-pane label="注册" name="register" />
+      <el-tabs v-model="tab" stretch data-testid="login-tabs">
+        <el-tab-pane name="login">
+          <template #label><span data-testid="login-tab-login">登录</span></template>
+        </el-tab-pane>
+        <el-tab-pane name="register">
+          <template #label><span data-testid="login-tab-register">注册</span></template>
+        </el-tab-pane>
       </el-tabs>
 
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="submit">
         <el-form-item label="用户名" prop="username">
-          <el-input v-model="form.username" size="large" placeholder="请输入用户名" />
+          <el-input v-model="form.username" data-testid="login-form-username" size="large" placeholder="请输入用户名" />
         </el-form-item>
         <el-form-item label="密码" prop="password">
-          <el-input v-model="form.password" type="password" size="large" show-password placeholder="请输入密码" />
+          <el-input
+            v-model="form.password"
+            data-testid="login-form-password"
+            type="password"
+            size="large"
+            show-password
+            placeholder="请输入密码"
+          />
         </el-form-item>
         <template v-if="tab === 'register'">
           <el-form-item label="昵称" prop="nickname">
-            <el-input v-model="form.nickname" size="large" placeholder="选填，默认与用户名相同" />
+            <el-input
+              v-model="form.nickname"
+              data-testid="login-form-nickname"
+              size="large"
+              placeholder="选填，默认与用户名相同"
+            />
           </el-form-item>
           <el-form-item label="手机号" prop="phone">
-            <el-input v-model="form.phone" size="large" placeholder="选填" />
+            <el-input v-model="form.phone" data-testid="login-form-phone" size="large" placeholder="选填" />
           </el-form-item>
         </template>
 
         <el-alert v-if="errorText" :title="errorText" type="error" :closable="false" show-icon class="error" />
 
-        <el-button type="primary" size="large" class="submit" :loading="loading" @click="submit">
+        <el-button type="primary" size="large" class="submit" data-testid="login-form-submit" :loading="loading" @click="submit">
           {{ tab === 'login' ? '登录' : '注册并登录' }}
         </el-button>
         <div class="tip">

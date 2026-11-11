@@ -3,27 +3,28 @@
     <template #header>
       <div class="card-header">
         <span>商品分类</span>
-        <el-button type="primary" :icon="Plus" @click="openForm()">新增</el-button>
+        <el-button type="primary" :icon="Plus" data-testid="category-list-create" @click="openForm()">新增</el-button>
       </div>
     </template>
 
-    <el-table v-loading="loading" :data="tree" border row-key="id" default-expand-all>
+    <el-table v-loading="loading" :data="tree" border row-key="id" default-expand-all data-testid="category-list-table">
       <el-table-column prop="name" label="分类名称" />
       <el-table-column label="操作" width="100" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="openForm(row)">编辑</el-button>
+          <el-button link type="primary" size="small" data-testid="category-row-edit" @click="openForm(row)">编辑</el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="visible" :title="form.id ? '编辑分类' : '新增分类'" width="480px">
+    <el-dialog v-model="visible" :title="form.id ? '编辑分类' : '新增分类'" width="480px" data-testid="category-form-dialog">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
         <el-form-item label="分类名称" prop="name">
-          <el-input v-model="form.name" placeholder="请输入分类名称" maxlength="50" />
+          <el-input v-model="form.name" data-testid="category-form-name" placeholder="请输入分类名称" maxlength="50" />
         </el-form-item>
         <el-form-item label="父分类" prop="parentId">
           <el-tree-select
             v-model="form.parentId"
+            data-testid="category-form-parent"
             :data="parentOptions"
             check-strictly
             :render-after-expand="false"
@@ -34,8 +35,8 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="visible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submit">确定</el-button>
+        <el-button data-testid="category-form-cancel" @click="visible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" data-testid="category-form-submit" @click="submit">确定</el-button>
       </template>
     </el-dialog>
   </el-card>

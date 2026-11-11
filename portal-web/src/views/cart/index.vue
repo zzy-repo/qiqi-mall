@@ -3,7 +3,7 @@
     <h3 class="title">购物车<span v-if="!logged" class="hint">（未登录，暂存在本浏览器）</span></h3>
 
     <el-card shadow="never">
-      <el-table v-loading="loading" :data="rows" border>
+      <el-table v-loading="loading" :data="rows" border data-testid="cart-list-table">
         <el-table-column prop="productName" label="商品" min-width="180" />
         <el-table-column label="规格" min-width="180">
           <template #default="{ row }">{{ row.specText || '默认规格' }}</template>
@@ -13,7 +13,14 @@
         </el-table-column>
         <el-table-column label="数量" width="150">
           <template #default="{ row }">
-            <el-input-number :model-value="row.quantity" :min="1" :precision="0" size="small" @change="(v) => changeQty(row, v)" />
+            <el-input-number
+              :model-value="row.quantity"
+              data-testid="cart-row-quantity"
+              :min="1"
+              :precision="0"
+              size="small"
+              @change="(v) => changeQty(row, v)"
+            />
           </template>
         </el-table-column>
         <el-table-column label="小计" width="130">
@@ -21,14 +28,20 @@
         </el-table-column>
         <el-table-column label="操作" width="90">
           <template #default="{ row }">
-            <el-button link type="danger" size="small" @click="remove(row)">删除</el-button>
+            <el-button link type="danger" size="small" data-testid="cart-row-remove" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
 
       <div class="footer">
         <span class="total">合计：<b>¥ {{ total }}</b></span>
-        <el-button type="primary" size="large" :disabled="!rows.length" @click="checkout">去结算</el-button>
+        <el-button
+          type="primary"
+          size="large"
+          :disabled="!rows.length"
+          data-testid="cart-checkout-submit"
+          @click="checkout"
+        >去结算</el-button>
       </div>
     </el-card>
   </div>

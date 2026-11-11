@@ -209,11 +209,10 @@ export async function addSku(page, { specs, price, stock }) {
   await page.getByRole('button', { name: '新增 SKU' }).click()
   const dialog = page.locator('.el-dialog')
   await expect(dialog).toBeVisible()
+  // 新增 SKU 时规格值是空列表：**每一行**都要先点「添加规格值」再填
   for (const [i, sp] of specs.entries()) {
-    if (i > 0) {
-      await page.getByRole('button', { name: '添加规格值' }).click()
-      await page.waitForTimeout(300)
-    }
+    await page.getByRole('button', { name: '添加规格值' }).click()
+    await page.waitForTimeout(300)
     const row = page.locator('.spec-row').nth(i)
     await row.locator('.el-select__wrapper').click()
     await page.waitForTimeout(400)

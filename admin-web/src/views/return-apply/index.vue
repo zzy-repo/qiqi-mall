@@ -7,7 +7,7 @@
       </div>
     </template>
 
-    <el-table v-loading="loading" :data="list" border>
+    <el-table v-loading="loading" :data="list" border data-testid="return-apply-list-table">
       <el-table-column label="订单号" width="180">
         <template #default="{ row }">{{ row.orderSn || row.orderId }}</template>
       </el-table-column>
@@ -27,12 +27,17 @@
       </el-table-column>
       <el-table-column label="操作" width="100" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="openForm(row)">审核</el-button>
+          <el-button link type="primary" size="small" data-testid="return-apply-row-audit" @click="openForm(row)">审核</el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="visible" :title="form.id ? '审核退货申请' : '新增退货申请'" width="520px">
+    <el-dialog
+      v-model="visible"
+      :title="form.id ? '审核退货申请' : '新增退货申请'"
+      width="520px"
+      data-testid="return-apply-form-dialog"
+    >
       <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
         <el-form-item label="订单" prop="orderId">
           <el-select v-model="form.orderId" placeholder="请选择订单" style="width: 100%" :disabled="!!form.id">
@@ -45,24 +50,24 @@
           </el-select>
         </el-form-item>
         <el-form-item label="退货原因" prop="reasonId">
-          <el-select v-model="form.reasonId" style="width: 100%" placeholder="请选择原因">
+          <el-select v-model="form.reasonId" data-testid="return-apply-form-reason" style="width: 100%" placeholder="请选择原因">
             <el-option v-for="r in reasons" :key="r.id" :label="r.name" :value="r.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="详细说明">
-          <el-input v-model="form.description" type="textarea" :rows="3" maxlength="500" />
+          <el-input v-model="form.description" data-testid="return-apply-form-description" type="textarea" :rows="3" maxlength="500" />
         </el-form-item>
         <el-form-item v-if="form.id" label="处理结果">
-          <el-radio-group v-model="form.status">
-            <el-radio :value="0">待处理</el-radio>
-            <el-radio :value="1">通过</el-radio>
-            <el-radio :value="2">拒绝</el-radio>
+          <el-radio-group v-model="form.status" data-testid="return-apply-form-status">
+            <el-radio :value="0" data-testid="return-apply-form-status-pending">待处理</el-radio>
+            <el-radio :value="1" data-testid="return-apply-form-status-pass">通过</el-radio>
+            <el-radio :value="2" data-testid="return-apply-form-status-reject">拒绝</el-radio>
           </el-radio-group>
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="visible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submit">确定</el-button>
+        <el-button data-testid="return-apply-form-cancel" @click="visible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" data-testid="return-apply-form-submit" @click="submit">确定</el-button>
       </template>
     </el-dialog>
   </el-card>

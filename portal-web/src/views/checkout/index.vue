@@ -6,7 +6,14 @@
       <template #header>收货信息</template>
       <el-form :model="form" label-width="90px" style="max-width: 620px">
         <el-form-item label="选择地址">
-          <el-select v-model="addressId" placeholder="选择已保存的地址" style="width: 100%" clearable @change="useAddress">
+          <el-select
+            v-model="addressId"
+            data-testid="checkout-form-address"
+            placeholder="选择已保存的地址"
+            style="width: 100%"
+            clearable
+            @change="useAddress"
+          >
             <el-option
               v-for="a in addresses"
               :key="a.id"
@@ -16,13 +23,19 @@
           </el-select>
         </el-form-item>
         <el-form-item label="收货人" required>
-          <el-input v-model="form.receiverName" maxlength="50" />
+          <el-input v-model="form.receiverName" data-testid="checkout-form-receiver-name" maxlength="50" />
         </el-form-item>
         <el-form-item label="电话">
-          <el-input v-model="form.receiverPhone" maxlength="20" />
+          <el-input v-model="form.receiverPhone" data-testid="checkout-form-receiver-phone" maxlength="20" />
         </el-form-item>
         <el-form-item label="收货地址" required>
-          <el-input v-model="form.receiverAddress" type="textarea" :rows="2" maxlength="255" />
+          <el-input
+            v-model="form.receiverAddress"
+            data-testid="checkout-form-receiver-address"
+            type="textarea"
+            :rows="2"
+            maxlength="255"
+          />
         </el-form-item>
       </el-form>
     </el-card>
@@ -45,7 +58,13 @@
 
       <div class="footer">
         <span class="total">应付：<b>¥ {{ total }}</b></span>
-        <el-button type="primary" size="large" :loading="submitting" @click="submit">提交订单</el-button>
+        <el-button
+          type="primary"
+          size="large"
+          :loading="submitting"
+          data-testid="checkout-form-submit"
+          @click="submit"
+        >提交订单</el-button>
       </div>
     </el-card>
   </div>

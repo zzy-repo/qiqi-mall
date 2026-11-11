@@ -8,11 +8,11 @@
           <span>SKU 管理</span>
           <el-tag v-if="productName" size="small" type="info">{{ productName }}</el-tag>
         </div>
-        <el-button type="primary" :icon="Plus" @click="openForm()">新增 SKU</el-button>
+        <el-button type="primary" :icon="Plus" data-testid="sku-list-create" @click="openForm()">新增 SKU</el-button>
       </div>
     </template>
 
-    <el-table v-loading="loading" :data="list" border>
+    <el-table v-loading="loading" :data="list" border data-testid="sku-list-table">
       <el-table-column label="图片" width="90">
         <template #default="{ row }">
           <el-image v-if="row.pic" :src="row.pic" fit="cover" class="thumb">
@@ -33,12 +33,12 @@
       <el-table-column prop="stock" label="库存" width="100" />
       <el-table-column label="操作" width="100" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="openForm(row)">编辑</el-button>
+          <el-button link type="primary" size="small" data-testid="sku-row-edit" @click="openForm(row)">编辑</el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="visible" :title="form.id ? '编辑SKU' : '新增SKU'" width="600px">
+    <el-dialog v-model="visible" :title="form.id ? '编辑SKU' : '新增SKU'" width="600px" data-testid="sku-form-dialog">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
         <el-form-item label="所属商品">
           <el-input :model-value="productName || form.productId" disabled />
@@ -49,14 +49,36 @@
 
         <el-form-item label="规格值">
           <div class="spec-list">
-            <div v-for="(spec, index) in form.specs" :key="index" class="spec-row">
-              <el-select v-model="spec.attributeId" placeholder="属性" style="width: 150px">
+            <div
+              v-for="(spec, index) in form.specs"
+              :key="index"
+              class="spec-row"
+              data-testid="sku-form-spec-row"
+            >
+              <el-select v-model="spec.attributeId" data-testid="sku-form-spec-attribute" placeholder="属性" style="width: 150px">
                 <el-option v-for="a in attributes" :key="a.id" :label="a.name" :value="a.id" />
               </el-select>
-              <el-input v-model="spec.value" placeholder="值，如 黑色" style="flex: 1" maxlength="100" />
-              <el-button link type="danger" size="small" @click="form.specs.splice(index, 1)">删除</el-button>
+              <el-input
+                v-model="spec.value"
+                data-testid="sku-form-spec-value"
+                placeholder="值，如 黑色"
+                style="flex: 1"
+                maxlength="100"
+              />
+              <el-button
+                link
+                type="danger"
+                size="small"
+                data-testid="sku-form-spec-remove"
+                @click="form.specs.splice(index, 1)"
+              >删除</el-button>
             </div>
-            <el-button size="small" :icon="Plus" @click="form.specs.push({ attributeId: null, value: '' })">
+            <el-button
+              size="small"
+              :icon="Plus"
+              data-testid="sku-form-spec-add"
+              @click="form.specs.push({ attributeId: null, value: '' })"
+            >
               添加规格值
             </el-button>
             <div v-if="!attributes.length" class="tip">该商品所属类型还没有属性，先去「商品类型 → 属性」里添加</div>
@@ -64,15 +86,22 @@
         </el-form-item>
 
         <el-form-item label="价格" prop="price">
-          <el-input-number v-model="form.price" :min="0" :precision="2" :step="1" style="width: 100%" />
+          <el-input-number
+            v-model="form.price"
+            data-testid="sku-form-price"
+            :min="0"
+            :precision="2"
+            :step="1"
+            style="width: 100%"
+          />
         </el-form-item>
         <el-form-item label="库存" prop="stock">
-          <el-input-number v-model="form.stock" :min="0" :precision="0" style="width: 100%" />
+          <el-input-number v-model="form.stock" data-testid="sku-form-stock" :min="0" :precision="0" style="width: 100%" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="visible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submit">确定</el-button>
+        <el-button data-testid="sku-form-cancel" @click="visible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" data-testid="sku-form-submit" @click="submit">确定</el-button>
       </template>
     </el-dialog>
   </el-card>

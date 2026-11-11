@@ -10,19 +10,27 @@
     <div class="filters">
       <el-input
         v-model="query.orderSn"
+        data-testid="order-list-search-sn"
         placeholder="按订单号搜索"
         clearable
         style="width: 220px"
         @keyup.enter="search"
         @clear="search"
       />
-      <el-select v-model="query.status" placeholder="全部状态" clearable style="width: 140px" @change="search">
+      <el-select
+        v-model="query.status"
+        data-testid="order-list-status-filter"
+        placeholder="全部状态"
+        clearable
+        style="width: 140px"
+        @change="search"
+      >
         <el-option v-for="(t, i) in statusText" :key="i" :label="t" :value="i" />
       </el-select>
-      <el-button type="primary" :icon="Search" @click="search">查询</el-button>
+      <el-button type="primary" :icon="Search" data-testid="order-list-search-submit" @click="search">查询</el-button>
     </div>
 
-    <el-table v-loading="loading" :data="list" border>
+    <el-table v-loading="loading" :data="list" border data-testid="order-list-table">
       <el-table-column prop="orderSn" label="订单号" min-width="160" />
       <el-table-column label="买家" width="110">
         <template #default="{ row }">{{ memberName.get(row.memberId) || row.memberId }}</template>
@@ -32,7 +40,7 @@
       </el-table-column>
       <el-table-column label="状态" width="100">
         <template #default="{ row }">
-          <el-tag :type="statusTag[row.status]" size="small">{{ statusText[row.status] }}</el-tag>
+          <el-tag :type="statusTag[row.status]" size="small" data-testid="order-row-status">{{ statusText[row.status] }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="包裹" width="110">
@@ -58,12 +66,13 @@
       </el-table-column>
       <el-table-column label="操作" width="230" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="openDetail(row)">明细</el-button>
+          <el-button link type="primary" size="small" data-testid="order-row-detail" @click="openDetail(row)">明细</el-button>
           <el-button
             v-if="row.status === 7"
             link
             type="warning"
             size="small"
+            data-testid="order-row-audit"
             @click="audit(row)"
           >审核</el-button>
           <el-button
@@ -71,9 +80,10 @@
             link
             type="success"
             size="small"
+            data-testid="order-row-delivery"
             @click="openDetail(row)"
           >发货单</el-button>
-          <el-button link type="primary" size="small" @click="openForm(row)">编辑</el-button>
+          <el-button link type="primary" size="small" data-testid="order-row-edit" @click="openForm(row)">编辑</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -81,6 +91,7 @@
     <div class="pager">
       <el-pagination
         v-model:current-page="query.page"
+        data-testid="list-pagination"
         :page-size="query.size"
         :total="total"
         layout="prev, pager, next, total"
@@ -90,32 +101,43 @@
     </div>
 
     <!-- 新增/编辑：订单 + 明细一起提交 -->
-    <el-dialog v-model="visible" :title="form.id ? '编辑订单' : '新增订单'" width="640px">
+    <el-dialog
+      v-model="visible"
+      :title="form.id ? '编辑订单' : '新增订单'"
+      width="640px"
+      data-testid="order-form-dialog"
+    >
       <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
         <el-form-item label="订单号" prop="orderSn">
-          <el-input v-model="form.orderSn" placeholder="留空自动生成" maxlength="50" />
+          <el-input v-model="form.orderSn" data-testid="order-form-order-sn" placeholder="留空自动生成" maxlength="50" />
         </el-form-item>
         <el-form-item label="买家" prop="memberId">
-          <el-select v-model="form.memberId" placeholder="请选择会员" style="width: 100%">
+          <el-select v-model="form.memberId" data-testid="order-form-member" placeholder="请选择会员" style="width: 100%">
             <el-option v-for="m in members" :key="m.id" :label="`${m.username}${m.nickname ? '（' + m.nickname + '）' : ''}`" :value="m.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="收货人" prop="receiverName">
-          <el-input v-model="form.receiverName" maxlength="50" />
+          <el-input v-model="form.receiverName" data-testid="order-form-receiver-name" maxlength="50" />
         </el-form-item>
         <el-form-item label="收货电话">
-          <el-input v-model="form.receiverPhone" maxlength="20" />
+          <el-input v-model="form.receiverPhone" data-testid="order-form-receiver-phone" maxlength="20" />
         </el-form-item>
         <el-form-item label="收货地址">
-          <el-input v-model="form.receiverAddress" type="textarea" :rows="2" maxlength="255" />
+          <el-input
+            v-model="form.receiverAddress"
+            data-testid="order-form-receiver-address"
+            type="textarea"
+            :rows="2"
+            maxlength="255"
+          />
         </el-form-item>
         <el-form-item label="状态">
-          <el-select v-model="form.status" style="width: 100%">
+          <el-select v-model="form.status" data-testid="order-form-status" style="width: 100%">
             <el-option v-for="(t, i) in statusText" :key="i" :label="t" :value="i" />
           </el-select>
         </el-form-item>
         <el-form-item label="支付方式">
-          <el-select v-model="form.payType" style="width: 100%">
+          <el-select v-model="form.payType" data-testid="order-form-pay-type" style="width: 100%">
             <el-option v-for="(t, i) in payText" :key="i" :label="t" :value="i" />
           </el-select>
         </el-form-item>
@@ -171,21 +193,34 @@
         <el-button class="add-item" size="small" :icon="Plus" @click="addItem">加一条明细</el-button>
       </el-form>
       <template #footer>
-        <el-button @click="visible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submit">确定</el-button>
+        <el-button data-testid="order-form-cancel" @click="visible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" data-testid="order-form-submit" @click="submit">确定</el-button>
       </template>
     </el-dialog>
 
     <!-- 详情：明细 + 退货申请聚合展示 -->
-    <el-drawer v-model="detailVisible" :title="`订单明细 - ${detail?.order?.orderSn || ''}`" size="960px">
+    <el-drawer
+      v-model="detailVisible"
+      :title="`订单明细 - ${detail?.order?.orderSn || ''}`"
+      size="960px"
+      data-testid="order-detail-drawer"
+    >
       <template v-if="detail">
         <h4>发货单</h4>
-        <el-table :data="deliveries" border size="small" empty-text="暂无发货单（待审核通过后自动拆单生成）">
+        <el-table
+          :data="deliveries"
+          border
+          size="small"
+          empty-text="暂无发货单（待审核通过后自动拆单生成）"
+          data-testid="order-detail-delivery-table"
+        >
           <el-table-column prop="deliverySn" label="发货单号" min-width="170" />
           <el-table-column prop="warehouseName" label="发货仓" width="100" />
           <el-table-column label="状态" width="100">
             <template #default="{ row }">
-              <el-tag :type="deliveryTag[row.status] || 'info'" size="small">{{ deliveryText[row.status] || row.status }}</el-tag>
+              <el-tag :type="deliveryTag[row.status] || 'info'" size="small" data-testid="delivery-row-status">
+                {{ deliveryText[row.status] || row.status }}
+              </el-tag>
             </template>
           </el-table-column>
           <el-table-column label="运单号" min-width="140">
@@ -200,13 +235,60 @@
           </el-table-column>
           <el-table-column label="操作" width="300" fixed="right">
             <template #default="{ row }">
-              <el-button v-if="row.status === 0" link type="primary" size="small" @click="dispatch(row)">下发</el-button>
-              <el-button v-if="row.status === 0" link type="danger" size="small" @click="cancel(row)">取消</el-button>
-              <el-button v-if="row.status === 0" link type="warning" size="small" @click="openDeliveryEdit(row)">编辑</el-button>
-              <el-button v-if="row.status === 0" link type="warning" size="small" @click="openDeliverySplit(row)">拆分</el-button>
-              <el-button v-if="row.status === 0" link type="warning" size="small" @click="openDeliveryMerge(row)">合并</el-button>
-              <el-button v-if="row.status === 0" link type="danger" size="small" @click="removeDelivery(row)">删除</el-button>
-              <el-dropdown v-if="row.status >= 1 && row.status < 5" trigger="click" @command="(cmd) => callback(row, cmd)">
+              <el-button
+                v-if="row.status === 0"
+                link
+                type="primary"
+                size="small"
+                data-testid="delivery-row-dispatch"
+                @click="dispatch(row)"
+              >下发</el-button>
+              <el-button
+                v-if="row.status === 0"
+                link
+                type="danger"
+                size="small"
+                data-testid="delivery-row-cancel"
+                @click="cancel(row)"
+              >取消</el-button>
+              <el-button
+                v-if="row.status === 0"
+                link
+                type="warning"
+                size="small"
+                data-testid="delivery-row-edit"
+                @click="openDeliveryEdit(row)"
+              >编辑</el-button>
+              <el-button
+                v-if="row.status === 0"
+                link
+                type="warning"
+                size="small"
+                data-testid="delivery-row-split"
+                @click="openDeliverySplit(row)"
+              >拆分</el-button>
+              <el-button
+                v-if="row.status === 0"
+                link
+                type="warning"
+                size="small"
+                data-testid="delivery-row-merge"
+                @click="openDeliveryMerge(row)"
+              >合并</el-button>
+              <el-button
+                v-if="row.status === 0"
+                link
+                type="danger"
+                size="small"
+                data-testid="delivery-row-remove"
+                @click="removeDelivery(row)"
+              >删除</el-button>
+              <el-dropdown
+                v-if="row.status >= 1 && row.status < 5"
+                trigger="click"
+                data-testid="delivery-row-wms-callback"
+                @command="(cmd) => callback(row, cmd)"
+              >
                 <el-button link type="primary" size="small">模拟WMS回传 ▾</el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
@@ -250,7 +332,12 @@
     </el-drawer>
 
     <!-- 审核弹窗里的「查看拆单方案」：dry-run 预览，不落库 -->
-    <el-dialog v-model="previewVisible" title="拆单方案预览（只预览，不生成发货单）" width="560px">
+    <el-dialog
+      v-model="previewVisible"
+      title="拆单方案预览（只预览，不生成发货单）"
+      width="560px"
+      data-testid="order-split-preview-dialog"
+    >
       <div v-loading="previewLoading">
         <el-alert
           type="info"
@@ -273,7 +360,7 @@
         <div class="preview-tip">共 {{ previewPlan.length }} 个包裹</div>
       </div>
       <template #footer>
-        <el-button @click="previewVisible = false">关闭</el-button>
+        <el-button data-testid="order-split-preview-close" @click="previewVisible = false">关闭</el-button>
       </template>
     </el-dialog>
 
@@ -282,6 +369,7 @@
       v-model="dlgVisible"
       :title="dlgMode === 'edit' ? '编辑包裹（改仓 / 改量）' : '拆分包裹'"
       width="600px"
+      data-testid="delivery-form-dialog"
     >
       <el-alert
         type="warning"
@@ -294,7 +382,13 @@
       />
       <el-form label-width="88px">
         <el-form-item :label="dlgMode === 'edit' ? '发货仓' : '新包裹仓'">
-          <el-select v-model="dlgWarehouseId" placeholder="沿用原仓库" clearable style="width: 200px">
+          <el-select
+            v-model="dlgWarehouseId"
+            data-testid="delivery-form-warehouse"
+            placeholder="沿用原仓库"
+            clearable
+            style="width: 200px"
+          >
             <el-option v-for="w in warehouses" :key="w.id" :label="w.name" :value="w.id" />
           </el-select>
         </el-form-item>
@@ -314,13 +408,15 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dlgVisible = false">取消</el-button>
-        <el-button type="primary" :loading="dlgSaving" @click="submitDeliveryDialog">确定</el-button>
+        <el-button data-testid="delivery-form-cancel" @click="dlgVisible = false">取消</el-button>
+        <el-button type="primary" :loading="dlgSaving" data-testid="delivery-form-submit" @click="submitDeliveryDialog">
+          确定
+        </el-button>
       </template>
     </el-dialog>
 
     <!-- 合并待下发包裹 -->
-    <el-dialog v-model="mergeVisible" title="合并包裹" width="480px">
+    <el-dialog v-model="mergeVisible" title="合并包裹" width="480px" data-testid="delivery-merge-dialog">
       <el-alert
         type="warning"
         :closable="false"
@@ -332,7 +428,12 @@
       />
       <el-form label-width="88px">
         <el-form-item label="并入到">
-          <el-select v-model="mergeTargetId" placeholder="选择同订单的待下发包裹" style="width: 260px">
+          <el-select
+            v-model="mergeTargetId"
+            data-testid="delivery-merge-target"
+            placeholder="选择同订单的待下发包裹"
+            style="width: 260px"
+          >
             <el-option
               v-for="d in mergeOptions"
               :key="d.id"
@@ -343,8 +444,8 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="mergeVisible = false">取消</el-button>
-        <el-button type="primary" :loading="mergeSaving" @click="submitMerge">确定</el-button>
+        <el-button data-testid="delivery-merge-cancel" @click="mergeVisible = false">取消</el-button>
+        <el-button type="primary" :loading="mergeSaving" data-testid="delivery-merge-submit" @click="submitMerge">确定</el-button>
       </template>
     </el-dialog>
   </el-card>

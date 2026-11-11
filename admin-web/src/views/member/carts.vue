@@ -8,11 +8,11 @@
           <span>购物车</span>
           <el-tag v-if="memberName" size="small" type="info">{{ memberName }}</el-tag>
         </div>
-        <el-button type="primary" :icon="Plus" @click="openForm()">新增条目</el-button>
+        <el-button type="primary" :icon="Plus" data-testid="member-cart-list-create" @click="openForm()">新增条目</el-button>
       </div>
     </template>
 
-    <el-table v-loading="loading" :data="rows" border>
+    <el-table v-loading="loading" :data="rows" border data-testid="member-cart-list-table">
       <el-table-column label="商品" min-width="180">
         <template #default="{ row }">{{ productName.get(row.productId) || row.productId }}</template>
       </el-table-column>
@@ -23,24 +23,41 @@
       <el-table-column prop="createTime" label="加入时间" width="180" />
       <el-table-column label="操作" width="130" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="openForm(row)">编辑</el-button>
-          <el-button link type="danger" size="small" @click="remove(row)">删除</el-button>
+          <el-button link type="primary" size="small" data-testid="member-cart-row-edit" @click="openForm(row)">编辑</el-button>
+          <el-button link type="danger" size="small" data-testid="member-cart-row-remove" @click="remove(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="visible" :title="form.id ? '编辑购物车条目' : '新增购物车条目'" width="520px">
+    <el-dialog
+      v-model="visible"
+      :title="form.id ? '编辑购物车条目' : '新增购物车条目'"
+      width="520px"
+      data-testid="member-cart-form-dialog"
+    >
       <el-form ref="formRef" :model="form" :rules="rules" label-width="110px">
         <el-form-item label="所属会员">
           <el-input :model-value="memberName || form.memberId" disabled />
         </el-form-item>
         <el-form-item label="商品" prop="productId">
-          <el-select v-model="form.productId" placeholder="请选择商品" style="width: 100%" @change="onProductChange">
+          <el-select
+            v-model="form.productId"
+            data-testid="member-cart-form-product"
+            placeholder="请选择商品"
+            style="width: 100%"
+            @change="onProductChange"
+          >
             <el-option v-for="p in products" :key="p.id" :label="p.name" :value="p.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="规格（SKU）" prop="productSkuId">
-          <el-select v-model="form.productSkuId" placeholder="请选择规格" style="width: 100%" :disabled="!form.productId">
+          <el-select
+            v-model="form.productSkuId"
+            data-testid="member-cart-form-sku"
+            placeholder="请选择规格"
+            style="width: 100%"
+            :disabled="!form.productId"
+          >
             <el-option
               v-for="s in skuOptions"
               :key="s.id"
@@ -50,12 +67,12 @@
           </el-select>
         </el-form-item>
         <el-form-item label="数量" prop="quantity">
-          <el-input-number v-model="form.quantity" :min="1" :precision="0" style="width: 100%" />
+          <el-input-number v-model="form.quantity" data-testid="member-cart-form-quantity" :min="1" :precision="0" style="width: 100%" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="visible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submit">确定</el-button>
+        <el-button data-testid="member-cart-form-cancel" @click="visible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" data-testid="member-cart-form-submit" @click="submit">确定</el-button>
       </template>
     </el-dialog>
   </el-card>

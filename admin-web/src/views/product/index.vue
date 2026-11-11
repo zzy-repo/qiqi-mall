@@ -3,11 +3,11 @@
     <template #header>
       <div class="card-header">
         <span>商品列表</span>
-        <el-button type="primary" :icon="Plus" @click="openForm()">新增</el-button>
+        <el-button type="primary" :icon="Plus" data-testid="product-list-create" @click="openForm()">新增</el-button>
       </div>
     </template>
 
-    <el-table v-loading="loading" :data="list" border>
+    <el-table v-loading="loading" :data="list" border data-testid="product-list-table">
       <el-table-column label="主图" width="90">
         <template #default="{ row }">
           <el-image v-if="row.pic" :src="row.pic" fit="cover" class="thumb">
@@ -26,20 +26,21 @@
       </el-table-column>
       <el-table-column label="操作" width="150" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="openForm(row)">编辑</el-button>
-          <el-button link type="primary" size="small" @click="openSkus(row)">SKU</el-button>
+          <el-button link type="primary" size="small" data-testid="product-row-edit" @click="openForm(row)">编辑</el-button>
+          <el-button link type="primary" size="small" data-testid="product-row-sku" @click="openSkus(row)">SKU</el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="visible" :title="form.id ? '编辑商品' : '新增商品'" width="560px">
+    <el-dialog v-model="visible" :title="form.id ? '编辑商品' : '新增商品'" width="560px" data-testid="product-form-dialog">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
         <el-form-item label="商品名称" prop="name">
-          <el-input v-model="form.name" placeholder="请输入商品名称" maxlength="100" />
+          <el-input v-model="form.name" data-testid="product-form-name" placeholder="请输入商品名称" maxlength="100" />
         </el-form-item>
         <el-form-item label="商品描述">
           <el-input
             v-model="form.description"
+            data-testid="product-form-description"
             type="textarea"
             :rows="4"
             maxlength="500"
@@ -50,6 +51,7 @@
         <el-form-item label="分类" prop="categoryId">
           <el-tree-select
             v-model="form.categoryId"
+            data-testid="product-form-category"
             :data="categoryOptions"
             check-strictly
             :render-after-expand="false"
@@ -59,35 +61,58 @@
           />
         </el-form-item>
         <el-form-item label="类型" prop="typeId">
-          <el-select v-model="form.typeId" placeholder="请选择类型" style="width: 100%">
+          <el-select v-model="form.typeId" data-testid="product-form-type" placeholder="请选择类型" style="width: 100%">
             <el-option v-for="t in types" :key="t.id" :label="t.name" :value="t.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="主图">
-          <ImageUploader v-model="form.pic" placeholder="主图URL（可直接上传）" />
+          <ImageUploader v-model="form.pic" data-testid="product-form-pic" placeholder="主图URL（可直接上传）" />
         </el-form-item>
         <el-form-item label="商品相册">
           <div class="gallery">
-            <div v-for="(img, index) in form.gallery" :key="index" class="gallery-row">
-              <ImageUploader v-model="img.url" class="grow" placeholder="相册图URL" />
-              <el-input-number v-model="img.sort" :min="0" :precision="0" style="width: 110px" controls-position="right" />
-              <el-button link type="danger" size="small" @click="form.gallery.splice(index, 1)">删除</el-button>
+            <div
+              v-for="(img, index) in form.gallery"
+              :key="index"
+              class="gallery-row"
+              data-testid="product-form-gallery-row"
+            >
+              <ImageUploader v-model="img.url" class="grow" data-testid="product-form-gallery-input" placeholder="相册图URL" />
+              <el-input-number
+                v-model="img.sort"
+                data-testid="product-form-gallery-sort"
+                :min="0"
+                :precision="0"
+                style="width: 110px"
+                controls-position="right"
+              />
+              <el-button
+                link
+                type="danger"
+                size="small"
+                data-testid="product-form-gallery-remove"
+                @click="form.gallery.splice(index, 1)"
+              >删除</el-button>
             </div>
-            <el-button size="small" :icon="Plus" @click="form.gallery.push({ url: '', sort: form.gallery.length + 1 })">
+            <el-button
+              size="small"
+              :icon="Plus"
+              data-testid="product-form-gallery-add"
+              @click="form.gallery.push({ url: '', sort: form.gallery.length + 1 })"
+            >
               添加图片
             </el-button>
           </div>
         </el-form-item>
         <el-form-item label="上下架">
-          <el-radio-group v-model="form.publishStatus">
+          <el-radio-group v-model="form.publishStatus" data-testid="product-form-publish-status">
             <el-radio :value="1">上架</el-radio>
             <el-radio :value="0">下架</el-radio>
           </el-radio-group>
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="visible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submit">确定</el-button>
+        <el-button data-testid="product-form-cancel" @click="visible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" data-testid="product-form-submit" @click="submit">确定</el-button>
       </template>
     </el-dialog>
   </el-card>
@@ -186,6 +211,8 @@ const submit = async () => {
     const payload = {
       product: {
         name: form.name,
+        // 描述必须一起提交：之前这里只白名单了 5 个字段，弹窗里填的描述被静默丢掉
+        description: form.description,
         categoryId: form.categoryId,
         typeId: form.typeId,
         publishStatus: form.publishStatus,
