@@ -13,11 +13,20 @@
 #
 # vite 只做静态资源 + /portal|/admin 代理，改的是 VITE_PROXY_TARGET / VITE_PORT 两个环境变量，
 # 不改任何业务代码。
+#
+# 为什么用 systemd-run --unit 而不是 setsid nohup：
+#   ① 不记在 dsh-web.service 的 6G 账上（走 qiqi-svc.slice，兄弟 slice）；
+#   ② `systemd-run --scope` 的命令退出会按 KillMode=control-group 杀掉里面所有进程，
+#      setsid nohup 起的 vite 也活不过脚本退出——常驻服务必须用瞬态 service 单元。
+#   注意 slice 必须是**没有直接子进程**的（cgroup v2 no-internal-process）：
+#   qiqi-infra.slice 里有 detach-infra.sh 搬来的散进程，无法再跑子单元（systemd-run 报 219/CGROUP），
+#   所以这里用 qiqi-svc.slice。
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="${E2E_LOG_DIR:-/tmp}"
 ACTION="${1:-start}"
+SLICE="${E2E_SVC_SLICE:-qiqi-svc.slice}"
 
 # shard → portal端口/admin端口/后端端口
 SHARDS=("a:5183:5185:8091" "b:5193:5195:8092")
@@ -28,6 +37,8 @@ health() {
   echo "${code:-000}"
 }
 
+unit_of() { echo "qiqi-e2e-$2-$1"; }   # $1=shard名 $2=portal|admin
+
 pid_on() {
   ss -ltnp 2>/dev/null | grep ":$1 " | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2 || true
 }
@@ -36,9 +47,20 @@ case "$ACTION" in
   stop)
     for s in "${SHARDS[@]}"; do
       IFS=: read -r name pport aport backend <<< "$s"
-      for port in "$pport" "$aport"; do
+      for app in portal admin; do
+        unit="$(unit_of "$name" "$app")"
+        if systemctl is-active --quiet "$unit" 2>/dev/null; then
+          echo "▶ 停 shard $name $app（单元 $unit）"
+          systemctl stop "$unit" 2>/dev/null || true
+          systemctl reset-failed "$unit" 2>/dev/null || true
+        fi
+        # 兜底：早先用 setsid 散起的实例不在单元里，按端口收
+        port="$pport"; [[ "$app" == "admin" ]] && port="$aport"
         pid="$(pid_on "$port")"
-        [[ -n "${pid:-}" ]] && echo "▶ 停 $name:$port（pid $pid）" && kill "$pid" 2>/dev/null || true
+        if [[ -n "${pid:-}" ]]; then
+          echo "  · $port 上还有散进程 pid $pid，一并停掉"
+          kill "$pid" 2>/dev/null || true
+        fi
       done
     done
     exit 0
@@ -64,10 +86,16 @@ for s in "${SHARDS[@]}"; do
       continue
     fi
     LOG="$LOG_DIR/e2e-$app-$name.log"
-    echo "▶ 起 shard $name $app → $port（代理到 $backend，日志 $LOG）"
-    ( cd "$REPO_DIR/${app}-web" && \
-      VITE_PORT="$port" VITE_PROXY_TARGET="http://127.0.0.1:${backend}" \
-      setsid nohup ./node_modules/.bin/vite --mode development --strictPort > "$LOG" 2>&1 & )
+    unit="$(unit_of "$name" "$app")"
+    systemctl reset-failed "$unit" 2>/dev/null || true
+    echo "▶ 起 shard $name $app → $port（代理到 $backend，单元 $unit，日志 $LOG）"
+    systemd-run --unit="$unit" --slice="$SLICE" --collect --quiet \
+      --property=WorkingDirectory="$REPO_DIR/${app}-web" \
+      --property=Environment="VITE_PORT=$port" \
+      --property=Environment="VITE_PROXY_TARGET=http://127.0.0.1:${backend}" \
+      --property=StandardOutput=file:"$LOG" \
+      --property=StandardError=file:"$LOG" \
+      -- "$REPO_DIR/${app}-web/node_modules/.bin/vite" --mode development --strictPort
   done
 done
 

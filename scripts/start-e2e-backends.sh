@@ -15,20 +15,31 @@
 #   Redis 也要分开，否则 captcha:fail:{username} 这类全局计数会跨 shard 互相污染
 #   ——这正是「worker A 把 admin 密码错打满、worker B 登录被卡死」的根因。
 #
+# 为什么用 systemd-run --unit 而不是 setsid nohup：
+#   ① 为了让后端不记在 dsh-web.service 的 6G 账上（--slice=qiqi-infra.slice，兄弟 slice）；
+#   ② 关键坑：`systemd-run --scope` 的命令一退出，scope 的默认 KillMode=control-group
+#      会把里面所有进程一起杀掉——所以常驻服务必须用**瞬态 service 单元**（--unit），
+#      由 systemd 当主进程管着，脚本退出也不会被带走。
+#   进程崩了可用 `systemctl status qiqi-e2e-server-b` 看日志（journal 里也有）。
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVER_DIR="$REPO_DIR/qiqi-mall-server"
-LOG_DIR="${E2E_LOG_DIR:-/tmp}"
+# 注意：必须用一个**没有直接子进程**的 slice。
+#   cgroup v2 的 no-internal-process 约束：一个 cgroup 里只要有进程，就不能再给它启用
+#   领域控制器（memory 等）去跑子单元——表现为 systemd-run 直接失败 status=219/CGROUP。
+#   qiqi-infra.slice 里躺着 scripts/detach-infra.sh 搬过来的 12 个散进程，正是这种情况，
+#   所以 e2e 服务单元单独放 qiqi-svc.slice（空 slice，subtree_control=memory pids）。
+SLICE="${E2E_SVC_SLICE:-qiqi-svc.slice}"
 ACTION="${1:-start}"
 
-# shard → 端口 / 库 / redis db / 日志
+# shard → 端口 / 库 / redis db
 SHARDS=("a:8091:qiqi_mall_e2e_a:1" "b:8092:qiqi_mall_e2e_b:2")
-
-port_of()   { echo "$1" | cut -d: -f2; }
-db_of()     { echo "$1" | cut -d: -f3; }
-redis_of()  { echo "$1" | cut -d: -f4; }
-name_of()   { echo "$1" | cut -d: -f1; }
+unit_of() { echo "qiqi-e2e-server-$(echo "$1" | cut -d: -f1)"; }
+port_of() { echo "$1" | cut -d: -f2; }
+db_of()   { echo "$1" | cut -d: -f3; }
+redis_of(){ echo "$1" | cut -d: -f4; }
+name_of() { echo "$1" | cut -d: -f1; }
 
 health() {
   local code
@@ -39,11 +50,11 @@ health() {
 case "$ACTION" in
   stop)
     for s in "${SHARDS[@]}"; do
-      port="$(port_of "$s")"
-      pid="$(ss -ltnp 2>/dev/null | grep ":${port} " | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2 || true)"
-      if [[ -n "${pid:-}" ]]; then
-        echo "▶ 停 shard $(name_of "$s")（pid $pid, 端口 $port）"
-        kill "$pid" 2>/dev/null || true
+      unit="$(unit_of "$s")"
+      if systemctl is-active --quiet "$unit" 2>/dev/null; then
+        echo "▶ 停 shard $(name_of "$s")（单元 $unit）"
+        systemctl stop "$unit" 2>/dev/null || true
+        systemctl reset-failed "$unit" 2>/dev/null || true
       else
         echo "· shard $(name_of "$s") 没在跑"
       fi
@@ -52,9 +63,10 @@ case "$ACTION" in
     ;;
   status)
     for s in "${SHARDS[@]}"; do
-      port="$(port_of "$s")"
-      printf 'shard %-2s 端口 %-5s 库 %-18s redis-db %-2s 健康 %s\n' \
-        "$(name_of "$s")" "$port" "$(db_of "$s")" "$(redis_of "$s")" "$(health "$port")"
+      printf 'shard %-2s 端口 %-5s 库 %-18s redis-db %-2s 健康 %-3s 单元 %s\n' \
+        "$(name_of "$s")" "$(port_of "$s")" "$(db_of "$s")" "$(redis_of "$s")" \
+        "$(health "$(port_of "$s")")" \
+        "$(systemctl is-active "$(unit_of "$s")" 2>/dev/null || true)"
     done
     exit 0
     ;;
@@ -76,20 +88,24 @@ fi
 CP="$(cat "$CP_FILE")"
 
 for s in "${SHARDS[@]}"; do
-  name="$(name_of "$s")"; port="$(port_of "$s")"; db="$(db_of "$s")"; rdb="$(redis_of "$s")"
+  name="$(name_of "$s")"; port="$(port_of "$s")"; db="$(db_of "$s")"; rdb="$(redis_of "$s")"; unit="$(unit_of "$s")"
   if [[ "$(health "$port")" == "200" ]]; then
-    echo "· shard $name 已在 $port 上跑着，跳过"
+    echo "· shard $name 已在 $port 上跑着（健康 200），跳过"
     continue
   fi
-  LOG="$LOG_DIR/e2e-server-$name.log"
-  echo "▶ 启动 shard $name → 端口 $port / 库 $db / redis-db $rdb（日志 $LOG）"
-  setsid nohup java -XX:TieredStopAtLevel=1 -Xmx384m -cp "$CP" com.qiqi.mall.QiQiMallApplication \
-    --spring.profiles.active=dev \
-    --server.port="$port" \
-    --spring.datasource.url="jdbc:mysql://127.0.0.1:3306/${db}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai" \
-    --spring.data.redis.database="$rdb" \
-    --spring.devtools.restart.enabled=false \
-    > "$LOG" 2>&1 &
+  # 残留的失败单元先清掉，否则同名 --unit 起不来
+  systemctl reset-failed "$unit" 2>/dev/null || true
+  echo "▶ 启动 shard $name → 端口 $port / 库 $db / redis-db $rdb（单元 $unit）"
+  systemd-run --unit="$unit" --slice="$SLICE" --collect --quiet \
+    --property=WorkingDirectory="$SERVER_DIR" \
+    --property=StandardOutput=file:/tmp/e2e-server-$name.log \
+    --property=StandardError=file:/tmp/e2e-server-$name.log \
+    -- java -XX:TieredStopAtLevel=1 -Xmx384m -cp "$CP" com.qiqi.mall.QiQiMallApplication \
+      --spring.profiles.active=dev \
+      --server.port="$port" \
+      --spring.datasource.url="jdbc:mysql://127.0.0.1:3306/${db}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai" \
+      --spring.data.redis.database="$rdb" \
+      --spring.devtools.restart.enabled=false
 done
 
 echo "▶ 等健康检查（最多 90s）"
@@ -103,5 +119,11 @@ for i in $(seq 1 45); do
 done
 
 for s in "${SHARDS[@]}"; do
-  printf '  shard %-2s 端口 %-5s 健康 %s\n' "$(name_of "$s")" "$(port_of "$s")" "$(health "$(port_of "$s")")"
+  port="$(port_of "$s")"
+  h="$(health "$port")"
+  printf '  shard %-2s 端口 %-5s 健康 %-3s cgroup=%s\n' \
+    "$(name_of "$s")" "$port" "$h" \
+    "$(pid=$(ss -ltnp 2>/dev/null | grep ":${port} " | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2); \
+       [[ -n "${pid:-}" ]] && sed -n 's/^0:://p' /proc/$pid/cgroup || echo '-')"
+  [[ "$h" == "200" ]] || { echo "  ✗ shard $(name_of "$s") 没起来，看 /tmp/e2e-server-$(name_of "$s").log" >&2; exit 1; }
 done

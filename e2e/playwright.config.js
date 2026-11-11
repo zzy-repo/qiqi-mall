@@ -22,6 +22,21 @@ import { defineConfig, devices } from '@playwright/test'
  */
 const CHROME = '/root/.cache/ms-playwright/chromium-1248/chrome-linux64/chrome'
 
+/**
+ * 并行 shard 说明（配合 scripts/e2e-run.sh）：
+ *   每个 shard 由**一个独立的 playwright 进程**承担，进程级用环境变量切换目标地址
+ *   （PORTAL_BASE/ADMIN_BASE/API_BASE，见 tests/support/env.js），并用 `--shard=i/N` 切文件。
+ *
+ *   为什么不用 projects 里各自的 use.baseURL：spec 里的接口调用、跳转都走 env.js 导出的
+ *   **绝对地址**，而 env.js 在模块加载时读 process.env —— 同一个进程里的两个 project 共享
+ *   同一份 env，per-project 的 use.baseURL 只能影响相对路径的 page.goto，改不了 API 地址。
+ *   不改 spec/support（其他 agent 正在写）的前提下，进程级分片是唯一干净的做法。
+ */
+const E2E_WORKERS = Number(process.env.E2E_WORKERS || 1)      // 每个 shard 进程内的 worker 数
+const E2E_SHARD_NAME = process.env.E2E_SHARD_NAME || 'a'      // 只用于报告/产物目录区分
+const E2E_HTML_DIR = process.env.E2E_HTML_DIR || 'report/html'
+const E2E_OUT_DIR = process.env.E2E_OUT_DIR || './test-results'
+
 /** demo 档：全量录制 + 降速，方便人看；验收档保持快速干净 */
 const DEMO = !!process.env.DEMO
 const DEMO_VIEWPORT = { width: 1280, height: 720 }
@@ -32,12 +47,15 @@ export default defineConfig({
   timeout: DEMO ? 300_000 : 120_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,
-  workers: 1,
+  // 默认 1（保持 `npm test` 打 dev 栈时的老行为；多个 agent 共用 8081/dev 库，串行才不打架）。
+  // 走 e2e 独立库 + 多 shard 时由 scripts/e2e-run.sh 传 E2E_WORKERS。
+  workers: E2E_WORKERS,
   retries: 0,
   // HTML 报告单独放 report/html：它每次运行前会清空自己的输出目录，不能和 demo 视频共用 report/
-  reporter: [['list'], ['html', { open: 'never', outputFolder: 'report/html' }]],
+  // 每个 shard 一个独立 HTML 目录：两个进程同时写同一个 outputFolder 会互相清空/写坏
+  reporter: [['list'], ['html', { open: 'never', outputFolder: E2E_HTML_DIR }]],
   // demo 档把视频和 trace 单独放到 report/videos/raw，便于统一收集（report/ 已被 .gitignore 覆盖）
-  outputDir: DEMO ? './report/videos/raw' : './test-results',
+  outputDir: DEMO ? './report/videos/raw' : E2E_OUT_DIR,
   use: {
     baseURL: process.env.PORTAL_BASE || 'http://127.0.0.1:5173',
     screenshot: DEMO ? 'on' : 'only-on-failure',
@@ -51,5 +69,6 @@ export default defineConfig({
       slowMo: DEMO ? 400 : 0
     }
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }]
+  // 只用来给报告标注当前 shard；真正的地址分流在进程级（见文件头说明）
+  projects: [{ name: `chromium-${E2E_SHARD_NAME}`, use: { ...devices['Desktop Chrome'] } }]
 })

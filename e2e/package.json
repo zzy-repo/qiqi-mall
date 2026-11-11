@@ -10,7 +10,13 @@
     "report": "playwright show-report report/html",
     "predemo": "node scripts/precheck-env.mjs --strict",
     "demo": "bash ../scripts/demo-run.sh",
-    "demo:collect": "node scripts/collect-demo.mjs"
+    "demo:collect": "node scripts/collect-demo.mjs",
+    "e2e:reset": "bash ../scripts/reset-e2e-db.sh --all",
+    "reset:test": "bash ../scripts/reset-test-db.sh",
+    "e2e:stack": "bash ../scripts/start-e2e-backends.sh && bash ../scripts/start-e2e-frontends.sh",
+    "e2e:stack:stop": "bash ../scripts/start-e2e-frontends.sh stop; bash ../scripts/start-e2e-backends.sh stop",
+    "e2e:stack:status": "bash ../scripts/start-e2e-backends.sh status; bash ../scripts/start-e2e-frontends.sh status",
+    "test:iso": "PORTAL_BASE=http://127.0.0.1:5183 ADMIN_BASE=http://127.0.0.1:5185 API_BASE=http://127.0.0.1:8091 playwright test"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1"
