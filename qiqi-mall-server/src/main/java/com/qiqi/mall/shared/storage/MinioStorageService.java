@@ -8,7 +8,14 @@ import java.io.InputStream;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** 图片上传：校验 → 重写文件名 → PutObject → 返回可直连的 URL */
+/**
+ * 图片上传：校验 → 重写文件名 → PutObject → 返回可直连的 URL。
+ *
+ * 走 MinIO Java SDK 的 S3 兼容协议，dev 连本机 MinIO、test 连阿里云 OSS（见 app.minio.*）。
+ * 写入键 = objectKeyPrefix + objectName（test 下 objectKeyPrefix=qiqi-mall/，与 OSS 历史图同目录）；
+ * 返回地址 = publicBaseUrl(留空) + "/" + publicPathPrefix(默认 bucket) + "/" + objectName
+ * ⇒ dev/test 都是相对路径 /qiqi-mall/products/2026/11/uuid.png，历史数据不用改。
+ */
 @Service
 public class MinioStorageService {
 
@@ -41,11 +48,12 @@ public class MinioStorageService {
     public String upload(String objectName, InputStream stream, long size, String contentType) throws Exception {
         minioClient.putObject(PutObjectArgs.builder()
                 .bucket(properties.getBucket())
-                .object(objectName)
+                // OSS 里历史图都在 qiqi-mall/ 前缀下，写入键要带上同一前缀（dev 前缀为空）
+                .object(properties.objectKey(objectName))
                 .stream(stream, size, -1)
                 .contentType(contentType)
                 .build());
-        return properties.getPublicBaseUrl() + "/" + properties.getBucket() + "/" + objectName;
+        return properties.publicUrl(objectName);
     }
 
     public String extensionOf(String contentType) {

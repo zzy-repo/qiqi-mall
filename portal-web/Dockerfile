@@ -19,7 +19,10 @@ COPY nginx/default.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
 # 保证静态文件对 nginx worker 可读
 RUN chmod -R a+rX /usr/share/nginx/html
-ENV BACKEND_UPSTREAM=http://server:8081
+# 商品图 /qiqi-mall/** 的重定向目标（test 容器栈 = 阿里云 CDN，源站是 OSS bucket）。
+# compose 会用 IMG_CDN_BASE 覆盖；这里给默认值只是保证模板 envsubst 永远有值可用。
+ENV BACKEND_UPSTREAM=http://server:8081 \
+    IMG_CDN_BASE=https://cdn.rose7.cn
 EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
   CMD wget -qO- http://127.0.0.1/ >/dev/null || exit 1

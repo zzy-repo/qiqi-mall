@@ -45,10 +45,20 @@ services:
       MYSQL_USER: root
       MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-qiqi123456}
       JWT_SECRET: ${JWT_SECRET:-qiqi-mall-prod-secret-key-please-change-9876543210}
+      # 留空 = 库里存相对路径 /qiqi-mall/**（图片由前端 nginx 反代/重定向，不绑访问地址）
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-}
+      # 对象存储（test profile = 阿里云 OSS）。凭证绝不写进本文件：只透传宿主机环境变量。
+      # 宿主机来源：/root/.aliyun-qiqi/credentials.env 的 ALI_AK/ALI_SK
+      #            → 项目根 .env（已进 .gitignore）里的 OSS_ACCESS_KEY/OSS_SECRET_KEY
+      # 两个 key 缺任何一个，后端启动即失败（application-test.yml 的 require-credentials: true）
+      OSS_ACCESS_KEY: ${OSS_ACCESS_KEY:-}
+      OSS_SECRET_KEY: ${OSS_SECRET_KEY:-}
+      OSS_ENDPOINT: ${OSS_ENDPOINT:-https://s3.oss-cn-beijing.aliyuncs.com}
+      OSS_REGION: ${OSS_REGION:-cn-beijing}
+      OSS_BUCKET: ${OSS_BUCKET:-qiqi-mall-static}
+      # 回滚到 MinIO 时用（切回 application-test.yml 的 minio: 段即可复用这两个变量）
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-qiqiadmin}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-qiqi123456}
-      # 留空 = 库里存相对路径 /qiqi-mall/**（图片由前端 nginx 反代 MinIO，不绑访问地址）
-      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-}
       # 多实例共享验证码 / 幂等令牌
       KV_STORE: ${KV_STORE:-redis}
       REDIS_HOST: redis
@@ -86,10 +96,20 @@ services:
       MYSQL_USER: root
       MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-qiqi123456}
       JWT_SECRET: ${JWT_SECRET:-qiqi-mall-prod-secret-key-please-change-9876543210}
+      # 留空 = 库里存相对路径 /qiqi-mall/**（图片由前端 nginx 反代/重定向，不绑访问地址）
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-}
+      # 对象存储（test profile = 阿里云 OSS）。凭证绝不写进本文件：只透传宿主机环境变量。
+      # 宿主机来源：/root/.aliyun-qiqi/credentials.env 的 ALI_AK/ALI_SK
+      #            → 项目根 .env（已进 .gitignore）里的 OSS_ACCESS_KEY/OSS_SECRET_KEY
+      # 两个 key 缺任何一个，后端启动即失败（application-test.yml 的 require-credentials: true）
+      OSS_ACCESS_KEY: ${OSS_ACCESS_KEY:-}
+      OSS_SECRET_KEY: ${OSS_SECRET_KEY:-}
+      OSS_ENDPOINT: ${OSS_ENDPOINT:-https://s3.oss-cn-beijing.aliyuncs.com}
+      OSS_REGION: ${OSS_REGION:-cn-beijing}
+      OSS_BUCKET: ${OSS_BUCKET:-qiqi-mall-static}
+      # 回滚到 MinIO 时用（切回 application-test.yml 的 minio: 段即可复用这两个变量）
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-qiqiadmin}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-qiqi123456}
-      # 留空 = 库里存相对路径 /qiqi-mall/**（图片由前端 nginx 反代 MinIO，不绑访问地址）
-      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-}
       KV_STORE: ${KV_STORE:-redis}
       REDIS_HOST: redis
     depends_on:
@@ -192,6 +212,8 @@ services:
     environment:
       TZ: Asia/Shanghai
       BACKEND_UPSTREAM: http://gateway
+      # 商品图（/qiqi-mall/**）在 test 链路统一 301 到该 CDN（源站 = 阿里云 OSS bucket）
+      IMG_CDN_BASE: ${IMG_CDN_BASE:-https://cdn.rose7.cn}
     ports:
       - "5174:80"
     restart: unless-stopped
@@ -212,6 +234,8 @@ services:
     environment:
       TZ: Asia/Shanghai
       BACKEND_UPSTREAM: http://gateway
+      # 商品图（/qiqi-mall/**）在 test 链路统一 301 到该 CDN（源站 = 阿里云 OSS bucket）
+      IMG_CDN_BASE: ${IMG_CDN_BASE:-https://cdn.rose7.cn}
     ports:
       - "5176:80"
     restart: unless-stopped

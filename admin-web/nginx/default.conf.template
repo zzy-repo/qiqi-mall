@@ -77,13 +77,14 @@ server {
     }
 
 
-    # 商品图片：MinIO 直出。库里存相对路径 /qiqi-mall/**，所以从任何地址访问都能取到图
+    # 商品图片：库里存相对路径 /qiqi-mall/**（历史数据 + 新上传都是这个形式），
+    # test 链路的上传端已经指向阿里云 OSS（bucket qiqi-mall-static 的 qiqi-mall/ 前缀），
+    # 所以读取端必须落到同一个存储 —— 这里 301 到 CDN（源站就是该 bucket）。
+    # 用 301 而不是让后端返回 CDN 绝对地址：库里的相对路径一个字都不用改，前后端都不用动。
+    # 也不用 proxy_pass 回源：让浏览器直连 CDN，省掉本机出网流量与回源延迟。
     location /qiqi-mall/ {
-        # 注意：proxy_pass 不带 URI，原样透传 /qiqi-mall/** 给 MinIO（bucket 名就在路径里）
-        proxy_pass http://minio:9000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $qiqi_client_ip;
-        expires 7d;
+        # $request_uri 保留原始 /qiqi-mall/** 路径（bucket 内的 key 前缀与之一一对应）
+        return 301 ${IMG_CDN_BASE}$request_uri;
     }
 
     # history 路由回退
