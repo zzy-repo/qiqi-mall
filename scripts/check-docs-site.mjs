@@ -3,7 +3,8 @@
  * check-docs-site.mjs —— 文档站重建后的「一次体检」（零依赖：node 内置 + 全局 fetch）
  *
  * 为什么要有它：站点每次重建要验 9 项（页面数、图/视频能否取到、图与 mermaid 源码是否配对、
- * 业务场景是否「图+视频」齐全、内网信息有没有混进产物、SVG 硬指标、图内禁词、侧边栏死链），
+ * 业务场景是否「图+视频」齐全（无界面场景仅查图，见 NO_UI_SCENES）、内网信息有没有混进产物、
+ * SVG 硬指标、图内禁词、侧边栏死链），
  * 人工 curl + 数数必漏，所以要一条命令给出 PASS/FAIL + 具体数字 + 可行动的失败清单。
  *
  * 用法：
@@ -18,7 +19,21 @@
  *       --internal-ok 仅 dev 站用：第 ⑥ 项豁免根目录 README.md（dev 索引页），其余文件照扫
  *       --docs 图素材源目录（默认 <repo>/docs） / --videos 视频素材源目录（默认 <repo>/e2e/report/videos）
  *       dev 站的 /_assets/{img,video} 是 nginx alias 到这两个源目录的，prod 站则真拷进产物，故两者都要知道。
- * 退出码：全 PASS = 0，有 FAIL = 1（可直接接进 publish.sh 当门禁）。
+ *       --floor scenes=10[,pages=20] 覆盖下方 FLOOR 的下限阈值（可多次给，也可用环境变量
+ *       CHECK_DOCS_FLOOR="scenes=10 pages=20" 或单项 CHECK_DOCS_FLOOR_SCENES=10）。
+ * 退出码：全 PASS = 0，有 FAIL = 1（可直接接进 publish.sh 当门禁）；参数/阈值写错 = 2。
+ *
+ * 为什么需要「下限断言（floor）」：
+ *   第 ⑤ 项（场景图+视频齐全）和第 ⑨ 项（侧边栏死链）都是「先扫到东西，再判断扫到的东西对不对」。
+ *   一旦什么都没扫到，它们会说「场景 0 个，缺件 0」「链接 0 个，死链 0」并判 ✅ ——
+ *   `--docs` 指错目录、docs/flows/02-业务场景 被改名、站点产物被清空时，门禁会输出
+ *     ✅ ⑤  场景图+视频齐全  场景 0 个，缺件 0
+ *     ✅ ⑨  侧边栏一致性  链接 0 个，死链 0
+ *     结论：PASS      EXIT=0
+ *   也就是**什么都没检查就放行**（fail-open）。publish.sh 用退出码当门禁，这种「空跑即通过」等于没有门禁。
+ *   所以九项检查之后加一节「下限断言」：每个维度的实测数量必须 ≥ FLOOR 里的下限，
+ *   不达标就整条 FAIL、退出码 1 —— 宁可因为「扫到的东西太少」拦下来，也不要因为「问题数为 0」放过去。
+ *   阈值集中在下面唯一的 FLOOR_DEFAULTS / FLOOR 常量里，判定逻辑只读它，别处不许重复写数字。
  */
 import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs'
 import { join, dirname, resolve, posix } from 'node:path'
@@ -52,6 +67,78 @@ if (!SKIP_HTTP && !BASE) {
   console.error('✗ 缺少 --base；只想做静态检查请加 --skip-http')
   process.exit(2)
 }
+
+/* ============================================================== 下限阈值（floor） */
+
+// 唯一数据源：要调阈值只改这里（或从外部覆盖），判定逻辑只读 FLOOR[key]，不许在别处重复写数字。
+// 取值口径 = 当前实测值往下留余量：正常内容小幅增减不该误报，但「扫到的东西明显太少/根本没扫到」必须拦住。
+const FLOOR_DEFAULTS = {
+  scenes: 20,        // ⑤ 扫到的业务场景目录数（实测 28）
+  pages: 30,         // ① 产物页面数 = 场景页 + 图页（实测 52）
+  images: 30,        // ② 图片引用总数（实测 54）
+  videos: 25,        // ③ 视频引用总数（实测 41）
+  svgChecked: 40,    // ⑦⑧ 被检查的 svg 数 = 源 + 产物（实测 109）
+  sidebarLinks: 30,  // ⑨ 侧边栏站内链接数（实测 53）
+}
+const FLOOR_LABEL = {
+  scenes: '场景数', pages: '页面数', images: '图片引用',
+  videos: '视频引用', svgChecked: '检查的 svg', sidebarLinks: '侧边栏链接',
+}
+const FLOOR_KEYS = Object.keys(FLOOR_DEFAULTS)
+
+/** "scenes=10 pages=20" / "scenes=10,pages=20" → { scenes:10, pages:20 }；名字写错直接报错，避免「以为放宽了其实没生效」 */
+function parseFloorAssignments(chunk, origin) {
+  const out = {}
+  for (const kv of String(chunk).split(/[,\s]+/).filter(Boolean)) {
+    const m = /^([A-Za-z]+)=(\d+)$/.exec(kv)
+    if (!m) {
+      console.error(`✗ ${origin} 里的 "${kv}" 不是 key=非负整数 形式（可用项：${FLOOR_KEYS.join('/')}）`)
+      process.exit(2)
+    }
+    const [, key, val] = m
+    if (!FLOOR_KEYS.includes(key)) {
+      console.error(`✗ ${origin} 里的 "${key}" 不是已知下限项（可用项：${FLOOR_KEYS.join('/')}）`)
+      process.exit(2)
+    }
+    out[key] = Number(val)
+  }
+  return out
+}
+
+// 外部覆盖优先级：FLOOR_DEFAULTS < 环境变量（整串 + 单项）< --floor 命令行
+const FLOOR = { ...FLOOR_DEFAULTS }
+for (const key of FLOOR_KEYS) {
+  const single = process.env[`CHECK_DOCS_FLOOR_${key.replace(/([a-z])([A-Z])/g, '$1_$2').toUpperCase()}`]
+  if (single !== undefined && single !== '') Object.assign(FLOOR, parseFloorAssignments(`${key}=${single}`, `环境变量 CHECK_DOCS_FLOOR_${key.toUpperCase()}`))
+}
+if (process.env.CHECK_DOCS_FLOOR) Object.assign(FLOOR, parseFloorAssignments(process.env.CHECK_DOCS_FLOOR, '环境变量 CHECK_DOCS_FLOOR'))
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i]
+  if (a.startsWith('--floor=')) Object.assign(FLOOR, parseFloorAssignments(a.slice('--floor='.length), '参数 --floor'))
+  else if (a === '--floor') {
+    const v = argv[i + 1]
+    if (!v || v.startsWith('--')) {
+      console.error(`✗ --floor 需要一个 key=非负整数 参数（可用项：${FLOOR_KEYS.join('/')}）`)
+      process.exit(2)
+    }
+    Object.assign(FLOOR, parseFloorAssignments(v, '参数 --floor'))
+    i++
+  }
+}
+
+/* ============================================================== 无界面场景白名单（第 ⑤ 项用） */
+
+// 无界面场景：产品本身没有 UI（MCP / AI 工具能力），
+// 用户口径是"不做视频级验证"，验收方式 = mcp-server 测试套件断言。
+// 豁免的只是"必须有视频"，图仍然必须有。
+// 注意：只列「产品没有页面 UI」的场景。07-AI集成/4-令牌管理 有后台真实 UI 页面，**不豁免**。
+// 唯一数据源：判定逻辑只查下面的 Set，不要在别处重复写场景名。
+const NO_UI_SCENES = [
+  '07-AI集成/1-MCP最小闭环',
+  '07-AI集成/2-并发冲突（AI端）',
+  '07-AI集成/3-工具能力矩阵',
+]
+const NO_UI_SET = new Set(NO_UI_SCENES)
 
 /* ============================================================== 通用小工具 */
 
@@ -167,6 +254,7 @@ if (existsSync(SCENES)) {
     const scenes = readdirSync(catDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort(zhSort)
     for (const scene of scenes) {
       // 图：<类>/<N-场景>/ 下的 .svg 或 .png；旧结构允许 <类>/<N-场景>.svg|png
+      const scenePath = `${cat}/${scene}`
       const imgs = readdirSync(join(catDir, scene)).filter((f) => /\.(svg|png)$/i.test(f))
       for (const ext of ['.svg', '.png']) if (existsSync(join(catDir, scene + ext))) imgs.push(scene + ext)
       // 视频：<类>/<N-场景>.mp4 或 <类>/<N-场景>-<序号>-<分段名>.mp4（与 build-material 的匹配口径一致）
@@ -175,11 +263,14 @@ if (existsSync(SCENES)) {
         vids = readdirSync(join(VIDEOS, cat)).filter((f) => f.endsWith('.mp4')
           && (f === `${scene}.mp4` || f.startsWith(`${scene}-`)))
       } catch { /* 没有视频目录 = 0 个 */ }
+      const noUi = NO_UI_SET.has(scenePath)
       const missing = []
+      // 图：无论是否无界面场景都必须有（豁免不等于免检，缺图照旧 FAIL）
       if (imgs.length === 0) missing.push('图')
-      if (vids.length === 0) missing.push('视频')
-      sceneList.push({ path: `${cat}/${scene}`, imgs: imgs.length, vids: vids.length })
-      if (missing.length) sceneGaps.push({ path: `${cat}/${scene}`, missing })
+      // 视频：仅对白名单内的无界面场景跳过这一条，名单外缺视频照旧算缺件
+      if (!noUi && vids.length === 0) missing.push('视频')
+      sceneList.push({ path: scenePath, imgs: imgs.length, vids: vids.length, noUi })
+      if (missing.length) sceneGaps.push({ path: scenePath, missing })
     }
   }
 }
@@ -260,9 +351,20 @@ push('④', '图与源码配对', mmdOnly.length === 0 && svgOnly.length === 0,
 
 /* ============================================================== ⑤ 场景「图 + 视频」齐全 */
 
+// 无界面场景（白名单）只免「必须有视频」；图照旧必查，名单外的场景行为完全不变。
+const noUiList = sceneList.filter((s) => s.noUi)
+// 反向保护：白名单里写了但目录不存在 = 名单已过期/写错（不会放宽检查，只提示，避免悄悄失效）
+const noUiStale = NO_UI_SCENES.filter((n) => !sceneList.some((s) => s.path === n))
+
 push('⑤', '场景图+视频齐全', sceneGaps.length === 0,
-  `场景 ${sceneList.length} 个，缺件 ${sceneGaps.length}`,
-  sceneGaps.map((g) => `${g.path}  缺 ${g.missing.join(' + ')}`))
+  `场景 ${sceneList.length} 个，缺件 ${sceneGaps.length}`
+  + (noUiList.length ? `（其中 ${noUiList.length} 个为无界面场景，仅校验图）` : ''),
+  [
+    ...sceneGaps.map((g) => `${g.path}  缺 ${g.missing.join(' + ')}`),
+    // 被豁免的场景逐个打印出来，不悄悄跳过
+    ...noUiList.map((s) => `无界面场景免视频：${s.path}（图 ${s.imgs} 个，已在⑦⑧校验）`),
+    ...noUiStale.map((n) => `提示：NO_UI_SCENES 里的 ${n} 未匹配到任何场景目录（名单已过期？）`),
+  ])
 
 /* ============================================================== ⑦⑧ SVG 体检对象 */
 
@@ -362,6 +464,27 @@ if (!existsSync(sidebarPath)) {
 }
 push('⑨', '侧边栏一致性', deadLinks.length === 0, `链接 ${sidebarLinks} 个，死链 ${deadLinks.length}`, deadLinks)
 
+/* ============================================================== 下限断言（防止「扫不到东西 → 判通过」） */
+
+// 九项检查各自只看「扫到的东西对不对」，扫到 0 个就是 0 个问题 = 0 个失败 → 空跑即通过（fail-open）。
+// 这一节只看数量：每个维度的实测值必须 ≥ FLOOR 里的下限，否则整体 FAIL、退出码 1。
+const floorActual = {
+  scenes: sceneList.length,
+  pages: scenarioPages + diagramPages,
+  images: imgStat.total,
+  videos: vidStat.total,
+  svgChecked: svgTargets.length,
+  sidebarLinks,
+}
+const floorItems = FLOOR_KEYS.map((key) => ({
+  key,
+  label: FLOOR_LABEL[key],
+  actual: floorActual[key],
+  floor: FLOOR[key],
+  ok: floorActual[key] >= FLOOR[key],
+}))
+const floorFailed = floorItems.filter((f) => !f.ok)
+
 /* ============================================================== 输出 */
 
 for (const r of results) {
@@ -369,6 +492,14 @@ for (const r of results) {
   const shown = r.lines.slice(0, 60)
   for (const line of shown) console.log(`      ${line}`)
   if (r.lines.length > shown.length) console.log(`      … 其余 ${r.lines.length - shown.length} 条已省略`)
+}
+
+console.log('')
+console.log('── 下限断言（防止空跑通过）──')
+for (const f of floorItems) {
+  console.log(f.ok
+    ? `✅ ${f.label} ${f.actual} ≥ ${f.floor}（${f.key}）`
+    : `❌ ${f.label} ${f.actual} < ${f.floor}（${f.key}，差 ${f.floor - f.actual}）`)
 }
 
 const failed = results.filter((r) => !r.ok)
@@ -380,6 +511,10 @@ console.log(`页面 ${scenarioPages + diagramPages}（场景 ${scenarioPages} / 
   + `视频引用 ${vidStat.total}（${vidMode}: ${vidStat.ok}，失败 ${vidStat.fail}）`)
 console.log(`孤儿图 ${mmdOnly.length + svgOnly.length}  场景缺件 ${sceneGaps.length}  `
   + `泄露命中 ${leakHits.length}  SVG 不合规 ${svgBad.length}  死链 ${deadLinks.length}`)
-console.log(`结论：${failed.length === 0 ? 'PASS' : 'FAIL'}` +
-  (failed.length ? `（${failed.map((r) => r.id + r.title).join('、')}）` : ''))
-process.exit(failed.length === 0 ? 0 : 1)
+// 失败原因先写下限（它解释的是「为什么上面的 ✅ 不算数」），再写常规项
+const reasons = []
+if (floorFailed.length) reasons.push(`下限断言：${floorFailed.map((f) => `${f.label} ${f.actual} < ${f.floor}`).join('、')}`)
+if (failed.length) reasons.push(failed.map((r) => r.id + r.title).join('、'))
+const pass = reasons.length === 0
+console.log(`结论：${pass ? 'PASS' : 'FAIL'}` + (pass ? '' : `（${reasons.join('；')}）`))
+process.exit(pass ? 0 : 1)

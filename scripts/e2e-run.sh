@@ -8,7 +8,11 @@
 #   E2E_SHARDS=1 scripts/e2e-run.sh                      # 降级：单 shard 单后端
 #   E2E_WORKERS=2 scripts/e2e-run.sh                     # 每个 shard 内再开 2 个 worker
 #
-# 三个「为什么」：
+# ⚠️ 跑 e2e **不要**传 ADMIN_PASSWORD：e2e 分片库的 admin 口令是种子默认的 123456，
+#    ADMIN_PASSWORD 是容器栈 demo 录制用的强口令，混进来会让 ui.js 拿强口令登 e2e 库 →
+#    大面积登录超时「假红」。脚本入口会主动 unset（见下方入口处的注释）。
+#
+# 四个「为什么」：
 #
 #  ① 为什么在 qiqi-e2e.slice 里跑：agent 直接 `npx playwright test` 时，chrome/node 都是
 #     dsh-web.service 的子进程，全记在它 MemoryHigh=6G 的账上 → 一跑 e2e 就把 DSH 挤到假死。
@@ -22,6 +26,12 @@
 #     导出的绝对 URL，env.js 在模块加载时读 process.env；同进程内所有 project 共享一份 env，
 #     per-project 的 use.baseURL 改不了 API 地址。不改 spec/support 的前提下，进程级分片
 #     （每进程一套 env + `--shard=i/N`）是唯一干净做法。详见 e2e/playwright.config.js 头部。
+#
+#  ④ 为什么日志名默认带 TAG：日志名以前是固定的 /tmp/e2e-shard-<shard>.log，两条跑批只要落在
+#     同一个 shard 就写同一个文件，后跑的静默覆盖先跑的。实测踩过：两条线同时在 shard a 上跑，
+#     A 线的日志被 B 线覆盖，A 线的 agent 只能靠手工传 E2E_LOG_SUFFIX 才看到真相。
+#     所以现在默认拼本次跑的 TAG（$TAG = E2E_RUN_TAG，缺省「秒级时间戳-PID」，每次跑唯一），
+#     不需要使用者记得传任何东西；显式传 E2E_LOG_SUFFIX 时仍以传入值优先（向后兼容）。
 #
 # 注意：并行靠的是「shard × 库隔离」，不是多 worker 抢一个库；E2E_WORKERS 加大只适合
 #       那些内部不互相踩数据的 spec 集合。
@@ -63,6 +73,17 @@ for a in "$@"; do
     *) PASS_ARGS+=("$a") ;;
   esac
 done
+
+# ── 入口先清掉 ADMIN_PASSWORD ────────────────────────────────────────────────
+# e2e 分片库的 admin 口令是 sql/testdb/02-seed.sql 里的种子默认值（123456），不走强口令。
+# ADMIN_PASSWORD 是给容器栈（5174/5176/18080）demo 录制用的强口令，但环境变量会串：
+# 谁跑 e2e 时顺手把 ADMIN_PASSWORD=$(cat /root/.qiqi-secrets/admin.txt) 带进环境，
+# e2e/tests/support/ui.js 的 adminLogin（process.env.ADMIN_PASSWORD || '123456'）就会
+# 拿强口令去登 123456 的 e2e 库 → 登录失败，7 条用例全卡在登录页 20s 超时，看起来像大面积假失败
+# （今天已经有一个 agent 被这个坑掉了一轮）。
+# 为什么可以在这里 unset：demo 录制走的是 scripts/demo-run.sh，它是**独立入口**（自己 exec
+# systemd-run → npx playwright test，直连 5174/5176/18080），完全不经过本脚本，不受影响。
+unset ADMIN_PASSWORD
 
 # 单条 spec / 带路径过滤：--shard 会把它只分给一个 shard，另一个 shard 报「No tests found」
 # 并以非零退出，看起来像失败。所以只要给了文件过滤，就自动退回单 shard（除非显式指定 E2E_SHARDS）。
@@ -149,12 +170,18 @@ cat > "$INNER" <<'INNER_EOF'
 #!/usr/bin/env bash
 # 在 scope 内部跑：按 shard 起 playwright，各自一套 env，收齐退出码
 set -uo pipefail
-SFX="${E2E_LOG_SUFFIX:-}"
 REPO_DIR="$1"; shift
 WANT_SHARDS="$1"; shift
 WORKERS="$1"; shift
 OUT_PREFIX="$1"; shift
+TAG="$1"; shift          # 本次跑的 TAG（外层传进来）：日志名默认带它，并发跑批才不会互相覆盖
 UNLOCKED="$1"; shift
+
+# 日志后缀：默认用本次跑的 TAG（每次跑唯一）；显式 E2E_LOG_SUFFIX 优先（向后兼容）。
+# 分隔符的 `-` 只在这里补一次，并把传入值的前导 `-` 去掉，
+# 所以 E2E_LOG_SUFFIX=abc 和 E2E_LOG_SUFFIX=-abc 都落在 /tmp/e2e-shard-<shard>-abc.log，不会出现 `--`。
+SFX="${E2E_LOG_SUFFIX:-$TAG}"
+SFX="${SFX#-}"
 cd "$REPO_DIR/e2e"
 
 SHARDS=("a:5183:5185:8091" "b:5193:5195:8092" "c:5203:5205:8093" "d:5213:5215:8094")
@@ -166,7 +193,7 @@ for s in "${SHARDS[@]:$SHARD_FROM:$WANT_SHARDS}"; do
   IFS=: read -r name pport aport backend <<< "$s"
   i=$((i+1))
   out="${OUT_PREFIX:-/tmp/pwout}-$name"
-  log="/tmp/e2e-shard-$name${E2E_LOG_SUFFIX:-}.log"
+  log="/tmp/e2e-shard-$name-$SFX.log"
   extra=()
   if [[ -n "${MAPFILE:-}" ]]; then
     # 权重分片：直接列该 shard 该跑的文件
@@ -175,7 +202,7 @@ for s in "${SHARDS[@]:$SHARD_FROM:$WANT_SHARDS}"; do
   elif [[ "$WANT_SHARDS" -gt 1 ]]; then
     extra+=("--shard=$i/$WANT_SHARDS")
   fi
-  echo "▶ shard $name: portal→$pport / admin→$aport / api→$backend  输出 $out"
+  echo "▶ shard $name: portal→$pport / admin→$aport / api→$backend  输出 $out  日志 $log"
   env PORTAL_BASE="http://127.0.0.1:$pport" \
       ADMIN_BASE="http://127.0.0.1:$aport" \
       API_BASE="http://127.0.0.1:$backend" \
@@ -192,7 +219,7 @@ for name in "${!PIDS[@]}"; do
   if wait "${PIDS[$name]}"; then
     echo "✓ shard $name 通过"
   else
-    echo "✗ shard $name 失败（日志 /tmp/e2e-shard-$name$SFX.log）"
+    echo "✗ shard $name 失败（日志 /tmp/e2e-shard-$name-$SFX.log）"
     fail=1
   fi
 done
@@ -201,8 +228,8 @@ echo
 echo "──── 各 shard 摘要 ────"
 for s in "${SHARDS[@]:$SHARD_FROM:$WANT_SHARDS}"; do
   name="${s%%:*}"
-  printf '%-2s %s\n' "$name" "$(grep -E '^\s+[0-9]+ (passed|failed|flaky|skipped)' /tmp/e2e-shard-$name$SFX.log 2>/dev/null | tail -3 | tr '\n' ' ')"
-  grep -E '✘|✗.*›' /tmp/e2e-shard-$name$SFX.log 2>/dev/null | head -5
+  printf '%-2s %s\n' "$name" "$(grep -E '^\s+[0-9]+ (passed|failed|flaky|skipped)' /tmp/e2e-shard-$name-$SFX.log 2>/dev/null | tail -3 | tr '\n' ' ')"
+  grep -E '✘|✗.*›' /tmp/e2e-shard-$name-$SFX.log 2>/dev/null | head -5
 done
 exit "$fail"
 INNER_EOF
@@ -244,10 +271,10 @@ START=$(date +%s)
 set +e
 if [[ "${E2E_UNLOCKED:-1}" == "1" ]]; then
   E2E_MAPFILE="$MAPFILE" systemd-run --scope --quiet --slice="$SLICE" "${LIMITS[@]}" -- \
-    "$INNER" "$REPO_DIR" "$WANT_SHARDS" "$WORKERS" "$OUT_PREFIX" 1 "${PASS_ARGS[@]}"
+    "$INNER" "$REPO_DIR" "$WANT_SHARDS" "$WORKERS" "$OUT_PREFIX" "$TAG" 1 "${PASS_ARGS[@]}"
 else
   E2E_MAPFILE="$MAPFILE" systemd-run --scope --quiet --slice="$SLICE" "${LIMITS[@]}" -- \
-    flock /tmp/e2e.lock "$INNER" "$REPO_DIR" "$WANT_SHARDS" "$WORKERS" "$OUT_PREFIX" 0 "${PASS_ARGS[@]}"
+    flock /tmp/e2e.lock "$INNER" "$REPO_DIR" "$WANT_SHARDS" "$WORKERS" "$OUT_PREFIX" "$TAG" 0 "${PASS_ARGS[@]}"
 fi
 rc=$?
 set -e
