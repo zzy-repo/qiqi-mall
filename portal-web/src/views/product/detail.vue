@@ -5,7 +5,7 @@
       <div class="head">
         <div class="left">
           <div class="thumb" data-testid="product-detail-cover">
-            <!-- 主图按当前规格取：规格配了图就用规格图，没配则回退商品主图（相册仍是 SPU 级） -->
+            <!-- 主图优先级：用户点的缩略图 > 当前规格图 > 商品主图（相册仍是 SPU 级） -->
             <el-image v-if="coverPic" :src="coverPic" fit="cover" class="cover">
               <template #error><el-icon :size="60"><Goods /></el-icon></template>
             </el-image>
@@ -66,7 +66,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ShoppingCart } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
@@ -85,11 +85,32 @@ const quantity = ref(1)
 const loading = ref(false)
 
 const gallery = ref([])
+/** 用户点过的缩略图 id（null = 没选中任何一张，不框蓝框） */
 const activeGallery = ref(null)
 
 const currentSku = computed(() => skus.value.find((s) => s.id === skuId.value) || null)
-/** 详情页主图：优先当前规格图，规格没配图时回退商品主图 */
-const coverPic = computed(() => currentSku.value?.pic || product.value?.pic || '')
+/** 当前选中的缩略图 url（没选中时为 ''） */
+const activeGalleryUrl = computed(() => {
+  if (activeGallery.value == null) return ''
+  return gallery.value.find((g) => g.id === activeGallery.value)?.url || ''
+})
+/**
+ * 详情页主图取值优先级：① 用户点的缩略图 → ② 当前规格图 → ③ 商品主图。
+ * 相册是 SPU 级的，所以「点缩略图」必须能盖过规格图，否则点上去主图不动。
+ */
+const coverPic = computed(() => activeGalleryUrl.value || currentSku.value?.pic || product.value?.pic || '')
+
+/**
+ * 把缩略图选中态对齐到当前规格图：规格图正好在相册里 → 选中那一项；
+ * 否则（规格没配图 / 配的图不在相册里）→ 清空选中，避免「蓝框框着 A、主图显示 B」。
+ */
+const syncGalleryToSku = () => {
+  const pic = currentSku.value?.pic || ''
+  activeGallery.value = gallery.value.find((g) => g.url === pic)?.id ?? null
+}
+
+// 切规格必须重置缩略图选中态，否则会残留上一张相册图的蓝框
+watch(skuId, syncGalleryToSku)
 
 const load = async () => {
   loading.value = true
@@ -98,8 +119,9 @@ const load = async () => {
     product.value = data.product
     skus.value = data.skus || []
     gallery.value = data.gallery || []
-    activeGallery.value = gallery.value[0]?.id || null
     skuId.value = skus.value[0]?.id || null
+    // 初始：缩略图选中态与当前规格图保持一致（没有对应相册项就清空）
+    syncGalleryToSku()
   } catch (e) {
     ElMessage.error('加载商品失败：' + e.message)
   } finally {

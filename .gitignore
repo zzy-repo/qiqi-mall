@@ -21,3 +21,7 @@ scripts/cdn-converge/*
 !scripts/cdn-converge/dns_hook.py
 !scripts/cdn-converge/renew.sh
 !scripts/cdn-converge/RUNBOOK.txt
+
+# 密钥备份/临时文件一律不入库
+.env.bak.*
+*.bak.*
