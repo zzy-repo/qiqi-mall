@@ -15,7 +15,7 @@
 // 「库里有 14 笔订单」这类绝对数改成相对一致断言（list_orders 的 total 在 size=10 与 size=50 下必须相同）。
 // 跑完删掉自己造的单，不需要 reset-test-db.sh。
 
-import { bootstrap, connectServer, call, jsonAfter, sql, DB, MALL_BASE, MALL_USER } from './_setup.mjs';
+import { bootstrap, connectServer, call, jsonAfter, sql, DB, MALL_BASE, MALL_API_KEY } from './_setup.mjs';
 
 /** 本批新增的 3 个 */
 const NEW_TOOLS = ['list_orders', 'get_order_detail', 'count_deliveries'];
@@ -55,7 +55,7 @@ const samples = [];
 
 // ---------------- 主流程 ----------------
 async function main() {
-  console.log(`▶ 订单域只读工具测试 | 目标：${MALL_BASE} | 账号：${MALL_USER} | 库：${DB}`);
+  console.log(`▶ 订单域只读工具测试 | 目标：${MALL_BASE} | 凭证：API Key ${MALL_API_KEY ? MALL_API_KEY.slice(0, 8) + '…' : '(缺失)'} | 库：${DB}`);
 
   // 自建数据：一笔待审核订单（2 个 SKU、qty=2）
   let ctx;

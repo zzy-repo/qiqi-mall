@@ -1,4 +1,5 @@
 // 订单域工具：6 只读 + 1 写（写工具受 MCP_ENABLE_WRITE 控制）
+// 确认码口径：**由后端 split-preview 签发、audit-pass 校验**（MCP 只透传，不再自造 token）
 //   · 第 1 批 4 个：list_pending_orders / preview_split / list_deliveries / execute_audit_pass（行为一字未改）
 //   · 第 3 批 3 个：list_orders / get_order_detail / count_deliveries（全部只读，无操作票据）
 // ⚠️ 只读工具必须注册在 `if (!writeEnabled) return;` **之前** —— 否则 MCP_ENABLE_WRITE=0 时只读工具也跟着消失。
@@ -6,7 +7,6 @@
 
 import { z } from 'zod';
 import { listPendingOrders, splitPreview, auditPass, listDeliveries, listOrders, orderDetail, deliveryCounts, DELIVERY_COUNTS_CHUNK } from '../mall.mjs';
-import { issue, consume, hashPlan } from '../confirm.mjs';
 import { text, money, fail, clampPage, pageHeader, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './_shared.mjs';
 
 // ---------- 状态码中文化 ----------
@@ -101,29 +101,37 @@ export function registerOrderTools(server, { writeEnabled } = {}) {
     }
   );
 
-  // ② 只读：拆单预览 + 签发 confirm_token
+  // ② 只读：拆单预览（confirmCode 由**后端**签发，这里只做透传，不自己造票据）
   server.registerTool(
     'preview_split',
     {
       title: '预览拆单方案',
       description:
-        '预览某笔待审核订单会被拆成几个包裹、分别从哪个仓发。纯预览不修改数据。调用后拿到 confirm_token，只有用户明确同意后才能用来执行。',
+        '预览某笔待审核订单会被拆成几个包裹、分别从哪个仓发。纯预览不修改数据。' +
+        '返回里带一个后端签发的 confirmCode：把它连同 orderId 原样交给 execute_audit_pass 才能真的审核通过。' +
+        '请先把方案和包裹数念给用户，用户明确同意后再执行。',
       inputSchema: {
         orderId: z.number().int().positive().describe('待审核订单 id'),
       },
     },
     async ({ orderId }) => {
       try {
-        const plan = await splitPreview(orderId);
-        if (!Array.isArray(plan) || plan.length === 0) {
+        // ⚠️ 后端返回 { plan, confirmCode, expiresInSec }（不再是裸数组）；两个字段都是执行时必传的
+        const resp = await splitPreview(orderId);
+        const plan = Array.isArray(resp?.plan) ? resp.plan : [];
+        if (plan.length === 0) {
           return text(`订单 ${orderId} 的拆单方案为空（可能没有明细），无法执行审核。`);
         }
-        const { token } = issue({ tool: 'audit_pass', orderId, plan });
+        const confirmCode = typeof resp?.confirmCode === 'string' ? resp.confirmCode : '';
+        if (!confirmCode) {
+          return fail(new Error(`后端没有返回 confirmCode（split-preview 响应：${JSON.stringify(resp).slice(0, 200)}），无法继续审核`));
+        }
+        const expiresInSec = Number(resp?.expiresInSec ?? 300);
         return text(
           `订单 ${orderId} 将拆成 ${plan.length} 个包裹：\n${planToText(plan)}\n\n` +
-            `confirm_token: ${token}\n` +
-            `（方案 hash=${hashPlan(plan).slice(0, 12)}…，5 分钟内有效、仅可使用一次。请把方案念给用户确认，用户明确同意后再调用 execute_audit_pass。）\n\n` +
-            `方案 JSON:\n${JSON.stringify(plan, null, 2)}`
+            `confirmCode: ${confirmCode}\n` +
+            `（${expiresInSec} 秒内有效，仅可使用一次。请把方案念给用户确认；用户明确同意后，把这个 confirmCode 和 orderId=${orderId} 一起传给 execute_audit_pass。别自己编码、也别跨订单用。）\n\n` +
+            `JSON:\n${JSON.stringify({ plan, confirmCode, expiresInSec }, null, 2)}`
         );
       } catch (e) {
         return fail(e);
@@ -317,40 +325,45 @@ export function registerOrderTools(server, { writeEnabled } = {}) {
     return;
   }
 
-  // ③ 写：确认执行审核（真改数据）
+  // ⑦ 写：确认执行审核（真改数据）。
+  //    ⚠️ 设计说明：confirmCode 的「码 → 订单」映射在后端 KV 里，MCP 解不出来，
+  //    所以 orderId 必须由调用方一起给（方案 A）。后端在 audit-pass 里校验
+  //    「码里的 orderId == 路径里的 orderId」，跨单用码会被拒（确认码与订单不匹配）。
+  //    另一个方案（新增「用码换 orderId」接口）要多一次往返，没必要。
   server.registerTool(
     'execute_audit_pass',
     {
       title: '执行审核通过（写）',
       description:
-        '⚠️ 会真实修改数据：订单从待审核变待发货，并按方案生成发货单。调用前必须已 preview_split 且用户已确认。token 必须是 preview_split 返回的那个。',
+        '⚠️ 会真实修改数据：订单从待审核(7)变待发货(8)，并按方案生成发货单。' +
+        '调用前必须先 preview_split 并把方案念给用户确认。' +
+        'orderId 与 confirmCode **都必须来自刚才 preview_split 的同一次结果**（同一次预览、同一笔订单）；' +
+        'confirmCode 是后端签发的 UUID，**绝不要自己编造、不要复用、不要跨订单使用**——后端会校验码与订单是否匹配、是否已被用过或过期（默认 300 秒）。' +
+        '被拒（码无效/过期/不匹配/方案已变）时，重新 preview_split 并再次征得用户同意，不要重试同一个码。',
       inputSchema: {
-        token: z.string().min(1).describe('preview_split 返回的 confirm_token（一次性，5 分钟有效）'),
+        orderId: z
+          .number()
+          .int()
+          .positive()
+          .describe('待审核订单 id：必须与刚才 preview_split 预览的是同一笔（后端会校验确认码是否属于这个订单）'),
+        confirmCode: z
+          .string()
+          .min(1)
+          .describe('preview_split 返回的 confirmCode（一次性、默认 300 秒、绑定该订单；不允许自己编）'),
       },
     },
-    async ({ token }) => {
+    async ({ orderId, confirmCode }) => {
       try {
-        // 四道校验（存在/未过期/用途/一次性），失败也已被消费
-        const { orderId, planHash } = consume(token, 'audit_pass');
-
-        // 关键：重新预览一次，比对方案指纹 —— 防「确认的是 A、执行成 B」
-        const freshPlan = await splitPreview(orderId);
-        const freshHash = hashPlan(freshPlan);
-        if (freshHash !== planHash) {
-          throw new Error(
-            `订单 ${orderId} 的拆单方案已变化（仓库或库存被改动），拒绝执行。请重新调用 preview_split 预览并让用户确认。`
-          );
-        }
-
-        const deliveries = await auditPass(orderId);
+        // 确认码校验、方案指纹比对、状态守卫都在后端做（缺码/无效/已用/过期/不匹配都会带中文原因抛回来）
+        const deliveries = await auditPass(orderId, confirmCode);
         const list = Array.isArray(deliveries) ? deliveries : [];
-        if (list.length !== freshPlan.length) {
+        if (list.length === 0) {
           return {
             isError: true,
             content: [
               {
                 type: 'text',
-                text: `⚠️ 订单 ${orderId} 已审核通过（状态 7→8），但生成包裹数 ${list.length} 与方案 ${freshPlan.length} 不一致，请人工核查。\n${deliveriesToText(list)}`,
+                text: `⚠️ 订单 ${orderId} 审核接口返回成功，但没有生成任何发货单，请人工核查。`,
               },
             ],
           };

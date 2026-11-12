@@ -12,7 +12,7 @@
 // 只要求在架商品 ≥1 且每个类型都带属性。断言强度靠「相对关系」保证（records === min(size,total)、
 // 翻页不重复、详情必带 gallery/skus），而不是靠「库里恰好有 28 个商品」这种外部状态。
 
-import { connectServer, call, jsonAfter, dbCount, MALL_BASE, MALL_USER, DB } from './_setup.mjs';
+import { connectServer, call, jsonAfter, dbCount, MALL_BASE, MALL_API_KEY, DB } from './_setup.mjs';
 
 const CATALOG_TOOLS = [
   'search_products',
@@ -57,7 +57,7 @@ const samples = [];
 
 // ---------------- 主流程 ----------------
 async function main() {
-  console.log(`▶ 商品域只读工具测试 | 目标：${MALL_BASE} | 账号：${MALL_USER} | 库：${DB}\n`);
+  console.log(`▶ 商品域只读工具测试 | 目标：${MALL_BASE} | 凭证：API Key ${MALL_API_KEY ? MALL_API_KEY.slice(0, 8) + '…' : '(缺失)'} | 库：${DB}\n`);
 
   const client = await connectServer({ MCP_ENABLE_WRITE: '1' }, 'rw');
 

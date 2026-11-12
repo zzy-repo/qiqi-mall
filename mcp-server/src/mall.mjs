@@ -1,5 +1,7 @@
 // qiqi-mall 后端 REST 客户端（stdio MCP 专用）
-// 只做四件事：登录拿 Bearer、解 {code,message,data}、code!==0 抛中文原因、401 重登一次。
+// 三件事：带 API Key、解 {code,message,data}、code!==0 抛中文原因。
+// 认证走 **API Key**（请求头 X-Api-Key），不再「登录拿 JWT / 401 重登」——
+// key 是按库隔离的（dev 库一把、test 库一把），换库就换 key，代码不用动。
 // 配置全部走环境变量（绝不读相对路径配置文件，否则 cwd 一变就崩）。
 
 const BASE = (process.env.MALL_BASE || 'http://127.0.0.1:18080').replace(/\/+$/, '');
@@ -13,39 +15,17 @@ export class MallError extends Error {
   }
 }
 
-let token = null;
-let loginInFlight = null;
-
-async function doLogin() {
-  const username = process.env.MALL_USER;
-  const password = process.env.MALL_PASS;
-  if (!username || !password) {
-    throw new MallError('缺少 MALL_USER / MALL_PASS 环境变量，无法登录后端', 'ENV');
+/** 当前 API Key（每次请求现读，便于同进程换库调试）；缺了直接给中文原因，别发一个没凭证的请求 */
+export function apiKey() {
+  const key = (process.env.MALL_API_KEY || '').trim();
+  if (!key) {
+    throw new MallError(
+      '缺少 MALL_API_KEY 环境变量，无法调用后端。key 按库隔离（dev / test 各一把），' +
+        '测试环境可 `export MALL_API_KEY=$(cat /tmp/test-env-ai-key.txt)`；造 key 见 scripts/init-ai-key.sh（mcp-server/README「认证」一节）',
+      'ENV'
+    );
   }
-  const res = await fetch(`${BASE}/admin/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  });
-  const body = await readBody(res);
-  if (body.code !== 0 || !body.data?.accessToken) {
-    throw new MallError(`登录失败：${body.message || `HTTP ${res.status}`}（账号 ${username}）`, body.code);
-  }
-  token = body.data.accessToken;
-  return token;
-}
-
-async function ensureToken() {
-  if (token) return token;
-  if (!loginInFlight) {
-    loginInFlight = doLogin().finally(() => { loginInFlight = null; });
-  }
-  return loginInFlight;
-}
-
-/** 强制下次请求重新登录（token 过期 / 被踢） */
-export function resetToken() {
-  token = null;
+  return key;
 }
 
 async function readBody(res) {
@@ -59,15 +39,15 @@ async function readBody(res) {
 }
 
 /**
- * 统一请求：自动带 Bearer；外层 {code,message,data} 解包。
- * code!==0 抛 MallError(message)；HTTP 401 或 code===401 时重登一次再重试（仅一次）。
+ * 统一请求：自动带 X-Api-Key；外层 {code,message,data} 解包。
+ * code!==0 抛 MallError(message)；HTTP 401（key 无效/被禁用）也给一句能自诊断的中文原因。
  */
-export async function request(method, path, { body, retried = false } = {}) {
-  const t = await ensureToken();
+export async function request(method, path, { body } = {}) {
+  const key = apiKey();
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: {
-      Authorization: `Bearer ${t}`,
+      'X-Api-Key': key,
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -75,11 +55,12 @@ export async function request(method, path, { body, retried = false } = {}) {
 
   const payload = await readBody(res);
 
-  const unauthorized = res.status === 401 || payload.code === 401;
-  if (unauthorized && !retried) {
-    resetToken();
-    await ensureToken();
-    return request(method, path, { body, retried: true });
+  if (res.status === 401 || payload.code === 401) {
+    throw new MallError(
+      `API Key 无效或已被禁用（HTTP 401，key 前缀 ${key.slice(0, 8)}…）：` +
+        '请确认这把 key 属于当前库（dev / test 各一把，按库隔离），必要时用 scripts/init-ai-key.sh 重建',
+      401
+    );
   }
 
   if (payload.code !== 0) {
@@ -95,14 +76,22 @@ export function listPendingOrders({ size = 20 } = {}) {
   return request('GET', `/admin/orders?status=7&page=1&size=${encodeURIComponent(size)}`);
 }
 
-/** 拆单预览（dry-run，不落库）=> [{warehouseId,warehouseName,items:[...]}] */
+/**
+ * 拆单预览（dry-run，不落库）=> { plan:[{warehouseId,warehouseName,items:[...]}], confirmCode, expiresInSec }
+ * ⚠️ 后端已改成**返回对象**（不再是裸数组）：确认码 confirmCode 由后端签发（KV，5 分钟、一次性），
+ *    执行 audit-pass 时必须原样带回；MCP 自己不再造票据。
+ */
 export function splitPreview(orderId) {
   return request('POST', `/admin/orders/${encodeURIComponent(orderId)}/split-preview`);
 }
 
-/** 审核通过：订单 7→8，并按方案真的生成发货单 => [{id,deliverySn,...}] */
-export function auditPass(orderId) {
-  return request('POST', `/admin/orders/${encodeURIComponent(orderId)}/audit-pass`);
+/**
+ * 审核通过：订单 7→8，并按方案真的生成发货单 => [{id,deliverySn,...}]
+ * ⚠️ 必须带 confirmCode（split-preview 签发）。后端会校验：存在/未用/未过期/用途/订单匹配/方案指纹。
+ *    orderId 也要一起给——码存在后端 KV 里，MCP 解不出来，所以由调用方原样带上。
+ */
+export function auditPass(orderId, confirmCode) {
+  return request('POST', `/admin/orders/${encodeURIComponent(orderId)}/audit-pass`, { body: { confirmCode } });
 }
 
 /** 某笔订单拆出来的所有发货单 */

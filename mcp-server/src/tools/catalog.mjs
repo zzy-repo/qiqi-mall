@@ -1,8 +1,8 @@
-// 商品域（catalog）只读工具：6 个，全部只读 → 不需要操作票据（confirm.mjs）。
+// 商品域（catalog）只读工具：6 个，全部只读 → 不需要确认码。
 //
-// 令牌口径（全项目统一）：
-//   只读工具 → 不需要操作票据
-//   写工具   → 需要操作票据（第 2 批起）
+// 确认码口径（全项目统一）：
+//   只读工具 → 不需要确认码
+//   写工具   → 透传后端签发的 confirmCode（split-preview / dryRun=true 签发，后端校验）
 //
 // 与后端接口的对应关系（已读 Controller 确认真实形态）：
 //   search_products     → GET /admin/products（后端只支持 publishStatus，不分页/不搜关键字 → 工具层过滤+分页）

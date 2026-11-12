@@ -25,9 +25,13 @@
 //
 // ── 环境变量 ───────────────────────────────────────────────────────
 //   MALL_BASE            后端地址，默认 http://127.0.0.1:18080
-//   MALL_USER/MALL_PASS  管理端账号，默认 ai_operator / Ai@2026#ops（见 mcp-server/README）
-//   MCP_TEST_API_KEY     可选：管理端 API Key。给了就先探测它，能通就用 API Key（mode='apikey'），
-//                        不通自动回退 JWT 登录（mode='jwt'）。后端还没上 API Key 时留空即可。
+//   MALL_API_KEY         **必填**：管理端 API Key（请求头 X-Api-Key）。key 按库隔离 ——
+//                        dev 库一把、test 库一把；测试环境（18080 / qiqi_mall_test）用：
+//                          export MALL_API_KEY=$(cat /tmp/test-env-ai-key.txt)
+//                        造 key 见 scripts/init-ai-key.sh + mcp-server/README「认证：API Key」。
+//                        （MCP_TEST_API_KEY 仍可作为同义别名。）
+//                        注意：管理端一律走 API Key，**不再登录拿 JWT**；但支付接口
+//                        /portal/orders/{id}/pay 校验会员归属，必须继续用会员 JWT（见下面的造单流程）。
 //   MCP_TEST_DB / MCP_TEST_MYSQL_CONTAINER / MCP_TEST_MYSQL_USER / MCP_TEST_MYSQL_PASSWORD
 //                        直连测试库的数行数/清理用（默认 qiqi_mall_test / qiqi-mysql / root / qiqi123456）
 //
@@ -47,8 +51,7 @@ export const SERVER_ENTRY = fileURLToPath(new URL('../src/index.mjs', import.met
 
 // ---------------- 后端 / 库 配置 ----------------
 export const MALL_BASE = (process.env.MALL_BASE || 'http://127.0.0.1:18080').replace(/\/+$/, '');
-export const MALL_USER = process.env.MALL_USER || 'ai_operator';
-export const MALL_PASS = process.env.MALL_PASS || 'Ai@2026#ops';
+export const MALL_API_KEY = (process.env.MALL_API_KEY || process.env.MCP_TEST_API_KEY || '').trim();
 
 export const MCP_DB_CONTAINER = process.env.MCP_TEST_MYSQL_CONTAINER || 'qiqi-mysql';
 export const DB = process.env.MCP_TEST_DB || 'qiqi_mall_test';
@@ -101,55 +104,72 @@ async function http(method, path, { headers = {}, body } = {}) {
   return { status: res.status, payload };
 }
 
-// ---------------- ① 管理端凭证：API Key 优先，JWT 兜底 ----------------
+// ---------------- ① 管理端凭证：API Key（唯一方式，不再登录拿 JWT） ----------------
 let cachedAuth = null;
 
 /**
- * 确保有一份可用的管理端凭证。
- * 有 MCP_TEST_API_KEY 就先探测它（GET /admin/orders?size=1，只读、无副作用），
- * 通了返回 { headers: { 'X-Api-Key': ... }, mode: 'apikey' }，
- * 不通（后端还没上 API Key / 这把 key 被禁用）就回退 JWT 登录，返回 { headers: { Authorization: 'Bearer ...' }, mode: 'jwt' }。
- * @returns {Promise<{headers: Record<string,string>, mode: 'apikey'|'jwt', label: string}>}
+ * 确保有一把可用的管理端 API Key，并探测一次（GET /admin/orders?size=1，只读、无副作用）。
+ * 探测的作用：把「key 缺失 / key 属于别的库 / key 被禁用」在造数据之前就说清楚，
+ * 而不是等到某条断言莫名其妙地红。
+ * @returns {Promise<{headers: Record<string,string>, mode: 'apikey', label: string}>}
  */
 export async function adminAuth() {
   if (cachedAuth) return cachedAuth;
 
-  const apiKey = (process.env.MCP_TEST_API_KEY || process.env.MALL_API_KEY || '').trim();
-  if (apiKey) {
-    const probe = await http('GET', '/admin/orders?page=1&size=1', { headers: { 'X-Api-Key': apiKey } });
-    if (probe.payload?.code === 0) {
-      cachedAuth = {
-        headers: { 'X-Api-Key': apiKey },
-        mode: 'apikey',
-        label: `API Key ${apiKey.slice(0, 8)}…`,
-      };
-      return cachedAuth;
-    }
-    console.warn(
-      `[setup] MCP_TEST_API_KEY 探测失败（${probe.payload?.message || `HTTP ${probe.status}`}），回退到 JWT 登录`
+  if (!MALL_API_KEY) {
+    throw new Error(
+      '缺少 MALL_API_KEY（管理端 API Key，按库隔离，dev / test 各一把）。' +
+        '测试环境：export MALL_API_KEY=$(cat /tmp/test-env-ai-key.txt)；' +
+        '造 key：scripts/init-ai-key.sh（见 mcp-server/README「认证：API Key」）'
     );
   }
 
-  const login = await http('POST', '/admin/auth/login', { body: { username: MALL_USER, password: MALL_PASS } });
-  const token = login.payload?.data?.accessToken;
-  if (!token) {
+  const probe = await http('GET', '/admin/orders?page=1&size=1', { headers: { 'X-Api-Key': MALL_API_KEY } });
+  if (probe.payload?.code !== 0) {
     throw new Error(
-      `管理端登录失败：${login.payload?.message || `HTTP ${login.status}`}（账号 ${MALL_USER}）。` +
-        `若刚跑过 scripts/reset-test-db.sh，admin 表被清成了种子，需要按 mcp-server/README 重建 ${MALL_USER}。`
+      `API Key 不可用（${probe.payload?.message || `HTTP ${probe.status}`}，key 前缀 ${MALL_API_KEY.slice(0, 8)}…）。` +
+        '请确认这把 key 属于当前库（dev / test 各一把，按库隔离）；刚跑过 scripts/reset-test-db.sh 的话 ' +
+        'ai_api_key 表已被 DROP，需要重新跑 scripts/init-ai-key.sh 建一把。'
     );
   }
-  cachedAuth = { headers: { Authorization: `Bearer ${token}` }, mode: 'jwt', label: `JWT ${MALL_USER}` };
+
+  cachedAuth = { headers: { 'X-Api-Key': MALL_API_KEY }, mode: 'apikey', label: `API Key ${MALL_API_KEY.slice(0, 8)}…` };
   return cachedAuth;
 }
 
-/** 管理端请求：自动带凭证，code!==0 抛中文错误（不静默） */
+/** 管理端请求：自动带 API Key，code!==0 抛中文错误（不静默） */
 export async function adminRequest(method, path, body) {
   const auth = await adminAuth();
   const { status, payload } = await http(method, path, { headers: auth.headers, body });
   if (payload?.code !== 0) {
-    throw new Error(`${method} ${path} 失败：${payload?.message || `HTTP ${status}`}（管理端凭证模式 ${auth.mode}）`);
+    throw new Error(`${method} ${path} 失败：${payload?.message || `HTTP ${status}`}（管理端凭证 ${auth.label}）`);
   }
   return payload?.data;
+}
+
+/**
+ * 管理端 DELETE（高危写）：新后端要求 confirmCode，老后端不要求 → 两种都兼容。
+ *   ① 先按直连方式 DELETE；成功就完事（老后端 / 尚未加码的接口）
+ *   ② 返回「缺少确认码」→ `?dryRun=true` 预演拿码 → 带 body { confirmCode } 再删一次
+ * 这样清理逻辑不会因为后端灰度升级而留垃圾数据。
+ */
+async function adminDeleteWithConfirm(path) {
+  const auth = await adminAuth();
+  const first = await http('DELETE', path, { headers: auth.headers });
+  if (first.payload?.code === 0) return;
+
+  const firstMsg = first.payload?.message || `HTTP ${first.status}`;
+  if (!/确认码/.test(firstMsg)) throw new Error(`DELETE ${path} 失败：${firstMsg}`);
+
+  const pre = await http('DELETE', `${path}${path.includes('?') ? '&' : '?'}dryRun=true`, { headers: auth.headers });
+  const code = pre.payload?.data?.confirmCode;
+  if (pre.payload?.code !== 0 || !code) {
+    throw new Error(`DELETE ${path} 预演失败：${pre.payload?.message || `HTTP ${pre.status}`}`);
+  }
+  const done = await http('DELETE', path, { headers: auth.headers, body: { confirmCode: code } });
+  if (done.payload?.code !== 0) {
+    throw new Error(`DELETE ${path} 失败：${done.payload?.message || `HTTP ${done.status}`}`);
+  }
 }
 
 /** 买家端请求（要会员 JWT，注册/支付用） */
@@ -341,7 +361,7 @@ export async function createPendingOrder({ qty = 2, skuCount = 1 } = {}) {
   try {
     await portalRequest('POST', `/portal/orders/${created.id}/pay?payType=1`, { token: member.accessToken });
   } catch (e) {
-    await adminRequest('DELETE', `/admin/orders/${created.id}`).catch(() => {});
+    await adminDeleteWithConfirm(`/admin/orders/${created.id}`).catch(() => {});
     await adminRequest('DELETE', `/admin/members/${member.memberId}`).catch(() => {});
     throw new Error(`支付失败（POST /portal/orders/${created.id}/pay）：${e.message}`);
   }
@@ -349,7 +369,7 @@ export async function createPendingOrder({ qty = 2, skuCount = 1 } = {}) {
   // ⑤ 回读确认真的落到 7，否则后面所有断言都是空中楼阁
   const detail = await adminRequest('GET', `/admin/orders/${created.id}`);
   if (detail?.order?.status !== 7) {
-    await adminRequest('DELETE', `/admin/orders/${created.id}`).catch(() => {});
+    await adminDeleteWithConfirm(`/admin/orders/${created.id}`).catch(() => {});
     await adminRequest('DELETE', `/admin/members/${member.memberId}`).catch(() => {});
     throw new Error(
       `造单后订单 ${created.id} 的状态是 ${detail?.order?.status}（期望 7 待审核）——` +
@@ -387,7 +407,7 @@ export async function cleanupOrder(orderId, { memberId, orderSn } = {}) {
   // ① 删订单：DB 侧 order_item / delivery_order / delivery_item 都是 ON DELETE CASCADE，
   //    所以一行 DELETE 就把这次造的全部业务数据带走
   try {
-    await adminRequest('DELETE', `/admin/orders/${Number(orderId)}`);
+    await adminDeleteWithConfirm(`/admin/orders/${Number(orderId)}`);
     deleted = true;
     notes.push(`订单 ${orderId} 已删除（级联清掉明细/发货单）`);
   } catch (e) {
@@ -521,7 +541,7 @@ export async function connectServer(extraEnv = {}, label = 'server') {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [SERVER_ENTRY],
-    env: cleanEnv({ MALL_BASE, MALL_USER, MALL_PASS, MCP_ENABLE_WRITE: '1', ...extraEnv }),
+    env: cleanEnv({ MALL_BASE, MALL_API_KEY, MCP_ENABLE_WRITE: '1', ...extraEnv }),
     stderr: 'ignore', // server 的 console.error 不进测试输出
   });
   const client = new Client({ name: `mcp-test-${label}`, version: '0.1.0' });
