@@ -26,6 +26,7 @@ DROP TABLE IF EXISTS delivery_order;
 DROP TABLE IF EXISTS inventory;
 DROP TABLE IF EXISTS warehouse;
 DROP TABLE IF EXISTS payment_record;
+DROP TABLE IF EXISTS sku_bucket;
 DROP TABLE IF EXISTS sku_spec;
 DROP TABLE IF EXISTS product_gallery;
 DROP TABLE IF EXISTS sku;
@@ -154,13 +155,30 @@ CREATE TABLE `sku` (
   `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
   `product_id` BIGINT NOT NULL COMMENT '所属商品',
   `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '价格',
-  `stock` INT NOT NULL DEFAULT 0 COMMENT '库存',
+  `stock` INT NOT NULL DEFAULT 0 COMMENT '总库存——展示缓存：由 SUM(sku_bucket.stock) 周期回写，扣减/回补不写它、也不拿它裁决',
   `pic` VARCHAR(500) DEFAULT NULL COMMENT 'SKU图URL（指向 MinIO）',
   `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
   PRIMARY KEY (`id`),
   KEY `idx_product` (`product_id`),
   CONSTRAINT `fk_sku_product` FOREIGN KEY (`product_id`) REFERENCES `product` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='SKU';
+
+-- SKU 库存分桶（一份库存物理拆成 N 行；权威裁决处，sku.stock 是它的展示缓存）
+-- 详见 sql/migrate-sku-bucket.sql。热点 SKU 的扣减不再挤在 sku 一把行锁上，
+-- 而是分散到 N 行（UNIQUE(sku_id, bucket_no) 保证桶号唯一、每个桶只有一把行锁）。
+-- CHECK (stock >= 0)：单桶不许为负 ⇒ SUM(stock) 永远 >= 0 —— 「SUM 为负 / 超卖」在库层面就写不进去。
+CREATE TABLE `sku_bucket` (
+  `id`         BIGINT   NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `sku_id`     BIGINT   NOT NULL COMMENT '所属规格',
+  `bucket_no`  INT      NOT NULL COMMENT '桶号 0..N-1（N = qiqi.stock.bucket-count，默认 8）',
+  `stock`      INT      NOT NULL DEFAULT 0 COMMENT '本桶可用库存（权威值；sku.stock 只是它的缓存）',
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最近变动时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_sku_bucket` (`sku_id`, `bucket_no`),
+  KEY `idx_sku` (`sku_id`),
+  CONSTRAINT `ck_bucket_stock` CHECK (`stock` >= 0),
+  CONSTRAINT `fk_bucket_sku` FOREIGN KEY (`sku_id`) REFERENCES `sku` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='SKU 库存分桶（一份库存物理拆成 N 行，权威裁决处；sku.stock 是它的展示缓存）';
 
 -- SKU 规格值（聚合于 SKU，引用属性定义）
 CREATE TABLE `sku_spec` (
@@ -369,7 +387,8 @@ CREATE TABLE `stock_ledger` (
   `reason`     VARCHAR(32) NOT NULL COMMENT 'ORDER_CREATE / AUDIT_REJECT / DELIVERY_CANCEL / RETURN_REFUND',
   `ref_type`   VARCHAR(16) NULL     COMMENT '触发单据类型：DELIVERY / RETURN_APPLY；下单为 NULL',
   `ref_id`     BIGINT      NULL     COMMENT '触发单据 id：发货单 id / 退货申请 id；下单为 NULL',
-  `idem_key`   VARCHAR(96) NOT NULL COMMENT '幂等键 orderId:skuId:reason:refId（refId 缺省 0）',
+  `idem_key`   VARCHAR(96) NOT NULL COMMENT '幂等键 [前缀:]orderId:skuId:reason:refId（refId 缺省 0）；前缀=orderId % idem-key-shards，可关（详见 migrate-ledger-idem-shard.sql）',
+  `bucket_no`  INT         NULL     COMMENT '扣减/回补落点桶号（可空：历史台账）；只用于回补定位，不参与守恒计算',
   `created_at` DATETIME    NOT NULL COMMENT '记账时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_idem` (`idem_key`),

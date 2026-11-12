@@ -14,6 +14,7 @@ import com.qiqi.mall.catalog.service.ProductService;
 import com.qiqi.mall.catalog.service.SkuService;
 import com.qiqi.mall.catalog.service.SkuSpecService;
 import com.qiqi.mall.catalog.service.SpecTextHelper;
+import com.qiqi.mall.stock.StockStore;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,16 +32,23 @@ import java.util.Map;
 public class SkuController {
 
     private final SkuService skuService;
+    /**
+     * 库存落点（启动时定：legacy = sku.stock / bucket = 分桶）。
+     * 管理端「编辑库存」必须走它，不能直接改 sku.stock —— 分桶模式下那样等于没改库存。
+     */
+    private final StockStore stockStore;
     private final CatalogDeleteGuard deleteGuard;
     private final SkuSpecService skuSpecService;
     private final AttributeService attributeService;
     private final ProductService productService;
     private final SpecTextHelper specTextHelper;
 
-    public SkuController(SkuService skuService, SkuSpecService skuSpecService, AttributeService attributeService,
+    public SkuController(SkuService skuService, StockStore stockStore,
+                         SkuSpecService skuSpecService, AttributeService attributeService,
                          ProductService productService, SpecTextHelper specTextHelper,
                          CatalogDeleteGuard deleteGuard) {
         this.skuService = skuService;
+        this.stockStore = stockStore;
         this.skuSpecService = skuSpecService;
         this.attributeService = attributeService;
         this.productService = productService;
@@ -91,6 +99,9 @@ public class SkuController {
         sku.setVersion(0);              // 新建即 0 版：响应里带回 version，前端拿到就能直接编辑
         if (sku.getProductId() == null) return Result.fail("请指定所属商品");
         skuService.save(sku);
+        // 库存权威在 sku_bucket：新规格必须立刻把初始库存物化成桶，否则第一次扣减会判「库存不足」。
+        // （SkuBucketService#deduct 里还有一份懒初始化兜底，这里显式建一次是为了「新建即正确」。）
+        stockStore.resetStock(sku.getId(), sku.getStock() == null ? 0 : sku.getStock());
         saveSpecs(sku.getId(), request.getSpecs());
         return Result.ok(sku);
     }
@@ -111,6 +122,13 @@ public class SkuController {
         OptimisticLockGuard.requireVersion(sku.getVersion());
         int rows = skuService.getBaseMapper().updateById(sku);
         OptimisticLockGuard.requireAffected(rows);
+        // 库存被改过（请求里带了 stock）⇒ 用新总量重铺 N 个桶。
+        // 这是「设置绝对量」而不是「扣减」：只改 sku.stock 而不改桶，会出现「界面写 100、实际还能扣老数字」，
+        // 那是最坏的不一致。乐观锁失败时上面已经 409 返回，不会走到这里。
+        if (sku.getStock() != null) {
+            // legacy：直接写 sku.stock（它就是库存）；bucket：用新总量重铺 N 个桶
+            stockStore.resetStock(id, sku.getStock());
+        }
         if (request.getSpecs() != null) {
             // 整组替换规格值
             skuSpecService.remove(new LambdaQueryWrapper<SkuSpec>().eq(SkuSpec::getSkuId, id));

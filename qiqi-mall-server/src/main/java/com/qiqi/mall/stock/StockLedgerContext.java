@@ -28,6 +28,12 @@ import java.util.Map;
  * <h3>没有上下文时怎么办</h3>
  * 直接抛异常（fail-closed）：无台账的库存变更就是这个缺陷本身，宁可报错也不要静默改库存。
  *
+ * <h3>幂等键的打散前缀（可关）</h3>
+ * 前缀 = {@code orderId % N}（{@code qiqi.stock.idem-key-shards}，默认 1 = 不加）。
+ * 动机是 uk_idem 这个唯一二级索引的「尾部 gap 单点排队」：{@code idem_key} 以单调 orderId 开头，
+ * 所有插入共用一个 gap，InnoDB 的重复检查共享锁与并发插入的意向锁互斥 → 吞吐被钉死。
+ * 加前缀后插入按 N 轮转分散到 N 个 gap。**唯一性语义不变**（前缀是 orderId 的纯函数）。
+ *
  * <h3>「同一次触发内的重复」怎么区分</h3>
  * 一个包裹里可能有两条明细指向同一规格（同一订单两行买同一规格时会出现），
  * 它们必须合并成一行台账、件数相加；而**另一次触发**（重放）必须整笔跳过。
@@ -41,7 +47,36 @@ public final class StockLedgerContext {
 
         /** 幂等键 orderId:skuId:reason:refId（refId 缺省 0）—— 与台账表的 UNIQUE KEY 同口径 */
         public String idemKey(Long skuId) {
-            return orderId + ":" + skuId + ":" + reason + ":" + (refId == null ? 0L : refId);
+            return idemKey(skuId, 1);   // 1 = 不加前缀（与历史数据逐字节一致）
+        }
+
+        /**
+         * 幂等键（可带打散前缀）：{@code LPAD(orderId % shards, 位宽, '0') + ":" + 原键}。
+         *
+         * <p>{@code shards <= 1} 时**完全等价于**原来的 {@link #idemKey(Long)}（不加前缀），
+         * 这是「可回滚」的关键：把配置改回 1，行为逐字节回到今天。
+         *
+         * <p>为什么前缀取 {@code orderId % shards} 而不是哈希：订单号是单调自增的，
+         * 取模对它是**完美轮转**（0,1,2,…,N-1,0,1,…），既不需要 CRC、也让 SQL 回填能用同一个公式
+         * （{@code order_id % N}），Java 与 MySQL 能算出逐字节相同的键。
+         *
+         * <p>唯一性语义不变：前缀是 orderId 的纯函数，等于把同一份信息挪到字符串最前面，
+         * 整个 {@code idem_key} 仍然全局唯一，{@code uk_idem} 仍是硬闸门。
+         */
+        public String idemKey(Long skuId, int shards) {
+            String plain = orderId + ":" + skuId + ":" + reason + ":" + (refId == null ? 0L : refId);
+            if (shards <= 1) {
+                return plain;
+            }
+            return shardPrefix(orderId, shards) + plain;
+        }
+
+        /** 前缀：{@code orderId % shards} 零填充到「shards-1 的位数」+ 冒号（如 N=64 → "00:"…"63:"） */
+        public static String shardPrefix(Long orderId, int shards) {
+            int n = Math.max(1, shards);
+            long bucket = Math.floorMod(orderId == null ? 0L : orderId, (long) n);
+            int width = Long.toString(n - 1L).length();
+            return String.format("%0" + width + "d:", bucket);
         }
     }
 

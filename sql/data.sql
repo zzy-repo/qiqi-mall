@@ -16,6 +16,7 @@ TRUNCATE TABLE delivery_item;
 TRUNCATE TABLE delivery_order;
 TRUNCATE TABLE inventory;
 TRUNCATE TABLE warehouse;
+TRUNCATE TABLE sku_bucket;
 TRUNCATE TABLE sku_spec;
 TRUNCATE TABLE product_gallery;
 TRUNCATE TABLE sku;
@@ -105,6 +106,18 @@ INSERT INTO sku (id, product_id, price, stock, pic) VALUES
 
 -- SKU 规格值（颜色/内存/尺码/净含量，引用 attribute 定义）
 -- attribute: 1=手机-颜色 2=手机-内存 3=手机-屏幕尺寸 4=服装-尺码 5=服装-颜色 6=食品-净含量
+-- ---- 库存分桶：把上面每个 SKU 的 sku.stock 平均拆到 8 个桶（余数进 0 号桶）----
+-- 口径与 sql/migrate-sku-bucket.sql 的回填**完全一致**：这是同一份库存的物理拆分，不是第二份库存。
+-- 拆分后 SUM(sku_bucket.stock) == sku.stock（守恒）；之后 sku.stock 只是展示缓存，
+-- 真正的扣减/回补只动 sku_bucket。NOT EXISTS 守卫 = 已有桶的 SKU 整行跳过（可反复重跑）。
+INSERT INTO sku_bucket (sku_id, bucket_no, stock)
+SELECT s.id, seq.n,
+       FLOOR(s.stock / 8) + IF(seq.n = 0, s.stock - FLOOR(s.stock / 8) * 8, 0)
+  FROM sku s
+  CROSS JOIN (SELECT 0 AS n UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3
+              UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7) seq
+ WHERE NOT EXISTS (SELECT 1 FROM sku_bucket b WHERE b.sku_id = s.id);
+
 INSERT INTO sku_spec (id, sku_id, attribute_id, value) VALUES
   (1, 1, 1, '黑'), (2, 1, 2, '256G'),
   (3, 2, 1, '白'), (4, 2, 2, '256G'),

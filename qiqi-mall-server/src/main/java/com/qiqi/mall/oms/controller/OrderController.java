@@ -23,6 +23,7 @@ import com.qiqi.mall.catalog.service.ProductService;
 import com.qiqi.mall.catalog.service.SkuService;
 import com.qiqi.mall.member.service.MemberService;
 import com.qiqi.mall.stock.StockLedgerContext;
+import com.qiqi.mall.stock.StockStore;
 import com.qiqi.mall.stock.entity.StockLedger;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -47,13 +48,16 @@ public class OrderController {
     private final DeliveryOrderService deliveryOrderService;
     private final OrderPurgeService orderPurgeService;
     private final MemberService memberService;
+    /** 库存落点：「只剩 N 件」这类必须说准的地方走它（legacy 读 sku.stock，bucket 读 SUM(桶)） */
+    private final StockStore stockStore;
 
     public OrderController(OrderService orderService, OrderItemService orderItemService,
                            ReturnApplyService returnApplyService, SplitOrderService splitOrderService,
                            SkuService skuService, ProductService productService,
                            DeliveryOrderService deliveryOrderService,
                            OrderPurgeService orderPurgeService,
-                           MemberService memberService) {
+                           MemberService memberService,
+                           StockStore stockStore) {
         this.orderService = orderService;
         this.orderItemService = orderItemService;
         this.returnApplyService = returnApplyService;
@@ -63,6 +67,7 @@ public class OrderController {
         this.deliveryOrderService = deliveryOrderService;
         this.orderPurgeService = orderPurgeService;
         this.memberService = memberService;
+        this.stockStore = stockStore;
     }
 
     /**
@@ -225,10 +230,16 @@ public class OrderController {
         }
     }
 
-    /** 库存不足的中文原因：「库存不足：XX 只剩 N 件」（N 取扣减失败后的真实余量） */
+    /**
+     * 库存不足的中文原因：「库存不足：XX 只剩 N 件」（N 取扣减失败后的真实余量）。
+     *
+     * <p>余量读的是 {@code SUM(sku_bucket.stock)}（权威值），不是 {@code sku.stock}（展示缓存）——
+     * 缓存可能滞后几百毫秒，而「告诉用户只剩几件」错一个数就是客服工单。
+     * 这条路径只在扣减失败时走（每次 8 行求和），不构成热路径压力。
+     */
     private String insufficientStockMessage(OrderItem item, Long skuId) {
         Sku sku = skuService.getById(skuId);
-        int left = sku == null || sku.getStock() == null ? 0 : sku.getStock();
+        int left = stockStore.availableStock(skuId);
         String name = item.getProductName();
         if (sku != null && sku.getProductId() != null) {
             Product product = productService.getById(sku.getProductId());

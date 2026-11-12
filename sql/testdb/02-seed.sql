@@ -25,6 +25,7 @@ TRUNCATE TABLE delivery_item;
 TRUNCATE TABLE delivery_order;
 TRUNCATE TABLE inventory;
 TRUNCATE TABLE warehouse;
+TRUNCATE TABLE sku_bucket;
 TRUNCATE TABLE sku_spec;
 TRUNCATE TABLE product_gallery;
 TRUNCATE TABLE sku;
@@ -237,6 +238,19 @@ INSERT INTO sku (id, product_id, price, stock, pic) VALUES
   (110, 28, 7.34, 1000, '/qiqi-mall/products/2026/11/8aa6f981-7b04-4800-a946-a5cbab8a2fb0.webp'),
   (111, 28, 7.69, 1000, '/qiqi-mall/products/2026/11/8aa6f981-7b04-4800-a946-a5cbab8a2fb0.webp'),
   (112, 28, 8.04, 1000, '/qiqi-mall/products/2026/11/8aa6f981-7b04-4800-a946-a5cbab8a2fb0.webp');
+
+-- 库存分桶（权威库存；sku.stock 是它的展示缓存，由后端周期任务回写）
+-- 口径与 sql/migrate-sku-bucket.sql 的回填完全一致：floor(stock/8) 每桶 + 余数进 0 号桶，
+-- 拆的是同一份库存（SUM(桶) == sku.stock），不是第二份库存。NOT EXISTS 守卫使其可反复重跑。
+-- 注意：本节由 scripts/fetch-seed-data.mjs 生成；本文件是已提交的产物，
+--   下次重跑生成脚本时会按每个 SKU 生成显式 INSERT 行（口径相同）。
+INSERT INTO sku_bucket (sku_id, bucket_no, stock)
+SELECT s.id, seq.n,
+       FLOOR(s.stock / 8) + IF(seq.n = 0, s.stock - FLOOR(s.stock / 8) * 8, 0)
+  FROM sku s
+  CROSS JOIN (SELECT 0 AS n UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3
+              UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7) seq
+ WHERE NOT EXISTS (SELECT 1 FROM sku_bucket b WHERE b.sku_id = s.id);
 
 INSERT INTO sku_spec (id, sku_id, attribute_id, value) VALUES
   (1, 1, 1, '深空灰'),

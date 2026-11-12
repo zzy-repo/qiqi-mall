@@ -13,11 +13,13 @@ import java.time.LocalDateTime;
  * <p>为什么需要它：修「同一件货被回补两次」这个缺陷。原实现里「审核不通过（按整单回补）」
  * 与「取消包裹（按包裹回补）」都是裸的 {@code UPDATE sku SET stock = stock + N}，
  * 没有记录 / 没有查重 / 没有互斥 —— 两条入口叠加就补两次，库存虚增。
- * 现在**每一次扣/补都先写一行台账再动 {@code sku.stock}**：
+ * 现在**每一次扣/补都先写一行台账再动库存桶（{@code sku_bucket}）**：
  * <ul>
  *   <li>{@code idem_key} = {@code orderId:skuId:reason:refId}（refId 缺省 0）UNIQUE ——
  *       同一个触发（同一张包裹 / 同一张退货申请 / 同一次审核不通过）重放时，第二遍一律跳过；</li>
  *   <li>{@code delta} 正数=回补、负数=扣减 —— 把台账按 (order_id, sku_id) 求和就能对账；</li>
+ *   <li>{@code bucket_no} 记「这次扣/补落在哪个桶」（分桶后新增）：回补据此回到原桶，
+ *       但它<b>不参与守恒计算</b> —— 守恒只看 delta 的和；</li>
  *   <li>同一 (order_id, sku_id) 的「已回补总量」被夹紧在「该订单该规格的下单总量」以内
  *       （数量守恒，见 {@code StockLedgerService}）—— 不同触发、不同 reason 也不会补第二次。</li>
  * </ul>
@@ -61,6 +63,15 @@ public class StockLedger {
 
     /** 幂等键 orderId:skuId:reason:refId（refId 缺省 0），UNIQUE */
     private String idemKey;
+
+    /**
+     * 落点桶号（可空）：扣减时记「从哪个桶出去的」，回补时记「补回了哪个桶」。
+     *
+     * <p><b>只用于回补定位，不参与数量守恒</b>：守恒仍然只对 {@code delta} 求和
+     * （见 {@code StockLedgerMapper#sumRestoredQty} / {@code sumOrderedQty}）。
+     * 历史台账行为 NULL（分桶之前记的账），回补时按 sku 任选一个桶。
+     */
+    private Integer bucketNo;
 
     private LocalDateTime createdAt;
 }

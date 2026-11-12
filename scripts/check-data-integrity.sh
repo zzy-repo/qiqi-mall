@@ -6,6 +6,8 @@
 # 有些「坏了」不会让接口报错，只会让数字悄悄对不上：
 #   · 订单被硬删了，`stock_ledger` 却还留着它的行（孤儿台账）—— 谁也无法再判断这些进出属于哪单；
 #   · `sku.stock` 被写成负数 —— 后续扣减/回补全部继续错下去；
+#   · 库存分桶后：某个 SKU 一个桶都没有（扣减会判「库存不足」），或桶总量与 `sku.stock`
+#     这个展示缓存差太多（界面上的数字在骗人）；
 #   · 父订单状态与包裹事实分叉（父单说「已发货」但没有任何包裹真的出库；或货已出库、父单还挂着「待发货」）
 #     —— 所有按状态聚合的报表与文档从此都要为它开例外。
 # 这三类都得**定期扫**，等到业务方发现「库存对不上」时已经查不出是哪一步坏的。
@@ -21,6 +23,7 @@
 # ── 退出码 ─────────────────────────────────────────────────────────────────
 #   0 = 全部通过（告警不算问题）
 #   1 = 有问题（孤儿台账 / 负库存 / 父单超前 / 父单落后；--strict 还包括「已完成但包裹未签收」）
+#       ④ 桶缺失 / ⑤ 缓存偏差 **只告警不判红**（缓存滞后是分桶模式的正常现象，阈值见 --drift）
 #   2 = 参数或环境错误（docker 不可用、库连不上、库名不存在…）—— **不等于「没问题」**，别当 0 用
 #
 # ── 只读承诺 ───────────────────────────────────────────────────────────────
@@ -52,11 +55,16 @@ MYSQL_PASSWORD="${MCP_TEST_MYSQL_PASSWORD:-${MYSQL_ROOT_PASSWORD:-qiqi123456}}"
 
 STRICT=0
 SAMPLES=5
+# ⑤ 缓存偏差告警阈值（绝对件数）：|sku.stock − SUM(桶)| 超过它才告警。
+# 分桶模式下缓存滞后一个回写周期（250ms）是正常的，所以这里只报警、不判红。
+DRIFT=100
 DBS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)   sed -n '2,58p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     --strict)    STRICT=1; shift ;;
+    --drift)     DRIFT="${2:-}"; shift 2 ;;
+    --drift=*)   DRIFT="${1#--drift=}"; shift ;;
     --samples)   SAMPLES="${2:-}"; shift 2 ;;
     --samples=*) SAMPLES="${1#--samples=}"; shift ;;
     -*)          echo "✗ 不认识的参数：$1（用 --help 看用法）" >&2; exit 2 ;;
@@ -64,6 +72,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ "$SAMPLES" =~ ^[0-9]+$ ]] || { echo "✗ --samples 需要非负整数（收到「$SAMPLES」）" >&2; exit 2; }
+[[ "$DRIFT" =~ ^[0-9]+$ ]] || { echo "✗ --drift 需要非负整数（收到「$DRIFT」）" >&2; exit 2; }
 if [[ ${#DBS[@]} -eq 0 ]]; then DBS=("qiqi_mall" "qiqi_mall_test"); fi
 
 # 库名拼进 SQL，先过一遍白名单（只允许字母数字下划线）
@@ -209,6 +218,68 @@ elif [[ $((div_a + div_b)) == 0 ]]; then
 fi
 echo
 
+# ================================================================ ④ 库存分桶：桶缺失
+echo "④ 库存分桶：有 sku 却没有桶（分桶模式下这种 SKU 一扣就报「库存不足」）"
+bucket_missing_total=0
+for db in "${DBS[@]}"; do
+  has_tbl="$(q "SELECT COUNT(*) FROM information_schema.tables
+                 WHERE table_schema = '$db' AND table_name = 'sku_bucket'")"
+  if [[ "$has_tbl" != "1" ]]; then
+    printf '  ⚠ %-16s 还没有 sku_bucket 表（未跑迁移或仍是 legacy 模式）—— 跳过本项与 ⑤\n' "$db"
+    warnings=$((warnings + 1))
+    continue
+  fi
+  n="$(q "SELECT COUNT(*) FROM \`$db\`.sku s
+           WHERE NOT EXISTS (SELECT 1 FROM \`$db\`.sku_bucket b WHERE b.sku_id = s.id)")"
+  total="$(q "SELECT COUNT(*) FROM \`$db\`.sku")"
+  if [[ "$n" == "0" ]]; then
+    printf '  ✓ %-16s 桶缺失 0 个（%s 个规格都有桶）\n' "$db" "$total"
+  else
+    # 只告警：legacy 模式下这张表本来就没人写（空表也是「正常」），所以不判红
+    printf '  ⚠ %-16s 桶缺失 %s 个（共 %s 个规格）← 分桶模式下这些 SKU 会假性缺货\n' "$db" "$n" "$total"
+    q "SELECT CONCAT('      · sku id=', s.id, ' stock=', s.stock,
+                ' 桶数=', (SELECT COUNT(*) FROM \`$db\`.sku_bucket b WHERE b.sku_id = s.id)), 0
+         FROM \`$db\`.sku s
+        WHERE NOT EXISTS (SELECT 1 FROM \`$db\`.sku_bucket b WHERE b.sku_id = s.id)
+        ORDER BY s.id LIMIT $SAMPLES" | cut -f1
+    warnings=$((warnings + 1))
+    bucket_missing_total=$((bucket_missing_total + n))
+  fi
+done
+echo
+
+# ================================================================ ⑤ 库存分桶：缓存偏差
+echo "⑤ 库存分桶：展示缓存偏差（|sku.stock − SUM(桶)| > $DRIFT 件才告警；滞后属正常，只告警不判红）"
+drift_total=0
+for db in "${DBS[@]}"; do
+  has_tbl="$(q "SELECT COUNT(*) FROM information_schema.tables
+                 WHERE table_schema = '$db' AND table_name = 'sku_bucket'")"
+  [[ "$has_tbl" == "1" ]] || continue
+  read -r n maxdiff <<<"$(q "SELECT COUNT(*), COALESCE(MAX(ABS(diff)), 0) FROM (
+        SELECT s.stock - COALESCE(b.total, 0) AS diff
+          FROM \`$db\`.sku s
+          LEFT JOIN (SELECT sku_id, SUM(stock) AS total FROM \`$db\`.sku_bucket GROUP BY sku_id) b
+            ON b.sku_id = s.id) t
+       WHERE ABS(diff) > $DRIFT")"
+  if [[ "${n:-0}" == "0" ]]; then
+    printf '  ✓ %-16s 偏差超阈值 0 个（最大偏差 %s 件）\n' "$db" "${maxdiff:-0}"
+  else
+    printf '  ⚠ %-16s 偏差超阈值 %s 个（最大偏差 %s 件）← 缓存没跟上桶；若刚切模式，先跑 sql/reset-sku-bucket.sql\n' \
+      "$db" "$n" "${maxdiff:-0}"
+    q "SELECT CONCAT('      · sku id=', s.id, ' sku.stock=', s.stock,
+                ' SUM(桶)=', COALESCE(b.total,0), ' 偏差=', s.stock - COALESCE(b.total,0)), 0
+         FROM \`$db\`.sku s
+         LEFT JOIN (SELECT sku_id, SUM(stock) AS total FROM \`$db\`.sku_bucket GROUP BY sku_id) b
+           ON b.sku_id = s.id
+        WHERE ABS(s.stock - COALESCE(b.total, 0)) > $DRIFT
+        ORDER BY ABS(s.stock - COALESCE(b.total, 0)) DESC LIMIT $SAMPLES" | cut -f1
+    warnings=$((warnings + 1))
+    drift_total=$((drift_total + n))
+  fi
+done
+[[ $((bucket_missing_total + drift_total)) == 0 ]] && echo "  → 桶与缓存一致：扣减裁决（桶）与展示数字（sku.stock）没有分叉"
+echo
+
 # ================================================================ 结论
 elapsed=$(( $(date +%s) - started ))
 echo "────────────────────────────────────────────────────────────"
@@ -217,5 +288,6 @@ if [[ "$problems" == "0" ]]; then
   exit 0
 fi
 printf '结论：FAIL（问题 %s 项，告警 %s 项）｜耗时 %ss\n' "$problems" "$warnings" "$elapsed"
-echo "处理建议：孤儿台账先 dump 再按 NOT EXISTS 清理；负库存查扣减入口；A/B 分叉用父单状态重算（DeliveryFlowService#recomputeOrderStatus）回填。"
+echo "处理建议：孤儿台账先 dump 再按 NOT EXISTS 清理；负库存查扣减入口；A/B 分叉用父单状态重算（DeliveryFlowService#recomputeOrderStatus）回填；
+⑤ 桶缺失/缓存偏差：跑 sql/migrate-sku-bucket.sql（补桶）或 sql/reset-sku-bucket.sql（重置目标总量）。"
 exit 1

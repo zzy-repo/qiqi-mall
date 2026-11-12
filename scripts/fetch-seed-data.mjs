@@ -72,6 +72,13 @@ const WAREHOUSES = [
 ]
 const SKU_WAREHOUSE_CYCLE = [1, 2, 3, 1]
 const SKU_STOCK = 1000
+/**
+ * 库存分桶数：必须与后端配置 qiqi.stock.bucket-count（application-dev/test.yml）一致，
+ * 也必须与 sql/migrate-sku-bucket.sql 回填里的 8 一致。
+ * 种子先写 sku.stock，再按同一口径把它平均拆到 N 个桶（余数进 0 号桶）——
+ * 拆的是同一份库存，SUM(桶) == sku.stock，不是第二份库存。
+ */
+const BUCKET_COUNT = 8
 
 // ---------------------------------------------------------------------------
 const i18n = JSON.parse(readFileSync(I18N_FILE, 'utf8'))
@@ -203,6 +210,8 @@ async function main() {
   // ---- 商品 / SKU / 相册（图片先传到 MinIO）----
   const productRows = []
   const skuRows = []
+  /** sku id -> 总库存（供后面生成分桶行；改动 skuRows 时必须同步改这里） */
+  const skuStockById = new Map()
   const skuSpecRows = []
   const galleryRows = []
   const inventoryRows = []
@@ -250,6 +259,7 @@ async function main() {
         // 每个 SKU 用不同的图：SKU1=商品主图，SKU2..4=相册里的不同角度图（相册不够就回退主图）
         const skuPic = k === 0 ? pic : (galleryUrls[k - 1] || pic)
         skuRows.push(`  (${id}, ${productId}, ${num(price)}, ${SKU_STOCK}, '${esc(skuPic)}')`)
+        skuStockById.set(id, SKU_STOCK)
         skuSpecRows.push(`  (${++specId}, ${id}, ${a1.id}, '${esc(v1)}')`)
         skuSpecRows.push(`  (${++specId}, ${id}, ${a2.id}, '${esc(v2)}')`)
         const wh = SKU_WAREHOUSE_CYCLE[k % SKU_WAREHOUSE_CYCLE.length]
@@ -323,14 +333,32 @@ async function main() {
   // ---- 库存告警：留几个低库存 SKU，让概览页的告警列表有内容 ----
   for (const [skuIdx, stock] of [[9, 6], [17, 3], [33, 8]]) {
     const row = skuRows[skuIdx]
-    if (row) skuRows[skuIdx] = row.replace(/, \d+, '/, `, ${stock}, '`)
+    if (row) {
+      skuRows[skuIdx] = row.replace(/, \d+, '/, `, ${stock}, '`)
+      skuStockById.set(skuIdx + 1, stock)   // sku id 从 1 连续编号，与 skuRows 下标一一对应
+    }
+  }
+
+  // ---- 库存分桶行：sku_stock 平均拆成 BUCKET_COUNT 个桶（余数进 0 号桶）----
+  // 与 sql/migrate-sku-bucket.sql 的回填口径完全一致（同一份库存的物理拆分）。
+  // 为什么种子必须自己写：sku_bucket 是权威库存，reset 库时只 TRUNCATE 不插入的话，
+  // 每个 SKU 都会变成「0 库存」—— 所有下单都会报库存不足，而且看不出原因。
+  const bucketNoOf = (stock, bucketNo) => {
+    const base = Math.floor(stock / BUCKET_COUNT)
+    return bucketNo === 0 ? base + (stock - base * BUCKET_COUNT) : base
+  }
+  const skuBucketRows = []
+  for (const [id, stock] of [...skuStockById.entries()].sort((a, b) => a[0] - b[0])) {
+    for (let bucketNo = 0; bucketNo < BUCKET_COUNT; bucketNo++) {
+      skuBucketRows.push(`  (${id}, ${bucketNo}, ${bucketNoOf(stock, bucketNo)})`)
+    }
   }
 
   // ---- 拼 SQL ----
   const tables = [
     'cart', 'member_address', 'return_apply', 'order_item', '`order`', 'stock_ledger', 'return_reason',
     'order_setting', 'payment_record', 'delivery_logistics', 'delivery_item', 'delivery_order',
-    'inventory', 'warehouse', 'sku_spec', 'product_gallery', 'sku', 'product', 'attribute',
+    'inventory', 'warehouse', 'sku_bucket', 'sku_spec', 'product_gallery', 'sku', 'product', 'attribute',
     'product_type', 'category', 'member', 'admin'
   ]
   const sql = `-- 七七商城 测试库种子数据（qiqi_mall_test）
@@ -377,6 +405,11 @@ ${productRows.join(',\n')};
 INSERT INTO sku (id, product_id, price, stock, pic) VALUES
 ${skuRows.join(',\n')};
 
+-- 库存分桶（权威库存；sku.stock 是它的展示缓存，由后端周期任务回写）
+-- 拆分口径：floor(stock/8) 每桶 + 余数进 0 号桶 ⇒ SUM(stock) 严格等于上面的 sku.stock
+INSERT INTO sku_bucket (sku_id, bucket_no, stock) VALUES
+${skuBucketRows.join(',\n')};
+
 INSERT INTO sku_spec (id, sku_id, attribute_id, value) VALUES
 ${skuSpecRows.join(',\n')};
 
@@ -416,7 +449,7 @@ ${paymentRows.join(',\n')};
   console.log('\n=== 生成完成 ===')
   console.log(`输出：sql/testdb/02-seed.sql（${lines} 行，${(Buffer.byteLength(sql) / 1024).toFixed(1)} KB）`)
   console.log(`分类 ${rootNames.length} 个根 + ${childBySlug.size} 个子类；类型 ${TYPES.length} 个、属性 ${TYPES.length * 2} 个`)
-  console.log(`商品 ${productRows.length} 个；SKU ${skuRows.length} 个；sku_spec ${skuSpecRows.length} 行；相册 ${galleryRows.length} 张；分仓库存 ${inventoryRows.length} 行`)
+  console.log(`商品 ${productRows.length} 个；SKU ${skuRows.length} 个；分桶 ${skuBucketRows.length} 行（每 SKU ${BUCKET_COUNT} 桶）；sku_spec ${skuSpecRows.length} 行；相册 ${galleryRows.length} 张；分仓库存 ${inventoryRows.length} 行`)
   console.log(`图片：上传成功 ${uploadStats.ok}，失败 ${uploadStats.failed}，跳过(--no-upload) ${uploadStats.skipped}`)
   console.log(`类型/属性/规格值全部中文；商品标题与描述走 seed-i18n.json`)
   console.log(`\n未翻译清单（${new Set(untranslated).size} 项）：`)

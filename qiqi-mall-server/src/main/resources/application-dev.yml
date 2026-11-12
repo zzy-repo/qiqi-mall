@@ -22,6 +22,23 @@ spring:
     username: ${MYSQL_USER:root}
     password: ${MYSQL_PASSWORD:qiqi123456}
     driver-class-name: com.mysql.cj.jdbc.Driver
+    # HikariCP 连接池：此前完全走 Spring Boot 默认（maximumPoolSize=10 / minimumIdle=10 /
+    # connectionTimeout=30s），双实例合计只有 20 条连接，压测上量时先撞连接池，还轮不到 MySQL。
+    #
+    # 【为什么是 30 而不是更大】MySQL max_connections=151，双实例 30×2=60，
+    # 留 90+ 条给其它连接（运维工具、手工排查、其它客户端）；再大就要先抬 MySQL 上限，
+    # 否则只是把排队从应用侧挪到服务端，变成 Too many connections。
+    hikari:
+      maximum-pool-size: 30
+      # 保持 10 预热，避免冷启动抖动（首波请求不用现开连接）
+      minimum-idle: 10
+      # 30s → 10s：拿不到连接就快速失败，别让请求长时间挂着
+      connection-timeout: 10000
+      # 20min，短于 MySQL wait_timeout，避免用到被服务端掐断的连接
+      max-lifetime: 1200000
+      # 10min：只回收 minimum-idle 之外的富余连接
+      idle-timeout: 600000
+      pool-name: QiqiHikariPool
   devtools:
     restart:
       enabled: true
@@ -65,3 +82,37 @@ app:
     bucket: qiqi-mall
   # 进程外 KV：memory(单实例) | redis(多实例共享验证码/幂等令牌)
   kv-store: ${KV_STORE:memory}
+
+# 库存分桶（详见 sql/migrate-sku-bucket.sql 与 SkuBucketService）
+#   为什么分桶：热点 SKU 的所有并发都挤在 `UPDATE sku ... WHERE id=?` 那一把行锁上，
+#   TPS 上限 = 单行行锁吞吐。把同一份库存物理拆成 N 行（sku_bucket），并发就分散到 N 把锁。
+#   sku.stock 降级为展示缓存（由 SUM(桶) 周期回写），扣减/回补都不再写它。
+qiqi:
+  stock:
+    # ── 两个开关：默认都 false = 与 baseline 完全一致（同一条扣减 SQL、同一条台账插入 SQL）──
+    # 三个优化要分开归因，所以分三次镜像上线：
+    #   镜像1 bucket-enabled=false + ledger-insert-ignore=false → 只量「连接池」收益（C 阶段）
+    #   镜像2 ledger-insert-ignore=true                        → 量「台账插入改写」收益（L 阶段）
+    #   镜像3 bucket-enabled=true                              → 量「合并后」新拐点（E 阶段）
+    # 启动日志会打 `stock.mode=legacy|bucket(N=8) ledger=naive|ignore`，压测方据此确认镜像身份。
+    bucket-enabled: true
+    ledger-insert-ignore: true
+    # 幂等键打散前缀桶数：1 = 不加前缀（与历史数据逐字节一致，默认）。
+    #   为什么需要：uk_idem 是唯一二级索引，插入时要在这个 key 所在的 gap 上取共享锁做重复检查，
+    #     并发插入同一 gap 的意向锁与之互斥。idem_key 以单调 orderId 开头 → 所有插入落在同一个
+    #     尾部 gap → 全局单点排队（压测：等待次数恒定 ~2.8 万/分钟，等待时长 c8 19ms → c32 125ms，
+    #     TPS 钉死在 ~300）。加前缀后按 orderId % N 轮转分散到 N 个 gap。
+    #   为什么 64：双实例连接池 30×2=60，N=64 时平均每 gap <1 个连接；且 idem_key 是 VARCHAR(96)，
+    #     N<=64 前缀最多 3 字符（"63:"），最坏情况 92+3=95 仍装得下，**不用改表**。N=128 需要先把列加到 128。
+    #   ⚠️ 开启顺序（不可并发）：停流量 → 跑 sql/migrate-ledger-idem-shard.sql 回填旧行 → 起新镜像。
+    #     反了会让旧触发重放算出「带前缀」的新键、查不到库里那行「无前缀」旧键 → 当成首次触发 → 重复扣/补。
+    idem-key-shards: 64
+    # 桶数 N：必须与 sql/migrate-sku-bucket.sql 回填里的数字一致（SQL 里读不到本配置）。
+    #   dev / test 必须一致，否则同一套数据在两个环境的行为不同；压测对照时可临时改成 1
+    #   （1 = 退化成原来的单行串行），改完重启生效。
+    bucket-count: 8
+    # 展示缓存回写周期（ms）：扣/补路径只标脏，落到 sku.stock 的频率按时间算，与下单 QPS 无关。
+    #   250ms = 界面几乎实时，同时热点 SKU 每秒最多写 4 次 sku 行（原来是多少 QPS 就写多少次）。
+    cache-refresh-ms: 250
+    # 每轮最多回写多少个 SKU：限制单次任务耗时，避免一次刷新变成毛刺。
+    cache-refresh-batch: 200
