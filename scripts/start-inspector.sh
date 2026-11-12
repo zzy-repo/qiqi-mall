@@ -41,8 +41,12 @@ PUBLIC_HOST="${PUBLIC_HOST:-100.113.135.55}"
 DOCS_SITE="http://${PUBLIC_HOST}:3027"
 
 MALL_BASE="${MALL_BASE:-http://127.0.0.1:18080}"
-MALL_USER="${MALL_USER:-ai_operator}"
-MALL_PASS="${MALL_PASS:-Ai@2026#ops}"
+# 认证改为 API Key（MCP Server 已不再登录拿 JWT）：优先环境变量，其次读 init-ai-key.sh 产出的文件
+MALL_API_KEY="${MALL_API_KEY:-$(cat /tmp/test-env-ai-key.txt 2>/dev/null || true)}"
+if [ -z "$MALL_API_KEY" ]; then
+  echo "❌ 缺少 MALL_API_KEY：先跑 scripts/init-ai-key.sh，或 export MALL_API_KEY=ak_..." >&2
+  exit 1
+fi
 
 # token 固定：Inspector 的 authToken 解析顺序是
 #   options.authToken || process.env.MCP_INSPECTOR_API_TOKEN || randomBytes(32)
@@ -116,12 +120,10 @@ systemd-run \
   --setenv=SERVER_PORT="$SANDBOX_PORT" \
   --setenv=MCP_ENABLE_WRITE=1 \
   --setenv=MALL_BASE="$MALL_BASE" \
-  --setenv=MALL_USER="$MALL_USER" \
-  --setenv=MALL_PASS="$MALL_PASS" \
+  --setenv=MALL_API_KEY="$MALL_API_KEY" \
   /usr/bin/npx -y @modelcontextprotocol/inspector \
     -e "MALL_BASE=$MALL_BASE" \
-    -e "MALL_USER=$MALL_USER" \
-    -e "MALL_PASS=$MALL_PASS" \
+    -e "MALL_API_KEY=$MALL_API_KEY" \
     -e "MCP_ENABLE_WRITE=1" \
     node mcp-server/src/index.mjs \
   >/dev/null
