@@ -90,7 +90,7 @@ export function registerCatalogWriteTools(server, { writeEnabled } = {}) {
       } catch (e) {
         // 400（缺版本）/ 409（版本冲突）等：把 bizCode + 「重新读」的下一步原样交给模型
         return failWrite(e, {
-          action: '修改商品',
+          action: '商品修改',
           label: `productId=${productId}${name !== undefined ? ` 目标名称=「${name}」` : ''}`,
           oldVersion: version,
           rereadTool: 'get_product_detail',
@@ -169,7 +169,7 @@ export function registerCatalogWriteTools(server, { writeEnabled } = {}) {
         await updateSku(skuId, patch);
       } catch (e) {
         return failWrite(e, {
-          action: '修改SKU',
+          action: 'SKU 修改',
           label: `skuId=${skuId}`,
           oldVersion: version,
           rereadTool: 'list_skus（按该 SKU 所属商品的 productId 查）',
