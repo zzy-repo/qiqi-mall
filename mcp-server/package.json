@@ -1,0 +1,18 @@
+{
+  "name": "qiqi-mall-mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "qiqi-mall 最小闭环 MCP Server（stdio）：查待审核 / 预览拆单 / 确认执行 / 回读发货单",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.mjs",
+    "test": "node test/loop.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^3.25.76"
+  }
+}
