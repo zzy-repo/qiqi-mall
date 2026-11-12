@@ -85,7 +85,7 @@ import {
 } from '../../api/returnApply'
 import { useDangerConfirm } from '../../composables/useDangerConfirm'
 
-/** 审核退货（高危：通过会退款 + 回补库存）走「预演 → 确认 → 带码执行」 */
+/** 审核退货（高危：通过会退款 + 回补库存）走「预演 → 确认 → 执行」 */
 const danger = useDangerConfirm()
 
 const list = ref([])
@@ -140,7 +140,7 @@ const submit = async () => {
   if (!valid) return
   const body = { ...form, returnReason: reasonName.value.get(form.reasonId) || '' }
 
-  // 新增：只是建单，不影响订单/库存，不走确认码
+  // 新增：只是建单，不影响订单/库存，不走高危确认弹窗
   if (!form.id) {
     saving.value = true
     try {
@@ -168,7 +168,7 @@ const submit = async () => {
     confirmText: form.status === 1 ? '确认通过' : '确认拒绝',
     successText: '审核完成',
     dryRun: () => updateReturnApplyDryRun(applyId, body),
-    exec: (confirmCode) => updateReturnApply(applyId, { ...body, confirmCode }),
+    exec: () => updateReturnApply(applyId, body),
     onSuccess: () => load()
   })
 }

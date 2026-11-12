@@ -442,10 +442,10 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { listOrders, createOrder, updateOrder, shipOrder, shipOrderDryRun, deleteOrder, deleteOrderDryRun } from '../../api/order'
+import { listOrders, getOrder, createOrder, updateOrder, shipOrder, shipOrderDryRun, deleteOrder, deleteOrderDryRun } from '../../api/order'
 import {
   listDeliveries, deliveryCounts,
-  // 订单审核 / 发货单流转：预演（*DryRun）+ 执行（带 confirmCode）
+  // 订单审核 / 发货单流转：预演（*DryRun）+ 执行
   auditPassOrder, auditPassDryRun, auditRejectOrder, auditRejectDryRun,
   dispatchDelivery, dispatchDeliveryDryRun, cancelDelivery, cancelDeliveryDryRun,
   wmsCallback, wmsCallbackDryRun,
@@ -453,13 +453,14 @@ import {
   mergeDelivery, mergeDeliveryDryRun, deleteDelivery, deleteDeliveryDryRun
 } from '../../api/delivery'
 import { useDangerConfirm } from '../../composables/useDangerConfirm'
+import { handleSaveError } from '../../composables/useConflictHandler'
 import { listWarehouses } from '../../api/warehouse'
 import { Search } from '@element-plus/icons-vue'
 import { listMembers } from '../../api/member'
 import { listProducts } from '../../api/product'
 import { listSkus } from '../../api/sku'
 
-/** 14 个高危写操作共用的一套「预演 → 展示 → 确认 → 带码执行」流程（本页占 11 个） */
+/** 14 个高危写操作共用的一套「预演 → 展示 → 确认 → 执行」流程（本页占 11 个） */
 const danger = useDangerConfirm()
 
 // 状态机：0待付款 1已付款 2已发货 3已完成 4已关闭 5退款中 6已退款 7待审核 8待发货 9部分发货
@@ -544,12 +545,19 @@ const openForm = (row) => {
   Object.assign(form, row ? { ...row, items: form.items } : blankForm())
   if (row) {
     // 编辑时先拉明细
-    import('../../api/order').then(({ getOrder }) =>
-      getOrder(row.id).then((d) => { form.items = d.items.length ? d.items : [emptyItem()] }))
+    getOrder(row.id).then((d) => { form.items = d.items.length ? d.items : [emptyItem()] })
   } else {
     form.items = [emptyItem()]
   }
   visible.value = true
+  formRef.value?.clearValidate()
+}
+
+/** 重新拉一次订单详情并重填表单（409/400 后点「刷新」用；弹窗保持打开） */
+const reloadForm = async () => {
+  if (!form.id) return
+  const d = await getOrder(form.id)
+  Object.assign(form, { ...d.order, items: d.items.length ? d.items : [emptyItem()] })
   formRef.value?.clearValidate()
 }
 
@@ -558,6 +566,8 @@ const submit = async () => {
   if (!valid) return
   saving.value = true
   try {
+    // 整行 spread：form 来自 openForm 里对列表行（含 version）的展开，
+    // 所以 payload.order 自然带上 version —— 这里的乐观锁不需要额外拼字段。
     const payload = { order: { ...form }, items: form.items }
     if (form.id) await updateOrder(form.id, payload.order)
     else await createOrder(payload)
@@ -565,6 +575,8 @@ const submit = async () => {
     visible.value = false
     await load()
   } catch (e) {
+    // 409 被别人改过 / 400 漏传版本号 → 统一冲突弹窗（带「刷新」按钮重新填表单）
+    if (handleSaveError(e, { onRefresh: reloadForm }) !== 'other') return
     ElMessage.error('保存失败：' + e.message)
   } finally {
     saving.value = false
@@ -578,8 +590,8 @@ const deliveries = ref([])
 
 /**
  * 审核通过：待审核 → 待发货 + 按方案拆单。
- * 「预演 → 展示将要发生什么 → 确认 → 带码执行」全交给 useDangerConfirm：
- * 预演走 split-preview（真预览），它回 { willDo, plan, confirmCode, expiresInSec } —— 顺带把
+ * 「预演 → 展示将要发生什么 → 确认 → 执行」全交给 useDangerConfirm：
+ * 预演走 split-preview（真预览），它回 { willDo, plan } —— 顺带把
  * 「拆成几个包裹、每包哪个仓几条明细」列进弹窗明细区，原来那个独立的「拆单方案预览」弹窗因此不再需要。
  */
 const auditPass = async (row) => {
@@ -588,8 +600,8 @@ const auditPass = async (row) => {
     confirmText: '确认通过',
     successText: '审核通过，已生成发货单',
     dryRun: () => auditPassDryRun(row.id),
-    exec: (confirmCode) => auditPassOrder(row.id, { confirmCode }),
-    // 预演返回的 plan 转成弹窗明细区（只读展示，用户看的就是码绑定的那份方案）
+    exec: () => auditPassOrder(row.id),
+    // 预演返回的 plan 转成弹窗明细区（只读展示，让用户先看清这次要拆成什么样）
     details: (preview) =>
       (preview.plan || []).map((pkg) => ({
         label: `${pkg.warehouseName || ('仓库 ' + pkg.warehouseId)}（${(pkg.items || []).length} 条明细）`,
@@ -608,7 +620,7 @@ const auditReject = async (row) => {
     confirmText: '确认不通过',
     successText: '已审核不通过，订单关闭并回补库存',
     dryRun: () => auditRejectDryRun(row.id),
-    exec: (confirmCode) => auditRejectOrder(row.id, { confirmCode }),
+    exec: () => auditRejectOrder(row.id),
     onSuccess: () => load()
   })
 }
@@ -620,7 +632,7 @@ const ship = async (row) => {
     confirmText: '确认发货',
     successText: '已发货',
     dryRun: () => shipOrderDryRun(row.id),
-    exec: (confirmCode) => shipOrder(row.id, { confirmCode }),
+    exec: () => shipOrder(row.id),
     onSuccess: () => load()
   })
 }
@@ -632,7 +644,7 @@ const removeOrder = async (row) => {
     confirmText: '确认删除',
     successText: '订单已删除',
     dryRun: () => deleteOrderDryRun(row.id),
-    exec: (confirmCode) => deleteOrder(row.id, { confirmCode }),
+    exec: () => deleteOrder(row.id),
     onSuccess: () => load()
   })
 }
@@ -701,7 +713,8 @@ const openDeliverySplit = (d) => {
 
 /**
  * 编辑 / 拆分待下发包裹：先把表单收成「原参数」payload，再交给 danger 走
- * 「预演（同路径 + ?dryRun=true，body 同原参数）→ 确认 → 执行（body 里多带 confirmCode）」。
+ * 「预演（同路径 + ?dryRun=true，body 同原参数）→ 确认 → 执行」。
+ * 编辑分支的 payload 里带行级 version（乐观锁）：预演和执行发的是同一份 body，所以两边都带。
  * 表单弹窗先关掉，避免两个弹窗叠着；预演失败时由 danger 直接 toast，用户可重新打开表单改。
  */
 const submitDeliveryDialog = async () => {
@@ -713,7 +726,8 @@ const submitDeliveryDialog = async () => {
     const items = dlgItems.value
       .filter((r) => r.quantity !== null && r.quantity !== undefined && r.quantity !== r.current)
       .map((r) => ({ deliveryItemId: r.deliveryItemId, quantity: r.quantity }))
-    payload = { warehouseId: dlgWarehouseId.value || null, items }
+    // version 来自 GET /admin/deliveries?orderId= 的每一行；缺了后端 400、过期 409
+    payload = { warehouseId: dlgWarehouseId.value || null, items, version: d.version }
   } else {
     const items = dlgItems.value
       .filter((r) => r.quantity > 0)
@@ -730,8 +744,24 @@ const submitDeliveryDialog = async () => {
     confirmText: isEdit ? '确认修改' : '确认拆分',
     successText: isEdit ? '已保存（该包裹标记为人工调整）' : '已拆分',
     dryRun: () => (isEdit ? updateDeliveryDryRun(d.id, payload) : splitDeliveryDryRun(d.id, payload)),
-    exec: (confirmCode) =>
-      isEdit ? updateDelivery(d.id, { ...payload, confirmCode }) : splitDelivery(d.id, { ...payload, confirmCode }),
+    exec: () => (isEdit ? updateDelivery(d.id, payload) : splitDelivery(d.id, payload)),
+    // 409/400 交给统一冲突处理器：DangerConfirmDialog 收起，改弹冲突弹窗；
+    // 点「刷新」→ 重拉该订单的发货单，并用最新那一行重新打开「修改包裹」表单让用户再改
+    onError: (e) => {
+      if (e?.bizCode !== 409 && e?.bizCode !== 400) return false
+      handleSaveError(e, {
+        onRefresh: async () => {
+          await loadDeliveries(d.orderId)
+          const fresh = deliveries.value.find((x) => x.id === d.id)
+          if (!fresh) {
+            ElMessage.warning('该包裹已不存在（可能已被他人删除），请刷新订单详情')
+            return
+          }
+          openDeliveryEdit(fresh)
+        }
+      })
+      return true
+    },
     onSuccess: async () => {
       await loadDeliveries(d.orderId)
       await load()
@@ -766,10 +796,7 @@ const submitMerge = async () => {
     confirmText: isDelete ? '确认删除' : '确认合并',
     successText: isDelete ? '已删除（明细已并入目标包裹）' : '已合并',
     dryRun: () => (isDelete ? deleteDeliveryDryRun(d.id, targetId) : mergeDeliveryDryRun(d.id, targetId)),
-    exec: (confirmCode) =>
-      isDelete
-        ? deleteDelivery(d.id, targetId, { confirmCode })
-        : mergeDelivery(d.id, { targetId, confirmCode }),
+    exec: () => (isDelete ? deleteDelivery(d.id, targetId) : mergeDelivery(d.id, targetId)),
     onSuccess: async () => {
       await loadDeliveries(d.orderId)
       await load()
@@ -798,7 +825,7 @@ const removeDelivery = async (d) => {
     confirmText: '确认删除',
     successText: '已删除',
     dryRun: () => deleteDeliveryDryRun(d.id),
-    exec: (confirmCode) => deleteDelivery(d.id, null, { confirmCode }),
+    exec: () => deleteDelivery(d.id, null),
     onSuccess: async () => {
       await loadDeliveries(d.orderId)
       await load()
@@ -821,7 +848,7 @@ const dispatch = async (d) => {
     confirmText: '确认下发',
     successText: '已下发 WMS',
     dryRun: () => dispatchDeliveryDryRun(d.id),
-    exec: (confirmCode) => dispatchDelivery(d.id, { confirmCode }),
+    exec: () => dispatchDelivery(d.id),
     onSuccess: async () => {
       await loadDeliveries(d.orderId)
       await load()
@@ -836,7 +863,7 @@ const cancel = async (d) => {
     confirmText: '确认取消',
     successText: '已取消',
     dryRun: () => cancelDeliveryDryRun(d.id),
-    exec: (confirmCode) => cancelDelivery(d.id, { confirmCode }),
+    exec: () => cancelDelivery(d.id),
     onSuccess: async () => {
       await loadDeliveries(d.orderId)
       await load()
@@ -844,7 +871,7 @@ const cancel = async (d) => {
   })
 }
 
-/** 模拟 WMS 回传：event 在 query，确认码在 body */
+/** 模拟 WMS 回传：event 在 query */
 const callback = async (d, event) => {
   const label = { pick: '拣货', outbound: '出库', transit: '揽收', signed: '签收' }[event] || event
   await danger.run({
@@ -852,7 +879,7 @@ const callback = async (d, event) => {
     confirmText: '确认回传',
     successText: '回传成功',
     dryRun: () => wmsCallbackDryRun(d.id, event),
-    exec: (confirmCode) => wmsCallback(d.id, event, { confirmCode }),
+    exec: () => wmsCallback(d.id, event),
     onSuccess: async () => {
       await loadDeliveries(d.orderId)
       await load()
@@ -863,7 +890,6 @@ const callback = async (d, event) => {
 const detail = ref(null)
 const detailVisible = ref(false)
 const openDetail = async (row) => {
-  const { getOrder } = await import('../../api/order')
   detail.value = await getOrder(row.id)
   // 打开抽屉即加载发货单：此前 deliveries 只在 dispatch/cancel/callback 之后刷新，
   // 首次打开「发货单」区块永远为空，下发/回传入口不可达

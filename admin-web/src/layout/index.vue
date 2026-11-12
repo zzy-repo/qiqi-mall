@@ -105,6 +105,8 @@
 
     <!-- 高危写操作确认弹窗：全站只挂这一份（页面调 useDangerConfirm().run 唤起） -->
     <DangerConfirmDialog />
+    <!-- 保存冲突弹窗（409 被别人改过 / 400 漏传版本号）：全站只挂这一份（handleSaveError 唤起） -->
+    <ConflictDialog />
   </el-container>
 </template>
 
@@ -114,6 +116,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getUser, clearAuth } from '../utils/auth'
 import DangerConfirmDialog from '../components/DangerConfirmDialog.vue'
+import ConflictDialog from '../components/ConflictDialog.vue'
 
 const route = useRoute()
 const router = useRouter()

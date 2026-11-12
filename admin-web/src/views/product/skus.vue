@@ -124,11 +124,12 @@ import { ElMessage } from 'element-plus'
 import ImageUploader from '../../components/ImageUploader.vue'
 import { listSkus, getSku, createSku, updateSku, listSkuAttributes, deleteSku, deleteSkuDryRun } from '../../api/sku'
 import { useDangerConfirm } from '../../composables/useDangerConfirm'
+import { handleSaveError } from '../../composables/useConflictHandler'
 import { getProduct } from '../../api/product'
 
 const route = useRoute()
 const productId = Number(route.params.productId)
-/** 删除规格（高危）：预演 → 确认 → 带码执行 */
+/** 删除规格（高危）：预演 → 确认 → 执行 */
 const danger = useDangerConfirm()
 
 const list = ref([])
@@ -136,7 +137,11 @@ const attributes = ref([])
 const loading = ref(false)
 const productName = ref('')
 
-const blank = () => ({ id: null, productId, price: 0, stock: 0, pic: '', specs: [] })
+const blank = () => ({
+  id: null, productId, price: 0, stock: 0, pic: '', specs: [],
+  /** 乐观锁版本号：编辑时从详情/列表取，保存时原样带回；新建保持 null（不传，让后端置 0） */
+  version: null
+})
 const form = reactive(blank())
 
 const load = async () => {
@@ -177,6 +182,7 @@ const openForm = async (row) => {
         price: Number(data.sku.price),
         stock: data.sku.stock,
         pic: data.sku.pic || '',
+        version: data.sku.version,
         specs: (data.specs || []).map((s) => ({ attributeId: s.attributeId, value: s.value }))
       })
     } catch (e) {
@@ -185,6 +191,22 @@ const openForm = async (row) => {
     }
   }
   visible.value = true
+  formRef.value?.clearValidate()
+}
+
+/** 重新拉一次当前 SKU 详情并重填表单（409/400 后点「刷新」用；弹窗保持打开） */
+const reloadForm = async () => {
+  if (!form.id) return
+  const data = await getSku(form.id)
+  Object.assign(form, {
+    id: data.sku.id,
+    productId: data.sku.productId,
+    price: Number(data.sku.price),
+    stock: data.sku.stock,
+    pic: data.sku.pic || '',
+    version: data.sku.version,
+    specs: (data.specs || []).map((s) => ({ attributeId: s.attributeId, value: s.value }))
+  })
   formRef.value?.clearValidate()
 }
 
@@ -202,12 +224,19 @@ const submit = async () => {
       },
       specs: form.specs.filter((s) => s.attributeId && s.value)
     }
-    if (form.id) await updateSku(form.id, payload)
-    else await createSku(payload)
+    if (form.id) {
+      // 编辑必须带 version（乐观锁，fail-closed）：不带 → 400；版本过期 → 409
+      payload.sku.version = form.version
+      await updateSku(form.id, payload)
+    } else {
+      await createSku(payload)
+    }
     ElMessage.success('保存成功')
     visible.value = false
     await load()
   } catch (e) {
+    // 409/400 走统一冲突处理器（弹窗说清楚 + 「刷新」重新拉最新 SKU 填回表单）
+    if (handleSaveError(e, { onRefresh: reloadForm }) !== 'other') return
     ElMessage.error('保存失败：' + e.message)
   } finally {
     saving.value = false
@@ -216,7 +245,7 @@ const submit = async () => {
 
 /**
  * 删除 SKU：先预演（被订单明细 / 购物车引用时会在 willDo 里写明「删除会被拒绝」），
- * 用户确认后带确认码执行；被引用时后端拒绝的中文原因留在弹窗里。
+ * 用户确认后执行；被引用时后端拒绝的中文原因留在弹窗里。
  */
 const remove = async (row) => {
   await danger.run({
@@ -224,7 +253,7 @@ const remove = async (row) => {
     confirmText: '确认删除',
     successText: '已删除',
     dryRun: () => deleteSkuDryRun(row.id),
-    exec: (confirmCode) => deleteSku(row.id, { confirmCode }),
+    exec: () => deleteSku(row.id),
     onSuccess: () => load()
   })
 }

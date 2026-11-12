@@ -129,11 +129,12 @@ import { useRouter } from 'vue-router'
 import ImageUploader from '../../components/ImageUploader.vue'
 import { listProducts, getProduct, createProduct, updateProduct, deleteProduct, deleteProductDryRun } from '../../api/product'
 import { useDangerConfirm } from '../../composables/useDangerConfirm'
+import { handleSaveError } from '../../composables/useConflictHandler'
 import { listCategories } from '../../api/category'
 import { listProductTypes } from '../../api/productType'
 
 const router = useRouter()
-/** 删除商品（高危）：预演 → 确认 → 带码执行 */
+/** 删除商品（高危）：预演 → 确认 → 执行 */
 const danger = useDangerConfirm()
 
 const list = ref([])
@@ -182,7 +183,9 @@ const visible = ref(false)
 const saving = ref(false)
 const formRef = ref()
 const blankForm = () => ({
-  id: null, name: '', description: '', categoryId: null, typeId: null, publishStatus: 1, pic: '', gallery: []
+  id: null, name: '', description: '', categoryId: null, typeId: null, publishStatus: 1, pic: '', gallery: [],
+  /** 乐观锁版本号：编辑时从详情取、保存时原样带回；新建保持 null（不传，让后端置 0） */
+  version: null
 })
 const form = reactive(blankForm())
 
@@ -209,6 +212,14 @@ const openForm = async (row) => {
   formRef.value?.clearValidate()
 }
 
+/** 重新拉一次当前商品详情并重填表单（409/400 后点「刷新」用；弹窗保持打开，让用户在新数据上再改） */
+const reloadForm = async () => {
+  if (!form.id) return
+  const data = await getProduct(form.id)
+  Object.assign(form, { ...data.product, gallery: data.gallery || [] })
+  formRef.value?.clearValidate()
+}
+
 const submit = async () => {
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
@@ -226,12 +237,21 @@ const submit = async () => {
       },
       gallery: form.gallery.filter((g) => g.url)
     }
-    if (form.id) await updateProduct(form.id, payload)
-    else await createProduct(payload)
+    if (form.id) {
+      // 编辑必须带 version（乐观锁，fail-closed）：不带 → 后端 400；版本过期 → 409。
+      // 新建不传，让后端置 0。
+      payload.product.version = form.version
+      await updateProduct(form.id, payload)
+    } else {
+      await createProduct(payload)
+    }
     ElMessage.success('保存成功')
     visible.value = false
     await load()
   } catch (e) {
+    // 409（被别人改过）/ 400（漏传版本号）交给统一冲突处理器：弹窗里说清楚 + 给「刷新」按钮，
+    // 绝不用一句 2 秒就消失的 toast 打发（用户会以为存上了，改的内容就真丢了）。
+    if (handleSaveError(e, { onRefresh: reloadForm }) !== 'other') return
     ElMessage.error('保存失败：' + e.message)
   } finally {
     saving.value = false
@@ -240,7 +260,7 @@ const submit = async () => {
 
 /**
  * 删除商品：先预演，弹窗里把「会被几条订单明细 / 几个购物车引用、删不掉建议改下架」说清楚，
- * 用户确认后才带确认码执行。被引用时后端会在码校验之后拒绝，中文原因直接显示在弹窗里
+ * 用户确认后才执行。被引用时后端拒绝，中文原因直接显示在弹窗里
  * （不走 ElMessage.error：失败时弹窗不关，用户能看着原因决定下一步）。
  */
 const remove = async (row) => {
@@ -249,7 +269,7 @@ const remove = async (row) => {
     confirmText: '确认删除',
     successText: '已删除',
     dryRun: () => deleteProductDryRun(row.id),
-    exec: (confirmCode) => deleteProduct(row.id, { confirmCode }),
+    exec: () => deleteProduct(row.id),
     onSuccess: () => load()
   })
 }

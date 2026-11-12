@@ -25,25 +25,7 @@
         </div>
       </div>
 
-      <p class="countdown-line">
-        <span
-          class="countdown"
-          :class="{ 'is-expired': dangerState.expired }"
-          data-testid="danger-confirm-countdown"
-        >⏱ 确认码 {{ countdownText }} 内有效，仅可使用一次</span>
-      </p>
-
-      <el-alert
-        v-if="dangerState.expired"
-        class="tip"
-        type="warning"
-        :closable="false"
-        show-icon
-        title="确认码已过期，请重新预演"
-        data-testid="danger-confirm-expired"
-      />
-
-      <!-- 执行失败：不关弹窗，直接把后端的和中文原因摆在这里 -->
+      <!-- 执行失败：不关弹窗，直接把后端的中文原因摆在这里 -->
       <el-alert
         v-if="dangerState.error"
         class="tip"
@@ -52,11 +34,7 @@
         show-icon
         :title="dangerState.error"
         data-testid="danger-confirm-error"
-      >
-        <template #default>
-          <div class="error-hint">请关闭后重新预演（确认码已失效，一次一用）</div>
-        </template>
-      </el-alert>
+      />
     </div>
 
     <template #footer>
@@ -77,12 +55,15 @@
  * 高危写操作的统一确认弹窗（全站单例，挂载在 layout/index.vue）。
  *
  * 它只做渲染：状态与流程都在 composables/useDangerConfirm.js 里，
- * 所以 14 个调用点不需要各自复制「倒计时 / 失败不关窗 / 成功后刷新」这套逻辑。
+ * 所以 14 个调用点不需要各自复制「失败不关窗 / 成功后刷新」这套逻辑。
+ *
+ * 注意：确认码已下线（后端同批删除），所以这里不再有倒计时、有效期、一次性作废的展示，
+ * 也没有「码已失效，请重新预演」这类文案 —— 并发保护改由行级 version（乐观锁）承担。
  */
 import { computed } from 'vue'
 import { useDangerConfirm } from '../composables/useDangerConfirm'
 
-const { state: dangerState, cancel, execute, canExecute, countdownText } = useDangerConfirm()
+const { state: dangerState, cancel, execute, canExecute } = useDangerConfirm()
 
 // el-dialog 的 v-model：用户点右上角 ×（或遮罩，若允许）时等价于「取消」——不发请求
 const visible = computed({
@@ -97,7 +78,7 @@ const visible = computed({
 .danger-body { min-height: 80px; }
 /* willDo 用正常字号正文样式：不缩小、不变灰，允许换行，允许选中复制 */
 .willdo {
-  margin: 0 0 12px;
+  margin: 0;
   font-size: 15px;
   line-height: 1.7;
   color: #303133;
@@ -106,7 +87,7 @@ const visible = computed({
   user-select: text;
 }
 .details {
-  margin: 0 0 12px;
+  margin: 12px 0 0;
   padding: 8px 12px;
   background: #f7f8fa;
   border-radius: 4px;
@@ -115,9 +96,6 @@ const visible = computed({
 .detail-row { display: flex; gap: 10px; font-size: 13px; line-height: 1.8; user-select: text; }
 .detail-label { flex: 0 0 auto; color: #606266; font-weight: 600; }
 .detail-value { flex: 1; color: #303133; word-break: break-word; }
-.countdown-line { margin: 0; }
-.countdown { font-size: 14px; color: #e6a23c; font-variant-numeric: tabular-nums; }
-.countdown.is-expired { color: #f56c6c; font-weight: 600; }
+/* 失败时留一点呼吸：倒数第二块（willdo / details）与错误条之间 */
 .tip { margin-top: 12px; }
-.error-hint { font-size: 13px; line-height: 1.6; }
 </style>
