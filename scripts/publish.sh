@@ -188,6 +188,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SERVER_REPO="qiqi-mall-server"
 PORTAL_REPO="qiqi-portal-web"
 ADMIN_REPO="qiqi-admin-web"
+# ★ 坑：前端**镜像名 ≠ 源码目录名**，必须分开定义（目录名与 docker-compose.yml 的
+#   build.context: ./portal-web / ./admin-web 一致）。build_frontend 曾直接用镜像名
+#   拼构建上下文，真实发布时 `unable to prepare context: path .../qiqi-portal-web
+#   not found` 直接中止（dry-run 只打印命令，所以演练看不出来）。
+#   后端没暴露这个坑纯属巧合：目录名恰好等于镜像名 qiqi-mall-server。
+PORTAL_DIR="portal-web"
+ADMIN_DIR="admin-web"
 
 C_SERVER1="qiqi-server-1"; C_SERVER2="qiqi-server-2"
 C_PORTAL="qiqi-portal-web"; C_ADMIN="qiqi-admin-web"
@@ -954,14 +961,16 @@ rolling_backend() {
 build_frontend() {
   step_begin "构建前端镜像"
   if [ "$SKIP_FRONTEND" -eq 1 ]; then info "--skip-frontend：跳过"; step_end skip; return 0; fi
-  local w
-  for w in "$PORTAL_REPO" "$ADMIN_REPO"; do
+  local img dir pair
+  # $img = 镜像名（用于 -t / docker image inspect）；$dir = 源码目录（用于 -f 与构建上下文）
+  for pair in "$PORTAL_REPO=$PORTAL_DIR" "$ADMIN_REPO=$ADMIN_DIR"; do
+    img="${pair%%=*}"; dir="${pair##*=}"
     # 前端 Dockerfile 是多阶段：node:22-alpine 里 npm ci + vite build --mode $FRONTEND_BUILD_MODE
     # → 不在宿主机跑 npm（省内存，宿主机也不落 node_modules）
-    exe docker build -t "$w:$VER" --build-arg "BUILD_MODE=$FRONTEND_BUILD_MODE" \
-        -f "$REPO_ROOT/$w/Dockerfile" "$REPO_ROOT/$w"
-    if [ "$DRY_RUN" -eq 0 ] && ! docker image inspect "$w:$VER" >/dev/null 2>&1; then
-      die "$w:$VER 构建失败（后端未受影响，可只回退前端）"
+    exe docker build -t "$img:$VER" --build-arg "BUILD_MODE=$FRONTEND_BUILD_MODE" \
+        -f "$REPO_ROOT/$dir/Dockerfile" "$REPO_ROOT/$dir"
+    if [ "$DRY_RUN" -eq 0 ] && ! docker image inspect "$img:$VER" >/dev/null 2>&1; then
+      die "$img:$VER 构建失败（后端未受影响，可只回退前端）"
     fi
   done
   if [ "$DRY_RUN" -eq 1 ]; then step_end dry; else info "两个前端镜像就绪 ✓"; step_end ok; fi
