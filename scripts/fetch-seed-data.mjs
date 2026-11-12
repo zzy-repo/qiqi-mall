@@ -328,7 +328,7 @@ async function main() {
 
   // ---- 拼 SQL ----
   const tables = [
-    'cart', 'member_address', 'return_apply', 'order_item', '`order`', 'return_reason',
+    'cart', 'member_address', 'return_apply', 'order_item', '`order`', 'stock_ledger', 'return_reason',
     'order_setting', 'payment_record', 'delivery_logistics', 'delivery_item', 'delivery_order',
     'inventory', 'warehouse', 'sku_spec', 'product_gallery', 'sku', 'product', 'attribute',
     'product_type', 'category', 'member', 'admin'

@@ -141,6 +141,129 @@ for s in "${SHARDS[@]:$SHARD_FROM:$WANT_SHARDS}"; do
 done
 [[ "$missing" == "1" ]] && exit 2
 
+# ════════════════════════════════════════════════════════════════════════════
+# preflight 被测物版本锚（硬校验，任一不满足就 die）
+#
+# 为什么要有这一段（真实事故 2026-11-12）：
+#   两个分片的 JVM 从 19:05 起就没重启过，而 target/classes 在 21:58 / 22:26 / 22:43
+#   被反复重新编译 —— 19:05~22:33 这 3.5 小时里，**所有 e2e 结论都跑在旧字节码上**，
+#   却一直被当成「已验收」。修复被验成「没修好」、没修的被验成「好了」，全是假阴性/假阳性。
+#   根因是两件事各自都能「看起来成功」：systemctl restart 不编译（把旧代码再跑一遍），
+#   mvn compile 不重启（写进 target/classes 的字节码根本没人加载）。
+#   注意：别人的 `mvn -o test` 也会写 target/classes —— 所以「我编译过」不代表「被测物换了」。
+#
+# 三根锚，一根都不能少：
+#   A 代码锚：e2e 后端进程启动时间 ≥ target/classes 里最新 .class 的 mtime
+#             判定逻辑与 scripts/restart-e2e-backends.sh --check-only 完全一致（同一套事实、同一套口径），
+#             这里只是按「本次实际要用的 shard」逐条打出来，不另立一套判定。
+#   B 健康锚：/api/health 返回 200 **且** body 含 "status":"ok"
+#             本服务对未知路径也回 200（catch-all），所以「端口通」≠「健康」，必须看 body。
+#   C 独占锚：还有别的 e2e 跑批在跑 → 只醒目告警、不拦（并发常常是另一个 agent 在跑，
+#             拦住会互相卡死；但必须让人一眼看见「结论可能互相干扰」）。
+#
+# 跳过开关：E2E_SKIP_VERSION_CHECK=1（只给明确知道自己在干什么的场景，跳过时打大警告）。
+# 输出刻意保持 3~5 行，不刷屏。
+# ════════════════════════════════════════════════════════════════════════════
+CLASSES_DIR="$REPO_DIR/qiqi-mall-server/target/classes"
+fmt_epoch() { [[ "${1:-0}" == "0" ]] && echo "-" || date -d "@$1" '+%F %T'; }
+
+# 进程启动时刻：/proc/<pid> 目录的 mtime 就是进程启动时刻（秒级），与 restart-e2e-backends.sh 同源
+pid_start_epoch() {
+  local pid="$1"
+  [[ "$pid" =~ ^[0-9]+$ ]] && [[ "$pid" != "0" ]] && [[ -d "/proc/$pid" ]] || { echo 0; return 0; }
+  stat -c %Y "/proc/$pid" 2>/dev/null || echo 0
+}
+# 分片 → 后端 PID：优先 systemd 单元；单元被 --collect 回收时退回按监听端口反查
+pid_of_shard() {
+  local name="$1" port="$2" pid=""
+  pid="$(systemctl show -p MainPID --value "qiqi-e2e-server-$name" 2>/dev/null || true)"
+  if [[ ! "$pid" =~ ^[0-9]+$ ]] || [[ "$pid" == "0" ]]; then
+    pid="$(ss -ltnpH "sport = :$port" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2 || true)"
+  fi
+  echo "${pid:-0}"
+}
+# 健康：状态码 200 且 body 含 "status":"ok"（只探端口通 = 假健康，见脚本头 ③ 的说明）
+health_ok() {
+  local port="$1"
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:$port/api/health" 2>/dev/null || true)" == "200" ]] \
+    && [[ "$(curl -s --max-time 3 "http://127.0.0.1:$port/api/health" 2>/dev/null || true)" == *'"status":"ok"'* ]]
+}
+anchor_die() {
+  echo "✗ preflight 未通过：$*" >&2
+  echo "  只想显式跳过（结论自负）：E2E_SKIP_VERSION_CHECK=1 bash scripts/e2e-run.sh ..." >&2
+  exit 7
+}
+
+if [[ "${E2E_SKIP_VERSION_CHECK:-0}" == "1" ]]; then
+  cat >&2 <<'SKIP_EOF'
+
+████████████████████████████████████████████████████████████████████████
+⚠  E2E_SKIP_VERSION_CHECK=1：已**跳过**被测物版本锚（代码锚 A / 健康锚 B / 独占锚 C）
+   现在跑出来的结论可能是「旧字节码 / 半启动后端 / 并发干扰」上的假绿，不要拿它当验收。
+   只有明确知道自己在干什么（例：故意验证旧字节码的行为）才带这个开关。
+████████████████████████████████████████████████████████████████████████
+
+SKIP_EOF
+else
+  echo "▶ preflight 被测物版本锚（跳过用 E2E_SKIP_VERSION_CHECK=1）"
+
+  # ── A 代码锚 ──────────────────────────────────────────────────────────────
+  NEWEST_CLASS_MTIME="$(find "$CLASSES_DIR" -name '*.class' -printf '%T@\n' 2>/dev/null | sort -n | tail -1 | cut -d. -f1 || true)"
+  NEWEST_CLASS_MTIME="${NEWEST_CLASS_MTIME:-0}"
+  [[ "$NEWEST_CLASS_MTIME" == "0" ]] && anchor_die "找不到 $CLASSES_DIR 下的 .class —— 后端还没编译过；先跑：bash scripts/restart-e2e-backends.sh"
+  code_desc=""
+  for s in "${SHARDS[@]:$SHARD_FROM:$WANT_SHARDS}"; do
+    IFS=: read -r name pport aport backend <<< "$s"
+    pid="$(pid_of_shard "$name" "$backend")"
+    st="$(pid_start_epoch "$pid")"
+    if [[ "$st" == "0" ]]; then
+      anchor_die "shard $name 拿不到后端进程启动时刻（PID=${pid}，端口 $backend）→ 无法证明它加载的是新字节码。
+  排查：systemctl status qiqi-e2e-server-$name --no-pager -l；bash scripts/restart-e2e-backends.sh（会先 mvn compile 再重启）"
+    fi
+    if [[ "$st" -lt "$NEWEST_CLASS_MTIME" ]]; then
+      anchor_die "e2e 后端 PID $pid 启动于 $(fmt_epoch "$st")，而 target/classes 最新编译于 $(fmt_epoch "$NEWEST_CLASS_MTIME")（更新）→ 加载的是旧字节码。
+  请先跑：bash scripts/restart-e2e-backends.sh   （它会先 mvn compile 再重启）"
+    fi
+    code_desc+="${code_desc:+，}$name@PID$pid 启动 $(fmt_epoch "$st")"
+  done
+  # 空区间守卫：shard 区间如果解析成 0 个（SHARD_FROM 越界），上面两个循环会一次都不跑、
+  # 然后「全绿」通过 —— 那正是「什么都没校验却看起来通过了」，必须当成失败。
+  [[ -n "$code_desc" ]] || anchor_die "本次 shard 区间解析为空（SHARD_FROM=${SHARD_FROM} WANT_SHARDS=${WANT_SHARDS}）→ 一个被测物都没校验到"
+  echo "  ✓ A 代码锚：$code_desc ≥ 最新 class $(fmt_epoch "$NEWEST_CLASS_MTIME")"
+
+  # ── B 健康锚 ──────────────────────────────────────────────────────────────
+  health_desc=""
+  for s in "${SHARDS[@]:$SHARD_FROM:$WANT_SHARDS}"; do
+    IFS=: read -r name pport aport backend <<< "$s"
+    if ! health_ok "$backend"; then
+      anchor_die "shard $name 的后端 $backend /api/health 不是「200 + body 含 \"status\":\"ok\"」
+  → 端口通但服务没起全（本服务对未知路径也回 200，只看状态码会被骗）。
+  排查：bash scripts/restart-e2e-backends.sh；或 curl -s http://127.0.0.1:$backend/api/health"
+    fi
+    health_desc+="${health_desc:+/}$backend"
+  done
+  echo "  ✓ B 健康锚：$health_desc /api/health 200 且 status=ok"
+
+  # ── C 独占锚（只告警不拦）────────────────────────────────────────────────
+  others=()
+  for u in $(systemctl list-units --all --plain --no-legend 'run-*.scope' 2>/dev/null | awk '{print $1}'); do
+    d="$(systemctl show "$u" -p Description --value 2>/dev/null || true)"
+    [[ "$d" == *"e2e-inner-$TAG.sh"* ]] && continue
+    others+=("$u")
+  done
+  for f in "$SCOPE_DIR"/*; do
+    [[ -f "$f" ]] || continue
+    ot="$(basename "$f")"
+    [[ "$ot" == "$TAG" ]] && continue
+    others+=("tag:$ot")
+  done
+  if [[ "${#others[@]}" -gt 0 ]]; then
+    echo "  ⚠ 检测到并发跑批：${others[*]}，结果可能互相干扰（本次用 shard ${SHARD_FROM}~$((SHARD_FROM + WANT_SHARDS - 1))，继续跑）"
+  else
+    echo "  ✓ C 独占锚：没有别的 e2e 跑批在跑"
+  fi
+fi
+
 # 前置：重置库（独立库的最大好处就是可以随便重置）
 if [[ "$DO_RESET" == "1" ]]; then
   echo "▶ 重置 e2e 库"
