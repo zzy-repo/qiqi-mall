@@ -16,4 +16,7 @@ public class DeliveryUpdateRequest {
 
     /** 要改量的明细；null/空表示不改量 */
     private List<DeliveryItemQty> items;
+
+    /** 一次性确认码（先 ?dryRun=true 预演拿到）；也可用查询参数 ?confirmCode= 传 */
+    private String confirmCode;
 }

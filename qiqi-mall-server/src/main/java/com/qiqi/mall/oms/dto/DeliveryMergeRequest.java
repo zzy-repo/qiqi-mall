@@ -8,4 +8,7 @@ public class DeliveryMergeRequest {
 
     /** 目标包裹（必须同订单、同为待下发） */
     private Long targetId;
+
+    /** 一次性确认码（先 ?dryRun=true 预演拿到）；也可用查询参数 ?confirmCode= 传 */
+    private String confirmCode;
 }

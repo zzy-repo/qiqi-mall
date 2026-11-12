@@ -88,11 +88,11 @@ public class CatalogDeleteGuard {
 
     /** 商品：被「订单明细」「购物车」引用；有订单时建议改为下架 */
     public String checkProduct(Long productId) {
-        long orderItems = orderItemService.count(new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getProductId, productId));
+        long orderItems = countOrderItemsOfProduct(productId);
         if (orderItems > 0) {
             return String.format("该商品已被 %d 条订单明细引用，不能删除（可改为下架）", orderItems);
         }
-        long carts = cartService.count(new LambdaQueryWrapper<Cart>().eq(Cart::getProductId, productId));
+        long carts = countCartsOfProduct(productId);
         if (carts > 0) {
             return String.format("该商品还在 %d 个买家的购物车里，不能删除（可改为下架）", carts);
         }
@@ -101,11 +101,33 @@ public class CatalogDeleteGuard {
 
     /** SKU：被「订单明细」「购物车」引用（规格值随 SKU 级联，不算引用） */
     public String checkSku(Long skuId) {
-        long orderItems = orderItemService.count(new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getProductSkuId, skuId));
+        long orderItems = countOrderItemsOfSku(skuId);
         if (orderItems > 0) return String.format("该规格已被 %d 条订单明细引用，不能删除", orderItems);
-        long carts = cartService.count(new LambdaQueryWrapper<Cart>().eq(Cart::getProductSkuId, skuId));
+        long carts = countCartsOfSku(skuId);
         if (carts > 0) return String.format("该规格还在 %d 个买家的购物车里，不能删除", carts);
         return null;
+    }
+
+    // ---- 引用计数（确认码预演文案 + 指纹都用这几个，保证「说的」和「查的」是同一口径） ----
+
+    /** 商品被多少条订单明细引用 */
+    public long countOrderItemsOfProduct(Long productId) {
+        return orderItemService.count(new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getProductId, productId));
+    }
+
+    /** 商品在多少个购物车里 */
+    public long countCartsOfProduct(Long productId) {
+        return cartService.count(new LambdaQueryWrapper<Cart>().eq(Cart::getProductId, productId));
+    }
+
+    /** SKU 被多少条订单明细引用 */
+    public long countOrderItemsOfSku(Long skuId) {
+        return orderItemService.count(new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getProductSkuId, skuId));
+    }
+
+    /** SKU 在多少个购物车里 */
+    public long countCartsOfSku(Long skuId) {
+        return cartService.count(new LambdaQueryWrapper<Cart>().eq(Cart::getProductSkuId, skuId));
     }
 
     /** 退货原因：被「退货申请」引用（字典项一旦用过就不能删，否则历史申请说不清原因） */

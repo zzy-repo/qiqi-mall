@@ -1,7 +1,7 @@
 package com.qiqi.mall.oms;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.qiqi.mall.oms.service.ConfirmCodeService;
+import com.qiqi.mall.shared.security.ConfirmCodeService;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.order.entity.OrderItem;
 import com.qiqi.mall.order.mapper.OrderItemMapper;
@@ -52,7 +52,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * ⑦ 码过期（把 KV 里的 TTL 改成 1 毫秒模拟 5 分钟到期）→ 被拒
  * ⑧ A 单的码用到 B 单 → 「确认码与订单不匹配」
  * ⑨ status != 7 的订单 → 仍返回原有守卫错误
- * ⑩ audit-reject 不需要码（跑一次 reject 不报缺码）
+ * ⑩ audit-reject 现在也要码（口径已扩到 14 个 L3 写接口）：不带码 → 「缺少确认码」
  *
  * <p>数据自建：测试只复用目录域里「已有 SKU + 已有分仓库存」的只读事实，
  * 订单/明细全部自己插、跑完全部删（order 级联清掉 order_item / delivery_order / delivery_item）。
@@ -361,24 +361,23 @@ class OrderConfirmCodeIntegrationTest {
         assertThat(statusOf(orderId)).as("守卫拦下后状态不变").isEqualTo(1);
     }
 
-    // ------------------------------------------------------------------ ⑩ reject 不要码
+    // ------------------------------------------------------------------ ⑩ reject 也要码（口径扩大）
 
     @Test
     @org.junit.jupiter.api.Order(10)
-    @DisplayName("⑩ audit-reject 不需要确认码（不报缺码）")
-    void auditReject_doesNotNeedCode() {
+    @DisplayName("⑩ audit-reject 已纳入确认码口径（不带码 → 缺少确认码）")
+    void auditReject_alsoNeedsCode() {
         Long orderId = newPendingOrder(7, skuA, skuB);
 
         ResponseEntity<JsonNode> http = call(HttpMethod.POST, "/admin/orders/" + orderId + "/audit-reject", null, adminJwt);
         JsonNode body = http.getBody();
-        System.out.printf("⑩ POST /admin/orders/%d/audit-reject（不带码）→ HTTP %d，code=%d，message=%s，订单状态=%d%n",
-                orderId, http.getStatusCode().value(), body.path("code").asInt(),
-                body.path("message").asText(), statusOf(orderId));
+        System.out.printf("⑩ POST /admin/orders/%d/audit-reject（不带码）→ code=%d，message=%s，订单状态仍=%d%n",
+                orderId, body.path("code").asInt(), body.path("message").asText(), statusOf(orderId));
 
         assertThat(http.getStatusCode().value()).isEqualTo(200);
-        assertThat(body.path("code").asInt()).as("reject 不该被确认码拦住：%s", body).isZero();
-        assertThat(body.path("message").asText()).doesNotContain("确认码");
-        assertThat(statusOf(orderId)).as("审核不通过 → 已关闭(4)").isEqualTo(4);
+        assertThat(body.path("code").asInt()).isEqualTo(1);
+        assertThat(body.path("message").asText()).startsWith("缺少确认码");
+        assertThat(statusOf(orderId)).as("被拒时不能关单").isEqualTo(7);
     }
 
     // ------------------------------------------------------------------ 辅助

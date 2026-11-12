@@ -3,6 +3,9 @@ package com.qiqi.mall.catalog.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.shared.guard.CatalogDeleteGuard;
+import com.qiqi.mall.shared.security.ConfirmCodeService;
+import com.qiqi.mall.shared.security.ConfirmOps;
+import com.qiqi.mall.shared.security.ConfirmRequest;
 import com.qiqi.mall.catalog.entity.Attribute;
 import com.qiqi.mall.catalog.entity.Product;
 import com.qiqi.mall.catalog.entity.Sku;
@@ -33,16 +36,18 @@ public class SkuController {
     private final AttributeService attributeService;
     private final ProductService productService;
     private final SpecTextHelper specTextHelper;
+    private final ConfirmCodeService confirmCodeService;
 
     public SkuController(SkuService skuService, SkuSpecService skuSpecService, AttributeService attributeService,
                          ProductService productService, SpecTextHelper specTextHelper,
-                         CatalogDeleteGuard deleteGuard) {
+                         CatalogDeleteGuard deleteGuard, ConfirmCodeService confirmCodeService) {
         this.skuService = skuService;
         this.skuSpecService = skuSpecService;
         this.attributeService = attributeService;
         this.productService = productService;
         this.specTextHelper = specTextHelper;
         this.deleteGuard = deleteGuard;
+        this.confirmCodeService = confirmCodeService;
     }
 
     /** 列表：带规格文本，可按商品过滤 */
@@ -104,10 +109,35 @@ public class SkuController {
     }
 
     /** 删除 SKU：被订单明细 / 购物车引用时不允许删 */
+    /**
+     * 删除规格：被订单明细/购物车引用时拒绝。
+     * 确认码：?dryRun=true 预演；指纹 = 订单明细引用数 + 购物车引用数 —— 引用数变了执行会被拒。
+     */
     @DeleteMapping("/{id}")
-    public Result<Void> delete(@PathVariable Long id) {
+    public Result<?> delete(@PathVariable Long id,
+                            @RequestParam(required = false) Boolean dryRun,
+                            @RequestBody(required = false) ConfirmRequest req) {
+        Sku sku = skuService.getById(id);
+        if (sku == null) return Result.fail("规格不存在");
+        long orderItems = deleteGuard.countOrderItemsOfSku(id);
+        long carts = deleteGuard.countCartsOfSku(id);
         String blocked = deleteGuard.checkSku(id);
+        Product product = sku.getProductId() == null ? null : productService.getById(sku.getProductId());
+
+        String willDo = "将删除规格 SKU #" + sku.getId()
+                + (product == null ? "" : "（商品「" + product.getName() + "」）")
+                + "：售价 ¥" + sku.getPrice() + "、总池库存 " + sku.getStock() + " 件"
+                + "。当前被 " + orderItems + " 条订单明细、" + carts + " 个购物车引用"
+                + (blocked != null ? " —— 删除会被拒绝。" : "。删除后不可恢复。");
+
+        if (ConfirmCodeService.isDryRun(dryRun)) {
+            return Result.ok(confirmCodeService.preflight(willDo, ConfirmOps.SKU_DELETE, id, orderItems, carts));
+        }
+        String error = confirmCodeService.verify(req == null ? null : req.getConfirmCode(),
+                ConfirmOps.SKU_DELETE, id, orderItems, carts);
+        if (error != null) return Result.fail(error);
         if (blocked != null) return Result.fail(blocked);
+
         skuService.removeById(id);
         return Result.ok();
     }
