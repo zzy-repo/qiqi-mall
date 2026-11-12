@@ -67,6 +67,14 @@ class OrderPurgeLedgerIntegrationTest {
     @Autowired
     private JdbcTemplate jdbc;
 
+    /**
+     * 库存落点（启动时定：legacy = sku.stock 就是库存 / bucket = 权威在分桶，sku.stock 是缓存）。
+     * 本类断言前先 refreshDisplayCache 一次，这样「读 sku.stock」= 读权威值，断言口径不变；
+     * 还原库存用 resetStock（legacy 写 sku.stock，bucket 重铺桶），两种模式都能跑。
+     */
+    @Autowired
+    private com.qiqi.mall.stock.StockStore stockStore;
+
     private String adminJwt;
     private Long skuId;
     private Long productId;
@@ -113,7 +121,7 @@ class OrderPurgeLedgerIntegrationTest {
         }
         // 审核不通过回补过的库存还回去（用例要的是「有台账」，不是改库存）
         if (skuId != null && skuStockBefore != null) {
-            jdbc.update("UPDATE sku SET stock = ? WHERE id = ?", skuStockBefore, skuId);
+            stockStore.resetStock(skuId, skuStockBefore);   // 还原权威库存（桶 + 缓存）
         }
         System.out.printf("[清理] 自建订单 %d 张、会员 %d 个已删除，sku=%d 库存还原为 %s%n",
                 createdOrders.size(), createdMembers.size(), skuId, skuStockBefore);
@@ -142,6 +150,8 @@ class OrderPurgeLedgerIntegrationTest {
         int ledgerRows = ledgerCountOf(orderId);
         int ledgerDeltaSum = jdbc.queryForObject(
                 "SELECT COALESCE(SUM(delta), 0) FROM stock_ledger WHERE order_id = ?", Integer.class, orderId);
+        // 先按 SUM(sku_bucket.stock) 刷新展示缓存，再读 —— 断言的是权威库存，不是可能滞后的缓存
+        stockStore.refreshDisplayCache(skuId);
         int stockAfterRestore = jdbc.queryForObject("SELECT stock FROM sku WHERE id = ?", Integer.class, skuId);
         System.out.printf("① 自建订单 id=%d 单号=%s：审核不通过后订单=%d，台账 %d 行（delta 合计 %d），sku.stock %d → %d%n",
                 orderId, orderSn, orderStatusAfterReject, ledgerRows, ledgerDeltaSum, skuStockBefore, stockAfterRestore);

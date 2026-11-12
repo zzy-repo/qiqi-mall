@@ -95,6 +95,14 @@ class OptimisticLockIntegrationTest {
     @Autowired
     private JdbcTemplate jdbc;
 
+    /**
+     * 库存落点（启动时定：legacy = sku.stock 就是库存 / bucket = 权威在分桶，sku.stock 是缓存）。
+     * 本类断言前先 refreshDisplayCache 一次，这样「读 sku.stock」= 读权威值，断言口径不变；
+     * 还原库存用 resetStock（legacy 写 sku.stock，bucket 重铺桶），两种模式都能跑。
+     */
+    @Autowired
+    private com.qiqi.mall.stock.StockStore stockStore;
+
     private String adminJwt;
     private Long memberId;          // 种子会员：只当作订单的归属，不改它
     private Long categoryId;
@@ -537,7 +545,7 @@ class OptimisticLockIntegrationTest {
                 deliveryStatus(deliveryId), stockBefore, stockOf(skuId));
 
         // 这条用例往种子 SKU 上加了 3 件，跑完还原，别污染别的用例
-        jdbc.update("UPDATE sku SET stock = ? WHERE id = ?", stockBefore, skuId);
+        stockStore.resetStock(skuId, stockBefore);   // 还原权威库存（桶 + 缓存）
     }
 
     // ================================================================== ⑪ wms-callback
@@ -834,7 +842,7 @@ class OptimisticLockIntegrationTest {
         assertThat(paymentCountByType(sn, 2)).as("退款流水恰好 1 条").isEqualTo(1);
 
         // 这条用例往种子 SKU 上加了 2 件，跑完还原，别污染别的用例
-        jdbc.update("UPDATE sku SET stock = ? WHERE id = ?", stockBefore, skuId);
+        stockStore.resetStock(skuId, stockBefore);   // 还原权威库存（桶 + 缓存）
     }
 
     @Test
@@ -874,7 +882,7 @@ class OptimisticLockIntegrationTest {
         assertThat(stockOf(skuId)).as("**关键：库存只回补一次（3 件）**").isEqualTo(stockBefore + 3);
         assertThat(paymentCountByType(sn, 2)).as("**关键：退款流水只有 1 条**").isEqualTo(1);
 
-        jdbc.update("UPDATE sku SET stock = ? WHERE id = ?", stockBefore, skuId);
+        stockStore.resetStock(skuId, stockBefore);   // 还原权威库存（桶 + 缓存）
     }
 
     // ================================================================== ⑲ split 并发
@@ -1078,7 +1086,7 @@ class OptimisticLockIntegrationTest {
         int stockBefore = stockOf(skuId);
         ok(post("/admin/deliveries/" + lateParcel + "/cancel", null));
         int orderAfterLateWriter = orderStatus(orderId);
-        jdbc.update("UPDATE sku SET stock = ? WHERE id = ?", stockBefore, skuId);   // 撤销 cancel 的库存回补
+        stockStore.resetStock(skuId, stockBefore);   // 还原权威库存（桶 + 缓存）   // 撤销 cancel 的库存回补
         System.out.printf("㉒ ④ 晚到的写者（取消一张待下发包裹触发聚合）→ 订单=%d%n", orderAfterLateWriter);
         assertThat(orderAfterLateWriter).as("晚到的写者只能改包裹，不许把已完成订单退回已发货").isEqualTo(3);
         assertThat(deliveryStatus(lateParcel)).as("被取消的包裹自身状态确实变了（证明聚合真的跑过）").isEqualTo(9);
@@ -1265,7 +1273,7 @@ class OptimisticLockIntegrationTest {
                 returnApplyStatusOf(applyId), orderStatus(orderId));
         assertThat(returnApplyStatusOf(applyId)).isEqualTo(1);
         assertThat(orderStatus(orderId)).as("5→6 是退货审核写出来的，不许被上面的聚合守卫挡掉").isEqualTo(6);
-        jdbc.update("UPDATE sku SET stock = ? WHERE id = ?", stockBefore, skuId);   // 还原被回补的库存
+        stockStore.resetStock(skuId, stockBefore);   // 还原权威库存（桶 + 缓存）   // 还原被回补的库存
     }
 
     // ================================================================== ㉗ 审核通过写 6 必须先校验原状态
@@ -1427,7 +1435,7 @@ class OptimisticLockIntegrationTest {
                 "SELECT product_sku_id FROM delivery_item WHERE delivery_id = ? LIMIT 1", Long.class, parcel);
         int stockBeforeCancel = stockOf(cancelledSku);
         ok(post("/admin/deliveries/" + parcel + "/cancel", null));
-        jdbc.update("UPDATE sku SET stock = ? WHERE id = ?", stockBeforeCancel, cancelledSku);   // 撤销 cancel 的库存回补
+        stockStore.resetStock(cancelledSku, stockBeforeCancel);   // 撤销 cancel 的库存回补（桶 + 缓存一起还原）
         System.out.printf("㉚ ① 取消唯一包裹 → 包裹=%d（已取消），订单=%d（待审核），split_status=%d%n",
                 deliveryStatus(parcel), orderStatus(orderId), orderSplitStatus(orderId));
         assertThat(deliveryStatus(parcel)).isEqualTo(9);
@@ -1480,7 +1488,7 @@ class OptimisticLockIntegrationTest {
         ok(put("/admin/return-applies/" + applyA2, "{\"status\":1}"));
         System.out.printf("㉛-A'' 审核通过 → 订单 %d（应为 6 已退款）%n", orderStatus(direct));
         assertThat(orderStatus(direct)).as("重新走一遍审核流程要真的能通过").isEqualTo(6);
-        jdbc.update("UPDATE sku SET stock = ? WHERE id = ?", directStockBefore, directSku);   // 还原被回补的库存
+        stockStore.resetStock(directSku, directStockBefore);   // 还原被回补的库存（桶 + 缓存一起还原）
 
         // B：有已出库包裹 —— **不硬写 7**，交回聚合，按子单推导出 2 已发货
         Long shipped = newOrderWithItem(5, 1);
@@ -1737,6 +1745,8 @@ class OptimisticLockIntegrationTest {
     }
 
     private int stockOf(Long skuId) {
+        // 先按 SUM(sku_bucket.stock) 刷新展示缓存，再读 —— 断言的是权威库存，不是可能滞后的缓存
+        stockStore.refreshDisplayCache(skuId);
         return jdbc.queryForObject("SELECT stock FROM sku WHERE id = ?", Integer.class, skuId);
     }
 

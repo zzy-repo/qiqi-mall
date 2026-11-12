@@ -58,6 +58,14 @@ class OrderCreateStatusWhitelistIntegrationTest {
     @Autowired
     private JdbcTemplate jdbc;
 
+    /**
+     * 库存落点（启动时定：legacy = sku.stock 就是库存 / bucket = 权威在分桶，sku.stock 是缓存）。
+     * 本类断言前先 refreshDisplayCache 一次，这样「读 sku.stock」= 读权威值，断言口径不变；
+     * 还原库存用 resetStock（legacy 写 sku.stock，bucket 重铺桶），两种模式都能跑。
+     */
+    @Autowired
+    private com.qiqi.mall.stock.StockStore stockStore;
+
     private String adminJwt;
     private Long memberId;
     private Long productId;
@@ -102,7 +110,7 @@ class OrderCreateStatusWhitelistIntegrationTest {
         }
         jdbc.update("DELETE FROM member WHERE id = ?", memberId);
         if (skuId != null && skuStockBefore != null) {
-            jdbc.update("UPDATE sku SET stock = ? WHERE id = ?", skuStockBefore, skuId);
+            stockStore.resetStock(skuId, skuStockBefore);   // 还原权威库存（桶 + 缓存）
         }
         System.out.printf("[清理] 自建订单 %d 张、会员 1 个已删除，sku=%d 库存还原为 %s%n",
                 createdOrders.size(), skuId, skuStockBefore);

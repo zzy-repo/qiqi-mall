@@ -107,6 +107,14 @@ class DryRunPreviewIntegrationTest {
     @Autowired
     private JdbcTemplate jdbc;
 
+    /**
+     * 库存落点（启动时定：legacy = sku.stock 就是库存 / bucket = 权威在分桶，sku.stock 是缓存）。
+     * 本类断言前先 refreshDisplayCache 一次，这样「读 sku.stock」= 读权威值，断言口径不变；
+     * 还原库存用 resetStock（legacy 写 sku.stock，bucket 重铺桶），两种模式都能跑。
+     */
+    @Autowired
+    private com.qiqi.mall.stock.StockStore stockStore;
+
     @Autowired
     private OrderMapper orderMapper;
 
@@ -192,7 +200,7 @@ class DryRunPreviewIntegrationTest {
         for (Long productId : createdProducts) {
             jdbc.update("DELETE FROM product WHERE id = ?", productId);  // 级联下辖 SKU
         }
-        originalStock.forEach((skuId, stock) -> jdbc.update("UPDATE sku SET stock = ? WHERE id = ?", stock, skuId));
+        originalStock.forEach(stockStore::resetStock);   // 还原权威库存（桶 + 缓存），不是只改缓存
 
         // 自查看一眼：本类造过的订单（含 ④ 自己删掉的那张）一条台账都不许剩 ——
         // 留了就说明又产生了孤儿台账，直接让本类红，而不是等 check-data-integrity.sh 隔天发现
@@ -768,6 +776,8 @@ class DryRunPreviewIntegrationTest {
     }
 
     private int stockOf(Long skuId) {
+        // 先按 SUM(sku_bucket.stock) 刷新展示缓存，再读 —— 断言权威库存而不是可能滞后的缓存
+        stockStore.refreshDisplayCache(skuId);
         return jdbc.queryForObject("SELECT stock FROM sku WHERE id = ?", Integer.class, skuId);
     }
 
@@ -848,7 +858,9 @@ class DryRunPreviewIntegrationTest {
         m.put("台账行数", num("SELECT COUNT(*) FROM stock_ledger WHERE order_id " + orders.sql, orders.args));
         m.put("台账净额和",
                 num("SELECT COALESCE(SUM(delta),0) FROM stock_ledger WHERE order_id " + orders.sql, orders.args));
-        m.put("本测试SKU库存和", num("SELECT COALESCE(SUM(stock),0) FROM sku WHERE id " + skus.sql, skus.args));
+        // 库存指纹读权威值 SUM(桶)：sku.stock 是缓存（可能滞后几百毫秒），拿它做「零落库」指纹会假红
+        m.put("本测试SKU库存和(SUM桶)", num("SELECT COALESCE(SUM(stock),0) FROM sku_bucket WHERE sku_id "
+                + skus.sql, skus.args));
         m.put("本测试商品行数", num("SELECT COUNT(*) FROM product WHERE id " + products.sql, products.args));
         return m;
     }
