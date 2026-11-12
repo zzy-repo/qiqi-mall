@@ -31,6 +31,25 @@ npm start
 bash ../scripts/reset-test-db.sh     # 或 cd ../e2e && npm run reset:test
 ```
 
+## 用 MCP Inspector 调试
+
+```bash
+# ⚠️ v2.15 的 stdio 子进程不继承父进程环境变量，必须显式 -e 传
+npx -y @modelcontextprotocol/inspector \
+  -e MALL_BASE=http://127.0.0.1:18080 \
+  -e MALL_USER=ai_operator \
+  -e MALL_PASS='Ai@2026#ops' \
+  -e MCP_ENABLE_WRITE=1 \
+  node mcp-server/src/index.mjs
+```
+
+踩坑记录（v2.15.0 实测）：
+
+- **stdio 子进程拿不到父进程 env** → 不传 `-e` 会只注册 2 个只读工具（`MCP_ENABLE_WRITE` 不生效）
+- UI URL 参数是 `?MCP_INSPECTOR_API_TOKEN=…`（不是旧版的 `MCP_PROXY_AUTH_TOKEN`）
+- UI 用的是 **Mantine**，不是 MUI：Run 按钮文案是 `Execute Tool`，连服务器点 `span.mantine-Switch-track`
+- 成功后参数输入框会被 React 受控组件清空（想连点两次同参，靠 state 保留而不是输入框）
+
 ## 环境变量
 
 | 变量 | 默认 | 说明 |
