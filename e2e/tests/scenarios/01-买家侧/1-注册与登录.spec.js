@@ -5,7 +5,7 @@ import { loginError, loginFieldError } from '../../support/portal-ui.js'
 import { getMemberProfileApi, getMemberOrdersApi, memberTokenOf } from '../../support/assert.js'
 import { tid } from '../../support/tid.js'
 import { memberNickOf } from '../../support/fixtures.js'
-import { demoName, demoUsername } from '../../support/images.js'
+import { demoName, demoUsername, expectAllImagesLoaded } from '../../support/images.js'
 
 
 /**
@@ -36,6 +36,8 @@ test.describe('买家侧 01 注册与登录', () => {
     // 顶栏出现「你好，昵称」+ 退出入口，说明已登录
     await expect(tid(page, 'header-logout'), '顶栏应出现退出入口').toBeVisible()
     await expect(page.locator('body')).toContainText(nickname)
+    // 首页商品图要真的出图（演示片里不能停在灰底占位框上）；顺带钉住「登录后首页能正常出图」
+    await expectAllImagesLoaded(tid(page, 'home-product-card').locator('img'), '首页商品卡片图')
 
     // 服务端复核：token 可用，profile 是刚注册的账号
     const token = await memberTokenOf(page)
@@ -49,7 +51,7 @@ test.describe('买家侧 01 注册与登录', () => {
   test('用户名已占用：注册被拒，停留在注册页并提示', async ({ page }) => {
     const username = demoUsername('林小姐') || `e2e_auth_dup_${stamp()}`
     // 先建一个占位账号（真实注册页）
-    await memberRegisterAndLogin(page, username)
+    await memberRegisterAndLogin(page, username, '123456', memberNickOf(username))
 
     await openRegisterTab(page)
     await tid(page, 'auth-input-username').fill(username)
@@ -81,7 +83,7 @@ test.describe('买家侧 01 注册与登录', () => {
 
   test('密码错误：登录被拒并提示「用户名或密码错误」', async ({ page }) => {
     const username = demoUsername('陈先生') || `e2e_auth_pwd_${stamp()}`
-    await memberRegisterAndLogin(page, username)
+    await memberRegisterAndLogin(page, username, '123456', memberNickOf(username))
     // 退出登录（顶栏「退出」）
     await tid(page, 'header-logout').click()
     await page.waitForTimeout(800)
@@ -100,7 +102,7 @@ test.describe('买家侧 01 注册与登录', () => {
 
   test('未登录访问受保护页：拦截到登录页，登录后跳回原页面', async ({ page, request }) => {
     const username = demoUsername('王女士') || `e2e_auth_redirect_${stamp()}`
-    await memberRegisterAndLogin(page, username)
+    await memberRegisterAndLogin(page, username, '123456', memberNickOf(username))
     await tid(page, 'header-logout').click()
     await page.waitForTimeout(800)
 
@@ -127,6 +129,7 @@ test.describe('买家侧 01 注册与登录', () => {
     const username = demoUsername('赵小满') || `e2e_auth_weak_${stamp()}`
     await openRegisterTab(page)
     await tid(page, 'auth-input-username').fill(username)
+    await tid(page, 'auth-input-nickname').fill(memberNickOf(`${username}-weak`))  // 顶栏会显示，用自然中文昵称
     await tid(page, 'auth-input-password').fill('1')
     await tid(page, 'auth-submit').click()
     await expect(page, '当前无密码强度校验：1 位密码也能注册成功').not.toHaveURL(/\/login/, { timeout: 20_000 })

@@ -10,6 +10,7 @@ import { expect } from '@playwright/test'
 import { ADMIN } from './env.js'
 import { adminLogin } from './ui.js'
 import { tid } from './tid.js'
+import { receiverOf } from './fixtures.js'
 
 // ---------------------------------------------------------------------------
 // 通用：登录（带一次 500 重试）
@@ -110,10 +111,16 @@ export const auditPassOrder = async (page, row) => {
 
 /**
  * 用「新增订单」表单在 UI 里造一笔订单（状态可选，一般造「待审核」再走审核通过）。
+ *
+ * 收货人/电话/地址都会显示在弹窗和订单列表里，所以默认值取自 fixtures 的真实地址簿，
+ * 不再用 `调整E2E` / `E2E路` 这种测试味文案；调用方可用 receiver 覆盖（建议传 receiverOf(seed)，
+ * 保证姓名-电话-地址是同一个人的）。
  * @param items [{ productName, skuIndex, quantity }]
+ * @param receiver { receiverName, receiverPhone, receiverAddress }
  * @returns 订单号（保存后列表第一行）
  */
-export const createOrderViaUi = async (page, { receiverName = '调整E2E', status = '待审核', items }) => {
+export const createOrderViaUi = async (page, { receiver, status = '待审核', items }) => {
+  const who = receiver ?? receiverOf('新增订单默认收货人')
   // 订单列表页头的「新增」按钮没有 testid（本轮 testid 只覆盖了搜索/筛选/行操作），按文案点
   await page.getByRole('button', { name: '新增' }).click()
   const dlg = tid(page, 'order-form-dialog')
@@ -124,9 +131,9 @@ export const createOrderViaUi = async (page, { receiverName = '调整E2E', statu
   await page.waitForTimeout(400)
   await page.locator('.el-select-dropdown__item:visible').first().click()
 
-  await tid(page, 'order-form-receiver-name').fill(receiverName)
-  await tid(page, 'order-form-receiver-phone').fill('13600003333')
-  await tid(page, 'order-form-receiver-address').fill('广东省深圳市南山区E2E路 9 号')
+  await tid(page, 'order-form-receiver-name').fill(who.receiverName)
+  await tid(page, 'order-form-receiver-phone').fill(who.receiverPhone)
+  await tid(page, 'order-form-receiver-address').fill(who.receiverAddress)
 
   // 状态
   await tid(page, 'order-form-status').click()

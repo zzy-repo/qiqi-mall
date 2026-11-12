@@ -18,7 +18,7 @@ import {
 } from '../../support/admin-ui.js'
 import { adminTokenOf, getProductApi, getAdminOrderBySnApi, listDeliveriesApi } from '../../support/assert.js'
 import { tid } from '../../support/tid.js'
-import { addressOf } from '../../support/fixtures.js'
+import { receiverOf } from '../../support/fixtures.js'
 
 /**
  * 03-商家-履约 / 3-发货单调整（docs/flows/02-业务场景/03-商家-履约/3-发货单调整.mmd）
@@ -47,7 +47,7 @@ test.describe('03-商家-履约 › 3-发货单调整', () => {
     await test.step('② 造一笔待审核订单（同一商品两个 SKU，跨两个仓）', async () => {
       await gotoOrderList(page)
       orderSn = await createOrderViaUi(page, {
-        receiverName: addressOf(orderSnStamp).name,
+        receiver: receiverOf(orderSnStamp),
         status: '待审核',
         items: [
           { productName, skuIndex: 0, quantity: 2 },

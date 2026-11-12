@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { PORTAL, ADMIN, stamp } from '../../support/env.js'
+import { PORTAL, stamp } from '../../support/env.js'
 import {
   adminLogin,
   adminSetSkuStock,
@@ -10,8 +10,9 @@ import {
 import { memberOrderRow } from '../../support/ui.js'
 import { getProductApi, getMemberOrdersApi, memberTokenOf } from '../../support/assert.js'
 import { tid, tidPrefix } from '../../support/tid.js'
-import { addressOf, memberNickOf } from '../../support/fixtures.js'
+import { addressOf, memberNickOf, receiverOf } from '../../support/fixtures.js'
 import { demoName, demoUsername } from '../../support/images.js'
+import { withBackstage } from '../../support/backstage.js'
 
 
 /**
@@ -29,16 +30,20 @@ const checkoutForm = (page) => ({
 })
 
 test.describe('买家侧 04 结算下单与支付', () => {
-  test('结算页信息一致 → 下单 → 自动支付 → 订单待审核 + 库存扣减', async ({ page, request }) => {
+  test('结算页信息一致 → 下单 → 自动支付 → 订单待审核 + 库存扣减', async ({ page, request, browser }) => {
     const username = demoUsername('张小雨') || `e2e_order_${stamp()}`
     const buyer = addressOf(username)            // 收货人/地址会显示在订单里，用真实姓名与地址
-    await adminLogin(page)
-    await adminSetSkuStock(page, 1, 0, 50)
+    // 补库存是后台数据准备，放到「幕布」上下文里点（不进买家视角的录像，步骤与断言都不变）；
+    // 它和买家注册/加购**并行**，买家页面就不必空转等后台。
+    const prep = withBackstage(browser, async (admin) => {
+      await adminLogin(admin)
+      await adminSetSkuStock(admin, 1, 0, 50)
+    })
     await memberRegisterAndLogin(page, username, '123456', memberNickOf(username))
-
     const { skus } = await getProductApi(request, 1)
-    const sku = skus[0]
-    await addSpecToCart(page, 1, sku.specText)
+    await addSpecToCart(page, 1, skus[0].specText)
+    await prep                                   // 库存补好之后再读，断言用的就是补完的真实库存
+    const sku = (await getProductApi(request, 1)).skus[0]
     await page.goto(`${PORTAL}/cart`)
     await page.waitForTimeout(800)
     await tid(page, 'cart-checkout').click()
@@ -103,14 +108,18 @@ test.describe('买家侧 04 结算下单与支付', () => {
     expect(pageData.records.length, '校验不通过不应产生订单').toBe(0)
   })
 
-  test('库存不足：整单失败、不产生订单、库存不变', async ({ page, request }) => {
+  test('库存不足：整单失败、不产生订单、库存不变', async ({ page, request, browser }) => {
     const username = demoUsername('陈可') || `e2e_order_oos_${stamp()}`
     const buyer = addressOf(username)
-    await adminLogin(page)
-    // 把商品1 第一个 SKU 库存改小到 1（真实 UI）
-    await adminSetSkuStock(page, 1, 0, 1)
+    // 把商品1 第一个 SKU 库存改小到 1（真实 UI，在幕布上下文里点，买家视角的片子里不出现后台）；
+    // 与买家注册并行，买家页面不用干等。
+    const prep = withBackstage(browser, async (admin) => {
+      await adminLogin(admin)
+      await adminSetSkuStock(admin, 1, 0, 1)
+    })
 
     await memberRegisterAndLogin(page, username, '123456', memberNickOf(username))
+    await prep
     const { skus } = await getProductApi(request, 1)
     const sku = skus[0]
     expect(sku.stock, '前置：库存应为 1').toBe(1)
@@ -139,9 +148,11 @@ test.describe('买家侧 04 结算下单与支付', () => {
     expect((await getProductApi(request, 1)).skus.find((s) => s.id === sku.id).stock,
       '失败后库存应保持不变').toBe(1)
 
-    // 还原库存，避免影响后续用例
-    await page.goto(`${ADMIN}/product`)
-    await adminSetSkuStock(page, 1, 0, 50)
+    // 还原库存，避免影响后续用例（同样走幕布，别在买家片子尾巴上留一段后台画面）
+    await withBackstage(browser, async (admin) => {
+      await adminLogin(admin)
+      await adminSetSkuStock(admin, 1, 0, 50)
+    })
   })
 
   test('已支付订单不再显示「模拟支付」入口（支付守卫）', async ({ page, request }) => {
@@ -149,7 +160,8 @@ test.describe('买家侧 04 结算下单与支付', () => {
     await memberRegisterAndLogin(page, username, '123456', memberNickOf(username))
     const { skus } = await getProductApi(request, 1)
     await addSpecToCart(page, 1, skus[0].specText)
-    const orderSn = await submitCartOrder(page)
+    // 收货人走 fixtures 的自然姓名/地址（submitCartOrder 的默认值是「E2E买家」，会显示在订单里）
+    const orderSn = await submitCartOrder(page, receiverOf(username))
 
     const row = await memberOrderRow(page, orderSn)
     await expect(row, '已支付订单应为待审核').toContainText('待审核')

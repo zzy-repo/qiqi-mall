@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { stamp } from '../../support/env.js'
+import { memberLoginOf } from '../../support/member-login.js'
 import {
   readCaptchaFromLog,
   logSize,
@@ -23,7 +24,9 @@ import {
  *   「一次性消费」 = 同一 captchaId 第二次使用必须被拒（取出即删的接口语义）
  *
  * ⚠️ 验证码失败计数是「按用户名」的全局状态（KvStore，5 分钟窗口），
- *    触发失败路径一律用不存在的专用用户名 e2e_captcha_probe（admin 全程只成功登录，永不失败）。
+ *    触发失败路径一律用专用探针用户名（admin 全程只成功登录，永不失败）。
+ *    探针名也会明文出现在登录页「用户名」输入框里，所以用 fixtures 的自然会员号（拼音+数字），
+ *    不用 e2e_ 前缀 —— 刚好不存在于库里，唯一性靠数字后缀。
  *
  * 验证码答案来源：后端 CaptchaService 把明文以 DEBUG 打到服务端日志
  * （CAPTCHA_LOG，默认 /tmp/dev-server.log），helper 从日志读取；不为测试改任何生产代码（无后门）。
@@ -32,7 +35,8 @@ import {
 const WRONG = 'wrong-pass'
 // 每次运行用独立 probe 用户名：失败计数是后端全局状态（captcha:fail:<username>，5 分钟窗口），
 // 多 shard / 多 agent 共用一个后端时，固定名字会被别人打满，导致本条「应 >=5 次」或「应清零」的断言假死。
-const PROBE = `e2e_captcha_probe_${Date.now().toString(36).slice(-5)}`
+// 名字要同时满足两条：界面上好看（登录页会显示）+ 库里不存在（探针不可能是真实会员）。
+const PROBE = memberLoginOf(stamp())
 const ADMIN_BASE = process.env.ADMIN_BASE || 'http://127.0.0.1:5175'
 
 test.afterEach(async ({ request }) => {

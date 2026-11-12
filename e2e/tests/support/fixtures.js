@@ -11,6 +11,8 @@
  * 三条硬规则（改 spec 时自查）：
  *   1. writeTempPng() 生成的纯色图**只能**用于上传边界测试（415 / 413 这类），
  *      商品主图/相册/SKU 图必须用 realImages() / realGalleryImages() / realSkuImages()（MinIO 上的真实种子图）。
+ *      同一批要建多个商品时用**索引轮转**的 imageFor(i) / galleryFor(i)，不要用 seed 哈希
+ *      （哈希不可控，曾经一批商品全拿到同一张封面 —— 视频里就是一整屏同款商品图）。
  *   2. 界面上不得出现 `E2E`、时间戳、UUID。唯一性放到不显示的字段（登录名 / 内部备注）。
  *   3. 断言里可以用时间戳做唯一标识，但不许靠「界面显示名含时间戳」来定位元素 ——
  *      用 data-testid（行锚点 `*-row-<id>`）或先用接口查出 id 再定位。
@@ -49,13 +51,19 @@ const IMG_BASE = '/qiqi-mall/seed'
 const productImg = (file) => `${IMG_BASE}/product/${file}.webp`
 
 /**
- * 可用的种子图清单（**已在浏览器同源下逐个验证 HTTP 200**，2026-11-11 复核）：
- *   封面：1..5            相册：1-1 1-2 1-3 2-1 4-1 5-1          SKU：sku/1..9
- * 注意：库里 seed 数据引用了 6..11 的封面和更多相册图，但这些对象在 MinIO 上并不存在
- * （直连 8081 会返回 200，但那是网关的 JSON 兜底，浏览器里 404 → el-image 显示「无法加载」）。
- * 所以这里的池子只放确认存在的图，别再加没验证过的路径。
+ * 可用的种子图清单（**已在浏览器同源下逐个验证 HTTP 200**，2026-11-12 复核）：
+ *   封面：1 2 4 5          相册：1-1 1-2 1-3 2-1 4-1 5-1          SKU：sku/1..9（**9 张同名同图**）
+ *
+ * 注意两件事，别踩：
+ *  1. 库里 seed 数据引用了 6..11 的封面和更多相册图，但这些对象在 MinIO 上并不存在
+ *     （直连 8081 会返回 200，但那是网关的 JSON 兜底，浏览器里 404 → el-image 显示「无法加载」）。
+ *     所以池子只放确认存在的图，别再加没验证过的路径。
+ *  2. `3-cover.webp` 与 `2-cover.webp` 是**同一个文件**（md5 相同），`sku/1..9` 九张也是
+ *     同一个文件（就是 1-cover 那张 MacBook）。演示要求「相邻商品不同图」，所以封面池
+ *     里把重复的 3-cover 去掉了 —— 真正互不相同的种子图只有 4 张：
+ *       1-cover MacBook Pro / 2-cover 华硕灵耀双屏 / 4-cover iPhone 13 Pro / 5-cover OPPO A57
  */
-export const realImages = ['1-cover', '2-cover', '3-cover', '4-cover', '5-cover'].map(productImg)
+export const realImages = ['1-cover', '2-cover', '4-cover', '5-cover'].map(productImg)
 
 /** 每张封面配套的相册图（都取自上面验证过的清单） */
 export const realGalleryImageSets = [
@@ -65,7 +73,7 @@ export const realGalleryImageSets = [
   { cover: productImg('5-cover'), gallery: [productImg('5-1'), productImg('1-2'), productImg('1-3')] }
 ]
 
-/** 9 张 SKU 图 */
+/** 9 张 SKU 图（注意：这 9 个对象在 MinIO 上是同一张图，取哪张都一样 → 无法靠轮转做出差异） */
 export const realSkuImageList = Array.from({ length: 9 }, (_, i) => `${IMG_BASE}/sku/${i + 1}.webp`)
 
 /** 取一张真实商品封面 */
@@ -76,6 +84,30 @@ export const realGalleryImages = (seed) => pick(realGalleryImageSets, seed)
 
 /** 取一张真实 SKU 图 */
 export const realSkuImages = (seed) => pick(realSkuImageList, seed)
+
+/** 把任意整数规约成池子下标（负数也能用） */
+export const imageAt = (i, len) => ((Math.trunc(Number(i) || 0) % len) + len) % len
+const at = imageAt
+
+/**
+ * 按**索引轮转**取封面：imageFor(0)≠imageFor(1)≠…，相邻商品天然不同图。
+ *
+ * 为什么不用 pick(seed)：seed 多来自 stamp()/用户名，哈希高低位不可控，
+ * 曾经出现「一批商品全落到同一张封面」——录进视频就是 12 张一模一样的主图。
+ * 索引轮转是确定性的：同一批商品挨着建 → 图片依次循环，不会撞。
+ *
+ * @example for (let i = 0; i < n; i++) await fillCover(imageFor(i))
+ */
+export const imageFor = (i = 0) => realImages[at(i, realImages.length)]
+
+/** 按索引轮转取「封面 + 相册」整组（相册条目数固定 3 张） */
+export const galleryFor = (i = 0) => {
+  const set = realGalleryImageSets[at(i, realGalleryImageSets.length)]
+  return { cover: set.cover, gallery: [...set.gallery] }
+}
+
+/** 按索引轮转取 SKU 图（受限于「9 张同一张图」，目前只保证接口一致，图变不了） */
+export const skuImageFor = (i = 0) => realSkuImageList[at(i, realSkuImageList.length)]
 
 // ---------------------------------------------------------------------------
 // 商品名：自然中文商品名 + 款式限定，读起来像电商后台里真实存在的商品

@@ -17,6 +17,7 @@ import {
 import { adminTokenOf, getProductApi, getAdminOrderBySnApi, listDeliveriesApi } from '../../support/assert.js'
 import { tid } from '../../support/tid.js'
 import { memberNickOf, receiverOf } from '../../support/fixtures.js'
+import { memberLoginOf } from '../../support/member-login.js'
 
 /**
  * 03-商家-履约 / 1-订单审核与发货（docs/flows/02-业务场景/03-商家-履约/1-订单审核与发货/1-业务时序图.mmd）
@@ -45,7 +46,8 @@ test.describe('03-商家-履约 › 1-订单审核与发货', () => {
 
     let orderSn
     await test.step('② 买家下单支付（下单即扣 1 件库存，订单进入待审核）', async () => {
-      const buyer = `e2e_audit_${stamp()}`
+      // 登录名会显示在后台订单列表的「买家」列，用自然会员号（唯一性靠数字后缀）
+      const buyer = memberLoginOf(stamp())
       await memberRegisterAndLogin(page, buyer, '123456', memberNickOf(buyer))
       await addSpecToCart(page, 1, specText, skuId)
       orderSn = await submitCartOrder(page, receiverOf(buyer))
@@ -128,7 +130,7 @@ test.describe('03-商家-履约 › 1-订单审核与发货', () => {
 
     let orderSn
     await test.step('② 买家下单支付（下单即扣 1 件）', async () => {
-      const buyer = `e2e_reject_${stamp()}`
+      const buyer = memberLoginOf(stamp())
       await memberRegisterAndLogin(page, buyer, '123456', memberNickOf(buyer))
       await addSpecToCart(page, 1, specText, skuId)
       orderSn = await submitCartOrder(page, receiverOf(buyer))

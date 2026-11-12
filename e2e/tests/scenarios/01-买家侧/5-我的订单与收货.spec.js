@@ -16,6 +16,7 @@ import { getProductApi, getAdminOrderBySnApi, adminTokenOf, memberTokenOf, getMe
 import { tid } from '../../support/tid.js'
 import { memberNickOf, receiverOf } from '../../support/fixtures.js'
 import { demoUsername } from '../../support/images.js'
+import { withBackstage } from '../../support/backstage.js'
 
 
 /**
@@ -26,6 +27,39 @@ import { demoUsername } from '../../support/images.js'
  *       越权：列表只含自己的订单，看不到别人的订单号
  * 断言依据：portal/order/index.vue（确认收货按钮 v-if status===2）、OrderController.confirm（守卫 status=2 且本人）
  */
+
+/**
+ * 后台准备：登录 + 把商品1 第一个 SKU 库存补回 50。
+ * 买家侧片子里不该出现后台画面（审计 C 项），所以这些点击都放到幕布上下文里做。
+ */
+async function prepareStock(browser) {
+  return withBackstage(browser, async (admin) => {
+    await adminLogin(admin)
+    await adminSetSkuStock(admin, 1, 0, 50)
+    return admin
+  })
+}
+
+/**
+ * 把订单推进到「已发货」：管理员审核 → 抽屉下发 → 出库（真实 UI）。
+ * 买家侧片子要纯买家视角，所以这段在幕布上下文里跑；同时买家页不断刷新订单列表，
+ * 画面里能看到状态从「待审核」变成「已发货」，不会出现十几秒的静止空档。
+ */
+async function shipOrderInBackstage(browser, buyerPage, orderSn) {
+  // 幕布是**另一个上下文**（另一份 localStorage），所以要先登录再操作
+  const shipping = withBackstage(browser, async (admin) => {
+    await adminLogin(admin)
+    await shipOrderByUi(admin, orderSn)
+  })
+  let shipped = false
+  for (let i = 0; i < 20 && !shipped; i++) {
+    await buyerPage.reload()
+    await buyerPage.waitForTimeout(1200)
+    shipped = (await buyerPage.locator('.el-table__body tr').first().innerText()).includes('已发货')
+  }
+  await shipping          // 后台的断言/异常照旧往上报
+  return shipped
+}
 
 /** 把订单推进到「已发货」：管理员审核 → 抽屉下发 → 出库（真实 UI） */
 async function shipOrderByUi(page, orderSn) {
@@ -42,17 +76,18 @@ async function shipOrderByUi(page, orderSn) {
 }
 
 test.describe('买家侧 05 我的订单与收货', () => {
-  test('订单列表 + 详情弹窗 + 包裹进度（含运单号）', async ({ page, request }) => {
+  test('订单列表 + 详情弹窗 + 包裹进度（含运单号）', async ({ page, request, browser }) => {
     const username = demoUsername('张小雨') || `e2e_orders_${stamp()}`
-    await adminLogin(page)
-    await adminSetSkuStock(page, 1, 0, 50)
+    // 幕布里的后台准备与买家注册/加购并行，买家页面不空转（幕布点击不进录像）
+    const prep = prepareStock(browser)
     await memberRegisterAndLogin(page, username, '123456', memberNickOf(username))
 
     const { skus } = await getProductApi(request, 1)
     await addSpecToCart(page, 1, skus[0].specText)
+    await prep
     const buyer = receiverOf(username)
     const orderSn = await submitCartOrder(page, buyer)
-    await shipOrderByUi(page, orderSn)
+    await shipOrderInBackstage(browser, page, orderSn)
 
     // 列表：状态为已发货
     const row = await memberOrderRow(page, orderSn)
@@ -77,19 +112,23 @@ test.describe('买家侧 05 我的订单与收货', () => {
     await expect(drawer).toContainText('已出库')
   })
 
-  test('确认收货：已发货订单 → 已完成，且入口随之消失、状态不回退', async ({ page, request }) => {
+  test('确认收货：已发货订单 → 已完成，且入口随之消失、状态不回退', async ({ page, request, browser }) => {
     const username = demoUsername('李思远') || `e2e_confirm_${stamp()}`
-    await adminLogin(page)
-    await adminSetSkuStock(page, 1, 0, 50)
-    // 令牌必须在还停留在该端页面时取：admin 端令牌在 admin 域，买家端令牌在 portal 域
-    const at = await adminTokenOf(page)
+    // 令牌必须在该端页面还开着时取（admin 令牌在 admin 域，买家令牌在 portal 域）；
+    // 幕布里的补库存与买家注册/加购并行，买家页面不空转。
+    const prep = withBackstage(browser, async (admin) => {
+      await adminLogin(admin)
+      await adminSetSkuStock(admin, 1, 0, 50)
+      return adminTokenOf(admin)
+    })
     await memberRegisterAndLogin(page, username, '123456', memberNickOf(username))
 
     const { skus } = await getProductApi(request, 1)
     await addSpecToCart(page, 1, skus[0].specText)
+    const at = await prep
     const buyer = receiverOf(username)
     const orderSn = await submitCartOrder(page, buyer)
-    await shipOrderByUi(page, orderSn)
+    await shipOrderInBackstage(browser, page, orderSn)
 
     const row = await memberOrderRow(page, orderSn)
     await expect(row).toContainText('已发货')
@@ -111,14 +150,14 @@ test.describe('买家侧 05 我的订单与收货', () => {
     expect(order.status, '订单应停在已完成(3)').toBe(3)
   })
 
-  test('越权：买家只看得到自己的订单', async ({ page, request }) => {
+  test('越权：买家只看得到自己的订单', async ({ page, request, browser }) => {
     // A 账号下一单并推进到已发货
     const userA = demoUsername('陈可') || `e2e_own_a_${stamp()}`
-    await adminLogin(page)
-    await adminSetSkuStock(page, 1, 0, 50)
+    const prep = prepareStock(browser)
     await memberRegisterAndLogin(page, userA, '123456', memberNickOf(userA))
     const { skus } = await getProductApi(request, 1)
     await addSpecToCart(page, 1, skus[0].specText)
+    await prep
     const orderA = await submitCartOrder(page, receiverOf(userA))
 
     // B 账号登录：列表里不该出现 A 的订单

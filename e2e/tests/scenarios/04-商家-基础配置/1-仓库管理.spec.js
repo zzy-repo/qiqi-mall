@@ -21,7 +21,7 @@ import {
 } from '../../support/admin-ui.js'
 import { adminTokenOf, getAdminProductsApi, getProductApi, getAdminOrderBySnApi, listDeliveriesApi } from '../../support/assert.js'
 import { tid } from '../../support/tid.js'
-import { addressOf, warehouseNameOf } from '../../support/fixtures.js'
+import { receiverOf, warehouseNameOf } from '../../support/fixtures.js'
 
 /**
  * 04-商家-基础配置 / 1-仓库管理（docs/flows/02-业务场景/04-商家-基础配置/1-仓库管理.mmd）
@@ -119,7 +119,7 @@ test.describe('04-商家-基础配置 › 1-仓库管理', () => {
       // 先用一笔真实订单把这个仓库「用起来」：新增订单 → 审核通过 → 生成发货单
       await gotoOrderList(page)
       const orderSn = await createOrderViaUi(page, {
-        receiverName: addressOf(seed).name,
+        receiver: receiverOf(seed),
         status: '待审核',
         items: [{ productName, skuIndex: 0, quantity: 1 }]
       })

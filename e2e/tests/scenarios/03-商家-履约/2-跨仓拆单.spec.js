@@ -17,6 +17,7 @@ import {
 import { adminTokenOf, getProductApi, getAdminOrderBySnApi, listDeliveriesApi } from '../../support/assert.js'
 import { tid } from '../../support/tid.js'
 import { memberNickOf, receiverOf } from '../../support/fixtures.js'
+import { memberLoginOf } from '../../support/member-login.js'
 
 /**
  * 03-商家-履约 / 2-跨仓拆单（docs/flows/02-业务场景/03-商家-履约/2-跨仓拆单/1-业务时序图.mmd）
@@ -39,7 +40,8 @@ test.describe('03-商家-履约 › 2-跨仓拆单', () => {
 
     let crossSn
     await test.step('② 买家下单两个不同 SKU（跨仓）', async () => {
-      const buyer = `e2e_split_${stamp()}`
+      // 登录名会显示在后台订单列表的「买家」列，用自然会员号（唯一性靠数字后缀）
+      const buyer = memberLoginOf(stamp())
       await memberRegisterAndLogin(page, buyer, '123456', memberNickOf(buyer))
       await addSpecToCart(page, 1, skus[0].specText, skus[0].id)
       await addSpecToCart(page, 1, skus[1].specText, skus[1].id)
@@ -104,7 +106,7 @@ test.describe('03-商家-履约 › 2-跨仓拆单', () => {
 
     let singleSn
     await test.step('② 买家下单同一个 SKU（单仓）', async () => {
-      const buyer = `e2e_single_${stamp()}`
+      const buyer = memberLoginOf(stamp())
       await memberRegisterAndLogin(page, buyer, '123456', memberNickOf(buyer))
       await addSpecToCart(page, 1, skus[0].specText, skus[0].id)
       singleSn = await submitCartOrder(page, receiverOf(buyer))
