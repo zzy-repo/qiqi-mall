@@ -41,11 +41,33 @@
 | 商品 | `list_skus` | 只读 | `GET /admin/skus?productId=` |
 | 商品 | `update_product` | **写（带 version）** | `PUT /admin/products/{id}`，body `{product:{id,version,...}}` |
 | 商品 | `update_sku_stock` | **写（带 version）** | `PUT /admin/skus/{id}`，body `{sku:{id,version,stock/price}}` |
+| 履约 | `delivery(action)` | 2 只读 + 6 个 **L3 写** | `GET /admin/deliveries?orderId=`（**orderId 必填**，无单条详情/无全局列表）、`PUT /{id}`、`POST /{id}/split`、`POST /{id}/merge`、`DELETE /{id}?version=`、`POST /{id}/dispatch`、`POST /{id}/cancel`（六个写动作都支持 `?dryRun=true`） |
+| 退货 | `return_apply(action)` | 2 只读 + 1 个 **L3 写** | `GET /admin/return-applies?status=&orderId=`、`PUT /admin/return-applies/{id}`（审核，支持 `?dryRun=true`；**表无 version 列**） |
+| 退货 | `return_reason(action)` | 1 只读 + 3 写（L2） | `GET/POST /admin/return-reasons`、`PUT/DELETE /admin/return-reasons/{id}`（被引用时后端拒删） |
+| 配置 | `warehouse(action)` | 1 只读 + 3 写（L2） | `GET/POST /admin/warehouses`、`PUT/DELETE /admin/warehouses/{id}` |
+| 配置 | `order_setting(action)` | 1 只读 + 1 写（L2，**影响全站**） | `GET/PUT /admin/order-setting`（全局一行，upsert，无 version） |
+| 会员 | `member(action)` | 2 只读 + 3 写 | `GET/POST /admin/members`、`GET/PUT/DELETE /admin/members/{id}`（**PUT 必须 version**；DELETE 是 L3） |
+| 会员 | `member_address(action)` | 1 只读 + 2 写（L2） | `GET/POST /admin/member-addresses`、`PUT/DELETE /admin/member-addresses/{id}`（表无 version 列） |
+| 会员 | `member_cart(action=list)` | 只读 | `GET /admin/carts?memberId=` |
+| 概览 | `dashboard_overview()` | 只读 | `GET /admin/dashboard/overview` |
+| — | ~~`upload_image`~~ | **刻意未实现** | 后端只有 `POST /admin/upload/image`，签名是 `@RequestParam("file") MultipartFile` —— 只吃 multipart 文件流，用 JSON 打它会回「Current request is not a multipart request」；MCP 的参数是模型产出的文本，塞 base64 会让上下文爆掉，传本地路径又会把 server 变成任意文件读取通道，所以不上半成品 |
 
 并发控制口径：**只读工具无副作用、可反复调用；写工具靠 `version` 乐观锁**。
 `update_product` / `update_sku_stock` 的 `version` 是 **zod 必填**（缺了在协议层就被拒，请求都到不了后端）；
 后端 409 的中文原因会原样透出，并附上「带 `[409]` + 请重新读取最新 version」的下一步提示。
 成功后后端不回新版本号（`data:null`），**由工具层回读**一次把新 version 交给模型。
+
+**哪些工具带 version、哪些本来就不带**（照着后端真实入参写，别凭空造参数）：
+
+| 表 | 有 version 列？ | 工具里的口径 |
+|---|---|---|
+| product / sku / member / delivery_order / order | 有 | 写工具必须带 version；缺 → `400`，冲突 → `409`；成功后工具**回读**新 version 返回给模型 |
+| delivery_order 的 dispatch / cancel | 有，但接口不收 | 后端只让 WMS/运维调用，靠「仅待下发」状态守卫 + 影响行数闸门；工具里没有 version 参数 |
+| return_apply / return_reason / warehouse / order_setting / member_address / cart | **没有** | 接口根本不吃 version；并发靠「UPDATE 影响 0 行 → `409 记录已被删除`」兜底；工具里**不能**造一个 version 参数（那样每次调用都会被当非法入参） |
+
+`version` 在 `delivery(action=update|split|merge|delete)` 里是**按 action 必填**（同一个工具还承载不吃 version 的
+`dispatch`/`cancel`），所以走 zod 可选 + 工具层/后端双重把关；`member(action=update)` 与
+`update_product` / `update_sku_stock` 是 zod 必填。
 
 字段口径（别照"标准商品"想当然，已读后端实体确认）：`Product` 只有
 name / description / categoryId / typeId / publishStatus / pic / version —— **没有 subtitle、没有 price**
@@ -69,8 +91,18 @@ src/
     ├── _shared.mjs    公共件：text / fail / failWrite / clampPage / paginate（分页全项目统一 1/10/50）
     ├── order.mjs      订单域 6 只读 + 1 写（list_orders/get_order_detail/count_deliveries 是第 3 批）
     ├── catalog.mjs    商品域 6 个只读工具
-    └── catalog-write.mjs  商品域 2 个写工具（update_product / update_sku_stock，带 version 乐观锁）
+    ├── catalog-write.mjs  商品域 2 个写工具（update_product / update_sku_stock，带 version 乐观锁）
+    ├── delivery.mjs   履约域 1 个合并工具 delivery(action)：list/get + 6 个 L3 写动作（update/split/merge/delete/dispatch/cancel）
+    ├── returns.mjs    退货域 2 个：return_apply(list|get|audit) / return_reason(list|create|update|delete)
+    ├── config.mjs     配置域 2 个：warehouse(list|create|update|delete) / order_setting(get|update)
+    ├── member.mjs     会员域 3 个：member / member_address / member_cart
+    └── misc.mjs       概览域 1 个：dashboard_overview（upload_image 刻意未做，见文件尾注）
 ```
+
+工具总数：**24 个**（write=1）/ **21 个**（write=0 —— 纯写工具 `execute_audit_pass` /
+`update_product` / `update_sku_stock` 不注册；用 `action` 承载写动作的工具仍在，但 action 枚举里只剩只读动作）。
+测试：`npm test` 串行跑 9 个文件（loop / catalog / order-read / optimistic-lock / delivery / returns / config / member / misc），
+自带造数据+清数据，**连跑两轮、第二轮不 reset 库**，两轮都必须 0 失败。
 
 新增一个域 = 新建 `src/tools/<域>.mjs` + 在 `src/tools/index.mjs` 加一行 import/调用；
 工具内一律「中文 title + 说清什么时候用的 description + zod `.describe()` 参数 +
@@ -175,7 +207,7 @@ npx -y @modelcontextprotocol/inspector \
 
 踩坑记录（v2.15.0 实测）：
 
-- **stdio 子进程拿不到父进程 env** → 不传 `-e` 会漏掉写工具（`MCP_ENABLE_WRITE` 不生效，只剩 12 个只读工具）；
+- **stdio 子进程拿不到父进程 env** → 不传 `-e` 会漏掉写工具（`MCP_ENABLE_WRITE` 不生效，只剩只读工具，写 action 也会从枚举里消失）；
   `MALL_API_KEY` 也必须 `-e` 传，否则每个工具调用都返回「缺少 MALL_API_KEY 环境变量…」
 - UI URL 参数是 `?MCP_INSPECTOR_API_TOKEN=…`（不是旧版的 `MCP_PROXY_AUTH_TOKEN`）
 - UI 用的是 **Mantine**，不是 MUI：Run 按钮文案是 `Execute Tool`，连服务器点 `span.mantine-Switch-track`
@@ -211,7 +243,7 @@ bash scripts/start-inspector.sh    # 在仓库根目录执行
 |---|---|---|
 | `MALL_BASE` | `http://127.0.0.1:18080` | 后端网关地址 |
 | `MALL_API_KEY` | —（**必填**） | 管理端 API Key，随请求头 `X-Api-Key` 发出；**按库隔离**（dev 一把、test 一把），造 key 见上面「认证」 |
-| `MCP_ENABLE_WRITE` | `0` | `0`=只注册 12 个只读工具（订单 6 + 商品 6）；`1`=再加 3 个写工具（`execute_audit_pass` / `update_product` / `update_sku_stock`，共 15 个） |
+| `MCP_ENABLE_WRITE` | `0` | `0`=只注册 21 个工具（12 个纯只读 + 9 个「只读动作」工具，后者的 action 枚举里写动作被摘掉）；`1`=再加 3 个纯写工具（`execute_audit_pass` / `update_product` / `update_sku_stock`）并放开所有 action 的写动作，共 24 个 |
 
 见 `.env.example`。
 

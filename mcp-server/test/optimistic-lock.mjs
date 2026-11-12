@@ -77,6 +77,10 @@ async function readProduct(client, productId) {
 
 const uniqueMark = () => String(Date.now()).slice(-6);
 const WRITE_TOOLS = ['update_product', 'update_sku_stock'];
+// write=0 时应当全部在场的只读工具：订单域 6 + 商品域 6 + 第 4 批 6 个「带只读动作」的工具 + 概览 1。
+// ⚠️ 第 4 批的工具是「一个资源一个工具、用 action 区分动作」的形态（delivery / return_apply / return_reason /
+//    warehouse / order_setting / member / member_address / member_cart），write=0 时它们**仍在**，
+//    但 action 枚举里只剩只读动作（各域自己的测试会断言这一点）。
 const READONLY_TOOLS = [
   'list_pending_orders',
   'preview_split',
@@ -90,6 +94,15 @@ const READONLY_TOOLS = [
   'list_product_types',
   'list_attributes',
   'list_skus',
+  'delivery',
+  'return_apply',
+  'return_reason',
+  'warehouse',
+  'order_setting',
+  'member',
+  'member_address',
+  'member_cart',
+  'dashboard_overview',
 ];
 
 // ---------------- 主流程 ----------------

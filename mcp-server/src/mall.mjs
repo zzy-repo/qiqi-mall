@@ -224,4 +224,245 @@ export function skuDetail(id) {
   return request('GET', `/admin/skus/${encodeURIComponent(id)}`);
 }
 
+// ---------- 履约：发货单（delivery 域，第 4 批）----------
+// ⚠️ 后端实际形态（已读 oms/controller/DeliveryController.java + DeliveryEditService / DeliveryFlowService 确认，
+//    别按「标准 REST」想当然）：
+//   GET    /admin/deliveries?orderId=   **orderId 是必填参数**（@RequestParam Long orderId，不给→HTTP 400），
+//                                       返回 List 且**不分页**；每项自带 warehouseName / version / items / company / trackNo
+//   ——     **没有** GET /admin/deliveries/{id}（单条详情），也没有「不带 orderId 的全局发货单列表」；
+//          所以工具层的 action=get 只能「按 orderId 取列表再挑出那一条」（见 tools/delivery.mjs）
+//   PUT    /admin/deliveries/{id}        body { warehouseId?, items?:[{deliveryItemId,quantity}], version }
+//   POST   /admin/deliveries/{id}/split  body { newWarehouseId?, items:[{deliveryItemId,quantity}], version }
+//   POST   /admin/deliveries/{id}/merge  body { targetId, version }
+//   DELETE /admin/deliveries/{id}        **version 在 query**（?targetId=&version=），不是 body ——
+//                                        DELETE 带请求体在部分代理/网关会被丢掉，后端刻意改成 query
+//   POST   /admin/deliveries/{id}/dispatch、/{id}/cancel   这两个**不收 version**：
+//                                        由「仅待下发」状态守卫 + UPDATE 影响行数闸门兜住
+//   以上写操作全部支持 ?dryRun=true：只返回 { willDo }、不落库、不需要 version（预演不产生冲突）
+//   四个编辑动作（update/split/merge/delete）成功时返回 { orderId, splitStatus, deliveries:[...] } ——
+//   里面已经带**改完之后的最新 version**，所以工具层回读新 version 只需读这个响应（不必再发一次 GET）。
+
+/** ?dryRun=true 统一拼接（只认布尔 true，与后端 PreviewResult.isDryRun 同口径） */
+function dryRunQuery(dryRun) {
+  return dryRun === true ? 'dryRun=true' : '';
+}
+
+/**
+ * 编辑待下发包裹（改仓 / 改量）。
+ * @param {number} id 发货单 id
+ * @param {{warehouseId?:number, items?:Array<{deliveryItemId:number,quantity:number}>, version?:number, dryRun?:boolean}} req
+ */
+export function updateDelivery(id, { warehouseId, items, version, dryRun } = {}) {
+  const body = {};
+  if (warehouseId !== undefined && warehouseId !== null) body.warehouseId = warehouseId;
+  if (Array.isArray(items) && items.length) body.items = items;
+  if (version !== undefined && version !== null) body.version = version;
+  const qs = dryRunQuery(dryRun);
+  return request('PUT', `/admin/deliveries/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`, { body });
+}
+
+/** 拆分待下发包裹（拆出一个新包裹） */
+export function splitDelivery(id, { newWarehouseId, items, version, dryRun } = {}) {
+  const body = {};
+  if (newWarehouseId !== undefined && newWarehouseId !== null) body.newWarehouseId = newWarehouseId;
+  if (Array.isArray(items) && items.length) body.items = items;
+  if (version !== undefined && version !== null) body.version = version;
+  const qs = dryRunQuery(dryRun);
+  return request('POST', `/admin/deliveries/${encodeURIComponent(id)}/split${qs ? `?${qs}` : ''}`, { body });
+}
+
+/** 合并待下发包裹（源包 {id} 并入 targetId；version 校验的是**源包**那一行） */
+export function mergeDelivery(id, { targetId, version, dryRun } = {}) {
+  const body = {};
+  if (targetId !== undefined && targetId !== null) body.targetId = targetId;
+  if (version !== undefined && version !== null) body.version = version;
+  const qs = dryRunQuery(dryRun);
+  return request('POST', `/admin/deliveries/${encodeURIComponent(id)}/merge${qs ? `?${qs}` : ''}`, { body });
+}
+
+/** 删除待下发包裹（有明细时必须给 targetId，等同并入别处）；⚠️ version / targetId 都在 query */
+export function deleteDelivery(id, { targetId, version, dryRun } = {}) {
+  const qs = new URLSearchParams();
+  if (targetId !== undefined && targetId !== null) qs.set('targetId', String(targetId));
+  if (version !== undefined && version !== null) qs.set('version', String(version));
+  if (dryRun === true) qs.set('dryRun', 'true');
+  const s = qs.toString();
+  return request('DELETE', `/admin/deliveries/${encodeURIComponent(id)}${s ? `?${s}` : ''}`);
+}
+
+/** 下发仓库（状态 待下发→已下发；**不可撤回**，只能等 WMS 回传）；返回 DeliveryOrder 实体 */
+export function dispatchDelivery(id, { dryRun } = {}) {
+  const qs = dryRunQuery(dryRun);
+  return request('POST', `/admin/deliveries/${encodeURIComponent(id)}/dispatch${qs ? `?${qs}` : ''}`);
+}
+
+/** 取消发货单（状态 待下发→已取消，**回补总池库存**）；返回 DeliveryOrder 实体 */
+export function cancelDelivery(id, { dryRun } = {}) {
+  const qs = dryRunQuery(dryRun);
+  return request('POST', `/admin/deliveries/${encodeURIComponent(id)}/cancel${qs ? `?${qs}` : ''}`);
+}
+
+// ---------- 退货（returns 域，第 4 批）----------
+// ⚠️ 后端实际形态（已读 ReturnApplyController / ReturnReasonController 确认）：
+//   GET /admin/return-applies?status=&orderId=   List，**不分页**；返回项自带 orderSn（后端已 join 好）
+//   ——  **没有** GET /admin/return-applies/{id}（单条详情）→ 工具层 get 只能「取列表再挑一条」
+//   POST /admin/return-applies                   创建（本批 MCP 不暴露：退货申请由买家在 C 端发起）
+//   PUT  /admin/return-applies/{id}              body {status:1通过/2拒绝, description?}，支持 ?dryRun=true
+//        ⚠️ **return_apply 表没有 version 列**：并发靠「UPDATE ... WHERE id=? AND status=0 影响 0 行 → 409」
+//        加「order 行 @Version 0 行 → 409 整笔回滚」两道闸门，所以 MCP 这里**没有 version 可传**（不是我省略）
+//   GET/POST/PUT/DELETE /admin/return-reasons    原因字典：List 不分页；DELETE 被引用时后端拒绝
+
+/** 退货申请列表（status / orderId 都可选，都是精确等值） */
+export function listReturnApplies({ status, orderId } = {}) {
+  const qs = new URLSearchParams();
+  if (status !== undefined && status !== null) qs.set('status', String(status));
+  if (orderId !== undefined && orderId !== null) qs.set('orderId', String(orderId));
+  const s = qs.toString();
+  return request('GET', `/admin/return-applies${s ? `?${s}` : ''}`);
+}
+
+/**
+ * 审核退货申请（status=1 通过 → 退款 + 回补库存；2 拒绝 → 订单回已付款）。
+ * ⚠️ 没有 version 可传（表无 version 列），并发由后端影响行数闸门兜住 → 409。
+ */
+export function auditReturnApply(id, { status, description, dryRun } = {}) {
+  const body = { status };
+  if (description !== undefined && description !== null) body.description = description;
+  const qs = dryRunQuery(dryRun);
+  return request('PUT', `/admin/return-applies/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`, { body });
+}
+
+/** 退货原因字典（全量，不分页） */
+export function listReturnReasons() {
+  return request('GET', '/admin/return-reasons');
+}
+
+export function createReturnReason({ name }) {
+  return request('POST', '/admin/return-reasons', { body: { name } });
+}
+
+/** 改原因名（表无 version 列；后端 updateById 影响 0 行 → 409「记录已被删除」） */
+export function updateReturnReason(id, { name }) {
+  return request('PUT', `/admin/return-reasons/${encodeURIComponent(id)}`, { body: { name } });
+}
+
+/** 删原因（被退货申请引用时后端直接拒绝，中文原因原样透出） */
+export function deleteReturnReason(id) {
+  return request('DELETE', `/admin/return-reasons/${encodeURIComponent(id)}`);
+}
+
+// ---------- 基础配置（config 域，第 4 批）----------
+// ⚠️ 后端实际形态（已读 WarehouseController / OrderSettingController 确认）：
+//   GET/POST/PUT/DELETE /admin/warehouses       List 不分页；无 PUT 版本号（表无 version 列，
+//                                               updateById 影响 0 行 → 409「记录已被删除」）
+//   GET/PUT /admin/order-setting                全局只有一行；GET 没有行时返回**空对象**（不是 null）
+//                                               —— 工具层必须能读「未初始化」这种形态
+//                                               PUT 是 upsert，**不校验影响行数、也没有 version**
+
+export function listWarehouses() {
+  return request('GET', '/admin/warehouses');
+}
+
+export function createWarehouse({ name, status }) {
+  const body = { name };
+  if (status !== undefined && status !== null) body.status = status;
+  return request('POST', '/admin/warehouses', { body });
+}
+
+export function updateWarehouse(id, { name, status }) {
+  const body = {};
+  if (name !== undefined && name !== null) body.name = name;
+  if (status !== undefined && status !== null) body.status = status;
+  return request('PUT', `/admin/warehouses/${encodeURIComponent(id)}`, { body });
+}
+
+export function deleteWarehouse(id) {
+  return request('DELETE', `/admin/warehouses/${encodeURIComponent(id)}`);
+}
+
+/** 订单全局设置（只有一行；未初始化时后端返回空对象 {}） */
+export function getOrderSetting() {
+  return request('GET', '/admin/order-setting');
+}
+
+export function updateOrderSetting({ autoConfirmDays, autoCloseMinutes }) {
+  const body = {};
+  if (autoConfirmDays !== undefined && autoConfirmDays !== null) body.autoConfirmDays = autoConfirmDays;
+  if (autoCloseMinutes !== undefined && autoCloseMinutes !== null) body.autoCloseMinutes = autoCloseMinutes;
+  return request('PUT', '/admin/order-setting', { body });
+}
+
+// ---------- 会员（member 域，第 4 批）----------
+// ⚠️ 后端实际形态（已读 MemberController / MemberAddressController / CartController 确认）：
+//   GET /admin/members?status=&username=   List **不分页**（username 是 like 模糊）；返回含 version
+//   GET /admin/members/{id}                单条；id 不存在时 data=null（**code=0 不报错**）→ 工具层判空
+//   GET /admin/members/{id}/detail         {member, addresses, carts} 聚合（本批工具改用两个细粒度接口，语义更清楚）
+//   POST   /admin/members                  新建即 version=0；密码 BCrypt，**响应不回密码**
+//   PUT    /admin/members/{id}             **收 body.version（必填）**：缺 → 400，冲突 → 409
+//   DELETE /admin/members/{id}             无守卫；⚠️ order.member_id 外键无级联 → 有订单的会员删不掉
+//   GET/POST/PUT/DELETE /admin/member-addresses   List 不分页；无 version 列（影响 0 行 → 409「记录已被删除」）
+//   GET /admin/carts?memberId=             List 不分页；本批只做只读 list
+
+export function listMembers({ status, username } = {}) {
+  const qs = new URLSearchParams();
+  if (status !== undefined && status !== null) qs.set('status', String(status));
+  if (typeof username === 'string' && username.trim() !== '') qs.set('username', username.trim());
+  const s = qs.toString();
+  return request('GET', `/admin/members${s ? `?${s}` : ''}`);
+}
+
+/** 会员详情（id 不存在时后端 data=null，判空在工具层） */
+export function memberDetail(id) {
+  return request('GET', `/admin/members/${encodeURIComponent(id)}`);
+}
+
+export function createMember({ username, password, nickname, phone, status }) {
+  const body = { username, password };
+  if (nickname !== undefined && nickname !== null) body.nickname = nickname;
+  if (phone !== undefined && phone !== null) body.phone = phone;
+  if (status !== undefined && status !== null) body.status = status;
+  return request('POST', '/admin/members', { body });
+}
+
+/** 改会员（PUT /admin/members/{id}，body 至少含 {version}；updateById 跳 null，只传要改的字段） */
+export function updateMember(id, patch) {
+  return request('PUT', `/admin/members/${encodeURIComponent(id)}`, { body: { ...patch, id } });
+}
+
+export function deleteMember(id) {
+  return request('DELETE', `/admin/members/${encodeURIComponent(id)}`);
+}
+
+export function listMemberAddresses({ memberId } = {}) {
+  const qs = memberId === undefined || memberId === null ? '' : `?memberId=${encodeURIComponent(memberId)}`;
+  return request('GET', `/admin/member-addresses${qs}`);
+}
+
+export function createMemberAddress(body) {
+  return request('POST', '/admin/member-addresses', { body });
+}
+
+/** 改地址（表无 version 列；影响 0 行 → 409「记录已被删除」） */
+export function updateMemberAddress(id, patch) {
+  return request('PUT', `/admin/member-addresses/${encodeURIComponent(id)}`, { body: { ...patch, id } });
+}
+
+export function deleteMemberAddress(id) {
+  return request('DELETE', `/admin/member-addresses/${encodeURIComponent(id)}`);
+}
+
+export function listCarts({ memberId } = {}) {
+  const qs = memberId === undefined || memberId === null ? '' : `?memberId=${encodeURIComponent(memberId)}`;
+  return request('GET', `/admin/carts${qs}`);
+}
+
+// ---------- 概览（misc 域，第 4 批）----------
+// GET /admin/dashboard/overview：一次返回看板全部数字（商品/订单/今日成交/退货待处理/库存告警/7 日趋势/Top5）。
+// 口径写在后端注释里：今日成交按 payment_time 归日、只算「已付款且未退款」状态（1/2/3/7/8/9）。
+// 注意 scope：dashboard 是**只读**（ApiKeyAuthFilter 里读/写 scope 都是 dashboard:read），所以这里没有写接口。
+
+export function dashboardOverview() {
+  return request('GET', '/admin/dashboard/overview');
+}
+
 export const mallBase = BASE;
