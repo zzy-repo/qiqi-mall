@@ -16,6 +16,9 @@
 
 | 域 | 工具 | 读/写 | 后端接口 |
 |---|---|---|---|
+| 订单 | `list_orders` | 只读 | `GET /admin/orders?page&size&status&orderSn`（后端真分页；orderSn 模糊） |
+| 订单 | `get_order_detail` | 只读 | `GET /admin/orders/{id}`（`{order,items,returnApplies}`） |
+| 订单 | `count_deliveries` | 只读 | `GET /admin/deliveries/counts?orderIds=`（不含已取消） |
 | 订单 | `list_pending_orders` | 只读 | `GET /admin/orders?status=7` |
 | 订单 | `preview_split` | 只读（发票据） | `POST /admin/orders/{id}/split-preview` |
 | 订单 | `execute_audit_pass` | **写** | `POST /admin/orders/{id}/audit-pass` |
@@ -29,6 +32,12 @@
 
 令牌口径：**只读工具不需要操作票据；写工具必须走 `confirm.mjs`**。
 
+订单状态码（`Order.java` 注释 + admin-web 两处一致，工具返回一律翻成中文）：
+
+| 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|---|---|---|---|---|---|---|---|---|---|
+| 待付款 | 已付款 | 已发货 | 已完成 | 已关闭 | 退款中 | 已退款 | 待审核 | 待发货 | 部分发货 |
+
 ## 目录结构（新增域照这个模式加文件）
 
 ```
@@ -39,7 +48,7 @@ src/
 └── tools/
     ├── index.mjs      统一注册入口（按域 import；文件头有「新增域」清单）
     ├── _shared.mjs    公共件：text / fail / clampPage / paginate（分页全项目统一 1/10/50）
-    ├── order.mjs      订单域 4 个工具
+    ├── order.mjs      订单域 6 只读 + 1 写（list_orders/get_order_detail/count_deliveries 是第 3 批）
     └── catalog.mjs    商品域 6 个只读工具
 ```
 
@@ -58,10 +67,11 @@ export MCP_ENABLE_WRITE=1     # 0=只读（默认 0），1=开放写工具
 npm start
 ```
 
-`npm test` 跑两套测试：用 SDK client 通过 stdio 真启动本 server，逐条断言。
+`npm test` 跑三套测试：用 SDK client 通过 stdio 真启动本 server，逐条断言。
 
 - `test/loop.mjs`（12 条）：订单闭环，含「预览不落库」「假 token 被拒」「同一 token 只能用一次」「写开关生效」
 - `test/catalog.mjs`（26 条）：商品域 6 个只读工具，含分页夹取、空结果文案、**只读校验（调用前后 product/sku 行数不变）**
+- `test/order-read.mjs`（28 条）：订单域 3 个新只读工具，含分页夹取、状态码中文化（7→待审核）、单号模糊匹配、详情聚合、批量包裹数比对库、**只读校验（order/order_item/delivery_order 行数不变）**
 测试会消费 `qiqi_mall_test` 里 **id=3** 的订单，跑完记得复位：
 
 ```bash

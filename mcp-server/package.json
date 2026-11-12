@@ -9,9 +9,10 @@
   },
   "scripts": {
     "start": "node src/index.mjs",
-    "test": "node test/loop.mjs && node test/catalog.mjs",
+    "test": "node test/loop.mjs && node test/catalog.mjs && node test/order-read.mjs",
     "test:loop": "node test/loop.mjs",
-    "test:catalog": "node test/catalog.mjs"
+    "test:catalog": "node test/catalog.mjs",
+    "test:order-read": "node test/order-read.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

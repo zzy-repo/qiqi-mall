@@ -242,7 +242,10 @@ async function main() {
 
   await client.close();
 
-  // ⑫ 写开关：MCP_ENABLE_WRITE=0 → 只剩只读工具（订单 2 个 + 商品域 6 个），写工具消失
+  // ⑫ 写开关：MCP_ENABLE_WRITE=0 → 只剩只读工具（订单 6 个 + 商品域 6 个），写工具消失
+  // ⚠️ 第 3 批改动：订单域只读工具由 2 → 6（新增 list_orders / get_order_detail / count_deliveries），
+  //    同时把只读的 list_deliveries 从「写开关门后面」挪到门前面（此前 write=0 时它会连带消失，是第 1 批的疏漏）。
+  //    所以这里的只读清单从 8 个变成 12 个，闭环本身（①~⑪）一字未改。
   try {
     const ro = await connectServer({ MCP_ENABLE_WRITE: '0' }, 'ro');
     const { tools } = await ro.listTools();
@@ -250,6 +253,10 @@ async function main() {
     const want = [
       'list_pending_orders',
       'preview_split',
+      'list_deliveries',
+      'list_orders',
+      'get_order_detail',
+      'count_deliveries',
       'search_products',
       'get_product_detail',
       'list_categories',
@@ -258,7 +265,7 @@ async function main() {
       'list_skus',
     ];
     const pass = tools.length === want.length && want.every((n) => names.includes(n)) && !names.includes('execute_audit_pass');
-    assert(pass, '⑫ MCP_ENABLE_WRITE=0 → tools/list 只剩 8 个只读工具（订单 2 + 商品 6），写工具消失', `${tools.length} 个：${names.join(', ')}`);
+    assert(pass, '⑫ MCP_ENABLE_WRITE=0 → tools/list 只剩 12 个只读工具（订单 6 + 商品 6），写工具消失', `${tools.length} 个：${names.join(', ')}`);
     await ro.close();
   } catch (e) {
     ko('⑫ MCP_ENABLE_WRITE=0 → tools/list 只剩 8 个只读工具（订单 2 + 商品 6），写工具消失', e.message);

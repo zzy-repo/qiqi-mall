@@ -110,9 +110,56 @@ export function listDeliveries(orderId) {
   return request('GET', `/admin/deliveries?orderId=${encodeURIComponent(orderId)}`);
 }
 
-/** 订单详情（用于回读 status） */
+// ---------- 订单域只读接口（第 3 批）----------
+// ⚠️ 后端实际形态（已读 oms/controller/OrderController.java、DeliveryController.java 确认）：
+//   GET /admin/orders            **真分页**（MyBatis Page），支持 page/size/status/orderSn；
+//                                orderSn 是 `like`（模糊），status 是精确等值；size 后端自己夹 1~50；
+//                                返回 {records,total,size,current,pages}——注意是 current 不是 page
+//   GET /admin/orders/{id}       返回 OrderDetailDTO {order, items, returnApplies}；
+//                                ⚠️ id 不存在时 **code=0 不报错**，只是 order=null、两个数组为空
+//                                （工具层必须自己判空并给中文错误）
+//   GET /admin/deliveries/counts 批量「包裹数」，返回 Map<orderId(string),count>；
+//                                **只统计未取消(status!=9)的发货单**；逗号分隔、最多 50 个/次（后端不强制）；
+//                                非法片段被静默跳过（工具层用 zod 保证都是正整数，不依赖这个兜底）
+
+/**
+ * 订单详情（聚合：订单 + 明细 + 退货申请）。
+ * ⚠️ 后端对该 id 不存在时返回 {order:null, items:[], returnApplies:[]} 且 code=0，判空在工具层。
+ */
 export function orderDetail(orderId) {
   return request('GET', `/admin/orders/${encodeURIComponent(orderId)}`);
+}
+
+/**
+ * 订单列表（后端真分页）=> {records,total,size,current,pages}
+ * @param {{page?:number,size?:number,status?:number,orderSn?:string}} q
+ */
+export function listOrders({ page, size, status, orderSn } = {}) {
+  const qs = new URLSearchParams();
+  if (page !== undefined && page !== null) qs.set('page', String(page));
+  if (size !== undefined && size !== null) qs.set('size', String(size));
+  if (status !== undefined && status !== null) qs.set('status', String(status));
+  if (orderSn !== undefined && orderSn !== null && String(orderSn).trim() !== '') qs.set('orderSn', String(orderSn).trim());
+  const s = qs.toString();
+  return request('GET', `/admin/orders${s ? `?${s}` : ''}`);
+}
+
+/** 后端 counts 接口单次上限（OrderController 注释口径：一次最多 50 个够一页用；后端不强制，工具层自己切） */
+export const DELIVERY_COUNTS_CHUNK = 50;
+
+/**
+ * 批量统计多个订单的发货单数量 => Map<orderId, count>（已合并分片结果）。
+ * 语义注意：**不含已取消（status=9）的发货单**，与后台订单列表页「N 个包裹」标签一致。
+ */
+export async function deliveryCounts(orderIds, { chunk = DELIVERY_COUNTS_CHUNK } = {}) {
+  const ids = Array.isArray(orderIds) ? orderIds : [];
+  const merged = new Map();
+  for (let i = 0; i < ids.length; i += chunk) {
+    const slice = ids.slice(i, i + chunk);
+    const part = await request('GET', `/admin/deliveries/counts?orderIds=${encodeURIComponent(slice.join(','))}`);
+    for (const [k, v] of Object.entries(part || {})) merged.set(String(k), Number(v));
+  }
+  return merged;
 }
 
 // ---------- 商品域（catalog）只读接口 ----------

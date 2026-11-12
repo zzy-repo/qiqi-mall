@@ -24,7 +24,7 @@ export function registerAll(server, ctx = {}) {
   const { writeEnabled = false } = ctx;
 
   // 域可以并行/串行注册，互相独立：某域不注册写工具不会影响别的域
-  registerOrderTools(server, { writeEnabled }); // 订单域：2 只读 + 2 写（受 writeEnabled 控制）
+  registerOrderTools(server, { writeEnabled }); // 订单域：6 只读 + 1 写（execute_audit_pass 受 writeEnabled 控制）
   registerCatalogTools(server, { writeEnabled }); // 商品域：6 只读（本批，全部不写库）
 }
 
