@@ -1422,7 +1422,12 @@ class OptimisticLockIntegrationTest {
         System.out.printf("㉚ 初始：订单=%d（待发货），split_status=%d，包裹=%d（待下发）%n",
                 orderStatus(orderId), orderSplitStatus(orderId), deliveryStatus(parcel));
 
+        // cancel 会按包裹明细回补库存；这张单是直接插的（没走扣减）→ 不还原就会让 dev 库 sku 库存每轮虚增 1 件
+        Long cancelledSku = jdbc.queryForObject(
+                "SELECT product_sku_id FROM delivery_item WHERE delivery_id = ? LIMIT 1", Long.class, parcel);
+        int stockBeforeCancel = stockOf(cancelledSku);
         ok(post("/admin/deliveries/" + parcel + "/cancel", null));
+        jdbc.update("UPDATE sku SET stock = ? WHERE id = ?", stockBeforeCancel, cancelledSku);   // 撤销 cancel 的库存回补
         System.out.printf("㉚ ① 取消唯一包裹 → 包裹=%d（已取消），订单=%d（待审核），split_status=%d%n",
                 deliveryStatus(parcel), orderStatus(orderId), orderSplitStatus(orderId));
         assertThat(deliveryStatus(parcel)).isEqualTo(9);
@@ -1468,9 +1473,14 @@ class OptimisticLockIntegrationTest {
         Long applyA2 = again.path("id").asLong();
         System.out.printf("㉛-A' 重新登记申请 #%d → 订单 %d（应为 5 退款中）%n", applyA2, orderStatus(direct));
         assertThat(orderStatus(direct)).isEqualTo(5);
+        // 审核通过会回补库存；这张单是直接插的（没走扣减）→ 不还原就会让 dev 库 sku 库存每轮虚增
+        Long directSku = jdbc.queryForObject(
+                "SELECT product_sku_id FROM order_item WHERE order_id = ? ORDER BY id LIMIT 1", Long.class, direct);
+        int directStockBefore = stockOf(directSku);
         ok(put("/admin/return-applies/" + applyA2, "{\"status\":1}"));
         System.out.printf("㉛-A'' 审核通过 → 订单 %d（应为 6 已退款）%n", orderStatus(direct));
         assertThat(orderStatus(direct)).as("重新走一遍审核流程要真的能通过").isEqualTo(6);
+        jdbc.update("UPDATE sku SET stock = ? WHERE id = ?", directStockBefore, directSku);   // 还原被回补的库存
 
         // B：有已出库包裹 —— **不硬写 7**，交回聚合，按子单推导出 2 已发货
         Long shipped = newOrderWithItem(5, 1);

@@ -125,6 +125,32 @@ let stockSnapshot = null;
 let stockSnapshotTried = false;
 
 /**
+ * 本轮开始前 `delivery_order` 的最大 id（水位线）。
+ *
+ * <p>用途：夹具清理「撞上已出库守卫」的订单时，只许删**本次测试自己造出来的**包裹行
+ * （`id > 水位线` 且 `order_id = 本单`），不许按「这个订单名下所有包裹」盲删 ——
+ * 将来若有真实包裹挂在这张单上，盲删就是把对账证据删掉了。
+ * SQL 不可用时为 null，此时夹具放弃兜底（只报 note，不猜）。
+ */
+function maxDeliveryIdNow() {
+  try {
+    const v = sql(`SELECT IFNULL(MAX(id),0) FROM ${DB}.delivery_order`);
+    return v === '' ? null : Number(v);
+  } catch {
+    return null;
+  }
+}
+let deliveryWatermark = null;
+let deliveryWatermarkTried = false;
+function deliveryIdWatermark() {
+  if (!deliveryWatermarkTried) {
+    deliveryWatermarkTried = true;
+    deliveryWatermark = maxDeliveryIdNow();
+  }
+  return deliveryWatermark;
+}
+
+/**
  * 本轮开始时的 sku.stock 快照（懒抓 + 只抓一次）。
  * SQL 不可用（没 docker / 没起 MySQL）时返回 null —— 库存一致性检查自动跳过，不让测试因为基座基建挂掉。
  */
@@ -215,6 +241,7 @@ export function reconcileSkuStock() {
 
 // 立刻抓快照：此刻还没跑任何用例，这就是「本轮开始」的基准。
 skuStockSnapshot();
+deliveryIdWatermark();
 
 // 挂到进程退出：每个测试进程（含单独 `node test/x.mjs`）都自动生效，不需要调用方记得做什么。
 // 说明：'exit' 里只能跑同步代码，所以还原走同步 SQL；退出码可以在这里改写（实测生效）。
@@ -533,14 +560,45 @@ export async function cleanupOrder(orderId, { memberId, orderSn } = {}) {
   const notes = [];
   let deleted = false;
 
-  // ① 删订单：DB 侧 order_item / delivery_order / delivery_item 都是 ON DELETE CASCADE，
-  //    所以一行 DELETE 就把这次造的全部业务数据带走
+  // ① 删订单：走管理端 DELETE（内部是 OrderPurgeService：显式逐层删 + 按台账净额回补库存）。
   try {
     await adminDelete(`/admin/orders/${Number(orderId)}`);
     deleted = true;
-    notes.push(`订单 ${orderId} 已删除（级联清掉明细/发货单）`);
+    notes.push(`订单 ${orderId} 已删除（purge 按台账净额回补库存）`);
   } catch (e) {
-    notes.push(`订单 ${orderId} 删除失败，已跳过（可能被别处引用）：${e.message}`);
+    const msg = String(e?.message || e);
+    // 「已出库包裹拒删」这条守卫（OrderPurgeService#blockReason 的第 3 条）在**夹具**里要绕开一半：
+    // 本文件造的包裹是**脚手架**（wms_callback 把状态推到 3/4/5 只是为了验证状态机），
+    // 不是「货真的离开商家」的审计事实。所以先把这些脚手架包裹行删掉（物流明细一并删），
+    // 再重试 DELETE —— 重试仍然走 purge，库存照旧按台账净额回补，不是裸 SQL 删单。
+    if (/已出库|个包裹/.test(msg)) {
+      const sn = Number(orderId);
+      const mark = deliveryIdWatermark();
+      // ⚠️ 圈定口径（别放宽）：只碰「本单 + 本轮水位线之后新建」的包裹行。
+      //    绝不按「这个订单名下所有包裹」盲删 —— 真有真实包裹挂在这张单上时，那是对账证据。
+      const floor = mark == null ? null : Number(mark);
+      const scope = floor == null ? null : `order_id = ${sn} AND id > ${floor}`;
+      if (scope == null) {
+        notes.push(`订单 ${orderId} 删除被「已出库包裹」守卫拦住，且拿不到包裹水位线（SQL 不可用），未做兜底，请手工核对`);
+      } else {
+        try {
+          // 注意：这里用「IN (子查询)」而不是多表 DELETE —— 多表 DELETE 在没选默认库的
+          // `mysql -e` 会话里会回 1046「No database selected」（踩过，夹具会静默漏清一张单）。
+          sql(`DELETE FROM ${DB}.delivery_logistics WHERE delivery_id IN
+                (SELECT id FROM ${DB}.delivery_order WHERE ${scope})`);
+          sql(`DELETE FROM ${DB}.delivery_item WHERE delivery_id IN
+                (SELECT id FROM ${DB}.delivery_order WHERE ${scope})`);
+          sql(`DELETE FROM ${DB}.delivery_order WHERE ${scope}`);
+          await adminDelete(`/admin/orders/${Number(orderId)}`);
+          deleted = true;
+          notes.push(`订单 ${orderId} 已删除（先清掉本轮水位线之后、本单名下的脚手架包裹，再走 purge 回补库存）`);
+        } catch (e2) {
+          notes.push(`订单 ${orderId} 删除失败，已跳过（可能被别处引用）：${msg}；重试：${e2?.message || e2}`);
+        }
+      }
+    } else {
+      notes.push(`订单 ${orderId} 删除失败，已跳过（可能被别处引用）：${msg}`);
+    }
   }
 
   // ② 支付流水没有外键，按单号删（只删自己造的这一个单号）

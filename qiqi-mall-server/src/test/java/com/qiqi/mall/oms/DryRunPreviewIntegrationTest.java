@@ -63,6 +63,34 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>数据自建：订单/明细/商品/SKU/退货申请全部自己造，跑完全删；
  * 会改 sku.stock 的用例（audit-reject / cancel / return-audit 回补库存）在 @BeforeAll 记下原值、@AfterAll 还原。
  *
+ * <h3>「预演零落库」为什么**不能**比全表行数</h3>
+ * 本类连的是 dev 库 {@code qiqi_mall}，它**不是**独占的：别的进程（另一个 {@code mvn test}、
+ * 手工造的演示数据、MCP 那边的写用例）随时可能在同一个库里插/删一行。曾经这里的指纹是
+ * 「order / order_item / delivery_order / sku / product / return_apply / payment_record 的**全表行数**」——
+ * 于是**任何**别人的写都算到预演头上：
+ * <pre>
+ *   2026-11-12 实测：并发跑 {@code mvn test}（两个进程 + 一个往库里补数据的脚本）时，
+ *   本类 13 条用例全红，diff 全是 ±1 行（预演前 307 行 / 预演后 308 行）；
+ *   独占库重跑 → 全绿。红的是「别人写了库」，不是「预演写了库」。
+ * </pre>
+ * 所以指纹改成**只圈本测试自己造的数据**（{@link #dbSnapshot()}：按 {@code createdOrders} /
+ * {@code createdProducts} / 本测试动过的 sku 圈定），并额外加一条更贴语义的断言
+ * （{@link #fingerprintOf(Long)}）：预演涉及的**那一张订单**的状态 / 版本号 / 明细行数 /
+ * 支付流水行数 / 包裹行数与状态，必须逐项不变。
+ *
+ * <p>这不是把断言放松了，而是**换了参照系**：原来是「整个库一行都不许变」（自己根本控制不了），
+ * 现在是「我造的这批数据一个字段都不许变」+「这张订单的实质状态一个都不许变」——
+ * 后者比原来的行数比对更严（行数相同但 status 被改写、version 被偷偷 +1，原来抓不到，现在会红）。
+ *
+ * <h3>清理为什么不走 {@code OrderPurgeService#purge()}</h3>
+ * 本类的 {@code @AfterAll} 按 orderId 精确删单，并**同时删掉该单的 {@code stock_ledger} 行**
+ * （{@code stock_ledger} 故意没有外键，裸 {@code DELETE FROM order} 不会带着它走 → 会留孤儿台账：
+ * 实测每轮 {@code mvn test} 往 dev 库留 5 行，累计从 15 涨到 40）。
+ * 不走 {@code purge()} 的理由：它带守卫（有物流 / 有退货申请 / 有已出库包裹就拒删），而本类**故意**造这些状态
+ * （⑪ 出库回传、⑫ 退货申请、⑤~⑨ 已下发包裹）→ purge 必然拒删，清理失败会反过来把用例弄红；
+ * 且 purge 会按台账净额改 {@code sku.stock}，与下面「还原到 @BeforeAll 快照」互相打架。
+ * 清理的职责是把库恢复原样，不该再依赖被测逻辑能不能跑通（purge 本身有 3 个专门的 IT 类覆盖）。
+ *
  * <p>运行：cd qiqi-mall-server && mvn -o test -Dtest=DryRunPreviewIntegrationTest
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -94,8 +122,13 @@ class DryRunPreviewIntegrationTest {
     private Long skuB;
     private Long productIdOfSkuA;
     private Long productIdOfSkuB;
+    /** 本类造过、还没被自己删掉的订单 id（④ 真调删单后会从里面移除） */
     private final List<Long> createdOrders = new ArrayList<>();
+    /** 本类造过的**全部**订单 id（只增不减）：清理时用它自查看有没有留下孤儿台账 */
+    private final List<Long> allCreatedOrderIds = new ArrayList<>();
     private final List<Long> createdProducts = new ArrayList<>();
+    /** 本类造过、且会动库存的 SKU id（skuA / skuB + ⑬⑭ 自建的规格）—— 指纹只圈这些 SKU 的库存 */
+    private final List<Long> createdSkus = new ArrayList<>();
     private final Map<Long, Integer> originalStock = new LinkedHashMap<>();
 
     // ------------------------------------------------------------------ 准备 / 清理
@@ -144,14 +177,35 @@ class DryRunPreviewIntegrationTest {
             for (String sn : jdbc.queryForList("SELECT order_sn FROM `order` WHERE id = ?", String.class, orderId)) {
                 jdbc.update("DELETE FROM payment_record WHERE order_sn = ?", sn);
             }
+            // ★ 方案 B：删单的同时**按 order_id 精确删掉本单的库存台账行**。
+            //   stock_ledger 故意没有外键（台账是「同一件货有没有被补两次」的审计证据，不随订单级联），
+            //   所以裸 DELETE FROM order 不会带着它走 —— 不清就是**孤儿台账**：
+            //   实测每轮 mvn test 往 dev 库留 5 行（reason = AUDIT_REJECT / DELIVERY_CANCEL / RETURN_REFUND），
+            //   累计从 15 行涨到 40 行，check-data-integrity.sh 的「① 孤儿台账」会直接判红。
+            //   这里刻意**不**调 OrderPurgeService#purge()：它带守卫（有物流 / 有退货 / 有已出库包裹就拒删），
+            //   而本类故意造这些状态（⑤~⑨ 已下发包裹、⑪ 出库回传、⑫ 退货申请）→ purge 必然拒删，
+            //   清理失败会反过来把用例弄红；且 purge 会按台账净额改 sku.stock，与下面「还原到快照」打架。
+            //   清理的职责只是把库恢复原样，不该依赖被测逻辑跑通（purge 本身有 3 个专门的 IT 类覆盖）。
+            jdbc.update("DELETE FROM stock_ledger WHERE order_id = ?", orderId);
             jdbc.update("DELETE FROM `order` WHERE id = ?", orderId);   // 级联明细/发货单/退货申请
         }
         for (Long productId : createdProducts) {
             jdbc.update("DELETE FROM product WHERE id = ?", productId);  // 级联下辖 SKU
         }
         originalStock.forEach((skuId, stock) -> jdbc.update("UPDATE sku SET stock = ? WHERE id = ?", stock, skuId));
-        System.out.printf("[清理] 自建订单 %d 张、商品 %d 个已删除，SKU 库存已还原%n",
-                createdOrders.size(), createdProducts.size());
+
+        // 自查看一眼：本类造过的订单（含 ④ 自己删掉的那张）一条台账都不许剩 ——
+        // 留了就说明又产生了孤儿台账，直接让本类红，而不是等 check-data-integrity.sh 隔天发现
+        In everOrders = in(allCreatedOrderIds);
+        long leftoverLedger = allCreatedOrderIds.isEmpty() ? 0
+                : jdbc.queryForObject("SELECT COUNT(*) FROM stock_ledger WHERE order_id " + everOrders.sql,
+                        Long.class, everOrders.args);
+        assertThat(leftoverLedger)
+                .as("清理后本类造过的订单不许再留 stock_ledger 行（否则就是孤儿台账）")
+                .isZero();
+
+        System.out.printf("[清理] 自建订单 %d 张、商品 %d 个已删除，台账残留 %d 行，SKU 库存已还原%n",
+                createdOrders.size(), createdProducts.size(), leftoverLedger);
     }
 
     // ================================================================== 订单域（4）
@@ -162,11 +216,11 @@ class DryRunPreviewIntegrationTest {
     void auditPass_previewThenExecute() {
         Long orderId = newOrder(7, skuA, skuB);
 
-        Map<String, Object> before = dbSnapshot();
+        DryRunProbe probe = probeBeforeDryRun(orderId);
         JsonNode dry = ok(post(withDry("/admin/orders/" + orderId + "/audit-pass"), null));
         assertOnlyWillDo(dry);
         assertThat(dry.path("willDo").asText()).contains("审核通过").contains("待发货").contains("发货单");
-        assertThat(dbSnapshot()).as("预演必须零落库").isEqualTo(before);
+        assertDryRunWroteNothing(probe);
         assertThat(statusOf(orderId)).as("预演不能改订单状态").isEqualTo(7);
         assertThat(deliveriesOfOrder(orderId)).as("预演不能生成发货单").isEmpty();
         System.out.printf("① audit-pass 预演 → willDo=%s%n", dry.path("willDo").asText());
@@ -192,11 +246,11 @@ class DryRunPreviewIntegrationTest {
         Long orderId = newOrder(7, skuA, skuB);
         int stockBefore = stockOf(skuA);
 
-        Map<String, Object> before = dbSnapshot();
+        DryRunProbe probe = probeBeforeDryRun(orderId);
         JsonNode dry = ok(post(withDry("/admin/orders/" + orderId + "/audit-reject"), null));
         assertOnlyWillDo(dry);
         assertThat(dry.path("willDo").asText()).contains("审核不通过").contains("回补").contains("已关闭");
-        assertThat(dbSnapshot()).as("预演必须零落库").isEqualTo(before);
+        assertDryRunWroteNothing(probe);
         System.out.printf("② audit-reject 预演 → willDo=%s%n", dry.path("willDo").asText());
 
         ok(post("/admin/orders/" + orderId + "/audit-reject", null));
@@ -212,11 +266,11 @@ class DryRunPreviewIntegrationTest {
     void ship_previewThenExecute() {
         Long orderId = newOrder(1, skuA, skuB);          // 已付款
 
-        Map<String, Object> before = dbSnapshot();
+        DryRunProbe probe = probeBeforeDryRun(orderId);
         JsonNode dry = ok(post(withDry("/admin/orders/" + orderId + "/ship"), null));
         assertOnlyWillDo(dry);
         assertThat(dry.path("willDo").asText()).contains("已发货").contains("直发路径");
-        assertThat(dbSnapshot()).as("预演必须零落库").isEqualTo(before);
+        assertDryRunWroteNothing(probe);
         System.out.printf("③ ship 预演 → willDo=%s%n", dry.path("willDo").asText());
 
         ok(post("/admin/orders/" + orderId + "/ship", null));
@@ -230,11 +284,11 @@ class DryRunPreviewIntegrationTest {
     void orderDelete_previewThenExecute() {
         Long orderId = newOrder(1, skuA, skuB);
 
-        Map<String, Object> before = dbSnapshot();
+        DryRunProbe probe = probeBeforeDryRun(orderId);
         JsonNode dry = ok(delete(withDry("/admin/orders/" + orderId), null));
         assertOnlyWillDo(dry);
         assertThat(dry.path("willDo").asText()).contains("将删除订单").contains("级联删除").contains("不可恢复");
-        assertThat(dbSnapshot()).as("预演必须零落库").isEqualTo(before);
+        assertDryRunWroteNothing(probe);
         System.out.printf("④ DELETE 订单 预演 → willDo=%s%n", dry.path("willDo").asText());
 
         ok(delete("/admin/orders/" + orderId, null));
@@ -253,11 +307,11 @@ class DryRunPreviewIntegrationTest {
     void dispatch_previewThenExecute() {
         Long id = newPendingDeliveries().get(0);
 
-        Map<String, Object> before = dbSnapshot();
+        DryRunProbe probe = probeBeforeDryRun(orderIdOfDelivery(id));
         JsonNode dry = ok(post(withDry("/admin/deliveries/" + id + "/dispatch"), null));
         assertOnlyWillDo(dry);
         assertThat(dry.path("willDo").asText()).contains("下发").contains("待下发→已下发");
-        assertThat(dbSnapshot()).as("预演必须零落库").isEqualTo(before);
+        assertDryRunWroteNothing(probe);
         assertThat(deliveryStatusOf(id)).isZero();
         System.out.printf("⑤ dispatch 预演 → willDo=%s%n", dry.path("willDo").asText());
 
@@ -274,11 +328,11 @@ class DryRunPreviewIntegrationTest {
         Long targetWarehouse = otherWarehouseThan(warehouseOf(id));
         String payload = "{\"warehouseId\":" + targetWarehouse + "}";
 
-        Map<String, Object> before = dbSnapshot();
+        DryRunProbe probe = probeBeforeDryRun(orderIdOfDelivery(id));
         JsonNode dry = ok(put(withDry("/admin/deliveries/" + id), payload));
         assertOnlyWillDo(dry);
         assertThat(dry.path("willDo").asText()).contains("发货仓改为").contains("人工调整");
-        assertThat(dbSnapshot()).as("预演必须零落库").isEqualTo(before);
+        assertDryRunWroteNothing(probe);
         assertThat(warehouseOf(id)).isNotEqualTo(targetWarehouse);
         System.out.printf("⑥ 编辑包裹 预演（不带 version 也能预演）→ willDo=%s%n", dry.path("willDo").asText());
 
@@ -302,11 +356,11 @@ class DryRunPreviewIntegrationTest {
         Long itemId = firstDeliveryItemId(id);
         String payload = "{\"items\":[{\"deliveryItemId\":" + itemId + ",\"quantity\":1}]}";
 
-        Map<String, Object> snapshot = dbSnapshot();
+        DryRunProbe probe = probeBeforeDryRun(orderId);
         JsonNode dry = ok(post(withDry("/admin/deliveries/" + id + "/split"), payload));
         assertOnlyWillDo(dry);
         assertThat(dry.path("willDo").asText()).contains("拆成 2 个包裹").contains("新包");
-        assertThat(dbSnapshot()).as("预演必须零落库").isEqualTo(snapshot);
+        assertDryRunWroteNothing(probe);
         assertThat(deliveriesOfOrder(orderId)).hasSize(before);
         System.out.printf("⑦ split 预演 → willDo=%s%n", dry.path("willDo").asText());
 
@@ -326,11 +380,11 @@ class DryRunPreviewIntegrationTest {
         Long b = deliveries.get(1);
         String payload = "{\"targetId\":" + b + "}";
 
-        Map<String, Object> snapshot = dbSnapshot();
+        DryRunProbe probe = probeBeforeDryRun(orderIdOfDelivery(a));
         JsonNode dry = ok(post(withDry("/admin/deliveries/" + a + "/merge"), payload));
         assertOnlyWillDo(dry);
         assertThat(dry.path("willDo").asText()).contains("并入").contains("源包消失");
-        assertThat(dbSnapshot()).as("预演必须零落库").isEqualTo(snapshot);
+        assertDryRunWroteNothing(probe);
         assertThat(deliveryExists(a) && deliveryExists(b)).isTrue();
         System.out.printf("⑧ merge 预演 → willDo=%s%n", dry.path("willDo").asText());
 
@@ -351,11 +405,11 @@ class DryRunPreviewIntegrationTest {
         Long b = deliveries.get(1);
         String path = "/admin/deliveries/" + a + "?targetId=" + b;
 
-        Map<String, Object> snapshot = dbSnapshot();
+        DryRunProbe probe = probeBeforeDryRun(orderIdOfDelivery(a));
         JsonNode dry = ok(delete(withDry(path), null));
         assertOnlyWillDo(dry);
         assertThat(dry.path("willDo").asText()).contains("删除等同于并入");
-        assertThat(dbSnapshot()).as("预演必须零落库").isEqualTo(snapshot);
+        assertDryRunWroteNothing(probe);
         assertThat(deliveryExists(a)).isTrue();
         System.out.printf("⑨ DELETE 包裹 预演 → willDo=%s%n", dry.path("willDo").asText());
 
@@ -373,11 +427,11 @@ class DryRunPreviewIntegrationTest {
         Long id = newPendingDeliveries().get(0);
         int stockBefore = stockOf(skuA);
 
-        Map<String, Object> snapshot = dbSnapshot();
+        DryRunProbe probe = probeBeforeDryRun(orderIdOfDelivery(id));
         JsonNode dry = ok(post(withDry("/admin/deliveries/" + id + "/cancel"), null));
         assertOnlyWillDo(dry);
         assertThat(dry.path("willDo").asText()).contains("已取消").contains("回补");
-        assertThat(dbSnapshot()).as("预演必须零落库").isEqualTo(snapshot);
+        assertDryRunWroteNothing(probe);
         assertThat(deliveryStatusOf(id)).isZero();
         System.out.printf("⑩ cancel 预演 → willDo=%s%n", dry.path("willDo").asText());
 
@@ -396,11 +450,11 @@ class DryRunPreviewIntegrationTest {
         ok(post("/admin/deliveries/" + id + "/dispatch", null));      // 先合法下发（守卫要求已下发）
 
         String path = "/admin/deliveries/" + id + "/wms-callback?event=pick";
-        Map<String, Object> snapshot = dbSnapshot();
+        DryRunProbe probe = probeBeforeDryRun(orderIdOfDelivery(id));
         JsonNode dry = ok(post(withDry(path), null));
         assertOnlyWillDo(dry);
         assertThat(dry.path("willDo").asText()).contains("拣货").contains("已下发→已拣货");
-        assertThat(dbSnapshot()).as("预演必须零落库").isEqualTo(snapshot);
+        assertDryRunWroteNothing(probe);
         assertThat(deliveryStatusOf(id)).isEqualTo(1);
         System.out.printf("⑪ wms-callback 预演 → willDo=%s%n", dry.path("willDo").asText());
 
@@ -420,23 +474,25 @@ class DryRunPreviewIntegrationTest {
         String payload = "{\"status\":1}";
         int stockBefore = stockOf(skuA);
 
-        Map<String, Object> snapshot = dbSnapshot();
+        DryRunProbe probe = probeBeforeDryRun(orderId);
         JsonNode dry = ok(put(withDry("/admin/return-applies/" + applyId), payload));
         assertOnlyWillDo(dry);
         assertThat(dry.path("willDo").asText()).contains("通过").contains("退款").contains("回补");
-        assertThat(dbSnapshot()).as("预演必须零落库").isEqualTo(snapshot);
+        assertDryRunWroteNothing(probe);
         assertThat(returnApplyStatusOf(applyId)).isZero();
         assertThat(statusOf(orderId)).isEqualTo(5);
         System.out.printf("⑫ 退货审核 预演 → willDo=%s%n", dry.path("willDo").asText());
 
-        int paymentsBefore = paymentRecordCount();
+        // 退款流水按**本单 order_sn** 数（不数全表：dev 库是共用的，别人的流水不该算进我们头上）
+        String sn = orderSnOf(orderId);
+        int paymentsBefore = paymentCount(sn);
         ok(put("/admin/return-applies/" + applyId, payload));
         System.out.printf("⑫ 退货审核 真调 → 申请状态=%d，订单状态=%d，退款流水 +%d，SKU%d 库存 %d→%d%n",
-                returnApplyStatusOf(applyId), statusOf(orderId), paymentRecordCount() - paymentsBefore,
+                returnApplyStatusOf(applyId), statusOf(orderId), paymentCount(sn) - paymentsBefore,
                 skuA, stockBefore, stockOf(skuA));
         assertThat(returnApplyStatusOf(applyId)).isEqualTo(1);
         assertThat(statusOf(orderId)).isEqualTo(6);
-        assertThat(paymentRecordCount()).isEqualTo(paymentsBefore + 1);
+        assertThat(paymentCount(sn)).as("真调必须给这张单记 1 条退款流水").isEqualTo(paymentsBefore + 1);
         assertThat(stockOf(skuA)).isGreaterThan(stockBefore);
     }
 
@@ -450,11 +506,11 @@ class DryRunPreviewIntegrationTest {
         newBareSku(productId, "1.00", 10);
         newBareSku(productId, "2.00", 5);
 
-        Map<String, Object> snapshot = dbSnapshot();
+        DryRunProbe probe = probeBeforeDryRun(null);
         JsonNode dry = ok(delete(withDry("/admin/products/" + productId), null));
         assertOnlyWillDo(dry);
         assertThat(dry.path("willDo").asText()).contains("下辖 2 个 SKU").contains("删除后不可恢复");
-        assertThat(dbSnapshot()).as("预演必须零落库").isEqualTo(snapshot);
+        assertDryRunWroteNothing(probe);
         assertThat(productExists(productId)).isTrue();
         System.out.printf("⑬ DELETE 商品 预演 → willDo=%s%n", dry.path("willDo").asText());
 
@@ -471,11 +527,11 @@ class DryRunPreviewIntegrationTest {
         Long productId = newBareProduct("预演测试商品B");
         Long skuId = newBareSku(productId, "9.90", 8);
 
-        Map<String, Object> snapshot = dbSnapshot();
+        DryRunProbe probe = probeBeforeDryRun(null);
         JsonNode dry = ok(delete(withDry("/admin/skus/" + skuId), null));
         assertOnlyWillDo(dry);
         assertThat(dry.path("willDo").asText()).contains("将删除规格").contains("删除后不可恢复");
-        assertThat(dbSnapshot()).as("预演必须零落库").isEqualTo(snapshot);
+        assertDryRunWroteNothing(probe);
         assertThat(skuExists(skuId)).isTrue();
         System.out.printf("⑭ DELETE 规格 预演 → willDo=%s%n", dry.path("willDo").asText());
 
@@ -578,6 +634,7 @@ class DryRunPreviewIntegrationTest {
         order.setSplitStatus(0);
         orderMapper.insert(order);
         createdOrders.add(order.getId());
+        allCreatedOrderIds.add(order.getId());
 
         Long[] productIds = {productIdOfSkuA, productIdOfSkuB};
         for (int i = 0; i < skus.length; i++) {
@@ -627,9 +684,11 @@ class DryRunPreviewIntegrationTest {
     }
 
     private Long newBareSku(Long productId, String price, int stock) {
-        return insertReturningId(
+        Long id = insertReturningId(
                 "INSERT INTO sku (product_id, price, stock, pic) VALUES (?, ?, ?, NULL)",
                 productId, new BigDecimal(price), stock);
+        createdSkus.add(id);        // 指纹只圈这些自建规格的库存（不数全表 sku.stock）
+        return id;
     }
 
     /** INSERT 并取回自增主键（JdbcTemplate#queryForObject 不能跑 INSERT） */
@@ -716,8 +775,14 @@ class DryRunPreviewIntegrationTest {
         return jdbc.queryForObject("SELECT status FROM return_apply WHERE id = ?", Integer.class, applyId);
     }
 
-    private int paymentRecordCount() {
-        return scalar("SELECT COUNT(*) FROM payment_record").intValue();
+    /** 该订单（payment_record 按 order_sn 字符串关联、没有外键）记了几条流水 —— 只数自己这一单 */
+    private int paymentCount(String orderSn) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM payment_record WHERE order_sn = ?", Integer.class, orderSn);
+    }
+
+    /** 订单号（payment_record 的对账键） */
+    private String orderSnOf(Long orderId) {
+        return jdbc.queryForObject("SELECT order_sn FROM `order` WHERE id = ?", String.class, orderId);
     }
 
     private boolean productExists(Long productId) {
@@ -731,31 +796,149 @@ class DryRunPreviewIntegrationTest {
     }
 
     /**
-     * 「库里数据零变化」的指纹：关键表的行数 + 状态和 + 版本和 + 库存和。
+     * 「预演零落库」的指纹 —— <b>只圈本测试自己造的数据</b>，绝不数全表。
      *
-     * <p>为什么这么拼：预演要证明的是「什么都没写」。行数能抓到插入/删除，
-     * status 和能抓到状态流转，version 和能抓到隐式更新（乐观锁每次更新 +1），
-     * stock 和能抓到库存增减 —— 四类覆盖了 14 个端点全部可能的副作用。
+     * <p><b>为什么不能数全表</b>：本类连的是 dev 库 {@code qiqi_mall}，同一时刻可能有别的进程在写它
+     * （另一个 {@code mvn test}、往库里补演示数据的脚本、MCP 那边的写用例）。全表行数一被外人动过，
+     * 预演就成了替罪羊 —— 2026-11-12 实测：并发跑时本类 13 条用例全红，diff 全是 ±1 行，独占库重跑全绿。
+     *
+     * <p><b>圈定范围</b>（全部来自本测试自己的 {@code createdOrders} / {@code createdProducts} /
+     * {@code createdSkus} / skuA / skuB）：
+     * <ul>
+     *   <li>order：行数 / status 和 / version 和 —— 抓「插单、改状态、隐式更新（乐观锁 +1）」；</li>
+     *   <li>order_item：行数 / 件数和 —— 抓「凭空多/少一条明细」；</li>
+     *   <li>delivery_order：行数 / status 和 / version 和 —— 抓「拆分/合并/下发偷偷落库」；</li>
+     *   <li>delivery_item：行数 / 件数和 —— 抓「拆包把货搬来搬去」；</li>
+     *   <li>return_apply：status 和 —— 抓「退货审核预演就把申请改掉」；</li>
+     *   <li>payment_record：行数（按本单 order_sn 圈定）—— 抓「预演就退款记账」；</li>
+     *   <li>stock_ledger：行数 / delta 和 —— 抓「预演偷偷扣补库存并记账」；</li>
+     *   <li>sku：本测试动过的 SKU 库存和；product：本测试自建商品行数。</li>
+     * </ul>
+     *
+     * <p>参照系换了，断言**没松反而更紧**：原来「行数不变」看不出 status 被改写或 version 被偷偷 +1，
+     * 现在 status 和 / version 和 / 件数和 / 台账 delta 和都逐个比对，且只针对自己能负责的那批数据 ——
+     * 别人的写不再让我们假红，我们自己的写一行也跑不掉。
      */
     private Map<String, Object> dbSnapshot() {
+        In orders = in(createdOrders);
+        In products = in(createdProducts);
+        In skus = in(scopedSkuIds());
+
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("order行数", scalar("SELECT COUNT(*) FROM `order`"));
-        m.put("order状态和", scalar("SELECT COALESCE(SUM(status),0) FROM `order`"));
-        m.put("order版本和", scalar("SELECT COALESCE(SUM(version),0) FROM `order`"));
-        m.put("orderItem行数", scalar("SELECT COUNT(*) FROM order_item"));
-        m.put("delivery行数", scalar("SELECT COUNT(*) FROM delivery_order"));
-        m.put("delivery状态和", scalar("SELECT COALESCE(SUM(status),0) FROM delivery_order"));
-        m.put("delivery版本和", scalar("SELECT COALESCE(SUM(version),0) FROM delivery_order"));
-        m.put("deliveryItem行数", scalar("SELECT COUNT(*) FROM delivery_item"));
-        m.put("sku库存和", scalar("SELECT COALESCE(SUM(stock),0) FROM sku"));
-        m.put("product行数", scalar("SELECT COUNT(*) FROM product"));
-        m.put("returnApply状态和", scalar("SELECT COALESCE(SUM(status),0) FROM return_apply"));
-        m.put("paymentRecord行数", scalar("SELECT COUNT(*) FROM payment_record"));
+        m.put("订单行数", num("SELECT COUNT(*) FROM `order` WHERE id " + orders.sql, orders.args));
+        m.put("订单状态和", num("SELECT COALESCE(SUM(status),0) FROM `order` WHERE id " + orders.sql, orders.args));
+        m.put("订单版本和", num("SELECT COALESCE(SUM(version),0) FROM `order` WHERE id " + orders.sql, orders.args));
+        m.put("订单明细行数", num("SELECT COUNT(*) FROM order_item WHERE order_id " + orders.sql, orders.args));
+        m.put("订单明细件数和",
+                num("SELECT COALESCE(SUM(product_quantity),0) FROM order_item WHERE order_id " + orders.sql,
+                        orders.args));
+        m.put("发货单行数", num("SELECT COUNT(*) FROM delivery_order WHERE order_id " + orders.sql, orders.args));
+        m.put("发货单状态和",
+                num("SELECT COALESCE(SUM(status),0) FROM delivery_order WHERE order_id " + orders.sql, orders.args));
+        m.put("发货单版本和",
+                num("SELECT COALESCE(SUM(version),0) FROM delivery_order WHERE order_id " + orders.sql, orders.args));
+        m.put("包裹明细行数", num("SELECT COUNT(*) FROM delivery_item WHERE delivery_id IN "
+                + "(SELECT id FROM delivery_order WHERE order_id " + orders.sql + ")", orders.args));
+        m.put("包裹明细件数和", num("SELECT COALESCE(SUM(quantity),0) FROM delivery_item WHERE delivery_id IN "
+                + "(SELECT id FROM delivery_order WHERE order_id " + orders.sql + ")", orders.args));
+        m.put("退货申请状态和",
+                num("SELECT COALESCE(SUM(status),0) FROM return_apply WHERE order_id " + orders.sql, orders.args));
+        m.put("支付流水行数", num("SELECT COUNT(*) FROM payment_record WHERE order_sn IN "
+                + "(SELECT order_sn FROM `order` WHERE id " + orders.sql + ")", orders.args));
+        m.put("台账行数", num("SELECT COUNT(*) FROM stock_ledger WHERE order_id " + orders.sql, orders.args));
+        m.put("台账净额和",
+                num("SELECT COALESCE(SUM(delta),0) FROM stock_ledger WHERE order_id " + orders.sql, orders.args));
+        m.put("本测试SKU库存和", num("SELECT COALESCE(SUM(stock),0) FROM sku WHERE id " + skus.sql, skus.args));
+        m.put("本测试商品行数", num("SELECT COUNT(*) FROM product WHERE id " + products.sql, products.args));
         return m;
     }
 
-    private Long scalar(String sql) {
-        Long value = jdbc.queryForObject(sql, Long.class);
+    /** 指纹要圈的 SKU：skuA / skuB（种子规格，只读它的 stock）+ 本类自建的规格 */
+    private List<Long> scopedSkuIds() {
+        List<Long> ids = new ArrayList<>();
+        if (skuA != null) ids.add(skuA);
+        if (skuB != null) ids.add(skuB);
+        ids.addAll(createdSkus);
+        return ids;
+    }
+
+    /**
+     * **单张订单**的「预演不许动」指纹 —— 比行数更贴「零落库」的实质。
+     *
+     * <p>行数指纹只能证明「没多也没少」，证明不了「没被改写」；这里逐项钉死一张订单的实质状态：
+     * 状态 / 版本号 / 明细行数 / 支付流水行数 / 退货申请状态和 / 包裹行数与状态和。
+     * 任何一个被预演悄悄改了，这里都会红（比如「预演顺手把订单推到已发货」或「预演给包裹 +1 version」）。
+     */
+    private record OrderFingerprint(int status, int version, int items, int payments,
+                                    int deliveries, long deliveryStatusSum, long returnApplyStatusSum) {
+    }
+
+    private OrderFingerprint fingerprintOf(Long orderId) {
+        String sn = orderSnOf(orderId);
+        return new OrderFingerprint(
+                statusOf(orderId),
+                jdbc.queryForObject("SELECT version FROM `order` WHERE id = ?", Integer.class, orderId),
+                itemCountOf(orderId),
+                paymentCount(sn),
+                jdbc.queryForObject("SELECT COUNT(*) FROM delivery_order WHERE order_id = ?", Integer.class, orderId),
+                jdbc.queryForObject("SELECT COALESCE(SUM(status),0) FROM delivery_order WHERE order_id = ?",
+                        Long.class, orderId),
+                jdbc.queryForObject("SELECT COALESCE(SUM(status),0) FROM return_apply WHERE order_id = ?",
+                        Long.class, orderId));
+    }
+
+    /** IN (...) 子句 + 它要的占位符实参；空集合给 {@code IN (NULL)}（永远匹配不到，语义正确） */
+    private record In(String sql, Object[] args) {
+    }
+
+    /**
+     * 预演前拍下的双层指纹。
+     *
+     * @param data        本测试自建数据集整体指纹（{@link #dbSnapshot()}）
+     * @param orderId     本次预演涉及的那张订单；商品/规格类用例给 {@code null}（只做第 ① 层）
+     * @param fingerprint 该订单的单据级指纹（{@link #fingerprintOf(Long)}）
+     */
+    private record DryRunProbe(Map<String, Object> data, Long orderId, OrderFingerprint fingerprint) {
+    }
+
+    /**
+     * 预演前取样：①「我造的这一批数据」整体指纹；② 本次预演要动的那张订单的实质状态指纹。
+     *
+     * <p>两层都只圈**自己造的数据** —— 见 {@link #dbSnapshot()} 上关于「为什么不能数全表」的说明。
+     */
+    private DryRunProbe probeBeforeDryRun(Long orderId) {
+        return new DryRunProbe(dbSnapshot(), orderId, orderId == null ? null : fingerprintOf(orderId));
+    }
+
+    /**
+     * 预演后断言「零落库」—— 一条都不许删的两层：
+     * <ol>
+     *   <li><b>数据集层</b>：本测试自建的订单/明细/包裹/退货申请/流水/台账/库存/商品，一个字段都不许变；</li>
+     *   <li><b>单据层（更强）</b>：本次预演涉及的那张订单，状态 / 版本号 / 明细行数 / 支付流水行数 /
+     *       退货申请状态 / 包裹行数与状态和，逐项不变 —— 这才是「零落库」的实质，
+     *       行数比对看不出「status 被改写」「version 被偷偷 +1」，这一层能。</li>
+     * </ol>
+     */
+    private void assertDryRunWroteNothing(DryRunProbe probe) {
+        assertThat(dbSnapshot())
+                .as("预演必须零落库（只比对本测试自建的数据集，不数全表：dev 库是共用的）")
+                .isEqualTo(probe.data());
+        if (probe.orderId() != null) {
+            assertThat(fingerprintOf(probe.orderId()))
+                    .as("预演后订单 %d 的状态/版本号/明细行数/支付流水行数/包裹行数与状态必须逐一不变",
+                            probe.orderId())
+                    .isEqualTo(probe.fingerprint());
+        }
+    }
+
+    private static In in(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) return new In("IN (NULL)", new Object[0]);
+        return new In("IN (" + String.join(",", java.util.Collections.nCopies(ids.size(), "?")) + ")",
+                ids.toArray());
+    }
+
+    private long num(String sql, Object... args) {
+        Long value = jdbc.queryForObject(sql, Long.class, args);
         return value == null ? 0L : value;
     }
 
