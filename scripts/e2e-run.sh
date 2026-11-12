@@ -38,6 +38,11 @@ SHARDS=("a:5183:5185:8091" "b:5193:5195:8092" "c:5203:5205:8093" "d:5213:5215:80
 AVAIL_SHARDS="${AVAIL_SHARDS:-2}"
 
 WANT_SHARDS="${E2E_SHARDS:-2}"
+# 从第几个分片开始取（0=a 1=b 2=c 3=d）。
+# 用途：两条并发 e2e 线各自钉一个分片/库，避免撞同一个库出现假失败。
+#   E2E_SHARD_FROM=1 E2E_SHARDS=1  → 只用 shard b（5193/5195/8092，库 qiqi_mall_e2e_b）
+#   E2E_SHARD_FROM=0 E2E_SHARDS=1  → 只用 shard a（默认行为不变）
+export SHARD_FROM="${E2E_SHARD_FROM:-0}"   # 必须 export：内层 INNER heredoc 在独立 shell 里读它
 # 本次跑的标签：用来把自己的 scope 记账，--kill-stale 只清记账里的那些
 TAG="${E2E_RUN_TAG:-$(date +%s)-$$}"
 SCOPE_DIR=/tmp/e2e-scopes
@@ -103,7 +108,7 @@ fi
 
 # 前置：两个 shard 的服务必须在跑，否则测试会指着空气打
 missing=0
-for s in "${SHARDS[@]:0:$WANT_SHARDS}"; do
+for s in "${SHARDS[@]:$SHARD_FROM:$WANT_SHARDS}"; do
   IFS=: read -r name pport aport backend <<< "$s"
   for port in "$pport" "$aport" "$backend"; do
     code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:$port/" 2>/dev/null || true)"
@@ -157,7 +162,7 @@ MAPFILE="${E2E_MAPFILE:-}"
 declare -A PIDS
 
 i=0
-for s in "${SHARDS[@]:0:$WANT_SHARDS}"; do
+for s in "${SHARDS[@]:$SHARD_FROM:$WANT_SHARDS}"; do
   IFS=: read -r name pport aport backend <<< "$s"
   i=$((i+1))
   out="${OUT_PREFIX:-/tmp/pwout}-$name"
@@ -194,7 +199,7 @@ done
 
 echo
 echo "──── 各 shard 摘要 ────"
-for s in "${SHARDS[@]:0:$WANT_SHARDS}"; do
+for s in "${SHARDS[@]:$SHARD_FROM:$WANT_SHARDS}"; do
   name="${s%%:*}"
   printf '%-2s %s\n' "$name" "$(grep -E '^\s+[0-9]+ (passed|failed|flaky|skipped)' /tmp/e2e-shard-$name$SFX.log 2>/dev/null | tail -3 | tr '\n' ' ')"
   grep -E '✘|✗.*›' /tmp/e2e-shard-$name$SFX.log 2>/dev/null | head -5

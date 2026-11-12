@@ -162,6 +162,21 @@
 #     JSON → 再走 stdin 进容器内的临时文件（umask 077，用完即删）→ wget --post-file。
 #     全程不进 argv（宿主机和容器的 ps 都看不到）、不 echo、不写日志；响应里的 accessToken
 #     也只在断言 "grep 到 accessToken" 时用，从不打印。
+#
+# 【十一】CDN 刷新的 ObjectPath 必须 percent-encode —— 否则「报告成功但线上不生效」
+#   阿里云 CDN 的 RefreshObjectCaches 对 ObjectPath 里的中文**不做容错**，而且是**静默失败**：
+#     - 原样提交中文路径（如 https://docs.rose7.cn/material/diagrams/02-关键机制/6-并发支付.md）
+#       → 接口 200 + RefreshTaskId；DescribeRefreshTasks 里 Status=Complete / Process=100%，
+#         **清单里明确列出了那个对象**（看起来完全成功）
+#       → 但线上仍是 X-Cache: HIT、Age: 7948，返回的还是旧内容
+#     - 同一条路径 quote(..., safe="/") 编码后提交 → 90 秒内 X-Cache: MISS 回源，拿到新内容
+#   机制：CDN 的缓存 key 是**编码后的 URL**（浏览器/curl 发的也是编码串）。原样中文的
+#   ObjectPath 跟这个 key 对不上 ⇒ 任务"成功"完成，但一份缓存都没被失效。文档站 98 条
+#   中文 md/svg 路径全都踩在这上面 ⇒ "每次发版都报告成功、线上却一直是旧内容"。
+#   所以：① 所有 ObjectPath 一律过 publish_docs 里的 encode_object_path()（safe="/"，
+#           幂等：已编码的输入不会二次编码）；
+#         ② 提交后**必须回读校验**（抽 5 条 HEAD，看 X-Cache 从 HIT 变 MISS/EXPIRED）——
+#            这个接口错了也返回成功，没有回读就等于没有证据。
 # =============================================================================
 
 set -uo pipefail
@@ -1160,6 +1175,7 @@ PY
   fi
 
   # CDN：文件级刷新 html/md/目录首页（图/视频吃 30 天缓存，不刷）
+  # ★ 每条 ObjectPath 必须 percent-encode + 提交后回读校验（原因见脚本头【十一】）
   if ! python3 - "$DOCS_DIST" "$DOCS_DOMAIN" "$CDN_REGION" "$plan_flag" "$CRED_FILE" <<'PY'
 # -*- coding: utf-8 -*-
 """RefreshObjectCaches(ObjectType=File)：html/md/目录首页 + _vendor/ 下所有 js/css，批次 100。
@@ -1169,11 +1185,42 @@ PY
 为什么 _vendor/ 必须刷：docsify 的 _vendor/*.js、*.css 文件名**没有 content hash**
 （永远叫 docsify.min.js / theme-simple.css），URL 不变 ⇒ 吃 30 天缓存 ⇒ 改了样式/换了插件
 不刷就永远看不到新版。所以每次发布都把它们全部刷一遍（运行时扫目录，不硬编码文件名，
-将来加插件自动跟上）。"""
+将来加插件自动跟上）。
+
+★★ 为什么每条 ObjectPath 都必须 percent-encode（2026-11 实测，别"简化"回去）★★
+  阿里云 CDN 的 RefreshObjectCaches 对中文**不做容错**，而且是**静默失败**：
+    - 原样提交中文路径
+        https://docs.rose7.cn/_assets/img/flows/01-架构/1-系统架构图.svg
+      → 接口返回 200 + RefreshTaskId；DescribeRefreshTasks 里 Status=Complete /
+        Process=100%，**清单里明确列出了该对象**（看起来完全成功）
+      → 但线上仍是 X-Cache: HIT / Age 一路涨到 307（SaveTime 一动不动），返回的还是旧内容
+    - 同一条路径 quote(..., safe="/") 编码后提交
+        https://docs.rose7.cn/_assets/img/flows/01-%E6%9E%B6%E6%9E%84/1-...svg
+      → 17 秒内 X-Cache: MISS、Age 归零、SaveTime 刷新，拿到新内容
+  机制：CDN 的缓存 key 是**编码后的 URL**（浏览器/curl 发的也是编码串）。原样中文的
+  ObjectPath 跟这个 key 对不上 ⇒ 任务"成功"完成，但一份缓存都没被失效。文档站有 98 条
+  中文 md/svg 路径，全都在这个坑里 ⇒ "每次发版都报告成功、线上却没变"。
+  所以：绝不把 encode_object_path() 去掉；提交完还有两道回读（canary 探针 + 5 条抽检，
+  见文件末尾）——这个接口错了也会返回成功，没有回读就等于没有证据。
+"""
+import json
+import os
+import re
 import sys
+import time
+import urllib.parse
+import urllib.request
+from urllib.parse import quote, unquote
 
 dist, domain, region, mode, cred_path = sys.argv[1:6]
 APPLY = (mode == "--apply")
+VERIFY_TIMEOUT = int(os.environ.get("CDN_VERIFY_TIMEOUT") or 180)  # 回读校验轮询上限（秒）
+VERIFY_SAMPLE = int(os.environ.get("CDN_VERIFY_SAMPLE") or 5)      # 抽检条数
+CANARY_ON = (os.environ.get("CDN_CANARY") or "1") != "0"           # 编码自检探针开关
+
+NO_CACHE_EXT = {"html", "htm", "md"}                               # TTL 0，每次回源
+LONG_TTL_EXT = {"svg", "png", "jpg", "jpeg", "webp", "gif", "mp4", "webm",
+                "js", "css", "woff", "woff2", "ttf", "ico"}        # 30 天，会停在 HIT
 
 ak = sk = None
 for line in open(cred_path, encoding="utf-8"):
@@ -1187,45 +1234,97 @@ for line in open(cred_path, encoding="utf-8"):
     elif k == "ALI_SK":
         sk = v
 
-import os
+
+def redact(text):
+    out = str(text)
+    for s in (ak, sk):
+        if s:
+            out = out.replace(s, "***REDACTED***")
+    return out
+
+
+def fail(msg):
+    print("      ✗ " + redact(msg), file=sys.stderr)
+    sys.exit(3)
+
+
+# ---------------------------------------------------------------- 路径 → 编码
+def encode_object_path(path):
+    """OSS 对象路径 → 可直接提交给 CDN / 可直接请求的 URL path（唯一入口，别绕开）。
+
+    三条规矩（改之前先看本文件头部的实测现象）：
+      1) 根路径（"" / "/"）原样返回 "/"，不动；
+      2) safe="/" 必须给 —— 否则斜杠会被编成 %2F，路径层级消失，刷新照样打空；
+      3) 已经是编码串的输入**不要**二次编码 —— 先 unquote 还原成原始串再 quote，
+         于是 "%E6%9C%BA" 与 "机" 两条输入得到同一个输出，%E6 不会变成 %25E6。
+    """
+    if not path or path == "/":
+        return "/"
+    return "/" + quote(unquote(path).lstrip("/"), safe="/")
+
+
+def plain_path(rel):
+    """站点相对路径 → 未编码的 URL path（只用于打印对比，不许拿去请求/提交）。"""
+    return "/" + rel.lstrip("/") if rel else "/"
+
+
+def url_of(rel):
+    """站点相对路径（"" = 根）→ 提交给 CDN 的完整 URL；path 部分已 percent-encode。"""
+    return "https://%s%s" % (domain, encode_object_path(rel))
+
+
+def ext_of(rel):
+    return rel.rsplit(".", 1)[-1].lower() if "." in rel else ""
+
 
 # ① html / md / 每个目录首页（docsify 是运行时 fetch .md 的 SPA，md 必须刷）
-site_urls = ["https://%s/" % domain]
+site_rels = [""]                     # "" 就是站点根 https://<domain>/
+long_ttl_rels = []                   # 30 天缓存的对象：唯一能稳定观察到 X-Cache: HIT 的一类
 for dirpath, _d, filenames in os.walk(dist):
     for fn in filenames:
         abs_path = os.path.join(dirpath, fn)
         rel = os.path.relpath(abs_path, dist).replace(os.sep, "/")
         low = fn.lower()
         if low.endswith((".html", ".htm", ".md")):
-            site_urls.append("https://%s/%s" % (domain, rel))
+            site_rels.append(rel)
             if low == "index.html":
                 parent = rel.rsplit("/", 1)[0] if "/" in rel else ""
-                site_urls.append("https://%s/%s" % (domain, (parent + "/") if parent else ""))
-site_urls = sorted(set(site_urls))
+                site_rels.append((parent + "/") if parent else "")
+        if ext_of(rel) in LONG_TTL_EXT:
+            long_ttl_rels.append(rel)
+site_rels = sorted(set(site_rels))
+long_ttl_rels = sorted(set(long_ttl_rels))
 
 # ② _vendor/ 下的所有 js / css（文件名不带 hash，改了不刷就一直吃旧缓存）
 #    运行时扫 dist/_vendor/，不硬编码文件名：换主题、加插件都自动跟上。
-vendor_urls = []
+vendor_rels = []
 vendor_dir = os.path.join(dist, "_vendor")
 for dirpath, _d, filenames in os.walk(vendor_dir):
     for fn in filenames:
         if fn.lower().endswith((".js", ".css")):
-            abs_path = os.path.join(dirpath, fn)
-            rel = os.path.relpath(abs_path, dist).replace(os.sep, "/")
-            vendor_urls.append("https://%s/%s" % (domain, rel))
-vendor_urls = sorted(set(vendor_urls))
+            rel = os.path.relpath(os.path.join(dirpath, fn), dist).replace(os.sep, "/")
+            vendor_rels.append(rel)
+vendor_rels = sorted(set(vendor_rels))
 
-urls = sorted(set(site_urls) | set(vendor_urls))
-print("    CDN 刷新清单 %d 条（html/md/目录首页 %d 条 + _vendor js/css %d 条）"
-      % (len(urls), len(site_urls), len(vendor_urls)))
-for u in urls[:5]:
-    print("      " + u)
-if len(urls) > 5:
-    print("      ...（共 %d 条）" % len(urls))
-if vendor_urls:
-    print("      _vendor：%s" % ", ".join(os.path.basename(u) for u in vendor_urls))
+rels = sorted(set(site_rels) | set(vendor_rels))
+urls = [url_of(r) for r in rels]             # 交给接口的就是这一份（path 已编码）
+need_enc = [r for r in rels if encode_object_path(r) != plain_path(r)]
+
+print("    CDN 刷新清单 %d 条（html/md/目录首页 %d 条 + _vendor js/css %d 条；"
+      "其中含非 ASCII、必须编码的 %d 条）"
+      % (len(rels), len(site_rels), len(vendor_rels), len(need_enc)))
+for r in rels[:5]:
+    print("      %-58s%s" % (plain_path(r), encode_object_path(r) if
+                              encode_object_path(r) != plain_path(r) else ""))
+if len(rels) > 5:
+    print("      ...（共 %d 条）" % len(rels))
+for r in need_enc[:3]:                       # 单把"要编码的那几条"抽出来看，别被 ASCII 挡住
+    print("      必编码示例  %s\n                 → %s" % (plain_path(r), encode_object_path(r)))
+if vendor_rels:
+    print("      _vendor：%s" % ", ".join(os.path.basename(r) for r in vendor_rels))
 else:
     print("      _vendor：无 js/css（%s 不存在或为空，跳过）" % vendor_dir)
+print("      编码自检探针（canary）：%s" % ("开" if CANARY_ON else "关（CDN_CANARY=0）"))
 
 if not APPLY:
     print("    [plan] 未调用 CDN 接口（dry-run）")
@@ -1236,17 +1335,167 @@ from aliyunsdkcore.client import AcsClient
 from aliyunsdkcdn.request.v20180510.RefreshObjectCachesRequest import RefreshObjectCachesRequest
 
 client = AcsClient(ak, sk, region)
+
+
+def head_once(url, timeout=10):
+    """HEAD 一次，返回 (status, x_cache, age, save_time)。
+
+    只用 HEAD（不下正文），且**不做任何 cache-busting**：要看的就是边缘那份副本
+    现在到底是 HIT（说明没被失效）还是 MISS/EXPIRED（说明回源刷过了）。
+    """
+    req = urllib.request.Request(url, method="HEAD",
+                                 headers={"User-Agent": "qiqi-publish-verify/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            h = {k.lower(): v for k, v in resp.headers.items()}
+            age = h.get("age", "")
+            return (resp.status, h.get("x-cache", ""),
+                    int(age) if age.isdigit() else None, h.get("x-swift-savetime", ""))
+    except Exception as exc:              # 校验本身失败不该炸栈，记下来给人看
+        return 0, "ERR:%s" % str(exc)[:80], None, ""
+
+
+def submit(object_paths):
+    """提交一批 ObjectPath → (http_status, task_id, request_id, body)。
+
+    用 _implementation_of_do_action 拿**真实 HTTP 状态码**：公开的 do_action_with_exception
+    只回 body，非 2xx 直接抛异常，日志里看不到"到底几号码"。没有这个方法就退回公开 API。
+    """
+    req = RefreshObjectCachesRequest()
+    req.set_ObjectPath("\n".join(object_paths))   # ← 编码后的 URL；原样中文会被静默丢弃
+    req.set_ObjectType("File")
+    req.set_accept_format("JSON")                  # 要 JSON 返回体，好解析 RefreshTaskId
+    if hasattr(client, "_implementation_of_do_action"):
+        status, _hdrs, body, exc = client._implementation_of_do_action(req)
+        if exc:
+            fail("提交异常（拿不到 HTTP 状态码）：%s" % exc)
+        body = body.decode("utf-8", "replace")
+    else:
+        status, body = 200, client.do_action_with_exception(req).decode("utf-8", "replace")
+    try:
+        info = json.loads(body)
+    except ValueError:
+        # 兜底：万一网关/SDK 回了 XML，也要能抠出 TaskId（别把成功误判成失败）
+        info = {}
+        m = re.search(r"<RefreshTaskId>(\d+)</RefreshTaskId>", body)
+        if m:
+            info["RefreshTaskId"] = m.group(1)
+        m = re.search(r"<RequestId>([^<]+)</RequestId>", body)
+        if m:
+            info["RequestId"] = m.group(1)
+    return status, info.get("RefreshTaskId"), info.get("RequestId"), body
+
+
+def wait_flushed(rel, timeout):
+    """轮询一条 URL，直到它离开 HIT（或 Age 回落）。返回 (bool, 最后一行观测描述, 轮数)。"""
+    base_age = head_once(url_of(rel))[2]
+    started = time.time()
+    last = ""
+    while time.time() - started < timeout:
+        time.sleep(10)
+        st, xc, age, _sv = head_once(url_of(rel))
+        ok = bool(xc) and not xc.startswith("HIT")
+        if not ok and age is not None and base_age is not None and age + 5 < base_age:
+            ok = True
+        last = ("[t+%3ds] %-58s HTTP %-3s X-Cache: %-22s Age: %s  %s"
+                % (int(time.time() - started), encode_object_path(rel), st or "-", xc or "-",
+                   age if age is not None else "-", "✓ 已失效" if ok else "… 等待"))
+        print("      " + last)
+        if ok:
+            return True, last, int(time.time() - started)
+    return False, last, int(time.time() - started)
+
+
+# ---------------- ① 主清单：逐批打印 HTTP 状态码 + RefreshTaskId，任何一批不对就 fail ----------
 total = 0
+task_ids = []
 for i in range(0, len(urls), 100):
     batch = urls[i:i + 100]
-    req = RefreshObjectCachesRequest()
-    req.set_ObjectPath("\n".join(batch))
-    req.set_ObjectType("File")
-    resp = client.do_action_with_exception(req)
-    print("      批次 %d 已提交（%d 条）: %s"
-          % (i // 100 + 1, len(batch), resp.decode("utf-8", "replace")[:200]))
+    status, tid, rid, body = submit(batch)
+    print("      批次 %d: HTTP %s | %d 条 | RefreshTaskId=%s | RequestId=%s"
+          % (i // 100 + 1, status, len(batch), tid, rid))
+    if status != 200:
+        fail("批次 %d 返回 HTTP %s（非 200）→ 刷新失败：%s" % (i // 100 + 1, status, body[:200]))
+    if not tid:
+        fail("批次 %d 没拿到 RefreshTaskId（HTTP %s，返回体 %s）→ 视为刷新失败"
+             % (i // 100 + 1, status, body[:200]))
+    task_ids.append(str(tid))
     total += len(batch)
-print("    ✓ CDN 刷新已提交 %d 条（生效通常 1 分钟内）" % total)
+print("    ✓ CDN 刷新已提交 %d 条 / %d 个批次（RefreshTaskId: %s）"
+      % (total, len(task_ids), ", ".join(task_ids)))
+
+# ---------------- ② 编码自检探针（canary）：唯一能"物理证明"刷新生效的对象类 ----------
+# 主清单刷的是 html/md/_vendor：html 与 md 在 CDN 上是 TTL 0（no-cache，每次请求都回源），
+# 它们的 X-Cache **永远**是 MISS ⇒ 光看它们根本区分不出"刷新生效"和"刷新被静默丢弃"。
+# 而 svg/png 这类 30 天缓存的对象会稳定停在 X-Cache: HIT，只有它们能被观察到"从 HIT 掉下去"。
+# 所以每次发布额外刷**一条中文图**（1 条，代价可忽略），看它是否掉 HIT：
+#   掉下去      → percent-encode 确实被 CDN 认了 ✔
+#   掉不下去    → 正是"原样中文被静默丢弃"的指纹 → fail，拦住发布
+# 想关掉：CDN_CANARY=0（不建议；关掉就等于退回"只看接口说成功"）。
+canary_rels = [r for r in long_ttl_rels if encode_object_path(r) != plain_path(r)]
+if not CANARY_ON:
+    print("    ⚠ 已用 CDN_CANARY=0 关闭编码自检探针（只保证接口受理，不保证真的生效）")
+elif not canary_rels:
+    print("    ⚠ dist 里没有中文命名的 30 天缓存对象（svg/png…），跳过编码自检探针")
+else:
+    canary = canary_rels[0]
+    st0, xc0, age0, _sv0 = head_once(url_of(canary))
+    print("    编码自检探针 %s" % encode_object_path(canary))
+    print("      刷新前: HTTP %s | X-Cache: %s | Age: %s" % (st0 or "-", xc0 or "-",
+                                                          age0 if age0 is not None else "-"))
+    if not (xc0 or "").startswith("HIT"):
+        print("      ⚠ 基线不是 HIT（该边缘还没有这份缓存），本次无法判定 → 跳过（不 fail，"
+              "下一条探针会自动顶上）")
+    else:
+        cst, ctid, crid, cbody = submit([url_of(canary)])
+        print("      提交: HTTP %s | RefreshTaskId=%s | RequestId=%s" % (cst, ctid, crid))
+        if cst != 200 or not ctid:
+            fail("探针提交失败（HTTP %s）：%s" % (cst, cbody[:200]))
+        cok, clast, ctook = wait_flushed(canary, VERIFY_TIMEOUT)
+        if cok:
+            print("    ✓ 编码自检探针通过：%d 秒内 X-Cache 离开 HIT（percent-encode 生效）" % ctook)
+        else:
+            fail("编码自检探针失败：%d 秒内 %s 仍是 HIT（最后一次观测：%s）—— 刷新没真正生效，"
+                 "首要怀疑 ObjectPath 没做 percent-encode（见本文件头部实测说明）"
+                 % (VERIFY_TIMEOUT, encode_object_path(canary), clast))
+
+# ---------------- ③ 主清单抽检 N 条：基线是 HIT 的才有可比性，其余只记录不改判 ----------
+samples = need_enc[:VERIFY_SAMPLE]
+if not samples:
+    print("    ⚠ 主清单里没有需要编码的路径（无中文），跳过抽检")
+else:
+    print("    主清单抽检 %d 条（HEAD 一次，记录 X-Cache/Age 供人工复核）" % len(samples))
+    hit_samples = []
+    for r in samples:
+        st, xc, age, _sv = head_once(url_of(r))
+        if (xc or "").startswith("HIT"):
+            hit_samples.append(r)
+        print("      %-58s HTTP %-3s X-Cache: %-22s Age: %s"
+              % (encode_object_path(r), st or "-", xc or "-", age if age is not None else "-"))
+    if not hit_samples:
+        print("    ⚠ 抽检对象基线均非 HIT（html/md 是 TTL 0，每次请求都回源）⇒ X-Cache 前后"
+              "无可比性；本次生效性以 canary 探针 + 每批次 HTTP 200/RefreshTaskId 为准")
+    else:
+        pending = set(hit_samples)
+        started = time.time()
+        while pending and time.time() - started < VERIFY_TIMEOUT:
+            time.sleep(10)
+            for r in sorted(pending):
+                st, xc, age, _sv = head_once(url_of(r))
+                ok = bool(xc) and not xc.startswith("HIT")
+                print("      [t+%3ds] %-58s HTTP %-3s X-Cache: %-22s Age: %s  %s"
+                      % (int(time.time() - started), encode_object_path(r), st or "-",
+                         xc or "-", age if age is not None else "-", "✓" if ok else "…"))
+                if ok:
+                    pending.discard(r)
+        if pending and len(pending) == len(hit_samples):
+            fail("抽检 %d 条**全部**仍是 HIT → 刷新没有真正生效：%s"
+                 % (len(pending), ", ".join(sorted(encode_object_path(r) for r in pending))[:300]))
+        if pending:
+            print("    ⚠ 仍有 %d 条抽检对象在 %d 秒内没看到 X-Cache 变化；CDN 传播有快有慢，"
+                  "稍后 curl -I 复核即可（不阻塞发布）" % (len(pending), VERIFY_TIMEOUT))
+        else:
+            print("    ✓ 抽检 %d 条全部在 %d 秒内离开 HIT" % (len(hit_samples), int(time.time() - started)))
 PY
   then
     err "CDN 刷新失败（文档已上传，只是缓存可能还没失效；可手动刷或稍后重跑）"

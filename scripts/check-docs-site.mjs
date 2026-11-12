@@ -7,11 +7,15 @@
  * 人工 curl + 数数必漏，所以要一条命令给出 PASS/FAIL + 具体数字 + 可行动的失败清单。
  *
  * 用法：
- *   node scripts/check-docs-site.mjs --root /root/docsify --base http://100.113.135.55:3027
+ *   # dev 站（内网专用）：首页 README.md 就是内网索引页，本来就列着内网 IP/端口/测试账号，
+ *   # 那是有意为之、不是泄露，所以 dev 站用 --internal-ok 让第 ⑥ 项豁免 README.md 这一个文件。
+ *   node scripts/check-docs-site.mjs --root /root/docsify --base http://100.113.135.55:3027 --internal-ok
+ *   # prod 站（公网）：**绝对不要加 --internal-ok**，README.md 也必须过内网信息扫描。
  *   node scripts/check-docs-site.mjs --root /root/docsify/dist-prod --base https://docs.rose7.cn
  *   node scripts/check-docs-site.mjs --root /root/docsify --skip-http     # 只做静态检查，不发请求
  *
  * 参数：--root 站点产物目录（必填） / --base 站点基址（除非 --skip-http） / --skip-http 只查本地文件
+ *       --internal-ok 仅 dev 站用：第 ⑥ 项豁免根目录 README.md（dev 索引页），其余文件照扫
  *       --docs 图素材源目录（默认 <repo>/docs） / --videos 视频素材源目录（默认 <repo>/e2e/report/videos）
  *       dev 站的 /_assets/{img,video} 是 nginx alias 到这两个源目录的，prod 站则真拷进产物，故两者都要知道。
  * 退出码：全 PASS = 0，有 FAIL = 1（可直接接进 publish.sh 当门禁）。
@@ -33,6 +37,10 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const ROOT = resolve(opt('--root') ?? '')
 const BASE = (opt('--base') ?? '').replace(/\/+$/, '')
 const SKIP_HTTP = argv.includes('--skip-http')
+// dev 站专用开关：dev 首页 README.md 是内网索引页（本来就列着内网 IP/端口/测试账号），
+// 第 ⑥ 项豁免它一个文件；prod 站不许带（prod 的 README.md 也必须过内网信息扫描）。
+const INTERNAL_OK = argv.includes('--internal-ok')
+const INTERNAL_OK_SKIP = 'README.md'
 const DOCS = resolve(opt('--docs') ?? join(REPO, 'docs'))
 const VIDEOS = resolve(opt('--videos') ?? join(REPO, 'e2e', 'report', 'videos'))
 
@@ -276,8 +284,14 @@ const LEAK_WORDS = [
   ['admin/123456', /admin\s*\/\s*123456/gi], ['MCP Inspector', /MCP\s?Inspector/gi], ['qiqi2026', /qiqi2026/gi],
 ].map(([label, re]) => ({ label, re }))
 // 扫描对象 = 产物里的 md/html/js + 全部 SVG（源 svg 会被 dev 站 alias 直出，产物 svg 是 prod 真发布的字节）
+// --internal-ok（仅 dev 站）：只豁免根目录 README.md 这一个文件（dev 索引页），其它文件照扫，不是把问题藏起来。
+const leakSkipIsReadme = (f) => INTERNAL_OK && f === INTERNAL_OK_SKIP
+const leakMdTargets = allFiles
+  .filter((f) => /\.(md|html|js)$/i.test(f))
+  .filter((f) => !leakSkipIsReadme(f))
+  .map((f) => ({ label: f, abs: join(ROOT, f), svg: false }))
 const leakTargets = [
-  ...allFiles.filter((f) => /\.(md|html|js)$/i.test(f)).map((f) => ({ label: f, abs: join(ROOT, f), svg: false })),
+  ...leakMdTargets,
   ...svgTargets.map((t) => ({ ...t, svg: true })),
 ]
 const leakHits = []
@@ -289,8 +303,12 @@ for (const t of leakTargets) {
     if (n) leakHits.push(`${t.label}  ⊃ ${w.label} ×${n}`)
   }
 }
-push('⑥', '内网信息泄露', leakHits.length === 0,
-  `扫描 ${leakTargets.length} 个文件，命中 ${leakHits.length}`, leakHits)
+push('⑥',
+  INTERNAL_OK
+    ? '内网信息泄露（已豁免 README.md：dev 站索引页，内网专用）'
+    : '内网信息泄露',
+  leakHits.length === 0,
+  `扫描 ${leakTargets.length} 个文件，命中 ${leakHits.length}（prod 环境不要加 --internal-ok）`, leakHits)
 
 /* ============================================================== ⑦ SVG 硬指标 */
 
