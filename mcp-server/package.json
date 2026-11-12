@@ -3,16 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "qiqi-mall 最小闭环 MCP Server（stdio）：查待审核 / 预览拆单 / 确认执行 / 回读发货单",
+  "description": "qiqi-mall MCP Server（stdio）：查待审核 / 预演拆单 / 无码执行 / 回读发货单 + 商品域读写（version 乐观锁）",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "start": "node src/index.mjs",
-    "test": "node test/loop.mjs && node test/catalog.mjs && node test/order-read.mjs",
+    "test": "node test/loop.mjs && node test/catalog.mjs && node test/order-read.mjs && node test/optimistic-lock.mjs",
     "test:loop": "node test/loop.mjs",
     "test:catalog": "node test/catalog.mjs",
-    "test:order-read": "node test/order-read.mjs"
+    "test:order-read": "node test/order-read.mjs",
+    "test:lock": "node test/optimistic-lock.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

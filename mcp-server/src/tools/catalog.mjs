@@ -1,8 +1,9 @@
-// 商品域（catalog）只读工具：6 个，全部只读 → 不需要确认码。
+// 商品域（catalog）只读工具：6 个，全部只读 → 不需要任何票据。
 //
-// 确认码口径（全项目统一）：
-//   只读工具 → 不需要确认码
-//   写工具   → 透传后端签发的 confirmCode（split-preview / dryRun=true 签发，后端校验）
+// 并发控制口径（全项目统一，本批改）：
+//   只读工具 → 无副作用、可反复调用（含 dry-run 预演 preview_split）
+//   写工具   → **只留 version 乐观锁**，确认码（confirmCode）整套已删除；
+//              写工具在 src/tools/catalog-write.mjs（update_product / update_sku_stock，带 version）
 //
 // 与后端接口的对应关系（已读 Controller 确认真实形态）：
 //   search_products     → GET /admin/products（后端只支持 publishStatus，不分页/不搜关键字 → 工具层过滤+分页）
@@ -11,6 +12,7 @@
 //   list_product_types  → GET /admin/product-types + 每个类型 GET /admin/attributes?typeId=（后端不聚合）
 //   list_attributes     → GET /admin/attributes?typeId=
 //   list_skus           → GET /admin/skus?productId=
+// ⚠️ 详情/列表返回里都带 version（商品本体与每个 SKU 都有）—— 那是写工具的唯一合法输入，别把它过滤掉。
 
 import { z } from 'zod';
 import {

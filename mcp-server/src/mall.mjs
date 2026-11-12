@@ -77,9 +77,10 @@ export function listPendingOrders({ size = 20 } = {}) {
 }
 
 /**
- * 拆单预览（dry-run，不落库）=> { plan:[{warehouseId,warehouseName,items:[...]}], confirmCode, expiresInSec }
- * ⚠️ 后端已改成**返回对象**（不再是裸数组）：确认码 confirmCode 由后端签发（KV，5 分钟、一次性），
- *    执行 audit-pass 时必须原样带回；MCP 自己不再造票据。
+ * 拆单预览（dry-run，不落库）=> { willDo:"中文描述", plan:[{warehouseId,warehouseName,items:[...]}] }
+ * ⚠️ 并发控制口径（用户定的）：**只留 version 乐观锁**，确认码整套已删除 ——
+ *    预演只回答「会做什么」（willDo）+「拆成几包」（plan），不再签发 confirmCode / expiresInSec。
+ *    预演也不吃锁：它只是读，真正可能撞锁的是执行。
  */
 export function splitPreview(orderId) {
   return request('POST', `/admin/orders/${encodeURIComponent(orderId)}/split-preview`);
@@ -87,11 +88,12 @@ export function splitPreview(orderId) {
 
 /**
  * 审核通过：订单 7→8，并按方案真的生成发货单 => [{id,deliverySn,...}]
- * ⚠️ 必须带 confirmCode（split-preview 签发）。后端会校验：存在/未用/未过期/用途/订单匹配/方案指纹。
- *    orderId 也要一起给——码存在后端 KV 里，MCP 解不出来，所以由调用方原样带上。
+ * ⚠️ 不需要任何票据（确认码已删）：orderId 就是全部输入。
+ *    并发保护来自后端的业务守卫（仅 status=7 可审核）+ 热表 version 乐观锁，
+ *    所以「重复执行 / 期间被别人改过」会由后端带中文原因拒掉，MCP 原样透给模型。
  */
-export function auditPass(orderId, confirmCode) {
-  return request('POST', `/admin/orders/${encodeURIComponent(orderId)}/audit-pass`, { body: { confirmCode } });
+export function auditPass(orderId) {
+  return request('POST', `/admin/orders/${encodeURIComponent(orderId)}/audit-pass`);
 }
 
 /** 某笔订单拆出来的所有发货单 */
@@ -190,6 +192,36 @@ export function listAttributes({ typeId } = {}) {
 export function listSkus({ productId } = {}) {
   const qs = productId === undefined || productId === null ? '' : `?productId=${encodeURIComponent(productId)}`;
   return request('GET', `/admin/skus${qs}`);
+}
+
+// ---------- 商品域写接口（乐观锁 version） ----------
+// ⚠️ 并发控制口径（用户定的）：**只留 version 乐观锁**（后端 406a54b）。三条硬约定，别在工具层软化：
+//   ① 缺 version → 后端 code=400「缺少版本号，请刷新页面后重试」（payload 里 code 必须原样透出）；
+//   ② version 过期（读之后被别人改过）→ 后端 code=409「数据已被他人修改…，请刷新后重试」，
+//      且**一个字段都不会被覆盖**（UPDATE ... WHERE version=? 影响 0 行，事务内直接返回，不落库）；
+//   ③ 成功时后端只回 {code:0, data:null}，**不带新版本号** → 新 version 必须由调用方回读（工具层负责回读）。
+// 之所以在 MCP 这里也坚持「必须带 version」：MCP 是「人的操作的模拟」，人在 UI 上会撞的锁，
+// MCP 走同一个接口必然也要撞到 —— 这正是本轮验收要证明的东西。
+
+/**
+ * 更新商品（PUT /admin/products/{id}，body = { product }）。
+ * ⚠️ 后端 ProductSaveRequest 只认 { product, gallery } 两个字段；这里只发 product（不碰相册）——
+ *    传 gallery 是「整组替换相册」，误传会把相册删光，所以刻意不支持。
+ * @param {number} id
+ * @param {object} product 至少含 { id, version }；其余字段只传要改的（MyBatis-Plus updateById 跳过 null）
+ */
+export function updateProduct(id, product) {
+  return request('PUT', `/admin/products/${encodeURIComponent(id)}`, { body: { product: { ...product, id } } });
+}
+
+/** 更新 SKU（PUT /admin/skus/{id}，body = { sku }）；同样只发 sku（不碰规格值 specs，避免整组替换） */
+export function updateSku(id, sku) {
+  return request('PUT', `/admin/skus/${encodeURIComponent(id)}`, { body: { sku: { ...sku, id } } });
+}
+
+/** SKU 详情 => { sku, specs }（写操作成功后回读新 version 用；列表接口也可以，但这个更准） */
+export function skuDetail(id) {
+  return request('GET', `/admin/skus/${encodeURIComponent(id)}`);
 }
 
 export const mallBase = BASE;

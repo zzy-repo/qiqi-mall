@@ -1,20 +1,26 @@
 # qiqi-mall MCP Server（stdio 最小闭环）
 
 把商城后台「订单审核 + 拆单」暴露成 MCP 工具，给 Claude Desktop / 任意 MCP 客户端调用。
-本仓库这一层**只动 MCP 侧、后端一行没改** —— 它就是纯粹的 REST 客户端（认证 = API Key，确认码 = 后端签发）。
+本仓库这一层**只动 MCP 侧、后端一行没改** —— 它就是纯粹的 REST 客户端（认证 = API Key）。
+
+> **并发控制口径（现行）**：**只留 `version` 乐观锁**（后端 406a54b），确认码（confirmCode）
+> 整套已删除 —— 预演只回答「会做什么」（`willDo`），写操作靠 `version` fail-closed 校验
+> （缺 version → `400`，版本冲突 → `409`）。MCP 是「人的操作的模拟」：人在 UI 上会撞的锁，
+> MCP 走同一个接口必然也会撞到，这正是 `update_product` / `update_sku_stock` 必须带 version 的原因。
 
 ## 闭环
 
 ```
-① list_pending_orders()                          列出待审核订单（只读）
-② preview_split(orderId)                         拆单方案（dry-run 不落库）+ 后端签发的 confirmCode
-③ execute_audit_pass(orderId, confirmCode)       订单 7→8 并真的生成发货单（写）
-④ list_deliveries(orderId)                       回读，确认包裹数与方案一致
+① list_pending_orders()                 列出待审核订单（只读）
+② preview_split(orderId)                拆单方案（dry-run 不落库）→ { willDo（中文预演）, plan }
+③ execute_audit_pass(orderId)           订单 7→8 并真的生成发货单（写；不需要任何凭证）
+④ list_deliveries(orderId)              回读，确认包裹数与方案一致
 ```
 
-确认码（confirmCode）**由后端签发、后端校验**（`POST /admin/orders/{id}/split-preview` 发票，
-`POST /admin/orders/{id}/audit-pass` 收码）：UUID、默认 300 秒、一次性、绑定该订单 + 拆单方案指纹。
-MCP 只负责透传，**不再自己造票据**（旧的 `src/confirm.mjs` 已删除）。
+预演（`POST /admin/orders/{id}/split-preview`，等价于 `?dryRun=true`）返回
+`{ willDo: "将把订单 QQ… 审核通过：状态 待审核→待发货，并按方案生成 N 个发货单", plan: [...] }` ——
+**没有 confirmCode、没有 expiresInSec**。重复执行由后端业务守卫拦（「只有待审核订单可以审核通过」），
+期间被抢改由 `version` 乐观锁拦（`409`）。
 
 ## 工具清单（按域）
 
@@ -24,8 +30,8 @@ MCP 只负责透传，**不再自己造票据**（旧的 `src/confirm.mjs` 已�
 | 订单 | `get_order_detail` | 只读 | `GET /admin/orders/{id}`（`{order,items,returnApplies}`） |
 | 订单 | `count_deliveries` | 只读 | `GET /admin/deliveries/counts?orderIds=`（不含已取消） |
 | 订单 | `list_pending_orders` | 只读 | `GET /admin/orders?status=7` |
-| 订单 | `preview_split` | 只读（拿确认码） | `POST /admin/orders/{id}/split-preview` → `{plan, confirmCode, expiresInSec}` |
-| 订单 | `execute_audit_pass` | **写** | `POST /admin/orders/{id}/audit-pass`，body `{confirmCode}` |
+| 订单 | `preview_split` | 只读（dry-run 预演） | `POST /admin/orders/{id}/split-preview` → `{willDo, plan}`（无码） |
+| 订单 | `execute_audit_pass` | **写** | `POST /admin/orders/{id}/audit-pass`，入参只有 `{orderId}`（无码） |
 | 订单 | `list_deliveries` | 只读 | `GET /admin/deliveries?orderId=` |
 | 商品 | `search_products` | 只读 | `GET /admin/products`（后端只支持 publishStatus，关键字/分类/分页在工具层做） |
 | 商品 | `get_product_detail` | 只读 | `GET /admin/products/{id}` + `GET /admin/skus?productId=` |
@@ -33,8 +39,18 @@ MCP 只负责透传，**不再自己造票据**（旧的 `src/confirm.mjs` 已�
 | 商品 | `list_product_types` | 只读 | `GET /admin/product-types` + 每类型 `GET /admin/attributes?typeId=` |
 | 商品 | `list_attributes` | 只读 | `GET /admin/attributes?typeId=` |
 | 商品 | `list_skus` | 只读 | `GET /admin/skus?productId=` |
+| 商品 | `update_product` | **写（带 version）** | `PUT /admin/products/{id}`，body `{product:{id,version,...}}` |
+| 商品 | `update_sku_stock` | **写（带 version）** | `PUT /admin/skus/{id}`，body `{sku:{id,version,stock/price}}` |
 
-确认码口径：**只读工具不需要确认码；写工具必须透传后端签发的 `confirmCode`**（MCP 不自己发票据）。
+并发控制口径：**只读工具不需要任何票据；写工具靠 `version` 乐观锁**。
+`update_product` / `update_sku_stock` 的 `version` 是 **zod 必填**（缺了在协议层就被拒，请求都到不了后端）；
+后端 409 的中文原因会原样透出，并附上「带 `[409]` + 请重新读取最新 version」的下一步提示。
+成功后后端不回新版本号（`data:null`），**由工具层回读**一次把新 version 交给模型。
+
+字段口径（别照"标准商品"想当然，已读后端实体确认）：`Product` 只有
+name / description / categoryId / typeId / publishStatus / pic / version —— **没有 subtitle、没有 price**
+（价格在 SKU 上，改价请用 `update_sku_stock`）；相册是「整组替换」，误传会删图，故 `update_product` 刻意不支持。
+`Sku` 只有 productId / price / stock / pic / version，`update_sku_stock` 只改 stock/price（不碰规格值）。
 
 订单状态码（`Order.java` 注释 + admin-web 两处一致，工具返回一律翻成中文）：
 
@@ -50,14 +66,16 @@ src/
 ├── mall.mjs           REST 客户端（X-Api-Key 认证 / 解 {code,message,data} / code≠0 抛中文原因）
 └── tools/
     ├── index.mjs      统一注册入口（按域 import；文件头有「新增域」清单）
-    ├── _shared.mjs    公共件：text / fail / clampPage / paginate（分页全项目统一 1/10/50）
+    ├── _shared.mjs    公共件：text / fail / failWrite / clampPage / paginate（分页全项目统一 1/10/50）
     ├── order.mjs      订单域 6 只读 + 1 写（list_orders/get_order_detail/count_deliveries 是第 3 批）
-    └── catalog.mjs    商品域 6 个只读工具
+    ├── catalog.mjs    商品域 6 个只读工具
+    └── catalog-write.mjs  商品域 2 个写工具（update_product / update_sku_stock，带 version 乐观锁）
 ```
 
 新增一个域 = 新建 `src/tools/<域>.mjs` + 在 `src/tools/index.mjs` 加一行 import/调用；
 工具内一律「中文 title + 说清什么时候用的 description + zod `.describe()` 参数 +
-文本摘要 + `JSON:` 两段 + 空结果明确文案 + `fail(e)` 兜错」。
+文本摘要 + `JSON:` 两段 + 空结果明确文案 + `fail(e)` 兜错」；
+写工具统一用 `failWrite(e, {...})`（保留后端 bizCode，409 时给「重新读」的下一步）。
 
 ## 认证：API Key（不再登录拿 JWT）
 
@@ -115,13 +133,19 @@ export MCP_ENABLE_WRITE=1     # 0=只读（默认 0），1=开放写工具
 npm start
 ```
 
-`npm test` 跑三套测试：用 SDK client 通过 stdio 真启动本 server，逐条断言。
+`npm test` 跑四套测试：用 SDK client 通过 stdio 真启动本 server，逐条断言。
 **数据自建自清**，跑完库态与跑前一致（不消费种子数据、不需要复位脚本）：
 
-- `test/loop.mjs`（13 条 = 验收 12 条 + 「跨单用码后重新预览」1 条）：订单闭环 ——
-  预览不落库、confirmCode 是后端签发的 UUID 且 300 秒、缺码被 zod 拒、假码被拒、
-  **跨单用码被拒（码与订单不匹配）**、执行成功且 deliveries === plan、真落库、状态 7→8、
-  **同码复用被拒**、回读闭环、写开关生效。
+- `test/loop.mjs`（11 条）：订单闭环 —— 预览返回 **willDo + plan 且不含 confirmCode**、
+  `execute_audit_pass` 的 schema 只剩必填 `orderId`、预演可反复调用且不落库、
+  执行成功且 `deliveries === plan`、真落库、状态 7→8、
+  **重复执行被业务守卫拦**（「只有待审核订单可以审核通过」）、回读闭环、写开关生效。
+- `test/optimistic-lock.mjs`（13 条）：**乐观锁（version）验收** ——
+  读接口带 version（商品 + 每个 SKU）；`update_product` / `update_sku_stock`
+  带正确 version 成功且 version +1（回读 + 直连 DB 双确认）、带旧 version 被拒（文本含
+  「数据已被他人修改」+ `[409]`，且数据没被覆盖）、不带 version 在 zod 层被拒；
+  **并发场景**：MCP 读到 version=V → 另一个人用裸 HTTP 改同一行 → MCP 用 V 提交 → 409
+  → 重读 V+1 → 提交成功（商品与 SKU 两种载体都验）；write=0 时两个写工具消失。
 - `test/catalog.mjs`（27 条）：商品域 6 个只读工具，含分页夹取、空结果文案、**只读校验（调用前后 product/sku 行数不变）**。
 - `test/order-read.mjs`（32 条）：订单域 3 个只读工具，含分页夹取、状态码中文化（7→待审核）、单号模糊匹配、
   详情聚合、批量包裹数比对库、**只读校验（order/order_item/delivery_order 行数不变）**。
@@ -187,7 +211,7 @@ bash scripts/start-inspector.sh    # 在仓库根目录执行
 |---|---|---|
 | `MALL_BASE` | `http://127.0.0.1:18080` | 后端网关地址 |
 | `MALL_API_KEY` | —（**必填**） | 管理端 API Key，随请求头 `X-Api-Key` 发出；**按库隔离**（dev 一把、test 一把），造 key 见上面「认证」 |
-| `MCP_ENABLE_WRITE` | `0` | `0`=只注册 12 个只读工具（订单 6 + 商品 6）；`1`=再加 1 个写工具 `execute_audit_pass`（共 13 个） |
+| `MCP_ENABLE_WRITE` | `0` | `0`=只注册 12 个只读工具（订单 6 + 商品 6）；`1`=再加 3 个写工具（`execute_audit_pass` / `update_product` / `update_sku_stock`，共 15 个） |
 
 见 `.env.example`。
 
@@ -214,9 +238,11 @@ bash scripts/start-inspector.sh    # 在仓库根目录执行
 - **认证**：只用 API Key（`X-Api-Key`），key 按库隔离、可单独禁用/删除；口令（`MALL_USER`/`MALL_PASS`）不再出现在 MCP 侧。
   key 明文不入库（库里只存 sha256），也不要提交进仓库。
 - **写开关**：`MCP_ENABLE_WRITE=0` 时写工具根本不注册，模型连看都看不到。
-- **确认码在后端**：`confirmCode` 由 `split-preview` 签发、`audit-pass` 校验，存在后端 KV（默认 300 秒、一次性、
-  绑定 op + 订单 id + 拆单方案指纹）。**闸门在执行写操作的那一层**，所以直接 curl 写接口也绕不过去 ——
-  这是把票据从 MCP 进程内 Map（旧 `src/confirm.mjs`）搬到后端的根本原因。
-- **防偷换**：重算的拆单方案指纹与发码时不一致就拒绝（「拆单方案已变化」），避免「确认的是 A、执行成 B」。
-- **跨单防护**：码里带订单 id，`audit-pass` 会校验「码里的 id == 路径 id」，A 单的码拿去审核 B 单会被拒。
+- **并发控制 = version 乐观锁**（确认码已整套删除）：商品/SKU 的更新接口要求 `product.version` / `sku.version`，
+  缺版本号回 `400`（fail-closed，**绝不**静默降级成后写覆盖），版本冲突回 `409`
+  「数据已被他人修改（可能其他人在编辑），请刷新后重试」，且冲突时一个字段都不会被覆盖。
+  MCP 侧把 `version` 做成 zod 必填参数、成功后回读新 version、409 时把中文原因和「重新读」的下一步一起交给模型 ——
+  所以模型不可能「拿旧 version 硬重试」还以为能成功。
+- **状态守卫仍在后端**：`execute_audit_pass` 不认任何票据，但只有 `status=7` 的订单能审核通过，
+  重复执行/越权状态一律被后端拦住（MCP 只是透出中文原因）。
 - **stdio 纪律**：所有日志走 `console.error`，stdout 只留给 JSON-RPC。

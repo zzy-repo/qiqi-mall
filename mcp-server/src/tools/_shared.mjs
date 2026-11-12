@@ -20,6 +20,42 @@ export function fail(err) {
   return { isError: true, content: [{ type: 'text', text: `❌ ${err?.message || String(err)}` }] };
 }
 
+/**
+ * 写工具错误包装（乐观锁专用）—— 比 fail() 多两件事：
+ *   ① **保留后端 bizCode**：文本里显式带 `[409]` / `[400]`，测试与模型都能据此断言/分支；
+ *   ② 409（版本冲突）给一段「为什么 + 该怎么做」：说清「你手上的 version 过期了」，
+ *      并要求**重新读最新 version 再让用户确认**，明确禁止拿旧 version 反复重试。
+ *      （后端是 fail-closed：UPDATE ... WHERE version=? 影响 0 行，一个字段都不会覆盖，
+ *        所以旧 version 重试一万次也还是 409 —— 必须让模型知道「重试无用、要重读」。）
+ *
+ * @param {Error & {code?: number}} err  mall.request() 抛的 MallError（code = 后端 bizCode）
+ * @param {{action?: string, label?: string, oldVersion?: number, rereadTool?: string}} opts
+ */
+export function failWrite(err, { action = '修改', label = '', oldVersion, rereadTool = '对应只读工具' } = {}) {
+  const code = err?.code;
+  const tag = code === undefined || code === null || code === 0 ? '' : `[${code}] `;
+  const message = String(err?.message ?? err);
+  console.error(`[mcp] write failed (${action} ${label}): ${tag}${message}`);
+
+  const lines = [`❌ ${action}失败：${tag}${message}`];
+  if (label) lines.push(`对象：${label}`);
+
+  if (code === 409) {
+    lines.push(`原因：你手上的 version=${oldVersion ?? '(未知)'} 已经过期，说明期间有人改过这条数据（你读完它之后又被写了一次）。`);
+    lines.push(
+      `下一步：请重新调用 ${rereadTool} 拿最新 version，把最新数据和这次要改的内容一起念给用户确认后再重试。` +
+        '不要重复使用旧 version —— 后端不会覆盖被抢改的数据，旧 version 重试多少次都还是这个 409。'
+    );
+  } else if (code === 400) {
+    lines.push('原因：请求里没有可用的版本号（后端 fail-closed，缺 version 一律拒绝，绝不静默降级成后写覆盖）。');
+    lines.push(`下一步：请先调用 ${rereadTool} 拿到 version，带上它再提交。`);
+  } else {
+    lines.push(`下一步：按上面的原因修正参数后重试；若提示数据不存在，请先用只读工具确认 id。`);
+  }
+
+  return { isError: true, content: [{ type: 'text', text: lines.join('\n') }] };
+}
+
 // ---------- 分页 ----------
 // 后端的分页夹取规则：page 最小 1，size 默认 10、最大 50。
 // 本文件是 MCP 侧的统一入口——即使后端某接口不分页（如 /admin/products 全量返回），
