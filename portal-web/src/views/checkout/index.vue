@@ -22,6 +22,10 @@
             />
           </el-select>
         </el-form-item>
+        <!-- 清空下拉后三项会被一起置空，这里明说一句，免得用户以为还带着上一个地址 -->
+        <div v-if="addressCleared" class="addr-hint" data-testid="checkout-address-cleared-hint">
+          已取消选择地址，请手动填写收货信息
+        </div>
         <el-form-item label="收货人" required>
           <el-input v-model="form.receiverName" data-testid="checkout-input-receiver" maxlength="50" />
         </el-form-item>
@@ -87,6 +91,8 @@ const addresses = ref([])
 const addressId = ref(null)
 const submitting = ref(false)
 const form = ref({ receiverName: '', receiverPhone: '', receiverAddress: '' })
+/** 用户主动清空过地址下拉（用来显示「已取消选择地址」提示；清空后三项已置空） */
+const addressCleared = ref(false)
 // 幂等令牌：进结算页领一次，提交时携带；被消费/过期后自动重领
 const idempotentToken = ref('')
 
@@ -121,9 +127,19 @@ const load = async () => {
   }
 }
 
+/**
+ * 选中地址 → 回填三项；清空下拉（clearable 传 null/''）→ 三项一起置空。
+ * 以前清空后直接 return，三个输入框还留着上一个地址的值：用户以为没地址了，
+ * 下单却寄到别人家。所以清空必须连值一起清。
+ */
 const useAddress = (id) => {
   const addr = addresses.value.find((a) => a.id === id)
-  if (!addr) return
+  if (!addr) {
+    addressCleared.value = true
+    form.value = { receiverName: '', receiverPhone: '', receiverAddress: '' }
+    return
+  }
+  addressCleared.value = false
   form.value = {
     receiverName: addr.name,
     receiverPhone: addr.phone,
@@ -160,6 +176,7 @@ onMounted(load)
 <style scoped>
 .title { margin: 0 0 12px; font-size: 16px; }
 .block { margin-bottom: 16px; }
+.addr-hint { color: #e6a23c; font-size: 12px; line-height: 1.6; margin: 0 0 12px 90px; }
 .footer { display: flex; justify-content: flex-end; align-items: center; gap: 16px; margin-top: 16px; }
 .total { color: #606266; }
 .total b { color: #f56c6c; font-size: 18px; }

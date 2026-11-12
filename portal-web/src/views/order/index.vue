@@ -158,7 +158,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { listOrders, getOrder, payOrder, confirmOrder } from '../../api/order'
 import { listReturnReasons, listMyReturns, applyReturn } from '../../api/returns'
 import { listMyDeliveries } from '../../api/delivery'
@@ -238,8 +238,15 @@ const load = async () => {
   }
 }
 
-/** 确认收货（状态 2→3，服务端有守卫） */
+/**
+ * 确认收货（状态 2→3，服务端有守卫）。
+ * 这是不可逆的终态流转：点错一次订单就完成了、没有回退入口，所以先弹确认框再发请求
+ * （和买家侧「删除地址」同一套 ElMessageBox.confirm 写法）。
+ */
 const confirmReceive = async (row) => {
+  const ok = await ElMessageBox.confirm('确认已收到货？确认后订单完成，不可撤销。', '提示', { type: 'warning' })
+    .then(() => true).catch(() => false)
+  if (!ok) return
   try {
     await confirmOrder(row.id)
     ElMessage.success('已确认收货，订单完成')

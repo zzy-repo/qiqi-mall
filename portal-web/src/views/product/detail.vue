@@ -48,7 +48,14 @@
           </div>
           <div class="qty">
             <span class="label">数量：</span>
-            <el-input-number v-model="quantity" data-testid="product-detail-qty" :min="1" :precision="0" />
+            <!-- 上限跟当前规格库存：以前没有 max，能填 99999，加购/下单时才失败（体验差且无提示） -->
+            <el-input-number
+              v-model="quantity"
+              data-testid="product-detail-qty"
+              :min="1"
+              :max="currentSku?.stock || 1"
+              :precision="0"
+            />
             <span class="stock" v-if="currentSku" data-testid="product-detail-stock">库存 {{ currentSku.stock }}</span>
           </div>
           <el-button
@@ -110,7 +117,11 @@ const syncGalleryToSku = () => {
 }
 
 // 切规格必须重置缩略图选中态，否则会残留上一张相册图的蓝框
-watch(skuId, syncGalleryToSku)
+watch(skuId, () => {
+  syncGalleryToSku()
+  // 切规格后数量必须夹到新规格库存内：element-plus 的 :max 不 watch props.max
+  if (quantity.value > (currentSku.value?.stock || 1)) quantity.value = currentSku.value?.stock || 1
+})
 
 const load = async () => {
   loading.value = true

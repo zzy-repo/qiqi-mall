@@ -152,7 +152,17 @@
           />
         </el-form-item>
         <el-form-item label="状态">
-          <el-select v-model="form.status" data-testid="order-form-status" style="width: 100%">
+          <!--
+            编辑态只读：后端 OrderController 的更新入口有 `body.setStatus(null)`，
+            而 updateById 忽略 null 字段 → 这个下拉改了什么都不会落库，但旧前端照样提示「保存成功」。
+            状态只能靠审核/发货/收货等真实流程流转，所以编辑态直接不给改的入口。
+          -->
+          <div v-if="isEdit" class="readonly-block">
+            <span class="readonly-value" data-testid="order-form-status-readonly">{{ statusText[form.status] ?? '—' }}</span>
+            <div class="form-hint" data-testid="order-form-status-hint">状态由审核/发货/收货等流程流转，不能在此修改</div>
+          </div>
+          <!-- 新建态保留下拉：createOrderViaUi 造单要指定初始状态 -->
+          <el-select v-else v-model="form.status" data-testid="order-form-status" style="width: 100%">
             <el-option v-for="(t, i) in statusText" :key="i" :label="t" :value="i" />
           </el-select>
         </el-form-item>
@@ -162,55 +172,65 @@
           </el-select>
         </el-form-item>
 
-        <el-divider content-position="left">订单明细</el-divider>
-        <el-table :data="form.items" border size="small">
-          <el-table-column label="商品" width="170">
-            <template #default="{ row }">
-              <el-select
-                v-model="row.productId"
-                placeholder="选择商品"
-                size="small"
-                @change="(v) => onItemProductChange(row, v)"
-              >
-                <el-option v-for="p in products" :key="p.id" :label="p.name" :value="p.id" />
-              </el-select>
-            </template>
-          </el-table-column>
-          <el-table-column label="规格（SKU）" width="190">
-            <template #default="{ row }">
-              <el-select
-                v-model="row.productSkuId"
-                placeholder="选择规格"
-                size="small"
-                :disabled="!row.productId"
-                @change="(v) => onItemSkuChange(row, v)"
-              >
-                <el-option
-                  v-for="s in skuOptionsOf(row)"
-                  :key="s.id"
-                  :label="`${s.specJson || '默认规格'} · ¥${Number(s.price).toFixed(2)}`"
-                  :value="s.id"
-                />
-              </el-select>
-            </template>
-          </el-table-column>
-          <el-table-column label="单价" width="130">
-            <template #default="{ row }">
-              <el-input-number v-model="row.productPrice" :min="0" :precision="2" :controls="false" style="width: 110px" />
-            </template>
-          </el-table-column>
-          <el-table-column label="数量" width="110">
-            <template #default="{ row }">
-              <el-input-number v-model="row.productQuantity" :min="1" :precision="0" :controls="false" style="width: 90px" />
-            </template>
-          </el-table-column>
-          <el-table-column label="" width="60">
-            <template #default="{ $index }">
-              <el-button link type="danger" size="small" @click="form.items.splice($index, 1)">删</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-        <el-button class="add-item" size="small" :icon="Plus" @click="addItem">加一条明细</el-button>
+        <!--
+          编辑态不渲染明细区块：Order 实体上没有 items 字段，PUT 会把明细静默丢掉，
+          totalAmount 也没有重算路径 → 用户改完看到「保存成功」，其实一条都没变。
+          要看清细走列表行的「明细」抽屉（只读、带真实数据）。
+        -->
+        <div v-if="isEdit" class="form-hint" data-testid="order-form-items-hint">
+          订单明细不支持修改；如需查看，请在列表中打开「明细」
+        </div>
+        <template v-else>
+          <el-divider content-position="left">订单明细</el-divider>
+          <el-table :data="form.items" border size="small">
+            <el-table-column label="商品" width="170">
+              <template #default="{ row }">
+                <el-select
+                  v-model="row.productId"
+                  placeholder="选择商品"
+                  size="small"
+                  @change="(v) => onItemProductChange(row, v)"
+                >
+                  <el-option v-for="p in products" :key="p.id" :label="p.name" :value="p.id" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="规格（SKU）" width="190">
+              <template #default="{ row }">
+                <el-select
+                  v-model="row.productSkuId"
+                  placeholder="选择规格"
+                  size="small"
+                  :disabled="!row.productId"
+                  @change="(v) => onItemSkuChange(row, v)"
+                >
+                  <el-option
+                    v-for="s in skuOptionsOf(row)"
+                    :key="s.id"
+                    :label="`${s.specJson || '默认规格'} · ¥${Number(s.price).toFixed(2)}`"
+                    :value="s.id"
+                  />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="单价" width="130">
+              <template #default="{ row }">
+                <el-input-number v-model="row.productPrice" :min="0" :precision="2" :controls="false" style="width: 110px" />
+              </template>
+            </el-table-column>
+            <el-table-column label="数量" width="110">
+              <template #default="{ row }">
+                <el-input-number v-model="row.productQuantity" :min="1" :precision="0" :controls="false" style="width: 90px" />
+              </template>
+            </el-table-column>
+            <el-table-column label="" width="60">
+              <template #default="{ $index }">
+                <el-button link type="danger" size="small" @click="form.items.splice($index, 1)">删</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-button class="add-item" size="small" :icon="Plus" @click="addItem">加一条明细</el-button>
+        </template>
       </el-form>
       <template #footer>
         <el-button data-testid="order-form-cancel" @click="visible = false">取消</el-button>
@@ -552,6 +572,8 @@ const visible = ref(false)
 const saving = ref(false)
 const formRef = ref()
 const form = reactive(blankForm())
+/** 编辑态（有 id）——状态与明细在这种模式下都是只读的，见模板里的两处说明 */
+const isEdit = computed(() => !!form.id)
 
 const rules = {
   memberId: [{ required: true, message: '请选择买家', trigger: 'change' }],
@@ -585,7 +607,9 @@ const submit = async () => {
   if (!valid) return
   // 明细是订单的核心内容，商品/规格没选全时后端只回一句「数据处理失败，请稍后重试」，
   // 用户在弹窗里既看不出哪一行错、也不知道订单根本没建成。这里先拦住并说清怎么改。
-  if (!form.items.length || form.items.some((i) => !i.productId || !i.productSkuId)) {
+  // 编辑态不渲染明细表、提交也不带明细（后端 Order 实体没有 items 字段），所以不能再用明细拦保存，
+  // 否则用户会看到一个「看不见的原因」导致保存不动的死局。
+  if (!isEdit.value && (!form.items.length || form.items.some((i) => !i.productId || !i.productSkuId))) {
     ElMessage.warning('请至少填写一条完整的订单明细（先选商品，再选规格）')
     return
   }
@@ -987,5 +1011,9 @@ onMounted(async () => {
 .pager { display: flex; justify-content: flex-end; margin-top: 12px; }
 .add-item { margin-top: 10px; width: 100%; }
 .snapshot { color: #606266; }
+/* 编辑态只读状态 / 明细提示：正文明说「不能改」，别让人以为是自己没点上 */
+.readonly-block { display: flex; flex-direction: column; gap: 2px; }
+.readonly-value { color: #303133; }
+.form-hint { color: #e6a23c; font-size: 12px; line-height: 1.6; }
 .pkg-tag { cursor: pointer; }
 </style>

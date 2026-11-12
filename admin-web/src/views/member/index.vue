@@ -138,19 +138,24 @@ const memberLabel = (row) => row.nickname || row.username || `#${row.id}`
 /**
  * 后端「数据层拒绝」的通用兜底文案（GlobalExceptionHandler 的 DataAccessException 分支）。
  *
- * 会员删除唯一常见的触发原因就是名下有订单：`member_address` / `cart` 的外键是
- * ON DELETE CASCADE（会一并删掉），但 `fk_order_member` **没有**级联，
- * 于是 DELETE 被数据库拒绝，异常处理器回一句「数据处理失败，请稍后重试」。
- * 这句话对用户等于什么都没说，必须翻成能照着做的动作。
+ * 会员删除被拒有两条外键，都**没有**级联：`fk_order_member`（名下有订单）、
+ * `fk_return_member`（名下有退货申请，即 `return_apply.member_id`）；
+ * `member_address` / `cart` 的外键则是 ON DELETE CASCADE（会一并删掉），不是拒绝原因。
+ * 只要还挂着订单或退货申请，DELETE 就被数据库拒绝，异常处理器回一句通用文案：
+ * 「数据处理失败，请稍后重试」（DataAccessException 分支）或
+ * 「数据被其它记录引用，无法删除（请先处理关联的物流、退货、明细等记录）」
+ * （DataIntegrityViolationException 兜底分支，2026-11 起存在）。
+ * 两句对会员这一页都等于什么都没说（后者讲的还是物流/明细，与会员无关），
+ * 所以两种都要认出来，统一翻成会员自己那份原因。
  */
 const DB_GENERIC_FAILURE =
-  /数据处理失败|IntegrityConstraintViolation|Cannot delete or update a parent row|foreign key constraint/i
+  /数据处理失败|数据被其它记录引用|IntegrityConstraintViolation|Cannot delete or update a parent row|foreign key constraint/i
 
 /** 把删除失败的原因翻成人话（非通用兜底文案原样透出，不加工） */
 const humanizeDeleteError = (e) => {
   const raw = typeof e?.message === 'string' ? e.message.trim() : ''
   if (!raw) return '删除失败，请稍后重试；也可以改为禁用（status=0）'
-  if (DB_GENERIC_FAILURE.test(raw)) return '该会员名下有订单，无法删除；可改为禁用（status=0）'
+  if (DB_GENERIC_FAILURE.test(raw)) return '该会员名下有订单或退货申请，无法删除；可改为禁用（status=0）'
   return raw
 }
 
@@ -158,7 +163,7 @@ const humanizeDeleteError = (e) => {
 const localDryRun = (row) => async () => ({
   willDo:
     `确认删除会员「${memberLabel(row)}」？该会员的收货地址与购物车会一并删除；` +
-    '若其名下有订单则会被拒绝。删除后不可恢复。'
+    '若其名下有订单或退货申请则会被拒绝。删除后不可恢复。'
 })
 
 /**
@@ -176,7 +181,7 @@ const memberDetails = (row) => () => [
  * 删除会员：危险确认 → 执行 → 成功则刷新列表（成功提示由 run() 按 successText 弹出）。
  *
  * onError 返回 false = **不收起弹窗**：把翻好的人话留在弹窗里（dangerState.error），
- * 用户能看着原因决定下一步（改成禁用 / 先去处理订单），而不是被一条 2 秒就消失的 toast 打发。
+ * 用户能看着原因决定下一步（改成禁用 / 先去处理订单或退货申请），而不是被一条 2 秒就消失的 toast 打发。
  */
 const remove = async (row) => {
   await danger.run({
