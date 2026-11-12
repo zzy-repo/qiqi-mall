@@ -1,6 +1,7 @@
 package com.qiqi.mall.shared.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.qiqi.mall.apikey.service.AiApiKeyService;
 import com.qiqi.mall.shared.common.Result;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
@@ -25,10 +26,22 @@ public class SecurityConfig {
 
     private final JwtService jwtService;
     private final ObjectMapper objectMapper;
+    private final AiApiKeyService apiKeyService;
 
-    public SecurityConfig(JwtService jwtService, ObjectMapper objectMapper) {
+    public SecurityConfig(JwtService jwtService, ObjectMapper objectMapper, AiApiKeyService apiKeyService) {
         this.jwtService = jwtService;
         this.objectMapper = objectMapper;
+        this.apiKeyService = apiKeyService;
+    }
+
+    /**
+     * 两个过滤器的顺序：API Key 过滤器在前，JWT 在后面兜底。
+     * 两者都插在 UsernamePasswordAuthenticationFilter 之前（同锚点，Spring 的排序是稳定排序，
+     * 先 add 的在前）；功能上互不依赖 —— 只有 X-Api-Key 的请求由前者认证，
+     * 只有 Authorization: Bearer 的请求由后者认证，同时带上两者时以 JWT（人工操作）为准。
+     */
+    private ApiKeyAuthFilter apiKeyFilter() {
+        return new ApiKeyAuthFilter(apiKeyService, objectMapper);
     }
 
     @Bean
@@ -36,7 +49,12 @@ public class SecurityConfig {
         return new BCryptPasswordEncoder();
     }
 
-    /** 过滤器链 2：/admin/** 仅认 admin token（登录、验证码放行） */
+    /**
+     * 过滤器链 2：/admin/** 认 admin JWT（登录、验证码放行），另外认 API Key（ROLE_AI）。
+     *
+     * 红线：/admin/admins/**（管理员账号）与 /admin/api-keys/**（密钥自身）只认 JWT ——
+     * 这里再收一遍 hasRole("ADMIN")，即使 ApiKeyAuthFilter 将来被误改也进不来。
+     */
     @Bean
     @Order(1)
     public SecurityFilterChain adminChain(HttpSecurity http) throws Exception {
@@ -46,15 +64,18 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/admin/auth/login", "/admin/auth/captcha", "/admin/auth/captcha-required").permitAll()
-                        .anyRequest().hasRole("ADMIN"))
+                        .requestMatchers("/admin/admins", "/admin/admins/**",
+                                "/admin/api-keys", "/admin/api-keys/**").hasRole("ADMIN")
+                        .anyRequest().hasAnyRole("ADMIN", ApiKeyAuthFilter.ROLE_AI))
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint((req, res, ex) -> writeError(res, 401, "未登录或登录已过期"))
                         .accessDeniedHandler((req, res, ex) -> writeError(res, 403, "无权访问")))
+                .addFilterBefore(apiKeyFilter(), UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(new TokenAuthFilter(jwtService, JwtService.ROLE_ADMIN), UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 
-    /** 过滤器链 1：/portal/** 认 member token；商品浏览、登录注册、验证码公开 */
+    /** 过滤器链 1：/portal/** 认 member JWT（商品浏览、登录注册、验证码公开），另外认 API Key（ROLE_AI，只读） */
     @Bean
     @Order(2)
     public SecurityFilterChain portalChain(HttpSecurity http) throws Exception {
@@ -66,10 +87,11 @@ public class SecurityConfig {
                         .requestMatchers("/portal/auth/**").permitAll()
                         .requestMatchers(HttpMethod.GET,
                                 "/portal/categories/**", "/portal/products/**", "/portal/skus/**").permitAll()
-                        .anyRequest().hasRole("MEMBER"))
+                        .anyRequest().hasAnyRole("MEMBER", ApiKeyAuthFilter.ROLE_AI))
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint((req, res, ex) -> writeError(res, 401, "未登录或登录已过期"))
                         .accessDeniedHandler((req, res, ex) -> writeError(res, 403, "无权访问")))
+                .addFilterBefore(apiKeyFilter(), UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(new TokenAuthFilter(jwtService, JwtService.ROLE_MEMBER), UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }

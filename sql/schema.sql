@@ -32,6 +32,7 @@ DROP TABLE IF EXISTS product_type;
 DROP TABLE IF EXISTS category;
 DROP TABLE IF EXISTS member;
 DROP TABLE IF EXISTS admin;
+DROP TABLE IF EXISTS ai_api_key;
 -- 旧版本残留表（多租户方案已废弃）
 DROP TABLE IF EXISTS tenant_plan;
 DROP TABLE IF EXISTS tenant_user;
@@ -329,3 +330,21 @@ CREATE TABLE `order_setting` (
   `auto_close_minutes` INT NOT NULL DEFAULT 30 COMMENT '未付款自动关单分钟数',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单设置';
+
+-- AI 接口访问密钥（详见 sql/migrate-ai-api-key.sql）
+-- 明文不落库：只存 sha256(明文) 与明文前 8 位；删记录 = 立即吊销，无需黑名单。
+CREATE TABLE `ai_api_key` (
+  `id`           BIGINT       NOT NULL AUTO_INCREMENT,
+  `name`         VARCHAR(64)  NOT NULL COMMENT '用途名称，如 运营助手-只读',
+  `key_prefix`   VARCHAR(16)  NOT NULL COMMENT '明文前 8 位，列表展示用',
+  `key_hash`     CHAR(64)     NOT NULL COMMENT 'sha256(明文)，明文不落库',
+  `scopes`       VARCHAR(512) NOT NULL COMMENT '逗号分隔，如 order:read,catalog:read',
+  `expires_at`   DATETIME     NULL     COMMENT 'NULL = 永不过期',
+  `status`       TINYINT      NOT NULL DEFAULT 1 COMMENT '1启用 0禁用',
+  `last_used_at` DATETIME     NULL,
+  `created_by`   VARCHAR(64)  NULL,
+  `created_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_key_hash` (`key_hash`),
+  KEY `idx_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 接口访问密钥';
