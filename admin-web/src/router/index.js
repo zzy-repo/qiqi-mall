@@ -63,6 +63,12 @@ const routes = [
         meta: { title: '管理员' }
       },
       {
+        path: 'api-keys',
+        name: 'ApiKeys',
+        component: () => import('../views/api-key/index.vue'),
+        meta: { title: '令牌管理' }
+      },
+      {
         path: 'order',
         name: 'Order',
         component: () => import('../views/order/index.vue'),
