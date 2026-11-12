@@ -80,7 +80,13 @@ import { ElMessage } from 'element-plus'
 import { listReturnReasons } from '../../api/returnReason'
 import { listOrders } from '../../api/order'
 import { listMembers } from '../../api/member'
-import request from '../../api/request'
+import {
+  listReturnApplies, createReturnApply, updateReturnApply, updateReturnApplyDryRun
+} from '../../api/returnApply'
+import { useDangerConfirm } from '../../composables/useDangerConfirm'
+
+/** 审核退货（高危：通过会退款 + 回补库存）走「预演 → 确认 → 带码执行」 */
+const danger = useDangerConfirm()
 
 const list = ref([])
 const reasons = ref([])
@@ -97,7 +103,7 @@ const load = async () => {
   try {
     const [rs, applies, ords, mems] = await Promise.all([
       listReturnReasons(),
-      request.get('/return-applies'),
+      listReturnApplies(),
       listOrders({ page: 1, size: 50 }).then((d) => d.records || []),
       listMembers()
     ])
@@ -132,19 +138,39 @@ const openForm = (row) => {
 const submit = async () => {
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
-  saving.value = true
-  try {
-    const body = { ...form, returnReason: reasonName.value.get(form.reasonId) || '' }
-    if (form.id) await request.put(`/return-applies/${form.id}`, body)
-    else await request.post('/return-applies', body)
-    ElMessage.success('保存成功')
-    visible.value = false
-    await load()
-  } catch (e) {
-    ElMessage.error('保存失败：' + e.message)
-  } finally {
-    saving.value = false
+  const body = { ...form, returnReason: reasonName.value.get(form.reasonId) || '' }
+
+  // 新增：只是建单，不影响订单/库存，不走确认码
+  if (!form.id) {
+    saving.value = true
+    try {
+      await createReturnApply(body)
+      ElMessage.success('保存成功')
+      visible.value = false
+      await load()
+    } catch (e) {
+      ElMessage.error('保存失败：' + e.message)
+    } finally {
+      saving.value = false
+    }
+    return
   }
+
+  // 审核：通过=退款+回补库存、拒绝=订单回已付款，两个方向都由后端预演说明清楚
+  if (form.status !== 1 && form.status !== 2) {
+    ElMessage.warning('请先选择审核结果：通过 / 拒绝')
+    return
+  }
+  const applyId = form.id
+  visible.value = false
+  await danger.run({
+    title: '⚠️ 确认审核退货申请',
+    confirmText: form.status === 1 ? '确认通过' : '确认拒绝',
+    successText: '审核完成',
+    dryRun: () => updateReturnApplyDryRun(applyId, body),
+    exec: (confirmCode) => updateReturnApply(applyId, { ...body, confirmCode }),
+    onSuccess: () => load()
+  })
 }
 
 onMounted(load)

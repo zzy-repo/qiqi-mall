@@ -124,14 +124,17 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import ImageUploader from '../../components/ImageUploader.vue'
-import { listProducts, getProduct, createProduct, updateProduct, deleteProduct } from '../../api/product'
+import { listProducts, getProduct, createProduct, updateProduct, deleteProduct, deleteProductDryRun } from '../../api/product'
+import { useDangerConfirm } from '../../composables/useDangerConfirm'
 import { listCategories } from '../../api/category'
 import { listProductTypes } from '../../api/productType'
 
 const router = useRouter()
+/** 删除商品（高危）：预演 → 确认 → 带码执行 */
+const danger = useDangerConfirm()
 
 const list = ref([])
 const loading = ref(false)
@@ -235,20 +238,20 @@ const submit = async () => {
   }
 }
 
-/** 删除商品：被订单明细引用时后端会拦住并提示「可改为下架」，这里原样展示 */
+/**
+ * 删除商品：先预演，弹窗里把「会被几条订单明细 / 几个购物车引用、删不掉建议改下架」说清楚，
+ * 用户确认后才带确认码执行。被引用时后端会在码校验之后拒绝，中文原因直接显示在弹窗里
+ * （不走 ElMessage.error：失败时弹窗不关，用户能看着原因决定下一步）。
+ */
 const remove = async (row) => {
-  const ok = await ElMessageBox.confirm(
-    `确认删除商品「${row.name}」？删除后不可恢复；已被订单引用的商品请改为下架。`, '删除确认',
-    { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
-  ).then(() => true).catch(() => false)
-  if (!ok) return
-  try {
-    await deleteProduct(row.id)
-    ElMessage.success('已删除')
-    await load()
-  } catch (e) {
-    ElMessage.error(e.message)
-  }
+  await danger.run({
+    title: `⚠️ 确认删除商品「${row.name}」`,
+    confirmText: '确认删除',
+    successText: '已删除',
+    dryRun: () => deleteProductDryRun(row.id),
+    exec: (confirmCode) => deleteProduct(row.id, { confirmCode }),
+    onSuccess: () => load()
+  })
 }
 
 onMounted(() => { load(); loadRefs() })

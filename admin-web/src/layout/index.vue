@@ -102,6 +102,9 @@
         </router-view>
       </el-main>
     </el-container>
+
+    <!-- 高危写操作确认弹窗：全站只挂这一份（页面调 useDangerConfirm().run 唤起） -->
+    <DangerConfirmDialog />
   </el-container>
 </template>
 
@@ -110,6 +113,7 @@ import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getUser, clearAuth } from '../utils/auth'
+import DangerConfirmDialog from '../components/DangerConfirmDialog.vue'
 
 const route = useRoute()
 const router = useRouter()

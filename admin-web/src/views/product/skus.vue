@@ -120,13 +120,16 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { Plus, ArrowLeft } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import ImageUploader from '../../components/ImageUploader.vue'
-import { listSkus, getSku, createSku, updateSku, listSkuAttributes, deleteSku } from '../../api/sku'
+import { listSkus, getSku, createSku, updateSku, listSkuAttributes, deleteSku, deleteSkuDryRun } from '../../api/sku'
+import { useDangerConfirm } from '../../composables/useDangerConfirm'
 import { getProduct } from '../../api/product'
 
 const route = useRoute()
 const productId = Number(route.params.productId)
+/** 删除规格（高危）：预演 → 确认 → 带码执行 */
+const danger = useDangerConfirm()
 
 const list = ref([])
 const attributes = ref([])
@@ -211,20 +214,19 @@ const submit = async () => {
   }
 }
 
-/** 删除 SKU：被订单明细/购物车引用时后端会拦住并说明原因 */
+/**
+ * 删除 SKU：先预演（被订单明细 / 购物车引用时会在 willDo 里写明「删除会被拒绝」），
+ * 用户确认后带确认码执行；被引用时后端拒绝的中文原因留在弹窗里。
+ */
 const remove = async (row) => {
-  const ok = await ElMessageBox.confirm(
-    `确认删除该规格「${row.specText || row.id}」？删除后不可恢复。`, '删除确认',
-    { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
-  ).then(() => true).catch(() => false)
-  if (!ok) return
-  try {
-    await deleteSku(row.id)
-    ElMessage.success('已删除')
-    await load()
-  } catch (e) {
-    ElMessage.error(e.message)
-  }
+  await danger.run({
+    title: `⚠️ 确认删除规格「${row.specText || ('#' + row.id)}」`,
+    confirmText: '确认删除',
+    successText: '已删除',
+    dryRun: () => deleteSkuDryRun(row.id),
+    exec: (confirmCode) => deleteSku(row.id, { confirmCode }),
+    onSuccess: () => load()
+  })
 }
 
 onMounted(load)
