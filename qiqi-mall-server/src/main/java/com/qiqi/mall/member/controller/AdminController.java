@@ -2,6 +2,7 @@ package com.qiqi.mall.member.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.member.entity.Admin;
 import com.qiqi.mall.member.service.AdminService;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -57,7 +58,10 @@ public class AdminController {
         } else if (body.getPassword() != null) {
             body.setPassword(passwordEncoder.encode(body.getPassword()));
         }
-        adminService.updateById(body);
+        // 0 行 = 这个管理员账号在读取之后被别人删了（admin 无 version 列）→ 409「记录已被删除」。
+        // 尤其不能静默：密码已经 hash 过一遍，报成功会让人以为改成功了。
+        int rows = adminService.getBaseMapper().updateById(body);
+        OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_RECORD_DELETED);
         return Result.ok();
     }
 

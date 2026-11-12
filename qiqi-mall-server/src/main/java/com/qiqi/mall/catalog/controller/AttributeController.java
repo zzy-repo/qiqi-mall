@@ -1,6 +1,7 @@
 package com.qiqi.mall.catalog.controller;
 
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.shared.guard.CatalogDeleteGuard;
 import com.qiqi.mall.catalog.entity.Attribute;
 import com.qiqi.mall.catalog.service.AttributeService;
@@ -46,7 +47,9 @@ public class AttributeController {
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id, @RequestBody Attribute body) {
         body.setId(id);
-        attributeService.updateById(body);
+        // 0 行 = 属性在读取之后被别人删了（attribute 无 version 列）→ 409「记录已被删除」
+        int rows = attributeService.getBaseMapper().updateById(body);
+        OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_RECORD_DELETED);
         return Result.ok();
     }
 

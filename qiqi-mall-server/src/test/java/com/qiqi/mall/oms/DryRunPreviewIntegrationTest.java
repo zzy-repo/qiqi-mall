@@ -52,8 +52,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>并发控制现状（本测试顺带固化下来）：
  * <ul>
- *   <li>14 个端点里**只有** {@code PUT /admin/deliveries/{id}} 收客户端 {@code version}（delivery_order 表有 version 列）</li>
- *   <li>其余 13 个端点靠各自的状态守卫（重放必然被状态拦住），它们不传 version 也必须成功</li>
+ *   <li>14 个端点里**4 个**收客户端 {@code version}：{@code PUT /admin/deliveries/{id}}、
+ *       {@code POST /admin/deliveries/{id}/split}、{@code POST /admin/deliveries/{id}/merge}（body.version）
+ *       与 {@code DELETE /admin/deliveries/{id}}（**query 的 ?version=**）—— 它们操作的都是 delivery_order（有 version 列）</li>
+ *   <li>其余 10 个端点靠各自的状态守卫（重放必然被状态拦住），它们不传 version 也必须成功</li>
  *   <li>5 张热表（order / delivery_order / product / sku / member）的乐观锁本身由
  *       {@code OptimisticLockIntegrationTest} 覆盖，这里不重复</li>
  * </ul>
@@ -137,6 +139,11 @@ class DryRunPreviewIntegrationTest {
     @AfterAll
     void cleanup() {
         for (Long orderId : createdOrders) {
+            // payment_record 只有 order_sn（没有外键、不会级联）：先按单号删，否则「退货审核通过」
+            // 用例每跑一次就往库里留一条 DR 开头的退款流水
+            for (String sn : jdbc.queryForList("SELECT order_sn FROM `order` WHERE id = ?", String.class, orderId)) {
+                jdbc.update("DELETE FROM payment_record WHERE order_sn = ?", sn);
+            }
             jdbc.update("DELETE FROM `order` WHERE id = ?", orderId);   // 级联明细/发货单/退货申请
         }
         for (Long productId : createdProducts) {
@@ -286,7 +293,7 @@ class DryRunPreviewIntegrationTest {
 
     @Test
     @org.junit.jupiter.api.Order(7)
-    @DisplayName("⑦ split：dryRun 只回 willDo（零变化）→ 真调拆成多一个包裹")
+    @DisplayName("⑦ split：dryRun 只回 willDo（零变化）→ 带 version 真调拆成多一个包裹")
     void split_previewThenExecute() {
         List<Long> deliveries = newPendingDeliveries();
         Long id = deliveryWithLineQtyAtLeast(deliveries, 2);
@@ -303,14 +310,16 @@ class DryRunPreviewIntegrationTest {
         assertThat(deliveriesOfOrder(orderId)).hasSize(before);
         System.out.printf("⑦ split 预演 → willDo=%s%n", dry.path("willDo").asText());
 
-        ok(post("/admin/deliveries/" + id + "/split", payload));
-        System.out.printf("⑦ split 真调 → 包裹数 %d→%d%n", before, deliveriesOfOrder(orderId).size());
+        int version = versionOfDelivery(id);
+        ok(post("/admin/deliveries/" + id + "/split", withVersion(payload, version)));
+        System.out.printf("⑦ split 真调（version=%d）→ 包裹数 %d→%d%n",
+                version, before, deliveriesOfOrder(orderId).size());
         assertThat(deliveriesOfOrder(orderId)).hasSize(before + 1);
     }
 
     @Test
     @org.junit.jupiter.api.Order(8)
-    @DisplayName("⑧ merge：dryRun 只回 willDo（零变化）→ 真调源包并入目标包")
+    @DisplayName("⑧ merge：dryRun 只回 willDo（零变化）→ 带 version 真调源包并入目标包")
     void merge_previewThenExecute() {
         List<Long> deliveries = newPendingDeliveries();
         Long a = deliveries.get(0);
@@ -325,15 +334,17 @@ class DryRunPreviewIntegrationTest {
         assertThat(deliveryExists(a) && deliveryExists(b)).isTrue();
         System.out.printf("⑧ merge 预演 → willDo=%s%n", dry.path("willDo").asText());
 
-        ok(post("/admin/deliveries/" + a + "/merge", payload));
-        System.out.printf("⑧ merge 真调 → 源包还在=%s，目标包还在=%s%n", deliveryExists(a), deliveryExists(b));
+        int sourceVersion = versionOfDelivery(a);      // 源包合并后就没了，必须在调之前取
+        ok(post("/admin/deliveries/" + a + "/merge", withVersion(payload, sourceVersion)));
+        System.out.printf("⑧ merge 真调（version=%d）→ 源包还在=%s，目标包还在=%s%n",
+                sourceVersion, deliveryExists(a), deliveryExists(b));
         assertThat(deliveryExists(a)).isFalse();
         assertThat(deliveryExists(b)).isTrue();
     }
 
     @Test
     @org.junit.jupiter.api.Order(9)
-    @DisplayName("⑨ DELETE 包裹（有明细 → 并入 targetId）：dryRun 零变化 → 真调成功")
+    @DisplayName("⑨ DELETE 包裹（有明细 → 并入 targetId）：dryRun 零变化 → 带 ?version= 真调成功")
     void deliveryDelete_previewThenExecute() {
         List<Long> deliveries = newPendingDeliveries();
         Long a = deliveries.get(0);
@@ -348,8 +359,10 @@ class DryRunPreviewIntegrationTest {
         assertThat(deliveryExists(a)).isTrue();
         System.out.printf("⑨ DELETE 包裹 预演 → willDo=%s%n", dry.path("willDo").asText());
 
-        ok(delete(path, null));
-        System.out.printf("⑨ DELETE 包裹 真调 → 源包还在=%s%n", deliveryExists(a));
+        // DELETE 的 version 走 query（DELETE 带 body 过代理/CDN 不可靠）
+        int version = versionOfDelivery(a);
+        ok(delete(path + "&version=" + version, null));
+        System.out.printf("⑨ DELETE 包裹 真调（?version=%d）→ 源包还在=%s%n", version, deliveryExists(a));
         assertThat(deliveryExists(a)).isFalse();
     }
 
@@ -528,21 +541,25 @@ class DryRunPreviewIntegrationTest {
 
     @Test
     @org.junit.jupiter.api.Order(19)
-    @DisplayName("⑲ 顺序回归⑤：没有 version 的端点遇到违规状态 → code=1 业务守卫（不被压成 400/409）")
-    void orderRegression_noVersionEndpointReportsStateGuard() {
+    @DisplayName("⑲ 顺序回归⑤：version 对得上才轮到业务守卫 → code=1（不被压成 400/409）")
+    void orderRegression_stateGuardReportsAfterVersion() {
         Long id = newDispatchedDelivery();
 
+        // dispatch 不收 version（状态流转类），违规状态直接 code=1
         JsonNode dispatch = fail(post("/admin/deliveries/" + id + "/dispatch", null), 1);
+        // split / merge / delete 收 version：**带对的版本**才轮到状态守卫，且报的是「只有待下发…」
         JsonNode split = fail(post("/admin/deliveries/" + id + "/split",
-                "{\"items\":[{\"deliveryItemId\":" + firstDeliveryItemId(id) + ",\"quantity\":1}]}"), 1);
+                withVersion("{\"items\":[{\"deliveryItemId\":" + firstDeliveryItemId(id) + ",\"quantity\":1}]}",
+                        versionOfDelivery(id))), 1);
         Long closedOrder = newOrder(4, skuA);          // 已关闭
         JsonNode auditPass = fail(post("/admin/orders/" + closedOrder + "/audit-pass", null), 1);
 
-        System.out.printf("⑲ 无 version 端点 + 违规状态 → dispatch=%s | split=%s | audit-pass=%s%n",
+        System.out.printf("⑲ 违规状态（split 带对 version）→ dispatch=%s | split=%s | audit-pass=%s%n",
                 dispatch.path("message").asText(), split.path("message").asText(), auditPass.path("message").asText());
         assertThat(dispatch.path("message").asText()).isEqualTo("只有待下发发货单可以下发");
         assertThat(split.path("message").asText()).startsWith("只有待下发包裹可以拆分");
         assertThat(auditPass.path("message").asText()).isEqualTo("只有待审核订单可以审核通过");
+        assertThat(deliveryStatusOf(id)).as("被守卫拦下的请求不改数据").isEqualTo(1);
     }
 
     // ================================================================== 数据构造
@@ -743,6 +760,12 @@ class DryRunPreviewIntegrationTest {
     }
 
     // ================================================================== HTTP 辅助
+
+    /** 往一个 JSON body 里塞 version（split / merge 的 body 都要带；DELETE 走 query，不用这个） */
+    private static String withVersion(String payload, int version) {
+        assertThat(payload).endsWith("}");
+        return payload.substring(0, payload.length() - 1) + ",\"version\":" + version + "}";
+    }
 
     private static String withDry(String path) {
         return path + (path.contains("?") ? "&" : "?") + "dryRun=true";

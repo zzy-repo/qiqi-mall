@@ -40,6 +40,27 @@ public final class OptimisticLockGuard {
     public static final String MSG_VERSION_CONFLICT = "数据已被他人修改（可能其他人在编辑），请刷新后重试";
 
     /**
+     * 「订单状态已变化」：给 **C 端买家**看的版本冲突文案。
+     *
+     * <p>为什么不能复用 {@link #MSG_VERSION_CONFLICT}：买家根本不知道什么叫「版本」，
+     * 「数据已被他人修改（可能其他人在编辑）」会让人以为自己的账号被别人登了 —— 反而更慌。
+     * 买家的视角只有一件事：**这张订单现在的状态和我看到的已经不一样了**（别人先付了 / 别人先发了货），
+     * 所以支付、确认收货、申请退货这些 C 端状态流转统一用这一句（错误码仍是 409）。
+     */
+    public static final String MSG_ORDER_STATE_CHANGED = "订单状态已变化，请刷新后重试";
+
+    /**
+     * 「记录已被删除」：给**没有 version 列**的字典/配置/子表（category、warehouse、return_reason、
+     * cart、member_address、return_apply …）用。
+     *
+     * <p>这些表 {@code updateById} 不带 {@code AND version = ?}，影响行数 0 不可能是版本冲突，
+     * 只可能是「读出来之后这条记录被别人删了」。此时**继续按成功返回就是假成功**
+     * （管理员以为改好了，实际那条记录早没了），所以同样 fail-closed；错误码沿用 409
+     * （前端据此弹「刷新」对话框），文案说准原因。
+     */
+    public static final String MSG_RECORD_DELETED = "记录已被删除，请刷新后重试";
+
+    /**
      * 「记录已经没了」：给**没有 version 列**的表用（delivery_item 等 5 张热表之外的子表）。
      *
      * <p>这些表 {@code updateById} 不会带 {@code AND version = ?}，影响行数 0 不可能是

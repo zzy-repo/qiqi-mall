@@ -3,6 +3,7 @@ package com.qiqi.mall.portal.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.order.entity.OrderItem;
 import com.qiqi.mall.catalog.entity.Product;
@@ -128,6 +129,7 @@ public class PortalOrderController {
 
     /** 模拟支付：0待付款 → 1已付款 */
     @PostMapping("/{id}/pay")
+    @Transactional(rollbackFor = Exception.class)
     public Result<Map<String, Object>> pay(@PathVariable Long id, @RequestParam(defaultValue = "1") Integer payType) {
         Order order = orderService.getById(id);
         if (order == null || !order.getMemberId().equals(CurrentUser.id())) return Result.fail("订单不存在");
@@ -137,8 +139,14 @@ public class PortalOrderController {
         order.setStatus(7);
         order.setPayType(payType);
         order.setPaymentTime(LocalDateTime.now());
-        orderService.updateById(order);
-        // 支付流水（对账键 = 订单号）
+        // **并发支付的唯一闸门**（order 表有 @Version）：0 行 = 读出来之后订单已经被改过
+        // （最常见就是「同一张单被并发付了两次」）。这时绝不能当成功返回：
+        // 用户会以为付了两笔、实际只记一笔，或者状态根本没变还说支付成功。
+        // 抛 409 → 事务回滚（支付流水也不会落库），前端提示买家刷新。
+        // 文案用买家视角的说法（不用「数据被他人修改」）：见 OptimisticLockGuard.MSG_ORDER_STATE_CHANGED
+        int rows = orderService.getBaseMapper().updateById(order);
+        OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_ORDER_STATE_CHANGED);
+        // 支付流水（对账键 = 订单号）：与上面的状态推进在同一个事务里，要么都成、要么都不记
         paymentRecordService.record(order.getOrderSn(), order.getTotalAmount(),
                 PaymentRecord.TYPE_PAY, payType);
         return Result.ok(detailBody(order));
@@ -151,7 +159,9 @@ public class PortalOrderController {
         if (order == null || !order.getMemberId().equals(CurrentUser.id())) return Result.fail("订单不存在");
         if (order.getStatus() != 2) return Result.fail("只有已发货订单可以确认收货");
         order.setStatus(3);
-        orderService.updateById(order);
+        // 0 行 = 读出来之后订单被别人改过（例如另一边已经在确认收货）→ 409，同样是买家视角文案
+        int rows = orderService.getBaseMapper().updateById(order);
+        OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_ORDER_STATE_CHANGED);
         return Result.ok(detailBody(order));
     }
 

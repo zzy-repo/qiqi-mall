@@ -3,6 +3,7 @@ package com.qiqi.mall.oms.controller;
 import com.qiqi.mall.oms.entity.Warehouse;
 import com.qiqi.mall.oms.service.WarehouseService;
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
 
@@ -36,7 +37,10 @@ public class WarehouseController {
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id, @RequestBody Warehouse body) {
         body.setId(id);
-        warehouseService.updateById(body);
+        // 0 行 = 仓库在读取之后被别人删了（warehouse 无 version 列）→ 409「记录已被删除」。
+        // 必须拦：仓库是发货单/库存的归属依据，静默改失败会让人以为「这个仓还能用」。
+        int rows = warehouseService.getBaseMapper().updateById(body);
+        OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_RECORD_DELETED);
         return Result.ok();
     }
 

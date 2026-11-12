@@ -2,6 +2,7 @@ package com.qiqi.mall.member.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.member.entity.Cart;
 import com.qiqi.mall.member.service.CartService;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -37,7 +38,10 @@ public class CartController {
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id, @RequestBody Cart body) {
         body.setId(id);
-        cartService.updateById(body);
+        // 0 行 = 这条购物车记录已被删（cart 无 version 列）→ 409「记录已被删除」。
+        // 后台直接改购物车属于运维手段，同样不能报「保存成功」而实际没落地。
+        int rows = cartService.getBaseMapper().updateById(body);
+        OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_RECORD_DELETED);
         return Result.ok();
     }
 

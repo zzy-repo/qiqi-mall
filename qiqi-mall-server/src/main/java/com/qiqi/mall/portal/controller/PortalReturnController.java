@@ -2,6 +2,7 @@ package com.qiqi.mall.portal.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.oms.entity.ReturnApply;
 import com.qiqi.mall.oms.entity.ReturnReason;
@@ -11,6 +12,7 @@ import com.qiqi.mall.oms.service.ReturnApplyService;
 import com.qiqi.mall.oms.service.ReturnReasonService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -47,6 +49,7 @@ public class PortalReturnController {
     /** 提交退货申请，守卫：仅「已付款 / 已发货」订单可申请，且不能重复申请 */
     @Operation(summary = "买家提交退货申请")
     @PostMapping
+    @Transactional(rollbackFor = Exception.class)
     public Result<ReturnApply> apply(@RequestBody ApplyRequest request) {
         Order order = orderService.getById(request.getOrderId());
         if (order == null || !order.getMemberId().equals(CurrentUser.id())) return Result.fail("订单不存在");
@@ -72,7 +75,11 @@ public class PortalReturnController {
 
         // 联动：订单进入「退款中」
         order.setStatus(5);
-        orderService.updateById(order);
+        // 0 行 = 读出来之后订单被别人改过（管理员刚好发货/关闭、或另一次并发退货）→ 409 整笔回滚，
+        // 连刚插入的退货申请一起撤回 —— 否则会留下一条「申请已建、订单没进退款中」的待处理单，
+        // 反而把买家自己卡在「该订单已有待处理的退货申请」上，再也不能申请。
+        int rows = orderService.getBaseMapper().updateById(order);
+        OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_ORDER_STATE_CHANGED);
         return Result.ok(apply);
     }
 

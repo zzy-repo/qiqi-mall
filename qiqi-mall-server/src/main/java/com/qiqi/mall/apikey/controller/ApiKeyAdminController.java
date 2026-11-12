@@ -5,6 +5,7 @@ import com.qiqi.mall.apikey.entity.AiApiKey;
 import com.qiqi.mall.apikey.mapper.AiApiKeyMapper;
 import com.qiqi.mall.apikey.service.AiApiKeyService;
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.shared.security.CurrentUser;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -89,7 +90,10 @@ public class ApiKeyAdminController {
             return Result.fail(e.getMessage());
         }
         update.setId(id);
-        apiKeyMapper.updateById(update);
+        // 0 行 = 这把 Key 在 selectById 之后被别人删了（ai_api_key 无 version 列）→ 409「记录已被删除」。
+        // 必须抛在 evict 之前：否则缓存被清掉、库里却什么都没改，下一次请求看起来「生效了」。
+        int rows = apiKeyMapper.updateById(update);
+        OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_RECORD_DELETED);
         apiKeyService.evict(exist);
         return Result.ok();
     }

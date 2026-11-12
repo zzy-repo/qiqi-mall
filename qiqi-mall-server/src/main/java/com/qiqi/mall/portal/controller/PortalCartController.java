@@ -73,6 +73,9 @@ public class PortalCartController {
         int qty = request.getQuantity() == null || request.getQuantity() < 1 ? 1 : request.getQuantity();
         if (exist != null) {
             exist.setQuantity(exist.getQuantity() + qty);
+            // 刻意**不**检查影响行数：购物车是「意图清单」而非账务数据（见 OrderTransactionalCreator 的说明），
+            // cart 表也没有 version 列；0 行只可能是这条购物车条目恰好被删了（同账号另一个标签页删掉），
+            // 用户再加一次就是不一条新的 —— 不影响任何金额/库存。这里报错反而更烦人。
             cartService.updateById(exist);
             return Result.ok(exist);
         }
@@ -90,6 +93,8 @@ public class PortalCartController {
         Cart cart = cartService.getById(id);
         if (cart == null || !cart.getMemberId().equals(CurrentUser.id())) return Result.fail("购物车条目不存在");
         cart.setQuantity(request.getQuantity() == null || request.getQuantity() < 1 ? 1 : request.getQuantity());
+        // 同上：购物车是意图清单，0 行 = 条目在读取之后被删（同账号另一端），不改数量也不会让任何人多花钱，
+        // 保持原样（用户会直接看到条目没了，下次加购/下单前价格与数量都以结算页为准）。
         cartService.updateById(cart);
         return Result.ok();
     }
@@ -118,6 +123,8 @@ public class PortalCartController {
                 int qty = item.getQuantity() == null || item.getQuantity() < 1 ? 1 : item.getQuantity();
                 if (exist != null) {
                     exist.setQuantity(exist.getQuantity() + qty);
+                    // 登录后的本地车合并是**尽力而为**的批量操作（这个循环本来就会跳过 sku 已下架的条目），
+                    // 单条 0 行（条目刚被另端删掉）不中断整批，也不影响账务 —— 保持原样。
                     cartService.updateById(exist);
                 } else {
                     Cart cart = new Cart();

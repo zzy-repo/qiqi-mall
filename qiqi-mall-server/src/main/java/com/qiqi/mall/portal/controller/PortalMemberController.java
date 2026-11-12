@@ -3,6 +3,7 @@ package com.qiqi.mall.portal.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.member.entity.Member;
 import com.qiqi.mall.member.entity.MemberAddress;
 import com.qiqi.mall.shared.security.CurrentUser;
@@ -70,7 +71,11 @@ public class PortalMemberController {
         if (Integer.valueOf(1).equals(body.getDefaultStatus())) {
             clearOtherDefault(memberId, id);
         }
-        memberAddressService.updateById(body);
+        // 0 行 = 这条地址在读取之后被并发删了（member_address 无 version 列）→ 409 整笔回滚。
+        // 必须回滚：上面的 clearOtherDefault 已经把这个会员其它地址的「默认」清掉了，
+        // 若在此静默返回成功，会员就会出现「一条默认地址都没有」的不一致状态。
+        int rows = memberAddressService.getBaseMapper().updateById(body);
+        OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_RECORD_DELETED);
         return Result.ok();
     }
 
@@ -94,6 +99,9 @@ public class PortalMemberController {
                     .last("limit 1"), false);
             if (oldest != null) {
                 oldest.setDefaultStatus(1);
+                // 刻意不检查影响行数：0 行 = 这条「最早地址」恰在此刻被同账号另一端点删掉，
+                // 此时也没有别的行可提升；地址不是账务数据（订单下单时已快照收货地址），
+                // 下一次新增/编辑地址会重新算默认，保持原样即可。
                 memberAddressService.updateById(oldest);
             }
         }

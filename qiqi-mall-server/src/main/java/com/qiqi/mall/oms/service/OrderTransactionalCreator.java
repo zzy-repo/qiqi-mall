@@ -8,6 +8,7 @@ import com.qiqi.mall.catalog.entity.Sku;
 import com.qiqi.mall.catalog.service.ProductService;
 import com.qiqi.mall.catalog.service.SkuService;
 import com.qiqi.mall.shared.common.OrderSnGenerator;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -80,7 +81,10 @@ public class OrderTransactionalCreator {
 
         orderItemService.saveBatch(items);
         order.setTotalAmount(total);
-        orderService.updateById(order);
+        // 总额写回：0 行 = 这张刚建的订单在事务内被别人删了（并发取消/清理）→ 抛异常回滚，
+        // 不能留一张「总额 0 元、却有明细」的订单；事务是 REQUIRES_NEW，回滚即整单不成立。
+        int rows = orderService.getBaseMapper().updateById(order);
+        OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_RECORD_DELETED);
 
         // 清购物车已上移到 portal 侧（下单事务后执行）：
         // 购物车是「意图清单」而非账务数据，允许与订单存在轻微不一致，以此解除 oms→member 的模块依赖。

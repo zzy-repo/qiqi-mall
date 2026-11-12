@@ -32,6 +32,9 @@ public class OrderSettingController {
             orderSettingService.save(body);
         } else {
             body.setId(existing.getId());
+            // 刻意不检查影响行数：这是「有则改、无则插」的 upsert，全局配置天然只有一行。
+            // 0 行只可能是「刚好那一行被并发删掉了」，下一次 GET/PUT 会自动插回（下面的分支），
+            // 属幂等无害，报 409 反而会让「改个自动收货天数」变成随机失败。
             orderSettingService.updateById(body);
         }
         return Result.ok(body);

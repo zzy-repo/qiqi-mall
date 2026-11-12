@@ -1,6 +1,7 @@
 package com.qiqi.mall.oms.controller;
 
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.shared.guard.CatalogDeleteGuard;
 import com.qiqi.mall.oms.entity.ReturnReason;
 import com.qiqi.mall.oms.service.ReturnReasonService;
@@ -37,7 +38,9 @@ public class ReturnReasonController {
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id, @RequestBody ReturnReason body) {
         body.setId(id);
-        returnReasonService.updateById(body);
+        // 0 行 = 原因在读取之后被别人删了（return_reason 无 version 列）→ 409「记录已被删除」
+        int rows = returnReasonService.getBaseMapper().updateById(body);
+        OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_RECORD_DELETED);
         return Result.ok();
     }
 

@@ -38,11 +38,18 @@ import java.util.Map;
  * 所以预演阶段就会把「该包裹已下发不能改」这类问题直接告诉调用方。
  *
  * <p>**执行时的校验顺序（严格，不许抢跑）**：
- * ① 参数/存在性 → ② version 乐观锁（缺 → 400，冲突 → 409；仅 {@code PUT /admin/deliveries/{id}} 有）
+ * ① 参数/存在性 → ② version 乐观锁（缺 → 400，冲突 → 409）
  * → ③ 业务守卫（待下发）。**version 必须排在业务守卫前面**：「数据被别人改了」与「状态不对」
  * 是两件事，混在一起会让调用方查错方向。
+ *
+ * <p>**哪几个接口收 version**：待下发阶段的人工干预四个动作全都收 ——
+ * {@code PUT}（body.version）、{@code POST /split}（body.version）、{@code POST /merge}（body.version）、
+ * {@code DELETE}（**query 的 ?version=**，DELETE 带 body 过代理/CDN 不可靠）。
+ * 状态流转类（dispatch / cancel / wms-callback）不收：它们由「状态守卫 + 影响行数检查」兜住，
+ * 且调用方（WMS/运维）拿不到前端页面上的 version。
+ * 预演（{@code ?dryRun=true}）一律**不需要** version：不落库就不存在冲突。
  */
-@Tag(name = "管理端-发货单与履约", description = "发货单下发/取消/WMS 回传，以及待下发阶段的人工干预：改仓改量、拆分、合并、删除（编辑需带 version，全部支持 ?dryRun=true 预演）")
+@Tag(name = "管理端-发货单与履约", description = "发货单下发/取消/WMS 回传，以及待下发阶段的人工干预：改仓改量、拆分、合并、删除（四个编辑动作均需 version，全部支持 ?dryRun=true 预演）")
 @RestController
 @RequestMapping("/admin/deliveries")
 public class DeliveryController {
@@ -138,8 +145,11 @@ public class DeliveryController {
 
     /**
      * 拆分待下发包裹：按明细数量拆出一个新的待下发包裹。守卫：仅 status=0；源包与新包 source=1。
+     *
+     * <p>校验顺序同 {@link #update}：① 存在性 → ② 参数（要拆哪些明细）→ ③ version（缺 400 / 冲突 409）
+     * → ④ 业务守卫（status=0，service 层）。**dryRun 分支在版本校验之前**：预演不落库，不需要版本号。
      */
-    @Operation(summary = "拆分发货单（把一个包裹拆成两个）；?dryRun=true 只预演，返回将要发生什么")
+    @Operation(summary = "拆分发货单（把一个包裹拆成两个）；需带 version，?dryRun=true 只预演")
     @PostMapping("/{id}/split")
     public Result<Map<String, Object>> split(@PathVariable Long id,
                                              @RequestParam(required = false) Boolean dryRun,
@@ -148,13 +158,26 @@ public class DeliveryController {
             return Result.ok(PreviewResult.of(
                     deliveryEditService.previewSplit(id, body.getNewWarehouseId(), body.getItems())));
         }
+        // ① 存在性
+        DeliveryOrder current = deliveryOrderService.getById(id);
+        if (current == null) return Result.fail("发货单不存在：" + id);
+        // ② 参数
+        if (body == null || body.getItems() == null || body.getItems().isEmpty()) {
+            return Result.fail("请指定要拆出的明细与数量");
+        }
+        // ③ 乐观锁：缺失 → 400，版本对不上（期间被别人拆/改过）→ 409；都必须在业务守卫之前
+        OptimisticLockGuard.requireVersion(body.getVersion());
+        OptimisticLockGuard.requireSameVersion(body.getVersion(), current.getVersion());
+        // ④ 业务守卫（service 里的 requirePending）+ 落库
         return Result.ok(deliveryEditService.split(id, body.getNewWarehouseId(), body.getItems()));
     }
 
     /**
      * 合并待下发包裹：把 {id} 并入 targetId（同订单、同待下发）。
+     *
+     * <p>校验顺序同上：① 存在性 → ② 参数（targetId 必填、不能与自己合并）→ ③ version → ④ 业务守卫。
      */
-    @Operation(summary = "合并发货单（把包裹并到另一个包裹）；?dryRun=true 只预演，返回将要发生什么")
+    @Operation(summary = "合并发货单（把包裹并到另一个包裹）；需带 version，?dryRun=true 只预演")
     @PostMapping("/{id}/merge")
     public Result<Map<String, Object>> merge(@PathVariable Long id,
                                              @RequestParam(required = false) Boolean dryRun,
@@ -162,20 +185,44 @@ public class DeliveryController {
         if (PreviewResult.isDryRun(dryRun)) {
             return Result.ok(PreviewResult.of(deliveryEditService.previewMerge(id, body.getTargetId())));
         }
+        // ① 存在性
+        DeliveryOrder current = deliveryOrderService.getById(id);
+        if (current == null) return Result.fail("发货单不存在：" + id);
+        // ② 参数
+        if (body == null || body.getTargetId() == null) return Result.fail("请指定要并入的目标包裹");
+        if (body.getTargetId().equals(id)) return Result.fail("不能与自己合并");
+        // ③ 乐观锁
+        OptimisticLockGuard.requireVersion(body.getVersion());
+        OptimisticLockGuard.requireSameVersion(body.getVersion(), current.getVersion());
+        // ④ 业务守卫 + 落库
         return Result.ok(deliveryEditService.merge(id, body.getTargetId()));
     }
 
     /**
      * 删除待下发包裹：还有明细时必须带 targetId（等同于并入别处）。守卫：仅 status=0 待下发。
+     *
+     * <p>**version 走 query 而不是 body**：{@code DELETE} 带请求体在部分代理/CDN/网关上是会被丢的
+     * （HTTP/1.0 网关、某些 WAF 直接吞 body），会出现「浏览器觉得传了、后端收到 null」→ 莫名其妙 400。
+     * 所以这个接口的版本号是 {@code ?version=}，与 {@code ?targetId=} 同一形态。
+     * 调用示例：{@code DELETE /admin/deliveries/12?targetId=13&version=3}
      */
-    @Operation(summary = "删除发货单（有明细时须给 targetId，等于并到别处）；?dryRun=true 只预演")
+    @Operation(summary = "删除发货单（有明细时须给 targetId，等于并到别处）；需带 ?version=，?dryRun=true 只预演")
     @DeleteMapping("/{id}")
     public Result<Map<String, Object>> delete(@PathVariable Long id,
                                               @RequestParam(required = false) Long targetId,
+                                              @RequestParam(required = false) Integer version,
                                               @RequestParam(required = false) Boolean dryRun) {
         if (PreviewResult.isDryRun(dryRun)) {
             return Result.ok(PreviewResult.of(deliveryEditService.previewDelete(id, targetId)));
         }
+        // ① 存在性
+        DeliveryOrder current = deliveryOrderService.getById(id);
+        if (current == null) return Result.fail("发货单不存在：" + id);
+        // ② 参数：targetId 是否必填取决于「还有没有明细」，属于业务守卫（service 里有准确中文原因），此处不抢跑
+        // ③ 乐观锁（query 参数）
+        OptimisticLockGuard.requireVersion(version);
+        OptimisticLockGuard.requireSameVersion(version, current.getVersion());
+        // ④ 业务守卫 + 落库（有明细时内部转 merge，同样走 markManual 的影响行数闸门）
         return Result.ok(deliveryEditService.delete(id, targetId));
     }
 

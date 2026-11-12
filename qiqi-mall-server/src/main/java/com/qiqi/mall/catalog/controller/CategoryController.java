@@ -1,6 +1,7 @@
 package com.qiqi.mall.catalog.controller;
 
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.shared.guard.CatalogDeleteGuard;
 import com.qiqi.mall.catalog.entity.Category;
 import com.qiqi.mall.catalog.service.CategoryService;
@@ -42,7 +43,9 @@ public class CategoryController {
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id, @RequestBody Category body) {
         body.setId(id);
-        categoryService.updateById(body);
+        // 0 行 = 分类在读取之后被别人删了（category 无 version 列）→ 409「记录已被删除」，别报假成功
+        int rows = categoryService.getBaseMapper().updateById(body);
+        OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_RECORD_DELETED);
         return Result.ok();
     }
 

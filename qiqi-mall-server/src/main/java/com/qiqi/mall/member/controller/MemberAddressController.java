@@ -2,6 +2,7 @@ package com.qiqi.mall.member.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.member.entity.MemberAddress;
 import com.qiqi.mall.member.service.MemberAddressService;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -39,7 +40,9 @@ public class MemberAddressController {
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id, @RequestBody MemberAddress body) {
         body.setId(id);
-        memberAddressService.updateById(body);
+        // 0 行 = 地址在读取之后被别人删了（member_address 无 version 列）→ 409「记录已被删除」
+        int rows = memberAddressService.getBaseMapper().updateById(body);
+        OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_RECORD_DELETED);
         return Result.ok();
     }
 

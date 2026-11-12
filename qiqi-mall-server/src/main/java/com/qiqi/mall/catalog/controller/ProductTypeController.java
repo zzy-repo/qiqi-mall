@@ -1,6 +1,7 @@
 package com.qiqi.mall.catalog.controller;
 
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.shared.guard.CatalogDeleteGuard;
 import com.qiqi.mall.catalog.entity.ProductType;
 import com.qiqi.mall.catalog.service.ProductTypeService;
@@ -42,7 +43,10 @@ public class ProductTypeController {
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id, @RequestBody ProductType body) {
         body.setId(id);
-        productTypeService.updateById(body);
+        // 0 行 = 这条类型在读取之后被别人删了（product_type 无 version 列）→ 必须 fail-closed，
+        // 否则管理员拿到「保存成功」但其实什么都没有改。
+        int rows = productTypeService.getBaseMapper().updateById(body);
+        OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_RECORD_DELETED);
         return Result.ok();
     }
 

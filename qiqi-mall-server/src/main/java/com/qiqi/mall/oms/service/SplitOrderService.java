@@ -8,6 +8,7 @@ import com.qiqi.mall.oms.entity.Warehouse;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.order.entity.OrderItem;
 import com.qiqi.mall.shared.common.DeliverySnGenerator;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -157,7 +158,10 @@ public class SplitOrderService {
         }
 
         order.setSplitStatus(1);
-        orderService.updateById(order);
+        // 0 行 = 本事务读出来之后订单被别人改过（审核/取消/另一笔拆单）→ 抛 409 让**整笔拆单回滚**。
+        // 忽略返回值的后果：「发货单生成了、订单却没标记已拆」，履约链路从此对不上账。
+        int rows = orderService.getBaseMapper().updateById(order);
+        OptimisticLockGuard.requireAffected(rows);
         return created;
     }
 

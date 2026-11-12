@@ -1,8 +1,10 @@
 package com.qiqi.mall.oms.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.qiqi.mall.shared.common.PreviewResult;
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.order.entity.OrderItem;
 import com.qiqi.mall.oms.entity.PaymentRecord;
@@ -90,9 +92,15 @@ public class ReturnApplyController {
      * <p>校验顺序：**① 参数/存在性（申请不存在 / 已处理 / 结论非法）→ ② 业务守卫（status=0）→ ③ 执行**。
      * 这几条属于「这次请求本身就不成立」，先回原因比别的都清楚。
      *
-     * <p>并发：{@code return_apply} 表没有 version 列，本接口靠「待处理」状态守卫防重放
-     * （审核成功后 status 不再是 0，重复提交必被拦）；它内部改的订单走 {@code updateById}，
-     * 没有客户端版本号参与，属于同一次请求内的「读-改-写」。
+     * <p>并发：{@code return_apply} 表没有 version 列，靠**两道影响行数闸门**（都在本方法同一个
+     * {@code @Transactional} 里，失败即整笔回滚）：
+     * <ol>
+     *   <li>申请行：{@code UPDATE ... WHERE id=? AND status=0}（把「待处理」守卫写进 SQL）影响 0 行
+     *       → 另一个管理员刚审过 / 申请被删 → 409 {@value OptimisticLockGuard#MSG_VERSION_CONFLICT}</li>
+     *   <li>订单行（order 表有 {@code @Version}）0 行 → 另一个管理员同时审了同一张单 / 订单被别的流程改过
+     *       → 409 {@value OptimisticLockGuard#MSG_VERSION_CONFLICT}，申请状态一并回滚
+     *       —— 绝不能出现「申请已通过、订单没退款、库存回补了两次」这种只回滚一半的结果</li>
+     * </ol>
      */
     @Operation(summary = "审核退货申请（status 1 通过 / 2 拒绝）；?dryRun=true 只预演，返回将要发生什么")
     @PutMapping("/{id}")
@@ -124,22 +132,39 @@ public class ReturnApplyController {
             return Result.ok(PreviewResult.of(willDo));
         }
 
-        exist.setStatus(target);
-        if (body.getDescription() != null) exist.setDescription(body.getDescription());
-        returnApplyService.updateById(exist);
+        // ① 申请行：return_apply 没有 version 列，所以把「待处理」这条守卫**写成 UPDATE 的条件** ——
+        //    `UPDATE return_apply SET status=? WHERE id=? AND status=0`。
+        //    这是「读-改-写」的原子版：两个管理员同时审同一张申请时，InnoDB 用行锁把两次 UPDATE 排成先后，
+        //    后一个的 WHERE status=0 不再命中 → 影响 0 行 → 409 + 「数据已被他人修改…请刷新后重试」。
+        //    如果只用上面那句 if (exist.getStatus() != 0) 判断，两个请求都能通过（读到的都是 0），
+        //    随后就会各退一次款、各回补一次库存 —— 那是真金白银的重复。
+        //    0 行还有第二种原因：这条申请被并发删了 —— 同样不能继续（往不存在的申请上记账），一样 fail-closed。
+        LambdaUpdateWrapper<ReturnApply> applyGuard = new LambdaUpdateWrapper<ReturnApply>()
+                .eq(ReturnApply::getId, exist.getId())
+                .eq(ReturnApply::getStatus, 0)
+                .set(ReturnApply::getStatus, target);
+        if (body.getDescription() != null) {
+            applyGuard.set(ReturnApply::getDescription, body.getDescription());
+        }
+        int applyRows = returnApplyService.getBaseMapper().update(null, applyGuard);
+        OptimisticLockGuard.requireAffected(applyRows);
 
         if (order == null) return Result.ok();
         if (target == 1) {
             // 通过：退款 + 回补库存
             order.setStatus(6);
-            orderService.updateById(order);
+            // ② 订单（有 version）：0 行 = 另一个管理员同时审了同一张单 / 订单被别的流程改过 →
+            //    抛 409 **整笔回滚**（申请状态一起退回去）。绝不能「申请已通过、订单没退款」只回滚一半。
+            int rows = orderService.getBaseMapper().updateById(order);
+            OptimisticLockGuard.requireAffected(rows);
             paymentRecordService.record(order.getOrderSn(), order.getTotalAmount(),
                     PaymentRecord.TYPE_REFUND, order.getPayType() == null ? 0 : order.getPayType());
             items.forEach(item -> skuService.restoreStock(item.getProductSkuId(), item.getProductQuantity()));
         } else {
             // 拒绝：订单回到已付款
             order.setStatus(1);
-            orderService.updateById(order);
+            int rows = orderService.getBaseMapper().updateById(order);
+            OptimisticLockGuard.requireAffected(rows);
         }
         return Result.ok();
     }
