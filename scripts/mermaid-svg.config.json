@@ -1,0 +1,17 @@
+{
+  "theme": "redux-color",
+  "themeVariables": {
+    "fontFamily": "Noto Sans CJK SC, Noto Sans SC, Microsoft YaHei, PingFang SC, sans-serif"
+  },
+  "htmlLabels": false,
+  "flowchart": {
+    "htmlLabels": false,
+    "wrappingWidth": 420
+  },
+  "sequence": {
+    "wrappingWidth": 420
+  },
+  "er": {
+    "useMaxWidth": true
+  }
+}
