@@ -12,7 +12,8 @@ import {
 } from '../../support/portal-ui.js'
 import { getMemberAddressesApi, memberTokenOf } from '../../support/assert.js'
 import { tid } from '../../support/tid.js'
-import { addressBook } from '../../support/fixtures.js'
+import { addressBook, memberNickOf } from '../../support/fixtures.js'
+import { demoUsername } from '../../support/images.js'
 
 /**
  * 买家侧 07 收货地址（docs/flows/02-业务场景/01-买家侧/7-收货地址）
@@ -25,10 +26,13 @@ import { addressBook } from '../../support/fixtures.js'
 const ADDR_A = addressBook[0]
 const ADDR_B = addressBook[1]
 
-/** 每个用例用独立账号，互不干扰 */
+/**
+ * 每个用例用独立账号，互不干扰。
+ * 登录名只承担唯一性（不显示）；昵称会出现在顶栏「你好，XX」，所以走 fixtures 的自然中文名。
+ */
 const newMember = async (page, tag) => {
-  const username = `e2e_addr_${tag}_${stamp()}`
-  await memberRegisterAndLogin(page, username)
+  const username = demoUsername('林晚') || `e2e_addr_${tag}_${stamp()}`
+  await memberRegisterAndLogin(page, username, '123456', memberNickOf(username))
   return username
 }
 
