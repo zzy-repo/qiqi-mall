@@ -15,6 +15,7 @@ import com.qiqi.mall.oms.service.DeliveryLogisticsService;
 import com.qiqi.mall.oms.service.DeliveryOrderService;
 import com.qiqi.mall.oms.service.WarehouseService;
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.shared.security.ConfirmCodeService;
 import com.qiqi.mall.shared.security.ConfirmOps;
 import com.qiqi.mall.shared.security.ConfirmPreview;
@@ -118,8 +119,17 @@ public class DeliveryController {
 
     /**
      * 编辑待下发包裹：改发货仓 / 改明细数量。守卫：仅 status=0 待下发；改动后 source=1 并重算订单 split_status。
+     *
+     * <p>**校验顺序（严格，乐观锁不抢跑）**：缺码 → 码无效/用途/目标 → 指纹变化 → **缺版本号(400) / 版本过期(409)** → 业务守卫(status=0)。
+     * 也就是说 version 校验排在确认码之后、业务守卫之前：
+     * 「码对不上」永远先说码（那是这次请求的票），版本冲突归入「期间数据被改动」这一档，
+     * 不会出现「码已过期却先报数据被改」的误导。
+     *
+     * <p>乐观锁是**第二道**闸：确认码指纹只看「这次要改成什么」（仓库 + 明细），
+     * 有人改了包裹的 source/状态/别的字段时指纹未必变，靠 version 才能发现。
+     * 缺版本号一律拒（fail-closed），绝不静默降级成无版本校验。
      */
-    @Operation(summary = "编辑发货单（待下发阶段改发货仓/改件数）；需带 confirmCode，?dryRun=true 只预演")
+    @Operation(summary = "编辑发货单（待下发阶段改发货仓/改件数）；需带 confirmCode + version，?dryRun=true 只预演")
     @PutMapping("/{id}")
     public Result<Map<String, Object>> update(@PathVariable Long id,
                                               @RequestParam(required = false) Boolean dryRun,
@@ -133,6 +143,16 @@ public class DeliveryController {
         String error = confirmCodeService.verify(code, ConfirmOps.DELIVERY_EDIT, id,
                 deliveryEditService.extrasOfUpdate(id, body.getWarehouseId(), body.getItems()));
         if (error != null) return Result.fail(error);
+
+        // 乐观锁 ①：缺版本号直接拒（fail-closed）
+        OptimisticLockGuard.LockError lockError = OptimisticLockGuard.checkVersion(body.getVersion());
+        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
+        // 乐观锁 ②：与库里当前版本比对；不一致 = 读之后被别人改过
+        DeliveryOrder current = deliveryOrderService.getById(id);
+        if (current == null) return Result.fail("发货单不存在：" + id);
+        lockError = OptimisticLockGuard.checkSameVersion(body.getVersion(), current.getVersion());
+        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
+
         return Result.ok(deliveryEditService.update(id, body.getWarehouseId(), body.getItems()));
     }
 
@@ -241,6 +261,8 @@ public class DeliveryController {
             item.put("source", d.getSource());
             item.put("receiverName", d.getReceiverName());
             item.put("createdAt", d.getCreatedAt());
+            // 乐观锁版本号必须回给前端：PUT /admin/deliveries/{id} 的 body 要原样带回来
+            item.put("version", d.getVersion());
             item.put("items", deliveryItemService.list(new LambdaQueryWrapper<DeliveryItem>()
                     .eq(DeliveryItem::getDeliveryId, d.getId())));
             DeliveryLogistics logistics = deliveryLogisticsService.getOne(

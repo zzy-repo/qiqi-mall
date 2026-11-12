@@ -271,10 +271,15 @@ class ConfirmGateIntegrationTest {
         System.out.printf("⑥ 编辑包裹 缺码 → %s%n", fail(put("/admin/deliveries/" + id, payload)).path("message").asText());
         assertThat(warehouseOf(id)).isNotEqualTo(targetWarehouse);
 
+        // 乐观锁改造后，执行必须带 version（fail-closed：不带会回 code=400）
+        int version = versionOfDelivery(id);
         ok(put("/admin/deliveries/" + id, "{\"warehouseId\":" + targetWarehouse
+                + ",\"version\":" + version
                 + ",\"confirmCode\":\"" + dry.path("confirmCode").asText() + "\"}"));
-        System.out.printf("⑥ 编辑包裹 带码执行 → 仓库=%d%n", warehouseOf(id));
+        System.out.printf("⑥ 编辑包裹 带码+version=%d 执行 → 仓库=%d，version→%d%n",
+                version, warehouseOf(id), versionOfDelivery(id));
         assertThat(warehouseOf(id)).isEqualTo(targetWarehouse);
+        assertThat(versionOfDelivery(id)).as("成功编辑后 version 必须 +1").isEqualTo(version + 1);
     }
 
     @Test
@@ -699,6 +704,11 @@ class ConfirmGateIntegrationTest {
 
     private Long warehouseOf(Long deliveryId) {
         return jdbc.queryForObject("SELECT warehouse_id FROM delivery_order WHERE id = ?", Long.class, deliveryId);
+    }
+
+    /** 发货单当前乐观锁版本号（PUT /admin/deliveries/{id} 执行时必须原样带回） */
+    private int versionOfDelivery(Long deliveryId) {
+        return jdbc.queryForObject("SELECT version FROM delivery_order WHERE id = ?", Integer.class, deliveryId);
     }
 
     private int stockOf(Long skuId) {

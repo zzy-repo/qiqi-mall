@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.qiqi.mall.shared.common.OrderSnGenerator;
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.oms.dto.OrderDetailDTO;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.order.entity.OrderItem;
@@ -95,6 +96,7 @@ public class OrderController {
     public Result<Order> create(@RequestBody OrderCreateRequest request) {
         Order order = request.getOrder();
         order.setId(null);
+        order.setVersion(0);            // 新建即 0 版：响应里带回 version，前端拿到就能直接编辑
         if (order.getOrderSn() == null || order.getOrderSn().isBlank()) {
             order.setOrderSn(OrderSnGenerator.next());
         }
@@ -123,12 +125,21 @@ public class OrderController {
     /**
      * 更新订单基础信息（收货人/地址等）。
      * 守卫：status 不通过本接口变更——统一置空，状态只能经专用接口 + 前置校验流转。
+     *
+     * <p>**乐观锁，fail-closed**：必须带 {@code body.version}（列表/详情都会返回）。
+     * 缺版本号 → code=400；读之后被别人改过（UPDATE 影响行数 0）→ code=409，
+     * 收货人/地址一个字段都不会被覆盖。注意 status 在这里被置空、不参与 SET，
+     * 所以「订单状态」不会被本接口的乐观锁波及（状态只走专用接口）。
      */
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id, @RequestBody Order body) {
         body.setId(id);
         body.setStatus(null);
-        orderService.updateById(body);
+        OptimisticLockGuard.LockError lockError = OptimisticLockGuard.checkVersion(body.getVersion());
+        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
+        int rows = orderService.getBaseMapper().updateById(body);
+        lockError = OptimisticLockGuard.checkAffected(rows);
+        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
         return Result.ok();
     }
 

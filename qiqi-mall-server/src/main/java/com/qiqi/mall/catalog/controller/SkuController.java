@@ -3,6 +3,7 @@ package com.qiqi.mall.catalog.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.shared.guard.CatalogDeleteGuard;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.shared.security.ConfirmCodeService;
 import com.qiqi.mall.shared.security.ConfirmOps;
 import com.qiqi.mall.shared.security.ConfirmRequest;
@@ -65,6 +66,8 @@ public class SkuController {
             item.put("price", sku.getPrice());
             item.put("stock", sku.getStock());
             item.put("pic", sku.getPic());
+            // 乐观锁版本号必须回给前端：编辑时原样带回来，后端据此判断「读之后有没有人改过」
+            item.put("version", sku.getVersion());
             item.put("specText", specTexts.getOrDefault(sku.getId(), ""));
             result.add(item);
         }
@@ -88,18 +91,30 @@ public class SkuController {
     public Result<Sku> create(@RequestBody SkuSaveRequest request) {
         Sku sku = request.getSku();
         sku.setId(null);
+        sku.setVersion(0);              // 新建即 0 版：响应里带回 version，前端拿到就能直接编辑
         if (sku.getProductId() == null) return Result.fail("请指定所属商品");
         skuService.save(sku);
         saveSpecs(sku.getId(), request.getSpecs());
         return Result.ok(sku);
     }
 
+    /**
+     * 更新 SKU（**乐观锁，fail-closed**）。
+     *
+     * <p>必须带 {@code sku.version}：缺 → code=400；被抢改（影响行数 0）→ code=409，
+     * 且此时不会覆盖价格/库存，也不会替换规格值（规格替换排在更新之后）。
+     */
     @PutMapping("/{id}")
     @Transactional
     public Result<Void> update(@PathVariable Long id, @RequestBody SkuSaveRequest request) {
         Sku sku = request.getSku();
+        if (sku == null) return Result.fail("缺少 SKU 数据");
         sku.setId(id);
-        skuService.updateById(sku);
+        OptimisticLockGuard.LockError lockError = OptimisticLockGuard.checkVersion(sku.getVersion());
+        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
+        int rows = skuService.getBaseMapper().updateById(sku);
+        lockError = OptimisticLockGuard.checkAffected(rows);
+        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
         if (request.getSpecs() != null) {
             // 整组替换规格值
             skuSpecService.remove(new LambdaQueryWrapper<SkuSpec>().eq(SkuSpec::getSkuId, id));

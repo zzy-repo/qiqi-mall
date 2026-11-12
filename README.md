@@ -51,10 +51,19 @@ mysql -h127.0.0.1 -uroot -pqiqi123456 qiqi_mall
 |------|------|
 | `sql/schema.sql` | 建库建表 |
 | `sql/data.sql` | 示例数据（3 会员 / 3 地址 / 3 购物车 / 1 管理员 / 10 分类 / 3 类型 / 6 属性 / 5 商品 / 9 SKU / 4 订单 / 2 退货）|
+| `sql/migrate-optimistic-lock.sql` | 5 张热表加乐观锁 `version` 列（幂等，已有库升级时跑；见「并发控制」一节） |
 
 示例账号（密码统一 `123456`，BCrypt 存储）：后台 `admin`，买家 `qiqi` / `xiaoming`（`laowang` 为禁用状态）。
 
 两个脚本都挂到 `/docker-entrypoint-initdb.d/`，数据卷为空时按序自动执行。
+**已有数据卷**（表已经建好了）升级到「乐观锁」版本时，手动跑一次迁移即可（可重复执行）：
+
+```bash
+docker exec -i -e MYSQL_PWD=$MYSQL_ROOT_PASSWORD qiqi-mysql \
+  mysql --default-character-set=utf8mb4 -uroot < sql/migrate-optimistic-lock.sql
+```
+
+`migrate-*.sql` 都是幂等的：重跑第二次全部命中「已存在」→ 跳过，不报错、不动数据。
 
 ## 本地开发（日常迭代）
 
@@ -249,6 +258,49 @@ curl -X POST "$B/admin/orders/7/audit-pass" -H "Authorization: Bearer $AT" \
 ### ⑥ 与 API Key / JWT 的分工
 
 JWT 回答「**谁**登录着」（人），API Key（`X-Api-Key` + scopes）回答「**哪个机器**在调」（AI / 脚本），`confirmCode` 回答「**这一次**写操作你确认过了」。三者正交：前两个管身份与权限，最后一个管单次动作的意图，缺一不可。
+
+## 并发控制：乐观锁 version（5 张热表）
+
+**为什么**：`product` / `sku` / `order` / `delivery_order` / `member` 原来既没有 `version` 也没有 `update_time`，
+`PUT /admin/products/{id}` 就是 `updateById(product)` —— 纯 last-write-wins。两个人同时编辑同一个商品，
+**后保存的完整覆盖前保存的**，双方的修改都丢，而且谁都不知道。
+
+**现在**：这 5 张表各加一列 `version INT NOT NULL DEFAULT 0`（迁移：`sql/migrate-optimistic-lock.sql`，幂等可重跑），
+实体上是 MyBatis-Plus 的 `@Version`，`MybatisPlusConfig` 注册了 `OptimisticLockerInnerInterceptor`（**必须排在分页之前**），
+所以 `updateById(entity)` 生成的是 `UPDATE ... SET version = version + 1 WHERE id = ? AND version = ?`。
+
+### 错误码约定
+
+| 场景 | code | message |
+|---|---|---|
+| 成功 | `0` | `ok` |
+| 缺少版本号 | `400` | `缺少版本号，请刷新页面后重试` |
+| 版本冲突（期间被别人改过） | `409` | `数据已被他人修改（可能其他人在编辑），请刷新后重试` |
+
+> `409` 是项目里**唯一**非 `0`/`1` 的业务 code（沿用 HTTP 语义）。前端看到 `409` 就弹「数据已被他人修改，
+> 点这里刷新后重试」的那一个对话框，看到 `400` 说明自己没把 version 带回去（代码 bug，不是并发）。
+> 两者都是 **HTTP 200 + 业务码**，与项目其它错误一致，不靠 HTTP 状态码分支。
+
+### 接口契约（前端必须带 version）
+
+| 接口 | 版本号从哪来 |
+|---|---|
+| `PUT /admin/products/{id}` | body `product.version` ← `GET /admin/products`、`GET /admin/products/{id}` 的 `product.version` |
+| `PUT /admin/skus/{id}` | body `sku.version` ← `GET /admin/skus?productId=`（列表每行有 `version`）、`GET /admin/skus/{id}` |
+| `PUT /admin/orders/{id}` | body `version` ← `GET /admin/orders`（`records[].version`）、`GET /admin/orders/{id}`（`data.order.version`） |
+| `PUT /admin/deliveries/{id}` | body `version` ← `GET /admin/deliveries?orderId=`（每行有 `version`）；另一个字段 `confirmCode` 照旧 |
+| `PUT /admin/members/{id}` | body `version` ← `GET /admin/members`、`GET /admin/members/{id}` |
+
+**fail-closed**：`version` 为 null 一律拒（`400`），**绝不静默降级成「无版本校验」** —— 那等于白加，
+而且外人看不出来（接口照样 code=0）。存量调用方（老前端 / 脚本 / MCP 写接口）会因此拿到 400，属预期。
+
+### `PUT /admin/deliveries/{id}` 的校验顺序（乐观锁不抢跑）
+
+`缺码 → 码无效/已用/过期 → 用途不符 → 目标不符 → 指纹变化 → **缺版本号(400) / 版本过期(409)** → 业务守卫(status=0)`
+
+即：确认码是「这次请求的票」，码不对先说码；版本冲突归入「期间数据被改动」那一档。
+确认码指纹只看「这次要改成什么」（仓库 + 明细），有人改了 `source`/`status`/别的字段时指纹未必变，靠 `version` 才能发现 ——
+两者是**两层**闸门，不是替代关系。
 
 ## 订单状态机
 

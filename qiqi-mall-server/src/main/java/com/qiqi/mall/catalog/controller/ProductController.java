@@ -3,6 +3,7 @@ package com.qiqi.mall.catalog.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.shared.guard.CatalogDeleteGuard;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.shared.security.ConfirmCodeService;
 import com.qiqi.mall.shared.security.ConfirmOps;
 import com.qiqi.mall.shared.security.ConfirmRequest;
@@ -62,17 +63,33 @@ public class ProductController {
     public Result<Product> create(@RequestBody ProductSaveRequest request) {
         Product product = request.getProduct();
         product.setId(null);
+        product.setVersion(0);          // 新建即 0 版：响应里带回 version，前端拿到就能直接编辑
         productService.save(product);
         saveGallery(product.getId(), request.getGallery());
         return Result.ok(product);
     }
 
+    /**
+     * 更新商品（**乐观锁，fail-closed**）。
+     *
+     * <p>必须带 {@code product.version}（列表/详情接口都会返回）：
+     * 缺版本号 → code=400「缺少版本号，请刷新页面后重试」；
+     * UPDATE 影响行数 0（读之后被别人改过）→ code=409「数据已被他人修改…，请刷新后重试」，
+     * 此时**一个字段都不会被覆盖**，并且因为相册替换排在更新之后，也不会动相册。
+     */
     @PutMapping("/{id}")
     @Transactional
     public Result<Void> update(@PathVariable Long id, @RequestBody ProductSaveRequest request) {
         Product product = request.getProduct();
+        if (product == null) return Result.fail("缺少商品数据");
         product.setId(id);
-        productService.updateById(product);
+        // ① 缺版本号直接拒（绝不静默降级成「无版本校验」）
+        OptimisticLockGuard.LockError lockError = OptimisticLockGuard.checkVersion(product.getVersion());
+        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
+        // ② 走 baseMapper 拿**影响行数**（service.updateById 只回 boolean，区分不了 0 行）
+        int rows = productService.getBaseMapper().updateById(product);
+        lockError = OptimisticLockGuard.checkAffected(rows);
+        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
         if (request.getGallery() != null) {
             // 整组替换相册
             productGalleryService.remove(new LambdaQueryWrapper<ProductGallery>()

@@ -27,6 +27,15 @@ public class Result<T> {
         return new Result<>(1, message, null);
     }
 
+    /**
+     * 带业务码的失败：目前只有乐观锁在用 ——
+     * 缺版本号 {@code 400}、版本冲突 {@code 409}（沿用 HTTP 语义，见 {@code OptimisticLockGuard}）。
+     * 前端据此弹「刷新后重试」对话框，所以码必须透传，不能一律压成 1。
+     */
+    public static <T> Result<T> fail(int code, String message) {
+        return new Result<>(code, message, null);
+    }
+
     public int getCode() {
         return code;
     }

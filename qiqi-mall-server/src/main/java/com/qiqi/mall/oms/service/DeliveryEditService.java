@@ -8,6 +8,7 @@ import com.qiqi.mall.oms.entity.Warehouse;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.order.entity.OrderItem;
 import com.qiqi.mall.shared.common.DeliverySnGenerator;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.shared.security.ConfirmCodeService;
 import com.qiqi.mall.shared.security.ConfirmPreview;
 import org.springframework.stereotype.Service;
@@ -404,10 +405,18 @@ public class DeliveryEditService {
         return quantity;
     }
 
-    /** 人工改动记账：source=1 + 重算 split_status */
+    /**
+     * 人工改动记账：source=1 + 重算 split_status。
+     *
+     * <p>这里落库的是 {@code UPDATE delivery_order SET ... , version = version + 1
+     * WHERE id = ? AND version = ?}（实体带 @Version）。影响行数 0 说明「本事务读出来之后
+     * 又有别人改了这张包裹」—— 直接抛乐观锁冲突（code=409），而不是把别人的改动盖掉：
+     * 事务回滚，明细改动一并撤销，前端刷新后重试即可。
+     */
     private void markManual(DeliveryOrder delivery) {
         delivery.setSource(DeliveryOrder.SOURCE_MANUAL);
-        deliveryOrderService.updateById(delivery);
+        int rows = deliveryOrderService.getBaseMapper().updateById(delivery);
+        OptimisticLockGuard.requireAffected(rows);
         recomputeSplitStatus(delivery.getOrderId());
     }
 
@@ -468,6 +477,7 @@ public class DeliveryEditService {
             row.put("warehouseName", wh == null ? "" : wh.getName());
             row.put("status", d.getStatus());
             row.put("source", d.getSource());
+            row.put("version", d.getVersion());      // 编辑后的最新版本号，前端下次编辑要用
             row.put("items", itemsOf(d.getId()));
             list.add(row);
         }

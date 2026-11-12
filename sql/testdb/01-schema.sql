@@ -55,6 +55,7 @@ CREATE TABLE `member` (
   `phone` VARCHAR(20) DEFAULT NULL COMMENT '手机号',
   `status` TINYINT NOT NULL DEFAULT 1 COMMENT '1启用 0禁用',
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_member_username` (`username`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='会员';
@@ -139,6 +140,7 @@ CREATE TABLE `product` (
   `type_id` BIGINT NOT NULL COMMENT '所属类型',
   `publish_status` TINYINT NOT NULL DEFAULT 1 COMMENT '1上架 0下架',
   `pic` VARCHAR(500) DEFAULT NULL COMMENT '主图URL（指向 MinIO）',
+  `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
   PRIMARY KEY (`id`),
   KEY `idx_category` (`category_id`),
   KEY `idx_type` (`type_id`),
@@ -153,6 +155,7 @@ CREATE TABLE `sku` (
   `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '价格',
   `stock` INT NOT NULL DEFAULT 0 COMMENT '库存',
   `pic` VARCHAR(500) DEFAULT NULL COMMENT 'SKU图URL（指向 MinIO）',
+  `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
   PRIMARY KEY (`id`),
   KEY `idx_product` (`product_id`),
   CONSTRAINT `fk_sku_product` FOREIGN KEY (`product_id`) REFERENCES `product` (`id`) ON DELETE CASCADE
@@ -204,6 +207,7 @@ CREATE TABLE `order` (
   `receiver_phone` VARCHAR(20) DEFAULT NULL COMMENT '收货电话快照',
   `receiver_address` VARCHAR(255) DEFAULT NULL COMMENT '收货地址快照',
   `split_status` TINYINT NOT NULL DEFAULT 0 COMMENT '0未拆(单仓直发) 1已拆',
+  `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_order_sn` (`order_sn`),
   KEY `idx_member` (`member_id`),
@@ -281,6 +285,7 @@ CREATE TABLE `delivery_order` (
   `source` TINYINT NOT NULL DEFAULT 0 COMMENT '来源：0自动拆单 1人工调整（改仓/改量/拆分/合并/删除）',
   `split_rule_id` BIGINT NULL COMMENT '预留：命中的拆单规则ID，层次二规则引擎启用',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_delivery_sn` (`delivery_sn`),
   KEY `idx_order` (`order_id`),

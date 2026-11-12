@@ -1,5 +1,6 @@
 package com.qiqi.mall.shared.common;
 
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -23,6 +24,19 @@ public class GlobalExceptionHandler {
     public Result<Void> handle(Exception e) {
         log.error("请求处理失败", e);
         return Result.fail(e.getMessage());
+    }
+
+    /**
+     * 乐观锁校验失败：**原样透出 400 / 409 业务码**（缺版本号 / 版本冲突）。
+     *
+     * <p>为什么单列一条：{@link #handle(Exception)} 会把一切压成 code=1，
+     * 而前端要靠 409 识别「别人改过了，弹刷新对话框」，压成 1 就退化成普通报错了。
+     * 日志按 warn 打（这是正常的并发结果，不是故障），不打印堆栈免得刷屏。
+     */
+    @ExceptionHandler(OptimisticLockGuard.LockException.class)
+    public Result<Void> handleOptimisticLock(OptimisticLockGuard.LockException e) {
+        log.warn("乐观锁校验未通过 code={} message={}", e.getCode(), e.getMessage());
+        return Result.fail(e.getCode(), e.getMessage());
     }
 
     /**

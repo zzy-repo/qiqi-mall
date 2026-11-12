@@ -2,6 +2,7 @@ package com.qiqi.mall.member.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.member.entity.Cart;
 import com.qiqi.mall.member.entity.Member;
 import com.qiqi.mall.member.entity.MemberAddress;
@@ -47,15 +48,27 @@ public class MemberController {
     @PostMapping
     public Result<Member> create(@RequestBody Member body) {
         body.setId(null);
+        body.setVersion(0);             // 新建即 0 版：响应里带回 version，前端拿到就能直接编辑
         if (body.getStatus() == null) body.setStatus(1);
         memberService.save(body);
         return Result.ok(body);
     }
 
+    /**
+     * 更新会员（**乐观锁，fail-closed**）。
+     *
+     * <p>必须带 {@code body.version}：缺 → code=400；被抢改（影响行数 0）→ code=409。
+     * 注意 status 也是并发敏感字段（禁用/启用被覆盖 = 有人被错误放行/拦截），
+     * 所以这里同样不允许「无版本校验」的更新。
+     */
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id, @RequestBody Member body) {
         body.setId(id);
-        memberService.updateById(body);
+        OptimisticLockGuard.LockError lockError = OptimisticLockGuard.checkVersion(body.getVersion());
+        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
+        int rows = memberService.getBaseMapper().updateById(body);
+        lockError = OptimisticLockGuard.checkAffected(rows);
+        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
         return Result.ok();
     }
 
