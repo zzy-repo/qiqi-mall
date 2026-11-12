@@ -64,7 +64,7 @@
 | 会员 | `member_address(action)` | 1 只读 + 2 写（L2） | `GET/POST /admin/member-addresses`、`PUT/DELETE /admin/member-addresses/{id}`（表无 version 列） |
 | 会员 | `member_cart(action)` | 1 只读 + 3 写（L2） | `GET /admin/carts?memberId=`、`POST /admin/carts`、`PUT/DELETE /admin/carts/{id}`（表无 version 列；改的是库里那条记录，不是买家自助购物车） |
 | 概览 | `dashboard_overview()` | 只读 | `GET /admin/dashboard/overview` |
-| — | ~~`upload_image`~~ | **刻意未实现** | 后端只有 `POST /admin/upload/image`，签名是 `@RequestParam("file") MultipartFile` —— 只吃 multipart 文件流，用 JSON 打它会回「Current request is not a multipart request」；MCP 的参数是模型产出的文本，塞 base64 会让上下文爆掉，传本地路径又会把 server 变成任意文件读取通道，所以不上半成品。**已确认后端没有「传 URL 让后端去拉」的接口**（`AdminUploadController` 只有 MultipartFile 一个入口），要补这条得后端先加接口 |
+| 上传 | `upload_image_from_url(url)` | **写**（`MCP_ENABLE_WRITE`） | `POST /admin/upload/image-from-url`（body `{url}`）。**只传 URL，不传文件 / base64 / 本地路径**：拉取由后端做，带全套 SSRF 防护 —— 只允许 https（http / file / ftp / gopher 一律拒）、禁内网 / 回环 / 链路本地 / CGNAT（`127/8`、`10/8`、`172.16/12`、`192.168/16`、`169.254/16`、`100.64/10`、`::1`、`fc00::/7`、`fe80::/10`）、**不跟随重定向**（3xx 直接拒）、连接 5s / 读取 10s、正文 **≤5MB**、**前 16 字节嗅探**真实类型（只收 jpg/png/webp，不信 Content-Type）、**解析一次拿 IP 后用该 IP 连**（防 DNS 重绑定）。失败是中文原因 + 400/403/413/415/502/504（不是 500）。返回结构与人工上传一致：`{url: "/qiqi-mall/products/2026/11/uuid.webp", objectName}`，scope `catalog:write` |
 
 并发控制口径：**只读工具无副作用、可反复调用；写工具靠 `version` 乐观锁**。
 `update_product` / `update_sku_stock` 的 `version` 是 **zod 必填**（缺了在协议层就被拒，请求都到不了后端）；
@@ -111,12 +111,13 @@ src/
     ├── returns.mjs    退货域 2 个：return_apply(list|get|audit|create|delete) / return_reason(list|create|update|delete)
     ├── config.mjs     配置域 2 个：warehouse(list|create|update|delete) / order_setting(get|update)
     ├── member.mjs     会员域 3 个：member / member_address / member_cart(action=list|create|update|delete)
-    └── misc.mjs       概览域 1 个：dashboard_overview（upload_image 刻意未做，见文件尾注）
+    └── misc.mjs       概览 + 上传 2 个：dashboard_overview（只读）、upload_image_from_url（写，按 URL 拉图存对象存储）
 ```
 
-工具总数：**38 个**（write=1）/ **26 个**（write=0 —— 纯写工具 12 个不注册：
+工具总数：**39 个**（write=1）/ **26 个**（write=0 —— 纯写工具 13 个不注册：
 `execute_audit_pass` / `create_order` / `update_order` / `audit_reject_order` / `ship_order` / `delete_order` /
-`update_product` / `update_sku_stock` / `create_product` / `delete_product` / `create_sku` / `delete_sku`；
+`update_product` / `update_sku_stock` / `create_product` / `delete_product` / `create_sku` / `delete_sku` /
+`upload_image_from_url`；
 用 `action` 承载写动作的工具仍在，但 action 枚举里只剩只读动作）。
 测试：`npm test` 串行跑 12 个文件（loop / catalog / catalog-write / catalog-dict / order-read / order-write /
 optimistic-lock / delivery / returns / config / member / misc），
@@ -276,7 +277,7 @@ bash scripts/start-inspector.sh    # 在仓库根目录执行
 |---|---|---|
 | `MALL_BASE` | `http://127.0.0.1:18080` | 后端网关地址 |
 | `MALL_API_KEY` | —（**必填**） | 管理端 API Key，随请求头 `X-Api-Key` 发出；**按库隔离**（dev 一把、test 一把），造 key 见上面「认证」 |
-| `MCP_ENABLE_WRITE` | `0` | `0`=只注册 26 个只读工具（纯只读 + 「只读动作」工具，后者的 action 枚举里写动作被摘掉）；`1`=再加 12 个纯写工具并放开所有 action 的写动作，共 38 个 |
+| `MCP_ENABLE_WRITE` | `0` | `0`=只注册 26 个只读工具（纯只读 + 「只读动作」工具，后者的 action 枚举里写动作被摘掉）；`1`=再加 13 个纯写工具（含 `upload_image_from_url`）并放开所有 action 的写动作，共 39 个 |
 
 见 `.env.example`。
 

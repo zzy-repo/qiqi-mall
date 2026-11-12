@@ -465,6 +465,21 @@ export function dashboardOverview() {
   return request('GET', '/admin/dashboard/overview');
 }
 
+/**
+ * 按 URL 上传图片：POST /admin/upload/image-from-url  body = { url }
+ * => { url: "/qiqi-mall/products/2026/11/uuid.webp", objectName: "products/2026/11/uuid.webp" }
+ *
+ * ⚠️ 为什么是「传 URL」而不是传文件内容/本地路径：
+ *    模型的入参是它自己产出的 JSON 文本 —— 5MB 图塞 base64 会变成 6~7MB 文本（产不出来），
+ *    传服务器本地路径则等于把 MCP 变成「任意本地文件读取 + 外发对象存储」的通道。
+ *    拉取动作由**后端**做，并带全套 SSRF 防护（只许 https、禁内网/回环/链路本地/CGNAT、
+ *    不跟随重定向、连接 5s / 读取 10s、正文 ≤5MB、前 16 字节嗅探真实类型不看 Content-Type）。
+ *    后端拒绝时的 message 是中文原因，这里原样透给模型（HTTP 400/403/413/415/502/504，不是 500）。
+ */
+export function uploadImageFromUrl(url) {
+  return request('POST', '/admin/upload/image-from-url', { body: { url } });
+}
+
 // ---------- 第 5 批（覆盖补齐）：把 admin 后台「人能做」的其余写/读端点补齐 ----------
 // 口径：见 mcp-server/README「工具表」。每个 wrapper 都对着 Controller 真实入参写，
 // 收 version 的收 version、支持 ?dryRun=true 的透 dryRun（只回 willDo，不落库、不需要 version）。

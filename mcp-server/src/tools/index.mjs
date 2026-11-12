@@ -23,6 +23,8 @@
 // │ 3) 分页一律用 ./_shared.mjs 的 clampPage + paginate（page 默认 1，size 默认 10、最大 50），
 // │    即使后端接口不分页也在工具层夹取 —— 10 批工具的分页语义必须完全一致
 // │ 4) 返回「文本摘要 + JSON:」两段（照 preview_split 的写法），空结果给明确文案
+// │    例外：upload_image_from_url（misc）吃的是「后端拒绝的中文原因」（400/403/413/415/502/504），
+// │    没有 version 语义，所以它用 fail(e) 而不是 failWrite(e)。
 // │ 5) 报错统一 fail(e)；**写工具**用 _shared.mjs 的 failWrite(e, {...})，
 // │    它会把后端 bizCode（400 缺版本 / 409 版本冲突）显式带进文本，并给出「重新读」的下一步
 // │ 6) 并发控制口径：**version 乐观锁**（改数据必须带上次读到的 version）。
@@ -68,7 +70,7 @@ export function registerAll(server, ctx = {}) {
   registerReturnsTools(server, { writeEnabled }); // 退货：return_apply(list|get|audit|create|delete) + return_reason(list|create|update|delete)
   registerConfigTools(server, { writeEnabled }); // 配置：warehouse(list|create|update|delete) + order_setting(get|update)
   registerMemberTools(server, { writeEnabled }); // 会员：member / member_address / member_cart(含 create|update|delete)
-  registerMiscTools(server, { writeEnabled }); // 概览：dashboard_overview（只读；upload_image 刻意未做，见 misc.mjs 尾注）
+  registerMiscTools(server, { writeEnabled }); // 概览 + 上图：dashboard_overview（只读）+ upload_image_from_url（写，按 URL 拉图存对象存储）
 }
 
 export default registerAll;

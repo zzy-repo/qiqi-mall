@@ -7,6 +7,7 @@
 // 逐条断言：
 //   ① tools/list 含 5 个新写工具（中文 title/description），且 write=0 时全部消失
 //   ② create_order：协议层必填（缺 items / 缺收货人）→ 被 zod 拒；正常建单 → 金额=明细单价×数量（后端重算）、version=0
+//   ②a2 初始状态白名单：create_order 传 8（待发货，需要包裹这个前置事实）→ 协议层被拒 + 中文原因 + 一行不落库；1 与 7 放行
 //   ③ update_order：假 version → 409 且**数据一个字段都没被覆盖**；正确 version → 成功、version +1（回读 + DB 双确认）
 //   ④ ship_order：状态守卫（只有已付款能发）→ dryRun 不落库 → 真执行 1→2 → 重复被拒
 //   ⑤ audit_reject_order：dryRun 不落库 → 真执行 7→4，并把总池库存回补（回补量原样减回去，不污染共用测试库）
@@ -146,11 +147,46 @@ async function main() {
       };
     });
 
+    // ②a2 初始状态白名单（与后端 OrderController#create 同一口径）：只收 0/1/7
+    await check('②a2 create_order 初始状态白名单：8 被协议层拒且一行不落库；1 与 7 放行', async () => {
+      // 8 待发货需要「包裹」这个前置事实 —— 真实流程产不出的初始状态，必须在协议层就收掉
+      const badSn = `QQWBAD8${stamp()}`;
+      const bad = await expectError(client, 'create_order', {
+        orderSn: badSn,
+        memberId: Number(member.id),
+        status: 8,
+        payType: 1,
+        receiverName: '白名单用例-待发货',
+        receiverPhone: '13800000000',
+        receiverAddress: '浙江省杭州市西湖区测试路 3 号',
+        items: [item],
+      });
+      const leaked = Number(sql(`SELECT COUNT(*) FROM ${DB}.\`order\` WHERE order_sn = '${badSn}'`));
+
+      // 1 已付款（退货被拒且无包裹时订单会落回 1，ship 的 1→2 直发通道要它）与 7 待审核都必须放行
+      const one = await makeOrder(1, 'S1');
+      const seven = await makeOrder(7, 'S7');
+      const oneRow = dbOrder(one.j.id);
+      const sevenRow = dbOrder(seven.j.id);
+      // 拒单原因必须是中文（zod 默认只回 "Invalid input at status"，模型看不懂错在哪）
+      const zh = /初始状态只接受/.test(bad.text) && /待审核/.test(bad.text);
+      return {
+        pass:
+          bad.threw &&
+          zh &&
+          leaked === 0 &&
+          oneRow?.status === 1 &&
+          sevenRow?.status === 7,
+        detail:
+          `status=8 → ${bad.threw ? '被拒' : '竟然放行了'}` +
+          `（库内该单号行数=${leaked}，中文原因=${zh}）｜status=1 落库 ${oneRow?.status}｜status=7 落库 ${sevenRow?.status}`,
+      };
+    });
+
     let orderA = null;
     await check('②b create_order 正常建单（status=0 待付款）→ 金额按明细重算=19.8、version=0、库里有行', async () => {
       const { j, text } = await makeOrder(0, 'A');
-      orderA = j;
-      const row = dbOrder(j.id);
+      orderA = j;      const row = dbOrder(j.id);
       samples.push({ tool: 'create_order', args: { status: 0, items: 1 }, line: text.split('\n')[0] });
       return {
         pass:

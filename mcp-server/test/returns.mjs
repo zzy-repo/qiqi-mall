@@ -17,6 +17,16 @@
 // 数据自给自足（见 test/_setup.mjs）：自己造一笔待审核订单 + 一条退货申请（POST /admin/return-applies），
 // 所有断言都落在自己造的数据上；跑完删申请、删原因、删单，可连跑两轮、不 reset 库。
 //
+// ── 前置状态必须是「真实流程」走出来的（2026-11-12 补） ────────────────────
+// 后端把退货口径收紧成：**审核通过只允许把订单从「5 退款中」写成「6 已退款」**
+// （买家申请退货 / 后台代客登记的那一刻，订单就进 5；5 是唯一能进 6 的状态）。
+// 所以造数不能停在「7 待审核」就直接审退款 —— 那是任何真实流程都产不出的组合。
+// 本文件走的就是真实链路：
+//   支付(→7 待审核) → return_apply(action=create) 代客登记（后端联动订单 →5 退款中）→ audit
+// 同一条口径还有个副作用：**一张订单同时只挂一条在审申请**（订单已在 5 就不再受理新申请，
+// 见 ReturnApplyController.RETURNABLE）。所以「用完就删的申请」（④c 删除、⑦b 解除引用）
+// 各自落在自己的一笔待审核订单上 —— 断言强度不变，只是把前置状态摆对。
+//
 // 前置：后端 18080 可达 + `export MALL_API_KEY=$(cat /tmp/test-env-ai-key.txt)`。
 
 import { bootstrap, adminRequest, connectServer, call, expectError, jsonAfter, sql, DB, MALL_BASE, MALL_API_KEY } from './_setup.mjs';
@@ -78,9 +88,25 @@ async function main() {
   const M = mark();
   const createdReasons = []; // 收尾清理
   const createdApplies = []; // 收尾清理
+  const extraCtx = [];       // 「用完就删的申请」各自那笔订单（收尾一起清）
   const samples = [];
   let mainApplyId = null;
   let client;
+
+  /**
+   * 再造一笔干净的「待审核(7)」订单，专供「用完就删的申请」用。
+   *
+   * 为什么不能都挂在 ORDER_ID 上：建申请的后端联动是「申请待处理 + 订单进 5 退款中」成对出现，
+   * 而 5 不再受理新申请。同一条订单上第二次建申请会被拒
+   * ——「当前订单状态不可受理退货申请（当前：退款中）」。
+   * 所以一次性申请用它自己的订单：仍然是完整真实链路（支付→7 → 建申请→5 → 删申请），
+   * 只是不跟主用例抢同一张单。断言强度不变。
+   */
+  async function freshReturnableOrder() {
+    const c = await bootstrap({ qty: 1, skuCount: 1, autoCleanup: true });
+    extraCtx.push(c);
+    return c;
+  }
 
   try {
     client = await connectServer({ MCP_ENABLE_WRITE: '1' }, 'returns');
@@ -169,11 +195,14 @@ async function main() {
       };
     });
     await check('④c return_apply(action=delete) → 删掉一条临时申请（列表里查不到，且明确「没退款/不回补库存」）', async () => {
+      // 临时申请落在它自己的一笔待审核订单上（见 freshReturnableOrder 的说明）：
+      // 建申请的后端联动会把这张单推进「5 退款中」，这正是后面 delete 要面对的真实前置状态。
+      const own = await freshReturnableOrder();
       const tmp = jsonAfter(
         (await call(client, 'return_apply', {
           action: 'create',
-          orderId: ORDER_ID,
-          memberId: ctx.memberId,
+          orderId: own.orderId,
+          memberId: own.memberId,
           reasonId,
           returnReason: '质量问题',
           description: `MCP 临时 ${M}`,
@@ -181,6 +210,7 @@ async function main() {
       );
       const tmpId = tmp?.id ?? null;
       if (tmpId) createdApplies.push(tmpId);
+      const orderAfterCreate = dbOrderStatus(own.orderId);
       const { text } = await call(client, 'return_apply', { action: 'delete', applyId: tmpId });
       const list = jsonAfter((await call(client, 'return_apply', { action: 'list', size: 50 })).text).records;
       const gone = !list.some((r) => Number(r.id) === Number(tmpId));
@@ -188,7 +218,10 @@ async function main() {
         const i = createdApplies.indexOf(tmpId);
         if (i >= 0) createdApplies.splice(i, 1); // 已删掉，收尾不用再删
       }
-      return { pass: !!tmpId && gone && /不退款/.test(text) && /不回补库存/.test(text), detail: `临时 applyId=${tmpId}｜列表已无该行=${gone}` };
+      return {
+        pass: !!tmpId && gone && /不退款/.test(text) && /不回补库存/.test(text) && orderAfterCreate === 5,
+        detail: `临时 applyId=${tmpId}（订单 ${own.orderId}）｜建申请后订单=${orderAfterCreate}（期望 5 退款中）｜列表已无该行=${gone}`,
+      };
     });
 
     const before = { return_apply: dbCount('return_apply'), return_reason: dbCount('return_reason') };
@@ -247,18 +280,22 @@ async function main() {
     await check('⑦b 解除引用（删掉引用它的那条申请）后 delete → 成功，字典里查不到', async () => {
       // ⚠️ 必须用一条**只被本条申请引用**的原因：mainApply 也引用了 ③a 造的原因，
       //    所以拿它做「解除引用后可删」的例子会一直是「还有人引用」——那是断言写错了，不是后端错。
+      // 同样，这条「临时申请」要落在它自己的一笔待审核订单上：主订单此时已在 5 退款中，
+      // 5 不再受理新申请（真实口径，不是后端 bug）。
+      const own = await freshReturnableOrder();
       const only = await call(client, 'return_reason', { action: 'create', name: `MCP仅引用一次-${M}` });
       const onlyId = jsonAfter(only.text).id;
       createdReasons.push(onlyId);
       const extra = await adminRequest('POST', '/admin/return-applies', {
-        orderId: ORDER_ID,
-        memberId: ctx.memberId,
+        orderId: own.orderId,
+        memberId: own.memberId,
         returnReason: '测试引用',
         description: `MCP 引用解除 ${M}`,
         status: 0,
         reasonId: onlyId,
       });
       createdApplies.push(extra.id);
+      const orderAfterCreate = dbOrderStatus(own.orderId);
       const blocked = await expectError(client, 'return_reason', { action: 'delete', reasonId: onlyId });
       await adminRequest('DELETE', `/admin/return-applies/${extra.id}`);
       const okDel = await call(client, 'return_reason', { action: 'delete', reasonId: onlyId });
@@ -268,20 +305,23 @@ async function main() {
         if (i >= 0) createdReasons.splice(i, 1); // 已经删掉了，收尾不用再删
       }
       return {
-        pass: blocked.threw && okDel.text.includes('✅') && gone,
-        detail: `引用时被拒=${blocked.threw}；解除后删除成功=${okDel.text.includes('✅')}；库中已不存在=${gone}`,
+        pass: blocked.threw && okDel.text.includes('✅') && gone && orderAfterCreate === 5,
+        detail: `引用时被拒=${blocked.threw}；建申请后订单=${orderAfterCreate}（期望 5 退款中）；解除后删除成功=${okDel.text.includes('✅')}；库中已不存在=${gone}`,
       };
     });
 
     // ⑧ audit 预演 + 参数边界
-    await check('⑧a audit dryRun=true（结论=通过）→ willDo 写明退款+回补库存，且申请/订单状态都没变', async () => {
+    //    前置状态由真实流程走出来：④a 建申请的后端联动已把订单推到 5 退款中，这里先断言它确实是 5 ——
+    //    「5 → 6 已退款」是唯一合法的退款路径，订单若不是 5，dryRun 会被守卫拒（不是测试该放宽的事）。
+    await check('⑧a audit dryRun=true（结论=通过）→ 前置订单必须已在「5 退款中」，willDo 写明退款+回补库存，且申请/订单状态都没变', async () => {
       const orderBefore = dbOrderStatus(ORDER_ID);
       const { text } = await call(client, 'return_apply', { action: 'audit', applyId: mainApplyId, auditStatus: 1, dryRun: true });
       const j = jsonAfter(text);
       samples.push({ tool: 'return_apply audit(dryRun)', args: { applyId: mainApplyId, auditStatus: 1 }, line: text.split('\n').slice(0, 2).join(' ') });
       return {
-        pass: typeof j.willDo === 'string' && /退款/.test(j.willDo) && /回补/.test(j.willDo) && dbApplyStatus(mainApplyId) === 0 && dbOrderStatus(ORDER_ID) === orderBefore,
-        detail: `willDo=${(j.willDo || '').slice(0, 90)}…｜申请仍是 ${dbApplyStatus(mainApplyId)}、订单仍是 ${dbOrderStatus(ORDER_ID)}`,
+        pass: orderBefore === 5 && typeof j.willDo === 'string' && /退款/.test(j.willDo) && /回补/.test(j.willDo)
+          && /退款中→已退款/.test(j.willDo) && dbApplyStatus(mainApplyId) === 0 && dbOrderStatus(ORDER_ID) === orderBefore,
+        detail: `前置订单=${orderBefore}（期望 5 退款中）｜willDo=${(j.willDo || '').slice(0, 90)}…｜申请仍是 ${dbApplyStatus(mainApplyId)}、订单仍是 ${dbOrderStatus(ORDER_ID)}`,
       };
     });
     await check('⑧b audit 缺 auditStatus → isError（参数边界）', async () => {
@@ -344,6 +384,12 @@ async function main() {
     if (ctx?.cleanup) {
       const r = await ctx.cleanup();
       console.log(`🧹 清理自建数据：${r.notes.join('；')}｜退货申请 ${createdApplies.length} 条、原因 ${createdReasons.length} 条已删`);
+    }
+    // 「用完就删的申请」各自那笔订单也一并清掉（申请已在上一步删完，否则 OrderPurgeService 会以「有退货申请」拒删）
+    for (const c of extraCtx) {
+      if (!c?.cleanup) continue;
+      const r = await c.cleanup();
+      console.log(`🧹 清理一次性订单：${r.notes.join('；')}`);
     }
   }
 

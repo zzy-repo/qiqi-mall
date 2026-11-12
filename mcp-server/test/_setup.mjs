@@ -87,6 +87,147 @@ export function dbCount(table) {
   return Number(sql(`SELECT COUNT(*) FROM ${DB}.\`${table}\``));
 }
 
+// ---------------- ④ 库存快照：npm test 不许让测试库库存净漂 ----------------
+// ── 它修的是什么 ──────────────────────────────────────────────────────
+// 跑一轮 `npm test`，qiqi_mall_test 的 sku.stock 会净漂（实测 1000 → 998 / 997）。
+// 根因不是后端：后端删单会按 `stock_ledger` 净额回补（OrderPurgeService#settleStockLedger，正确），
+// 而**个别测试为了抵掉「取消包裹 / 审核不通过」的回补，直接用 `PUT /admin/skus` 把库存改回去**——
+// 这一步只改 sku.stock、不写台账。台账于是记成「+3 已补」（净额 0），实际库存却是「少 3」，
+// 随后夹具删单时 purge 按净额算 = 0 件，一件都不回补 → 这 3 件就永久蒸发了。
+//
+// ── 为什么选「快照 + 还原 + 断言」而不是「收尾脚本」或「夹具改走 API 删单」 ──────
+//   · 夹具本来就走 API 删单（cleanupOrder → DELETE /admin/orders → purge），选 C 等于现状，
+//     修不到「裸改库存、台账不同步」这个真正的源头；
+//   · 选 B（npm test 之后再跑一个还原脚本）只能保证「下一轮干净」，本轮结束那一刻仍是不一致的，
+//     而且谁单独跑 `node test/xxx.mjs` 就绕过了它；
+//   · 选 A 覆盖面最广：基座是本文件，**每个**测试进程（含单独跑某一条）都自动带上，
+//     不依赖调用方记得调用，也不改任何一条既有断言。
+//
+// ── 口径（刻意的取舍，别改成「先还原再比对」） ──────────────────────────
+//   1. 进程结束（含 process.exit / 未捕获异常 / 信号）时读一次真实库存，与本轮开始时的快照逐 SKU 比对；
+//   2. 有差异 → **先如实报出差异**（哪个 SKU、快照多少、现在多少），再按快照还原，
+//      这样「漂了多少」永远是可见的，而不是被还原悄悄抹掉；
+//   3. 还原后再读一次：仍然不一致 → 打 ❌ 并把退出码置 1（真红）；
+//      MCP_STOCK_STRICT=1 时，只要本轮出现过差异就红（给 CI 卡「谁又裸改库存」用）。
+const firstLine = (e) => String(e?.message || e).split('\n')[0];
+
+/** 读全表 sku.stock → Map<skuId, stock> */
+function readSkuStock() {
+  const map = new Map();
+  for (const line of sql(`SELECT id, stock FROM ${DB}.sku ORDER BY id`).split('\n').filter(Boolean)) {
+    const [id, stock] = line.split('\t');
+    map.set(Number(id), Number(stock));
+  }
+  return map;
+}
+
+let stockSnapshot = null;
+let stockSnapshotTried = false;
+
+/**
+ * 本轮开始时的 sku.stock 快照（懒抓 + 只抓一次）。
+ * SQL 不可用（没 docker / 没起 MySQL）时返回 null —— 库存一致性检查自动跳过，不让测试因为基座基建挂掉。
+ */
+export function skuStockSnapshot() {
+  if (stockSnapshotTried) return stockSnapshot;
+  stockSnapshotTried = true;
+  try {
+    stockSnapshot = readSkuStock();
+  } catch (e) {
+    console.error(`[setup] ⚠ 抓不到库存快照（直连测试库不可用），本轮跳过库存一致性检查：${firstLine(e)}`);
+    stockSnapshot = null;
+  }
+  return stockSnapshot;
+}
+
+/** 与快照逐 SKU 比对 → [{skuId, before, after}]（只列有差异的；消失的 SKU 不算差异） */
+function stockDiff(snapshot, current) {
+  const diff = [];
+  for (const [skuId, before] of snapshot) {
+    if (!current.has(skuId)) continue; // 测试自己建的 SKU 已经删掉了，不是漂移
+    const after = current.get(skuId);
+    if (after !== before) diff.push({ skuId, before, after });
+  }
+  return diff;
+}
+
+/**
+ * 收尾：比对 → 报差异 → 按快照还原 → 再比对（还不行就红）。
+ * 同步实现（execFileSync），所以能挂在 process 'exit' 上 —— 那里只能跑同步代码。
+ * @returns {{drift: Array<{skuId:number,before:number,after:number}>, restored: boolean, ok: boolean}}
+ */
+export function reconcileSkuStock() {
+  const snapshot = skuStockSnapshot();
+  if (!snapshot) return { drift: [], restored: false, ok: true };
+
+  let current;
+  try {
+    current = readSkuStock();
+  } catch (e) {
+    console.error(`[setup] ⚠ 收尾时读不到库存，无法核对本轮是否漂移：${firstLine(e)}`);
+    return { drift: [], restored: false, ok: true };
+  }
+
+  const drift = stockDiff(snapshot, current);
+  if (drift.length === 0) {
+    console.log(`[setup] ✅ 库存快照断言 PASS：${snapshot.size} 个 SKU 的 stock 与本轮开始时一致（无漂移）`);
+    return { drift, restored: false, ok: true };
+  }
+
+  const lines = drift.map((d) => `sku ${d.skuId}: ${d.before} → ${d.after}（${d.after - d.before > 0 ? '+' : ''}${d.after - d.before}）`);
+  console.log(`[setup] ⚠ 本轮库存有漂移（共 ${drift.length} 个 SKU），差异：${lines.join('；')}`);
+
+  // 按快照还原（只改有差异的那几个 SKU，一次 SQL 发完）。
+  // 写法是「增量」而不是「写绝对值」：stock = stock + (快照值 - 刚才读到的值) ——
+  // 测试库是共用的（别的作业可能同时在造单扣库存），增量写法只补回**本轮观察到的**那部分差异，
+  // 不会把并发方在我们读完之后扣掉的货一起「还原」回去。
+  let restored = false;
+  try {
+    sql(drift
+      .map((d) => `UPDATE ${DB}.sku SET stock = stock + (${Number(d.before)} - ${Number(d.after)}) WHERE id = ${Number(d.skuId)};`)
+      .join(' '));
+    restored = true;
+  } catch (e) {
+    console.error(`[setup] ❌ 库存还原失败：${firstLine(e)}`);
+  }
+
+  // 还原后再核对一遍：这才是那条断言（口径是「本轮结束时必须等于快照」）
+  let after;
+  try {
+    after = readSkuStock();
+  } catch (e) {
+    console.error(`[setup] ❌ 还原后读不到库存，无法验证：${firstLine(e)}`);
+    return { drift, restored, ok: false };
+  }
+  const left = stockDiff(snapshot, after);
+  const strict = process.env.MCP_STOCK_STRICT === '1';
+  const ok = left.length === 0 && !strict;
+  if (left.length > 0) {
+    console.error(`[setup] ❌ 库存快照断言 FAIL：还原后仍有 ${left.length} 个 SKU 与快照不一致 —— `
+      + left.map((d) => `sku ${d.skuId} 应为 ${d.before}，实际 ${d.after}`).join('；'));
+  } else if (strict) {
+    console.error('[setup] ❌ MCP_STOCK_STRICT=1：本轮库存出现过漂移（已还原），按严格口径判红');
+  } else {
+    console.log(`[setup] ✅ 库存快照断言 PASS：${drift.length} 个漂移 SKU 已按快照还原，本轮结束库存 = 快照`);
+  }
+  return { drift, restored, ok };
+}
+
+// 立刻抓快照：此刻还没跑任何用例，这就是「本轮开始」的基准。
+skuStockSnapshot();
+
+// 挂到进程退出：每个测试进程（含单独 `node test/x.mjs`）都自动生效，不需要调用方记得做什么。
+// 说明：'exit' 里只能跑同步代码，所以还原走同步 SQL；退出码可以在这里改写（实测生效）。
+process.once('exit', () => {
+  try {
+    const r = reconcileSkuStock();
+    if (!r.ok && !process.exitCode) process.exitCode = 1;
+  } catch (e) {
+    console.error(`[setup] ❌ 库存收尾异常：${e?.stack || e}`);
+    if (!process.exitCode) process.exitCode = 1;
+  }
+});
+
 // ---------------- REST 小工具 ----------------
 async function http(method, path, { headers = {}, body } = {}) {
   const res = await fetch(`${MALL_BASE}${path}`, {
