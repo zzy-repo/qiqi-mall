@@ -194,9 +194,10 @@ test.describe('买家侧 06 售后退货', () => {
     await applyReturn(page, orderSn)
     await auditReturnInBackstage(browser, page, orderSn, true)
 
-    // 库存回补
-    const stockAfter = (await getProductApi(request, 1)).skus.find((s) => s.id === sku.id).stock
-    expect(stockAfter, '审核通过后库存应回补 1 件').toBe(stockBefore + 1)
+    // 库存回补（sku.stock 是缓存：轮询等它收敛，legacy 下第一次即命中）
+    await expect.poll(async () => (await getProductApi(request, 1)).skus.find((s) => s.id === sku.id).stock,
+      { timeout: 2_000, intervals: [50, 100, 200, 400], message: '审核通过后库存应回补 1 件' }
+    ).toBe(stockBefore + 1)
 
     // 买家侧看到售后结果 + 订单已退款
     const row = await memberOrderRow(page, orderSn)

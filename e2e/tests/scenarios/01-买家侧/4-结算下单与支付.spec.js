@@ -75,8 +75,11 @@ test.describe('买家侧 04 结算下单与支付', () => {
     expect(Number(order.totalAmount)).toBe(Number(sku.price))
     expect(order.paymentTime, '应已落支付时间').toBeTruthy()
 
-    const after = (await getProductApi(request, 1)).skus.find((s) => s.id === sku.id)
-    expect(after.stock, '下单应扣 1 件库存').toBe(sku.stock - 1)
+    // sku.stock 是展示缓存（分桶模式下由后台任务按 SUM(桶) 每 250ms 回写），所以轮询等它收敛；
+    // legacy 模式下第一次就命中，等价于原来的同步断言（没有放宽，只是不再跟缓存赛跑）
+    await expect.poll(async () => (await getProductApi(request, 1)).skus.find((s) => s.id === sku.id).stock,
+      { timeout: 2_000, intervals: [50, 100, 200, 400], message: '下单应扣 1 件库存' }
+    ).toBe(sku.stock - 1)
   })
 
   test('必填校验：不填收货人/地址不让下单', async ({ page, request }) => {

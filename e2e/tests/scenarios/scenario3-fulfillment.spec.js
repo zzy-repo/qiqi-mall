@@ -139,9 +139,14 @@ test.describe('场景3 订单履约', () => {
     const token = await memberTokenOf(page)
 
     // 确认收货 → 已完成
+    // 确认收货是不可逆的终态流转（2→3，没有回退入口），portal-web 在 2026-11-12 起先弹
+    // ElMessageBox 二次确认，**真正发请求的是弹框里的「确定」**——只点行内按钮不会有任何请求。
+    // 所以这里（比原来更严）连「必须先弹确认框」一起断言，再点确定，然后等状态真翻到已完成。
     await row.getByRole('button', { name: /确认收货/ }).click()
-    await page.waitForTimeout(1500)
-    await expect(row, '确认收货后订单状态应为已完成').toContainText('已完成')
+    const confirmBox = page.locator('.el-message-box')
+    await expect(confirmBox, '确认收货应先弹二次确认框（不可逆流转）').toBeVisible()
+    await confirmBox.getByRole('button', { name: '确定' }).click()
+    await expect(row, '确认收货后订单状态应为已完成').toContainText('已完成', { timeout: 15_000 })
 
     // 服务端复核（只读）
     const after = await getMemberOrderApi(request, token, order.id)

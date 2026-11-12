@@ -137,7 +137,10 @@ test.describe('04-商家-基础配置 › 1-仓库管理', () => {
       await gotoWarehouseList(page)
       const before = await tableRowCount(page, 'warehouse-list-table')
       await deleteWarehouse(page, warehouseRow(page, usedWhName))
-      await expectToastError(page, '数据处理失败')
+      // 文案口径（2026-11-12 收口）：外键拦截不再落到兜底「数据处理失败，请稍后重试」，
+      // 而是 GlobalExceptionHandler 翻译出的具体原因。断言这句**更具体**的文案，顺带证明
+      // 走的是「被引用 → 拒绝删除」这条守卫路径，而不是随便一个 500。
+      await expectToastError(page, '数据被其它记录引用，无法删除')
       await expect(warehouseRow(page, usedWhName), '被引用的仓库必须还在').toBeVisible()
       await page.reload()
       await page.waitForTimeout(1500)

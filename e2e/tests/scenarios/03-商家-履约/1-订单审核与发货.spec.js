@@ -109,9 +109,10 @@ test.describe('03-商家-履约 › 1-订单审核与发货', () => {
     })
 
     await test.step('⑧ 审核与发货不再动库存（只有下单扣了 1 件）', async () => {
-      const { skus } = await getProductApi(request, 1)
-      const after = skus.find((s) => s.id === skuId).stock
-      expect(after, '审核+发货不应再次扣库存').toBe(stockBefore - 1)
+      // 这里断言的是「审核/发货没有再扣库存」：只要求缓存收敛到下单后的那个值（不跟 250ms 回写赛跑）
+      await expect.poll(async () => (await getProductApi(request, 1)).skus.find((s) => s.id === skuId).stock,
+        { timeout: 2_000, intervals: [50, 100, 200, 400], message: '审核+发货不应再次扣库存' }
+      ).toBe(stockBefore - 1)
     })
   })
 
@@ -151,9 +152,12 @@ test.describe('03-商家-履约 › 1-订单审核与发货', () => {
     })
 
     await test.step('④ 库存回补到下单前', async () => {
-      const { skus } = await getProductApi(request, 1)
-      const after = skus.find((s) => s.id === skuId).stock
-      expect(after, '审核不通过应把下单扣掉的 1 件补回来').toBe(stockBefore)
+      // sku.stock 在分桶模式下只是展示缓存（由后台任务按 SUM(桶) 每 250ms 回写），
+      // 所以不能「读一次就断言」——必须轮询等它收敛，写法与同文件用例一 ⑧ 一致。
+      // 断言口径不变：仍然要求缓存值**恰好**等于下单前的值（不是放宽成 ≥ / ≈）。
+      await expect.poll(async () => (await getProductApi(request, 1)).skus.find((s) => s.id === skuId).stock,
+        { timeout: 2_000, intervals: [50, 100, 200, 400], message: '审核不通过应把下单扣掉的 1 件补回来' }
+      ).toBe(stockBefore)
     })
   })
 })

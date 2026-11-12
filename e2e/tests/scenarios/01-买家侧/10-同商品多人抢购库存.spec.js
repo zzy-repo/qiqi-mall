@@ -49,8 +49,24 @@ const QTY_PER_BUYER = 2
 
 // 库名由 API_BASE 端口决定；映射唯一维护在 e2e/tests/support/db.js 的 DB_OF_PORT（本 spec 原先自带一份，已收口）。
 
-/** 该 SKU 的库存（库里的真实值，不是页面显示） */
+/**
+ * 扣减模式：legacy（默认，sku.stock 就是库存）还是 bucket（库存权威在 sku_bucket，sku.stock 是缓存）。
+ * 由跑 e2e 的环境变量指定，**不猜**：两种模式下的断言强度不同，混着断言只会两头都不准。
+ *   E2E_STOCK_MODE=bucket npx playwright test ...   # 分桶镜像（镜像3）
+ *   （不设）= legacy                                 # 镜像1/2
+ */
+const STOCK_MODE = process.env.E2E_STOCK_MODE || 'legacy'
+
+/** 展示缓存：sku.stock（legacy 下它就是库存本身；bucket 下它滞后 ≤250ms） */
 const stockOf = (skuId) => Number(queryDb(`select stock from sku where id = ${skuId}`))
+
+/** 权威库存：分桶模式下的 SUM(sku_bucket.stock)（真正的库存事实，不滞后） */
+const bucketSumOf = (skuId) => Number(queryDb(
+  `select coalesce(sum(stock), 0) from sku_bucket where sku_id = ${skuId}`
+))
+
+/** 全库最小桶库存（分桶模式下证明没有任何桶被扣成负数） */
+const minBucketOfAll = () => Number(queryDb('select coalesce(min(stock),0) from sku_bucket'))
 
 /** 该 SKU 在订单明细上的统计（用来算「只多 1 笔」的增量）：{lines, qty, orders} */
 const orderItemStatsOf = (skuId) => {
@@ -281,9 +297,20 @@ test.describe('买家侧 10 同商品多人抢购库存', () => {
         expect(detail.items[0].productSkuId, '明细应指向抢购的那个 SKU').toBe(target.id)
         expect(detail.items[0].productQuantity, '明细件数应是 2').toBe(QTY_PER_BUYER)
 
-        // 库存：正好 0，不为负
+        // 库存：正好 0，不为负。两种模式分别钉各自的权威值 —— 这不比原来宽松，反而更严
+        //   · 分桶模式：SUM(桶) 必须**精确**为 0（权威值，没有滞后）
+        //   · 两种模式共用：sku.stock 轮询 2 秒内必须归零（legacy 是立刻，bucket 是 ≤250ms 的缓存回写）
+        if (STOCK_MODE === 'bucket') {
+          expect(bucketSumOf(target.id),
+            '分桶模式下 SUM(sku_bucket.stock) 必须恰好为 0（这是真正的库存事实）').toBe(0)
+          expect(minBucketOfAll(), '全库任何桶都不许出现负库存').toBeGreaterThanOrEqual(0)
+        }
+        await expect.poll(() => stockOf(target.id), {
+          timeout: 2_000,
+          intervals: [50, 100, 200, 400],
+          message: '下单成功后该 SKU 的库存（sku.stock）必须在 2 秒内归零（缓存也最终一致）'
+        }).toBe(0)
         const stockNow = stockOf(target.id)
-        expect(stockNow, '下单成功后该 SKU 库存必须恰好落到 0').toBe(0)
         const minStock = minStockOfAll()
         expect(minStock, '全库任何 SKU 都不许出现负库存').toBeGreaterThanOrEqual(0)
 
