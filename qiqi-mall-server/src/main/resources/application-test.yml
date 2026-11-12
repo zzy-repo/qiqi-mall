@@ -60,7 +60,3 @@ app:
     bucket: qiqi-mall
   # 进程外 KV：memory(单实例) | redis(多实例共享验证码/幂等令牌)
   kv-store: ${KV_STORE:memory}
-  # 操作确认码（confirmCode）：split-preview 签发、audit-pass 强制校验；一次性（取出即删）
-  confirm-code:
-    # 有效期（分钟），**默认 5 分钟**；只影响「预览→执行」的窗口，不影响码的一次性
-    ttl-minutes: ${CONFIRM_CODE_TTL_MINUTES:5}

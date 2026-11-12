@@ -3,6 +3,7 @@ package com.qiqi.mall.oms.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.qiqi.mall.shared.common.OrderSnGenerator;
+import com.qiqi.mall.shared.common.PreviewResult;
 import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.oms.dto.OrderDetailDTO;
@@ -15,14 +16,9 @@ import com.qiqi.mall.oms.service.OrderItemService;
 import com.qiqi.mall.oms.service.OrderService;
 import com.qiqi.mall.oms.service.ReturnApplyService;
 import com.qiqi.mall.oms.service.SplitOrderService;
-import com.qiqi.mall.shared.security.ConfirmCodeService;
-import com.qiqi.mall.shared.security.ConfirmOps;
-import com.qiqi.mall.shared.security.ConfirmRequest;
 import com.qiqi.mall.catalog.service.SkuService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -35,28 +31,22 @@ import java.util.Map;
 @RequestMapping("/admin/orders")
 public class OrderController {
 
-    private static final Logger log = LoggerFactory.getLogger(OrderController.class);
-
     private final OrderService orderService;
     private final OrderItemService orderItemService;
     private final ReturnApplyService returnApplyService;
     private final SplitOrderService splitOrderService;
     private final SkuService skuService;
     private final DeliveryOrderService deliveryOrderService;
-    /** 操作确认码：预演签发、执行强制校验（见 ConfirmCodeService 的统一契约） */
-    private final ConfirmCodeService confirmCodeService;
 
     public OrderController(OrderService orderService, OrderItemService orderItemService,
                            ReturnApplyService returnApplyService, SplitOrderService splitOrderService,
-                           SkuService skuService, DeliveryOrderService deliveryOrderService,
-                           ConfirmCodeService confirmCodeService) {
+                           SkuService skuService, DeliveryOrderService deliveryOrderService) {
         this.orderService = orderService;
         this.orderItemService = orderItemService;
         this.returnApplyService = returnApplyService;
         this.splitOrderService = splitOrderService;
         this.skuService = skuService;
         this.deliveryOrderService = deliveryOrderService;
-        this.confirmCodeService = confirmCodeService;
     }
 
     /**
@@ -146,65 +136,45 @@ public class OrderController {
     /**
      * 审核通过：待审核(7) → 待发货(8)，随后触发拆单生成发货单。
      *
-     * <p>确认码契约：预演用 {@code POST /admin/orders/{id}/split-preview}（真预览，带方案）
-     * 或本接口 {@code ?dryRun=true}；执行用本接口 + body {@code {confirmCode}}。
+     * <p>校验顺序（严格，业务守卫不许抢跑）：
+     * **① 订单存在 → ② 业务守卫（status==7）→ ③ 执行**；{@code ?dryRun=true} 时同样先过 ①②，
+     * 再把「将要发生什么」用中文说清楚（{@code {willDo}}），不落库、不发凭证。
      *
-     * <p>校验顺序（全部中文，前端可直接展示）：缺码 → 无效/已用/过期 → 用途不符 → 目标不符 →
-     * 方案指纹变化 → 原有 status=7 守卫。
+     * <p>并发：本接口不带客户端 {@code version}（改的是订单状态，走的是状态守卫这层闸门）；
+     * 通用编辑接口 {@code PUT /admin/orders/{id}} 才有 version 乐观锁。
      */
-    /**
-     * 审核通过：待审核(7) → 待发货(8)，随后触发拆单生成发货单。
-     *
-     * <p>确认码契约：预演用 {@code POST /admin/orders/{id}/split-preview}（真预览，带方案）
-     * 或本接口 {@code ?dryRun=true}；执行用本接口 + body {@code {confirmCode}}。
-     *
-     * <p>**校验顺序（严格）：缺码 → 无效/已用/过期 → 用途不符 → 目标不符 → 方案指纹变化 →
-     * 订单存在 → 原业务守卫（status==7）**。执行阶段算指纹用的是 {@code recomputePlan}（不跑守卫），
-     * 所以「状态被别人改过」不会被误报成「方案变了」。
-     */
-    @Operation(summary = "审核通过订单：需带 confirmCode（split-preview/dryRun 签发），?dryRun=true 只预演")
+    @Operation(summary = "审核通过订单（自动拆单）：?dryRun=true 只预演，返回将要发生什么")
     @PostMapping("/{id}/audit-pass")
     @Transactional
     public Result<?> auditPass(@PathVariable Long id,
-                               @RequestParam(required = false) Boolean dryRun,
-                               @RequestBody(required = false) ConfirmRequest req) {
-        if (ConfirmCodeService.isDryRun(dryRun)) {
-            Order previewed = orderService.getById(id);
-            if (previewed == null) return Result.fail("订单不存在");
-            // 预演必须过 status 守卫：签出来的码要真能执行
-            List<Map<String, Object>> previewPlan = splitOrderService.preview(id);
-            return Result.ok(confirmCodeService.preflight(auditPassWillDo(previewed, previewPlan),
-                    ConfirmOps.AUDIT_PASS, id, confirmCodeService.hashPlan(previewPlan)));
-        }
-
-        // ① 先验码（指纹素材不跑守卫）→ ② 再走存在性与业务守卫
-        String error = confirmCodeService.verify(req == null ? null : req.getConfirmCode(),
-                ConfirmOps.AUDIT_PASS, id, auditPassIntent(id));
-        if (error != null) return Result.fail(error);
-
+                               @RequestParam(required = false) Boolean dryRun) {
         Order order = orderService.getById(id);
         if (order == null) return Result.fail("订单不存在");
         if (order.getStatus() == null || order.getStatus() != 7) return Result.fail("只有待审核订单可以审核通过");
+
+        if (PreviewResult.isDryRun(dryRun)) {
+            return Result.ok(PreviewResult.of(auditPassWillDo(order, splitOrderService.preview(id))));
+        }
         order.setStatus(8);
         orderService.updateById(order);
         return Result.ok(splitOrderService.split(id));
     }
 
     /**
-     * 拆单方案预览（dry-run）：只算不落库，守卫：仅 status=7 待审核。
-     * 返回 {@code {willDo, plan:[{warehouseId, warehouseName, items:[...]}], confirmCode, expiresInSec}}。
+     * 拆单方案预览（dry-run，不落库）：守卫同 {@link #auditPass}（仅 status=7 待审核）。
      *
-     * <p>⚠️ 破坏性变更：返回结构从 {@code List<Map>} 变成 {@code Map}（多了 willDo / confirmCode / expiresInSec）；
-     * confirmCode 是 audit-pass 的必传票据。
+     * <p>返回 {@code {willDo, plan:[{warehouseId, warehouseName, items:[...]}]}} ——
+     * 比 {@code ?dryRun=true} 多了结构化的 {@code plan}，后台「查看拆单方案」抽屉用它渲染；
+     * 两者都只算不落库，都不签发凭证。
      */
-    @Operation(summary = "拆单方案预览（dry-run，不落库）：方案 + 一次性确认码 confirmCode（5 分钟有效）")
+    @Operation(summary = "拆单方案预览（dry-run，不落库）：方案 + 将要发生什么")
     @PostMapping("/{id}/split-preview")
     public Result<Map<String, Object>> splitPreview(@PathVariable Long id) {
         Order order = orderService.getById(id);
         if (order == null) return Result.fail("订单不存在");
+        if (order.getStatus() == null || order.getStatus() != 7) return Result.fail("只有待审核订单可以审核通过");
         List<Map<String, Object>> plan = splitOrderService.preview(id);
-        Map<String, Object> data = confirmCodeService.preflight(auditPassWillDo(order, plan),
-                ConfirmOps.AUDIT_PASS, id, confirmCodeService.hashPlan(plan));
+        Map<String, Object> data = PreviewResult.of(auditPassWillDo(order, plan));
         data.put("plan", plan);
         return Result.ok(data);
     }
@@ -225,35 +195,22 @@ public class OrderController {
     /**
      * 审核不通过：待审核(7) → 已关闭(4)，守卫：仅 status=7；联动回补库存（下单即扣模型）。
      *
-     * <p>确认码：?dryRun=true 预演；指纹 = 回补库存明细（按 skuId 汇总件数后排序拼 "skuId:qty"）+ 总件数 ——
-     * 预览后明细被加过/删过/换过 SKU，执行就会被拒（避免「确认的是回补 sku3 共 2 件、实际回补 5 件」）。
+     * <p>校验顺序：**① 存在性 → ② 业务守卫（status==7）→ ③ 执行**；
+     * {@code ?dryRun=true} 同样先过守卫，再返回「将回补哪些 SKU 多少件」的中文描述。
      */
-    @Operation(summary = "审核不通过订单：订单关闭并回补库存；需带 confirmCode，?dryRun=true 只预演")
+    @Operation(summary = "审核不通过订单（关闭并回补库存）：?dryRun=true 只预演，返回将要发生什么")
     @PostMapping("/{id}/audit-reject")
     @Transactional
     public Result<?> auditReject(@PathVariable Long id,
-                                 @RequestParam(required = false) Boolean dryRun,
-                                 @RequestBody(required = false) ConfirmRequest req) {
-        if (ConfirmCodeService.isDryRun(dryRun)) {
-            Order previewed = orderService.getById(id);
-            if (previewed == null) return Result.fail("订单不存在");
-            if (previewed.getStatus() == null || previewed.getStatus() != 7) {
-                return Result.fail("只有待审核订单可以审核不通过");
-            }
-            List<OrderItem> items = itemsOf(id);
-            return Result.ok(confirmCodeService.preflight(auditRejectWillDo(previewed, items),
-                    ConfirmOps.AUDIT_REJECT, id, restoreExtras(items)));
-        }
-
-        String error = confirmCodeService.verify(req == null ? null : req.getConfirmCode(),
-                ConfirmOps.AUDIT_REJECT, id, restoreExtras(itemsOf(id)));
-        if (error != null) return Result.fail(error);
-
+                                 @RequestParam(required = false) Boolean dryRun) {
         Order order = orderService.getById(id);
         if (order == null) return Result.fail("订单不存在");
         if (order.getStatus() == null || order.getStatus() != 7) return Result.fail("只有待审核订单可以审核不通过");
 
         List<OrderItem> items = itemsOf(id);
+        if (PreviewResult.isDryRun(dryRun)) {
+            return Result.ok(PreviewResult.of(auditRejectWillDo(order, items)));
+        }
         order.setStatus(4);
         orderService.updateById(order);
         items.forEach(item -> skuService.restoreStock(item.getProductSkuId(), item.getProductQuantity()));
@@ -270,33 +227,21 @@ public class OrderController {
     /**
      * 发货：已付款(1) → 已发货(2)，守卫：仅 status=1（历史直发路径，拆单链走 audit-pass）。
      *
-     * <p>确认码：?dryRun=true 预演；指纹 = 当前状态 + 明细条数 + 该订单现有发货单数
-     * （直发路径不该有发货单；若期间有人拆了单，说明走错接口了，码就该失效）。
+     * <p>校验顺序：**① 存在性 → ② 业务守卫（status==1）→ ③ 执行**；
+     * {@code ?dryRun=true} 先过守卫再返回中文描述（含明细条数与现有发货单数，让人看清走的是直发路径）。
      */
-    @Operation(summary = "订单发货；需带 confirmCode，?dryRun=true 只预演")
+    @Operation(summary = "订单发货（直发路径，不拆单）：?dryRun=true 只预演，返回将要发生什么")
     @PostMapping("/{id}/ship")
     @Transactional
     public Result<?> ship(@PathVariable Long id,
-                          @RequestParam(required = false) Boolean dryRun,
-                          @RequestBody(required = false) ConfirmRequest req) {
-        if (ConfirmCodeService.isDryRun(dryRun)) {
-            Order previewed = orderService.getById(id);
-            if (previewed == null) return Result.fail("订单不存在");
-            if (previewed.getStatus() == null || previewed.getStatus() != 1) {
-                return Result.fail("只有已付款订单可以发货");
-            }
-            return Result.ok(confirmCodeService.preflight(shipWillDo(previewed), ConfirmOps.SHIP, id,
-                    shipExtras(previewed.getStatus(), id)));
-        }
-
-        String error = confirmCodeService.verify(req == null ? null : req.getConfirmCode(),
-                ConfirmOps.SHIP, id, shipExtras(statusOrNull(id), id));
-        if (error != null) return Result.fail(error);
-
+                          @RequestParam(required = false) Boolean dryRun) {
         Order order = orderService.getById(id);
         if (order == null) return Result.fail("订单不存在");
         if (order.getStatus() == null || order.getStatus() != 1) return Result.fail("只有已付款订单可以发货");
 
+        if (PreviewResult.isDryRun(dryRun)) {
+            return Result.ok(PreviewResult.of(shipWillDo(order)));
+        }
         order.setStatus(2);
         orderService.updateById(order);
         return Result.ok(order);
@@ -310,27 +255,21 @@ public class OrderController {
 
     /**
      * 删除订单（级联删明细/发货单，不可恢复）。
-     * 确认码：?dryRun=true 预演；指纹 = 明细条数 + 发货单条数（要被一起删掉的量）。
+     *
+     * <p>校验顺序：**① 存在性 → ② 业务守卫（无额外状态限制）→ ③ 执行**；
+     * {@code ?dryRun=true} 返回「要级联删掉多少明细、多少发货单」的中文描述。
      */
-    @Operation(summary = "删除订单（级联）；需带 confirmCode，?dryRun=true 只预演")
+    @Operation(summary = "删除订单（级联）：?dryRun=true 只预演，返回将要发生什么")
     @DeleteMapping("/{id}")
     @Transactional
     public Result<?> delete(@PathVariable Long id,
-                            @RequestParam(required = false) Boolean dryRun,
-                            @RequestBody(required = false) ConfirmRequest req) {
-        if (ConfirmCodeService.isDryRun(dryRun)) {
-            Order previewed = orderService.getById(id);
-            if (previewed == null) return Result.fail("订单不存在");
-            return Result.ok(confirmCodeService.preflight(deleteWillDo(previewed),
-                    ConfirmOps.ORDER_DELETE, id, new Object[]{itemCountOf(id), countDeliveries(id)}));
-        }
-
-        String error = confirmCodeService.verify(req == null ? null : req.getConfirmCode(),
-                ConfirmOps.ORDER_DELETE, id, new Object[]{itemCountOf(id), countDeliveries(id)});
-        if (error != null) return Result.fail(error);
-
+                            @RequestParam(required = false) Boolean dryRun) {
         Order order = orderService.getById(id);
         if (order == null) return Result.fail("订单不存在");
+
+        if (PreviewResult.isDryRun(dryRun)) {
+            return Result.ok(PreviewResult.of(deleteWillDo(order)));
+        }
         orderService.removeById(id);
         return Result.ok();
     }
@@ -339,28 +278,6 @@ public class OrderController {
         return "将删除订单 " + order.getOrderSn() + "（id=" + order.getId() + "，当前状态 "
                 + statusText(order.getStatus()) + "）：级联删除 " + itemCountOf(order.getId()) + " 条明细、"
                 + countDeliveries(order.getId()) + " 个发货单（含包裹明细与物流记录），删除后不可恢复。";
-    }
-
-    // ------------------------------------------------------------------ 指纹素材（执行阶段重算；**不跑守卫**）
-
-    /** audit-pass 的指纹素材：现算方案指纹；方案不可复现（订单没了/没明细）时给哨兵，让「指纹变化」说话 */
-    private Object[] auditPassIntent(Long orderId) {
-        try {
-            return new Object[]{confirmCodeService.hashPlan(splitOrderService.recomputePlan(orderId))};
-        } catch (RuntimeException e) {
-            log.warn("audit-pass 重算拆单方案失败（按方案不可复现处理）orderId={}: {}", orderId, e.getMessage());
-            return new Object[]{"<方案不可复现>"};
-        }
-    }
-
-    /** audit-reject 的指纹素材：按 skuId 汇总的回补明细 + 总件数 */
-    private Object[] restoreExtras(List<OrderItem> items) {
-        return new Object[]{skuQtyLines(items), totalQty(items)};
-    }
-
-    /** ship 的指纹素材：当前状态 + 明细条数 + 现有发货单数 */
-    private Object[] shipExtras(Integer status, Long orderId) {
-        return new Object[]{status, itemCountOf(orderId), countDeliveries(orderId)};
     }
 
     // ------------------------------------------------------------------ 小工具
@@ -378,19 +295,14 @@ public class OrderController {
         return items.stream().mapToInt(i -> i.getProductQuantity() == null ? 0 : i.getProductQuantity()).sum();
     }
 
-    private Integer statusOrNull(Long orderId) {
-        Order order = orderService.getById(orderId);
-        return order == null ? null : order.getStatus();
-    }
-
-    /** 该订单现有发货单数（级联删除 / 直发校验的指纹组成之一） */
+    /** 该订单现有发货单数（删除订单的 willDo 要说明会级联删掉几个包裹） */
     private long countDeliveries(Long orderId) {
         return deliveryOrderService.count(new LambdaQueryWrapper<DeliveryOrder>().eq(DeliveryOrder::getOrderId, orderId));
     }
 
     /**
      * 回补明细摘要：按 skuId 汇总件数（TreeMap 天然有序）→ {@code ["skuId:qty", ...]}。
-     * 指纹与文案都从这里取，避免「文案说回补 2 件、指纹算的是 3 件」。
+     * 预演文案从这里取，避免「明细 3 条、回补台账却算成 2 件」这类对不上的话。
      */
     private static List<String> skuQtyLines(List<OrderItem> items) {
         java.util.TreeMap<Long, Integer> bySku = new java.util.TreeMap<>();

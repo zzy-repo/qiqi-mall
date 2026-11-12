@@ -1,6 +1,7 @@
 package com.qiqi.mall.oms.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.qiqi.mall.shared.common.PreviewResult;
 import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.order.entity.OrderItem;
@@ -11,9 +12,6 @@ import com.qiqi.mall.oms.service.OrderService;
 import com.qiqi.mall.oms.service.PaymentRecordService;
 import com.qiqi.mall.oms.service.ReturnApplyService;
 import com.qiqi.mall.catalog.service.SkuService;
-import com.qiqi.mall.shared.security.ConfirmCodeService;
-import com.qiqi.mall.shared.security.ConfirmOps;
-import com.qiqi.mall.shared.security.ConfirmRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,18 +32,15 @@ public class ReturnApplyController {
     private final OrderItemService orderItemService;
     private final SkuService skuService;
     private final PaymentRecordService paymentRecordService;
-    private final ConfirmCodeService confirmCodeService;
 
     public ReturnApplyController(ReturnApplyService returnApplyService, OrderService orderService,
                                  OrderItemService orderItemService, SkuService skuService,
-                                 PaymentRecordService paymentRecordService,
-                                 ConfirmCodeService confirmCodeService) {
+                                 PaymentRecordService paymentRecordService) {
         this.returnApplyService = returnApplyService;
         this.orderService = orderService;
         this.orderItemService = orderItemService;
         this.skuService = skuService;
         this.paymentRecordService = paymentRecordService;
-        this.confirmCodeService = confirmCodeService;
     }
 
     /** 列表：附带订单号，方便后台直接辨认（原本只能看到 orderId） */
@@ -92,15 +87,18 @@ public class ReturnApplyController {
      * 守门：仅「待处理」可审核；审核通过 → 订单退款中(5)→已退款(6) + 退款流水 + 库存回补；
      *       审核拒绝 → 订单退回已付款(1)。
      *
-     * <p>确认码：?dryRun=true 预演；指纹 = 结论(1/2) + 订单金额 + 回补总件数 ——
-     * 预演后订单金额或明细被改过，执行会被拒（避免「确认退 3999.98、实际退别的数」）。
+     * <p>校验顺序：**① 参数/存在性（申请不存在 / 已处理 / 结论非法）→ ② 业务守卫（status=0）→ ③ 执行**。
+     * 这几条属于「这次请求本身就不成立」，先回原因比别的都清楚。
+     *
+     * <p>并发：{@code return_apply} 表没有 version 列，本接口靠「待处理」状态守卫防重放
+     * （审核成功后 status 不再是 0，重复提交必被拦）；它内部改的订单走 {@code updateById}，
+     * 没有客户端版本号参与，属于同一次请求内的「读-改-写」。
      */
-    @Operation(summary = "审核退货申请（status 1 通过 / 2 拒绝）；需带 confirmCode，?dryRun=true 只预演")
+    @Operation(summary = "审核退货申请（status 1 通过 / 2 拒绝）；?dryRun=true 只预演，返回将要发生什么")
     @PutMapping("/{id}")
     @Transactional
     public Result<?> update(@PathVariable Long id,
                             @RequestParam(required = false) Boolean dryRun,
-                            @RequestParam(required = false) String confirmCode,
                             @RequestBody ReturnApply body) {
         ReturnApply exist = returnApplyService.getById(id);
         if (exist == null) return Result.fail("退货申请不存在");
@@ -116,20 +114,15 @@ public class ReturnApplyController {
                 ? java.math.BigDecimal.ZERO : order.getTotalAmount();
         String orderSn = order == null ? ("#" + exist.getOrderId()) : order.getOrderSn();
 
-        String willDo = target == 1
-                ? "将把退货申请 #" + exist.getId() + "（订单 " + orderSn + "）审核为「通过」：申请 待处理→已通过，"
-                + "订单 " + statusText(order == null ? null : order.getStatus()) + "→已退款，退款 ¥" + refund
-                + " 并记一条退款流水，同时回补 " + items.size() + " 条明细的总池库存（合计 " + totalQty + " 件）。"
-                : "将把退货申请 #" + exist.getId() + "（订单 " + orderSn + "）审核为「拒绝」：申请 待处理→已拒绝，"
-                + "订单 " + statusText(order == null ? null : order.getStatus()) + "→已付款，不回补库存、不退款。";
-
-        if (ConfirmCodeService.isDryRun(dryRun)) {
-            return Result.ok(confirmCodeService.preflight(willDo, ConfirmOps.RETURN_AUDIT, id,
-                    target, refund, totalQty));
+        if (PreviewResult.isDryRun(dryRun)) {
+            String willDo = target == 1
+                    ? "将把退货申请 #" + exist.getId() + "（订单 " + orderSn + "）审核为「通过」：申请 待处理→已通过，"
+                    + "订单 " + statusText(order == null ? null : order.getStatus()) + "→已退款，退款 ¥" + refund
+                    + " 并记一条退款流水，同时回补 " + items.size() + " 条明细的总池库存（合计 " + totalQty + " 件）。"
+                    : "将把退货申请 #" + exist.getId() + "（订单 " + orderSn + "）审核为「拒绝」：申请 待处理→已拒绝，"
+                    + "订单 " + statusText(order == null ? null : order.getStatus()) + "→已付款，不回补库存、不退款。";
+            return Result.ok(PreviewResult.of(willDo));
         }
-        String error = confirmCodeService.verify(ConfirmRequest.pick(body.getConfirmCode(), confirmCode),
-                ConfirmOps.RETURN_AUDIT, id, target, refund, totalQty);
-        if (error != null) return Result.fail(error);
 
         exist.setStatus(target);
         if (body.getDescription() != null) exist.setDescription(body.getDescription());

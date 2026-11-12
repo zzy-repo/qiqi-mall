@@ -14,12 +14,9 @@ import com.qiqi.mall.oms.service.DeliveryItemService;
 import com.qiqi.mall.oms.service.DeliveryLogisticsService;
 import com.qiqi.mall.oms.service.DeliveryOrderService;
 import com.qiqi.mall.oms.service.WarehouseService;
+import com.qiqi.mall.shared.common.PreviewResult;
 import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.shared.guard.OptimisticLockGuard;
-import com.qiqi.mall.shared.security.ConfirmCodeService;
-import com.qiqi.mall.shared.security.ConfirmOps;
-import com.qiqi.mall.shared.security.ConfirmPreview;
-import com.qiqi.mall.shared.security.ConfirmRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
@@ -32,15 +29,20 @@ import java.util.Map;
 /**
  * 发货单接口（方案 3b）：下发 / 取消 / WMS 回传 / 查询 + 待下发阶段的人工干预（改仓改量/拆分/合并/删除）。
  *
- * <p>**本接口的 7 个写操作全部是 L3（高影响/不可逆）→ 一律要确认码**，统一契约：
+ * <p>**本接口的 7 个写操作全部是 L3（高影响/不可逆）**，统一契约：
  * <pre>
- * ① 预演  POST/PUT/DELETE ...?dryRun=true   → 不落库，返回 { willDo, confirmCode, expiresInSec }
- * ② 执行  同一地址（不带 dryRun）+ 带 confirmCode（body 或 ?confirmCode=） → 校验通过才执行
+ * ① 预演  POST/PUT/DELETE ...?dryRun=true → 不落库，只返回 { willDo:"中文描述" }
+ * ② 执行  同一地址（不带 dryRun）→ 走下面三道闸门
  * </pre>
  * 预演方法（{@code DeliveryFlowService#previewXxx / DeliveryEditService#previewXxx}）与执行路径共用同一套守卫，
- * 所以预演阶段就会把「该包裹已下发不能改」这类问题直接告诉调用方，不会签出一个注定失败的码。
+ * 所以预演阶段就会把「该包裹已下发不能改」这类问题直接告诉调用方。
+ *
+ * <p>**执行时的校验顺序（严格，不许抢跑）**：
+ * ① 参数/存在性 → ② version 乐观锁（缺 → 400，冲突 → 409；仅 {@code PUT /admin/deliveries/{id}} 有）
+ * → ③ 业务守卫（待下发）。**version 必须排在业务守卫前面**：「数据被别人改了」与「状态不对」
+ * 是两件事，混在一起会让调用方查错方向。
  */
-@Tag(name = "管理端-发货单与履约", description = "发货单下发/取消/WMS 回传，以及待下发阶段的人工干预：改仓改量、拆分、合并、删除（均需确认码）")
+@Tag(name = "管理端-发货单与履约", description = "发货单下发/取消/WMS 回传，以及待下发阶段的人工干预：改仓改量、拆分、合并、删除（编辑需带 version，全部支持 ?dryRun=true 预演）")
 @RestController
 @RequestMapping("/admin/deliveries")
 public class DeliveryController {
@@ -51,173 +53,132 @@ public class DeliveryController {
     private final DeliveryFlowService deliveryFlowService;
     private final DeliveryEditService deliveryEditService;
     private final WarehouseService warehouseService;
-    private final ConfirmCodeService confirmCodeService;
 
     public DeliveryController(DeliveryOrderService deliveryOrderService, DeliveryItemService deliveryItemService,
                               DeliveryLogisticsService deliveryLogisticsService, DeliveryFlowService deliveryFlowService,
-                              DeliveryEditService deliveryEditService, WarehouseService warehouseService,
-                              ConfirmCodeService confirmCodeService) {
+                              DeliveryEditService deliveryEditService, WarehouseService warehouseService) {
         this.deliveryOrderService = deliveryOrderService;
         this.deliveryItemService = deliveryItemService;
         this.deliveryLogisticsService = deliveryLogisticsService;
         this.deliveryFlowService = deliveryFlowService;
         this.deliveryEditService = deliveryEditService;
         this.warehouseService = warehouseService;
-        this.confirmCodeService = confirmCodeService;
     }
 
-    // ------------------------------------------------------------------ 状态流转（L3，要码）
+    // ------------------------------------------------------------------ 状态流转（L3，支持 dryRun 预演）
 
-    @Operation(summary = "下发发货单给 WMS（仅待下发）；需带 confirmCode，?dryRun=true 只预演")
+    @Operation(summary = "下发发货单给 WMS（仅待下发）；?dryRun=true 只预演，返回将要发生什么")
     @PostMapping("/{id}/dispatch")
     public Result<?> dispatch(@PathVariable Long id,
-                              @RequestParam(required = false) Boolean dryRun,
-                              @RequestBody(required = false) ConfirmRequest req) {
-        if (ConfirmCodeService.isDryRun(dryRun)) {
-            ConfirmPreview preview = deliveryFlowService.previewDispatch(id);
-            return Result.ok(confirmCodeService.preflight(preview.willDo(), ConfirmOps.DISPATCH, id, preview.extras()));
+                              @RequestParam(required = false) Boolean dryRun) {
+        if (PreviewResult.isDryRun(dryRun)) {
+            return Result.ok(PreviewResult.of(deliveryFlowService.previewDispatch(id)));
         }
-        String error = confirmCodeService.verify(req == null ? null : req.getConfirmCode(),
-                ConfirmOps.DISPATCH, id, deliveryFlowService.extrasOfDispatch(id));
-        if (error != null) return Result.fail(error);
         return Result.ok(deliveryFlowService.dispatch(id));
     }
 
-    @Operation(summary = "取消发货单（仅待下发，回补库存）；需带 confirmCode，?dryRun=true 只预演")
+    @Operation(summary = "取消发货单（仅待下发，回补库存）；?dryRun=true 只预演，返回将要发生什么")
     @PostMapping("/{id}/cancel")
     public Result<?> cancel(@PathVariable Long id,
-                            @RequestParam(required = false) Boolean dryRun,
-                            @RequestBody(required = false) ConfirmRequest req) {
-        if (ConfirmCodeService.isDryRun(dryRun)) {
-            ConfirmPreview preview = deliveryFlowService.previewCancel(id);
-            return Result.ok(confirmCodeService.preflight(preview.willDo(), ConfirmOps.DELIVERY_CANCEL, id, preview.extras()));
+                            @RequestParam(required = false) Boolean dryRun) {
+        if (PreviewResult.isDryRun(dryRun)) {
+            return Result.ok(PreviewResult.of(deliveryFlowService.previewCancel(id)));
         }
-        String error = confirmCodeService.verify(req == null ? null : req.getConfirmCode(),
-                ConfirmOps.DELIVERY_CANCEL, id, deliveryFlowService.extrasOfCancel(id));
-        if (error != null) return Result.fail(error);
         return Result.ok(deliveryFlowService.cancel(id));
     }
 
-    /** WMS 回传入口：event = pick | outbound | transit | signed（幂等）。需确认码。 */
-    @Operation(summary = "模拟 WMS 回传：pick/outbound/transit/signed；需带 confirmCode，?dryRun=true 只预演")
+    /** WMS 回传入口：event = pick | outbound | transit | signed（幂等）。 */
+    @Operation(summary = "模拟 WMS 回传：pick/outbound/transit/signed；?dryRun=true 只预演，返回将要发生什么")
     @PostMapping("/{id}/wms-callback")
     public Result<?> wmsCallback(@PathVariable Long id,
                                  @RequestParam String event,
-                                 @RequestParam(required = false) Boolean dryRun,
-                                 @RequestBody(required = false) ConfirmRequest req) {
-        if (ConfirmCodeService.isDryRun(dryRun)) {
-            ConfirmPreview preview = deliveryFlowService.previewWmsCallback(id, event);
-            return Result.ok(confirmCodeService.preflight(preview.willDo(), ConfirmOps.WMS_CALLBACK, id, preview.extras()));
+                                 @RequestParam(required = false) Boolean dryRun) {
+        if (PreviewResult.isDryRun(dryRun)) {
+            return Result.ok(PreviewResult.of(deliveryFlowService.previewWmsCallback(id, event)));
         }
-        String error = confirmCodeService.verify(req == null ? null : req.getConfirmCode(),
-                ConfirmOps.WMS_CALLBACK, id, deliveryFlowService.extrasOfWmsCallback(id, event));
-        if (error != null) return Result.fail(error);
         return Result.ok(deliveryFlowService.wmsCallback(id, event));
     }
 
-    // ------------------------------------------------------------------ 待下发人工干预（L3，要码）
+    // ------------------------------------------------------------------ 待下发人工干预（L3，支持 dryRun 预演）
 
     /**
      * 编辑待下发包裹：改发货仓 / 改明细数量。守卫：仅 status=0 待下发；改动后 source=1 并重算订单 split_status。
      *
-     * <p>**校验顺序（严格，乐观锁不抢跑）**：缺码 → 码无效/用途/目标 → 指纹变化 → **缺版本号(400) / 版本过期(409)** → 业务守卫(status=0)。
-     * 也就是说 version 校验排在确认码之后、业务守卫之前：
-     * 「码对不上」永远先说码（那是这次请求的票），版本冲突归入「期间数据被改动」这一档，
-     * 不会出现「码已过期却先报数据被改」的误导。
+     * <p>**校验顺序（严格，业务守卫绝不抢跑）**：
+     * ① 存在性（发货单不存在 → code=1）
+     * → ② **version 乐观锁**：缺版本号 → {@code 400「缺少版本号，请刷新页面后重试」}；
+     *    与库里当前版本不一致（读之后被别人改过）→ {@code 409「数据已被他人修改（可能其他人在编辑），请刷新后重试」}
+     * → ③ 业务守卫（status=0，service 层）。
      *
-     * <p>乐观锁是**第二道**闸：确认码指纹只看「这次要改成什么」（仓库 + 明细），
-     * 有人改了包裹的 source/状态/别的字段时指纹未必变，靠 version 才能发现。
-     * 缺版本号一律拒（fail-closed），绝不静默降级成无版本校验。
+     * <p>为什么 version 必须排在业务守卫之前：两者说的是不同的事 —— 409 是「期间被别人改过」，
+     * 守卫失败是「这张单当前状态不允许」。顺序反了，「数据被别人改了」会被误报成「状态不对」，用户查错方向。
+     * 乐观锁是 **fail-closed**：缺版本号一律拒，绝不静默降级成「无版本校验」。
      */
-    @Operation(summary = "编辑发货单（待下发阶段改发货仓/改件数）；需带 confirmCode + version，?dryRun=true 只预演")
+    @Operation(summary = "编辑发货单（待下发阶段改发货仓/改件数）；需带 version，?dryRun=true 只预演")
     @PutMapping("/{id}")
     public Result<Map<String, Object>> update(@PathVariable Long id,
                                               @RequestParam(required = false) Boolean dryRun,
-                                              @RequestParam(required = false) String confirmCode,
                                               @RequestBody DeliveryUpdateRequest body) {
-        String code = ConfirmRequest.pick(body.getConfirmCode(), confirmCode);
-        if (ConfirmCodeService.isDryRun(dryRun)) {
-            ConfirmPreview preview = deliveryEditService.previewUpdate(id, body.getWarehouseId(), body.getItems());
-            return Result.ok(confirmCodeService.preflight(preview.willDo(), ConfirmOps.DELIVERY_EDIT, id, preview.extras()));
+        if (PreviewResult.isDryRun(dryRun)) {
+            return Result.ok(PreviewResult.of(
+                    deliveryEditService.previewUpdate(id, body.getWarehouseId(), body.getItems())));
         }
-        String error = confirmCodeService.verify(code, ConfirmOps.DELIVERY_EDIT, id,
-                deliveryEditService.extrasOfUpdate(id, body.getWarehouseId(), body.getItems()));
-        if (error != null) return Result.fail(error);
-
-        // 乐观锁 ①：缺版本号直接拒（fail-closed）
-        OptimisticLockGuard.LockError lockError = OptimisticLockGuard.checkVersion(body.getVersion());
-        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
-        // 乐观锁 ②：与库里当前版本比对；不一致 = 读之后被别人改过
+        // ① 存在性
         DeliveryOrder current = deliveryOrderService.getById(id);
         if (current == null) return Result.fail("发货单不存在：" + id);
+        // ② 乐观锁：缺版本号 → 400；版本对不上 → 409（都必须在业务守卫之前）
+        OptimisticLockGuard.LockError lockError = OptimisticLockGuard.checkVersion(body.getVersion());
+        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
         lockError = OptimisticLockGuard.checkSameVersion(body.getVersion(), current.getVersion());
         if (lockError != null) return Result.fail(lockError.code(), lockError.message());
-
+        // ③ 业务守卫（service 里的 requirePending）+ 落库
         return Result.ok(deliveryEditService.update(id, body.getWarehouseId(), body.getItems()));
     }
 
     /**
      * 拆分待下发包裹：按明细数量拆出一个新的待下发包裹。守卫：仅 status=0；源包与新包 source=1。
      */
-    @Operation(summary = "拆分发货单（把一个包裹拆成两个）；需带 confirmCode，?dryRun=true 只预演")
+    @Operation(summary = "拆分发货单（把一个包裹拆成两个）；?dryRun=true 只预演，返回将要发生什么")
     @PostMapping("/{id}/split")
     public Result<Map<String, Object>> split(@PathVariable Long id,
                                              @RequestParam(required = false) Boolean dryRun,
-                                             @RequestParam(required = false) String confirmCode,
                                              @RequestBody DeliverySplitRequest body) {
-        String code = ConfirmRequest.pick(body.getConfirmCode(), confirmCode);
-        if (ConfirmCodeService.isDryRun(dryRun)) {
-            ConfirmPreview preview = deliveryEditService.previewSplit(id, body.getNewWarehouseId(), body.getItems());
-            return Result.ok(confirmCodeService.preflight(preview.willDo(), ConfirmOps.DELIVERY_SPLIT, id, preview.extras()));
+        if (PreviewResult.isDryRun(dryRun)) {
+            return Result.ok(PreviewResult.of(
+                    deliveryEditService.previewSplit(id, body.getNewWarehouseId(), body.getItems())));
         }
-        String error = confirmCodeService.verify(code, ConfirmOps.DELIVERY_SPLIT, id,
-                deliveryEditService.extrasOfSplit(id, body.getNewWarehouseId(), body.getItems()));
-        if (error != null) return Result.fail(error);
         return Result.ok(deliveryEditService.split(id, body.getNewWarehouseId(), body.getItems()));
     }
 
     /**
      * 合并待下发包裹：把 {id} 并入 targetId（同订单、同待下发）。
      */
-    @Operation(summary = "合并发货单（把包裹并到另一个包裹）；需带 confirmCode，?dryRun=true 只预演")
+    @Operation(summary = "合并发货单（把包裹并到另一个包裹）；?dryRun=true 只预演，返回将要发生什么")
     @PostMapping("/{id}/merge")
     public Result<Map<String, Object>> merge(@PathVariable Long id,
                                              @RequestParam(required = false) Boolean dryRun,
-                                             @RequestParam(required = false) String confirmCode,
                                              @RequestBody DeliveryMergeRequest body) {
-        String code = ConfirmRequest.pick(body.getConfirmCode(), confirmCode);
-        if (ConfirmCodeService.isDryRun(dryRun)) {
-            ConfirmPreview preview = deliveryEditService.previewMerge(id, body.getTargetId());
-            return Result.ok(confirmCodeService.preflight(preview.willDo(), ConfirmOps.DELIVERY_MERGE, id, preview.extras()));
+        if (PreviewResult.isDryRun(dryRun)) {
+            return Result.ok(PreviewResult.of(deliveryEditService.previewMerge(id, body.getTargetId())));
         }
-        String error = confirmCodeService.verify(code, ConfirmOps.DELIVERY_MERGE, id,
-                deliveryEditService.extrasOfMerge(id, body.getTargetId()));
-        if (error != null) return Result.fail(error);
         return Result.ok(deliveryEditService.merge(id, body.getTargetId()));
     }
 
     /**
      * 删除待下发包裹：还有明细时必须带 targetId（等同于并入别处）。守卫：仅 status=0 待下发。
      */
-    @Operation(summary = "删除发货单（有明细时须给 targetId，等于并到别处）；需带 confirmCode，?dryRun=true 只预演")
+    @Operation(summary = "删除发货单（有明细时须给 targetId，等于并到别处）；?dryRun=true 只预演")
     @DeleteMapping("/{id}")
     public Result<Map<String, Object>> delete(@PathVariable Long id,
                                               @RequestParam(required = false) Long targetId,
-                                              @RequestParam(required = false) Boolean dryRun,
-                                              @RequestParam(required = false) String confirmCode,
-                                              @RequestBody(required = false) ConfirmRequest body) {
-        String code = ConfirmRequest.pick(body == null ? null : body.getConfirmCode(), confirmCode);
-        if (ConfirmCodeService.isDryRun(dryRun)) {
-            ConfirmPreview preview = deliveryEditService.previewDelete(id, targetId);
-            return Result.ok(confirmCodeService.preflight(preview.willDo(), ConfirmOps.DELIVERY_DELETE, id, preview.extras()));
+                                              @RequestParam(required = false) Boolean dryRun) {
+        if (PreviewResult.isDryRun(dryRun)) {
+            return Result.ok(PreviewResult.of(deliveryEditService.previewDelete(id, targetId)));
         }
-        String error = confirmCodeService.verify(code, ConfirmOps.DELIVERY_DELETE, id,
-                deliveryEditService.extrasOfDelete(id, targetId));
-        if (error != null) return Result.fail(error);
         return Result.ok(deliveryEditService.delete(id, targetId));
     }
 
-    // ------------------------------------------------------------------ 查询（只读，不要码）
+    // ------------------------------------------------------------------ 查询（只读）
 
     /**
      * 批量查「包裹数」：订单列表页的「N 个包裹」标签用。

@@ -17,9 +17,6 @@ public class DeliveryUpdateRequest {
     /** 要改量的明细；null/空表示不改量 */
     private List<DeliveryItemQty> items;
 
-    /** 一次性确认码（先 ?dryRun=true 预演拿到）；也可用查询参数 ?confirmCode= 传 */
-    private String confirmCode;
-
     /**
      * 乐观锁版本号：来自 {@code GET /admin/deliveries?orderId=} 返回的 version，**必填**。
      * 缺 → code=400；与库里当前版本不一致 → code=409（期间被别人改过，请刷新后重试）。

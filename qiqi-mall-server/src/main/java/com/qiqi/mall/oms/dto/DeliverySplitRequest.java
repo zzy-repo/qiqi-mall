@@ -16,7 +16,4 @@ public class DeliverySplitRequest {
 
     /** 要拆出的明细与数量（不填则报错，避免拆出空包） */
     private List<DeliveryItemQty> items;
-
-    /** 一次性确认码（先 ?dryRun=true 预演拿到）；也可用查询参数 ?confirmCode= 传 */
-    private String confirmCode;
 }

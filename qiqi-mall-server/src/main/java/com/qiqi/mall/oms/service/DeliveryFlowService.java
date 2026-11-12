@@ -8,13 +8,12 @@ import com.qiqi.mall.oms.entity.DeliveryOrder;
 import com.qiqi.mall.oms.entity.Warehouse;
 import com.qiqi.mall.oms.wms.MockWmsService;
 import com.qiqi.mall.order.entity.Order;
-import com.qiqi.mall.shared.security.ConfirmCodeService;
-import com.qiqi.mall.shared.security.ConfirmPreview;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.TreeMap;
 
@@ -125,108 +124,68 @@ public class DeliveryFlowService {
         return delivery;
     }
 
-    // ------------------------------------------------------------------ 确认码：预演 + 指纹
+    // ------------------------------------------------------------------ 预演（dryRun）：只说「将要发生什么」
 
     /*
-     * 每个写操作给两样东西：
-     *   previewXxx()  给人看的 willDo（带真实单号/仓名/件数）+ 指纹组成；**跑业务守卫**，签出来的码一定能执行；
-     *   extrasOfXxx() 执行阶段当场重算的指纹组成；**不跑业务守卫** —— 因为校验顺序是
-     *                 「缺码 → 无效/已用/过期 → 目标不符 → 指纹变化 → 原业务守卫」，
-     *                 守卫若在这里抢跑，「码是对的、只是单子被别人改过」会被误报成别的原因。
+     * 每个写操作给一个 previewXxx()：返回给用户看的中文描述（带真实单号/仓名/件数）。
+     * **跑业务守卫** —— 没资格执行的操作，预演阶段就说清原因，不给出「将要发生什么」再让人白点一次确认。
+     * 预演不落库、不签发任何凭证；并发控制不在这里，靠 version 乐观锁与状态守卫（见各 controller）。
      */
 
-    /** 预演「下发」：守卫同 {@link #dispatch}；指纹 = 订单 id + 仓库 id + 包裹明细摘要 */
-    public ConfirmPreview previewDispatch(Long deliveryId) {
+    /** 预演「下发」：守卫同 {@link #dispatch} */
+    public String previewDispatch(Long deliveryId) {
         DeliveryOrder d = require(deliveryId);
         if (d.getStatus() != DeliveryOrder.PENDING) {
             throw new IllegalStateException("只有待下发发货单可以下发");
         }
         List<DeliveryItem> items = itemsOf(deliveryId);
-        String willDo = "将把包裹 " + d.getDeliverySn() + "（" + warehouseName(d.getWarehouseId()) + "，"
+        return "将把包裹 " + d.getDeliverySn() + "（" + warehouseName(d.getWarehouseId()) + "，"
                 + items.size() + " 条明细合计 " + totalQty(items) + " 件）下发给 WMS：状态 待下发→已下发。"
                 + "下发后不可撤回，只能等 WMS 回传。";
-        return new ConfirmPreview(willDo, dispatchExtras(d));
     }
 
-    /** 下发指纹（执行阶段重算；不跑守卫） */
-    public Object[] extrasOfDispatch(Long deliveryId) {
-        DeliveryOrder d = deliveryOrderService.getById(deliveryId);
-        return d == null ? new Object[]{null, null, List.of()} : dispatchExtras(d);
-    }
-
-    private Object[] dispatchExtras(DeliveryOrder d) {
-        return new Object[]{d.getOrderId(), d.getWarehouseId(), itemLines(d.getId())};
-    }
-
-    /** 预演「取消」：守卫同 {@link #cancel}；指纹含「回补哪些 SKU 多少件」，明细被改过就废 */
-    public ConfirmPreview previewCancel(Long deliveryId) {
+    /** 预演「取消」：守卫同 {@link #cancel}；文案要点明回补哪些 SKU 多少件 */
+    public String previewCancel(Long deliveryId) {
         DeliveryOrder d = require(deliveryId);
         if (d.getStatus() != DeliveryOrder.PENDING) {
             throw new IllegalStateException("只有待下发发货单可以取消");
         }
         List<DeliveryItem> items = itemsOf(deliveryId);
         List<String> restore = skuQtyLines(items);
-        String willDo = "将取消包裹 " + d.getDeliverySn() + "（" + warehouseName(d.getWarehouseId())
+        return "将取消包裹 " + d.getDeliverySn() + "（" + warehouseName(d.getWarehouseId())
                 + "）：状态 待下发→已取消，并把 " + items.size() + " 条明细的 SKU 总池库存回补（"
                 + describeSkuQty(restore) + "，合计 " + totalQty(items) + " 件）；父订单状态会重新聚合。";
-        return new ConfirmPreview(willDo, cancelExtras(d, items));
     }
 
-    /** 取消指纹（执行阶段重算；不跑守卫） */
-    public Object[] extrasOfCancel(Long deliveryId) {
-        DeliveryOrder d = deliveryOrderService.getById(deliveryId);
-        if (d == null) return new Object[]{null, List.of(), 0};
-        List<DeliveryItem> items = itemsOf(deliveryId);
-        return cancelExtras(d, items);
-    }
-
-    private Object[] cancelExtras(DeliveryOrder d, List<DeliveryItem> items) {
-        return new Object[]{d.getOrderId(), skuQtyLines(items), totalQty(items)};
-    }
-
-    /** 预演「WMS 回传」：守卫同 {@link #wmsCallback}（含幂等判断）；指纹 = 事件名 + 当前状态 */
-    public ConfirmPreview previewWmsCallback(Long deliveryId, String event) {
+    /** 预演「WMS 回传」：守卫同 {@link #wmsCallback}（含幂等判断） */
+    public String previewWmsCallback(Long deliveryId, String event) {
         DeliveryOrder d = require(deliveryId);
         int current = d.getStatus();
         if (current == DeliveryOrder.CANCELLED) throw new IllegalStateException("已取消的发货单不能回传");
         String name = event == null ? "" : event.toLowerCase();
         int target = targetStatusOf(name);
-        String willDo;
         if (current >= target) {
-            willDo = "包裹 " + d.getDeliverySn() + " 当前已是「" + statusText(current) + "」，回传 " + name
+            return "包裹 " + d.getDeliverySn() + " 当前已是「" + statusText(current) + "」，回传 " + name
                     + " 不会改动任何数据（接口幂等），只会原样返回。";
-        } else {
-            // 与执行路径同一套状态守卫，避免签出一个注定失败的码
-            switch (name) {
-                case "pick" -> requireState(d, DeliveryOrder.DISPATCHED, "只有已下发发货单可以回传拣货");
-                case "outbound" -> {
-                    if (current != DeliveryOrder.DISPATCHED && current != DeliveryOrder.PICKED) {
-                        throw new IllegalStateException("只有已下发/已拣货发货单可以回传出库");
-                    }
-                }
-                case "transit" -> requireState(d, DeliveryOrder.OUTBOUND, "只有已出库发货单可以回传揽收");
-                case "signed" -> {
-                    if (current < DeliveryOrder.OUTBOUND) {
-                        throw new IllegalStateException("只有已出库之后的发货单可以回传签收");
-                    }
-                }
-                default -> { }
-            }
-            willDo = "将记录 WMS 回传 " + name + "：包裹 " + d.getDeliverySn() + "（" + warehouseName(d.getWarehouseId())
-                    + "）状态 " + statusText(current) + "→" + statusText(target) + "；父订单会按所有子单重新聚合。";
         }
-        return new ConfirmPreview(willDo, wmsCallbackExtras(d, name));
-    }
-
-    /** 回传指纹（执行阶段重算；不跑守卫：未知事件/状态不符交给原守卫报错） */
-    public Object[] extrasOfWmsCallback(Long deliveryId, String event) {
-        DeliveryOrder d = deliveryOrderService.getById(deliveryId);
-        if (d == null) return new Object[]{null, null};
-        return wmsCallbackExtras(d, event == null ? "" : event.toLowerCase());
-    }
-
-    private Object[] wmsCallbackExtras(DeliveryOrder d, String name) {
-        return new Object[]{name, d.getStatus()};
+        // 与执行路径同一套状态守卫
+        switch (name) {
+            case "pick" -> requireState(d, DeliveryOrder.DISPATCHED, "只有已下发发货单可以回传拣货");
+            case "outbound" -> {
+                if (current != DeliveryOrder.DISPATCHED && current != DeliveryOrder.PICKED) {
+                    throw new IllegalStateException("只有已下发/已拣货发货单可以回传出库");
+                }
+            }
+            case "transit" -> requireState(d, DeliveryOrder.OUTBOUND, "只有已出库发货单可以回传揽收");
+            case "signed" -> {
+                if (current < DeliveryOrder.OUTBOUND) {
+                    throw new IllegalStateException("只有已出库之后的发货单可以回传签收");
+                }
+            }
+            default -> { }
+        }
+        return "将记录 WMS 回传 " + name + "：包裹 " + d.getDeliverySn() + "（" + warehouseName(d.getWarehouseId())
+                + "）状态 " + statusText(current) + "→" + statusText(target) + "；父订单会按所有子单重新聚合。";
     }
 
     private static int targetStatusOf(String name) {
@@ -239,19 +198,20 @@ public class DeliveryFlowService {
         };
     }
 
-    /** 包裹明细（按 id 升序，保证指纹稳定） */
+    /** 包裹明细（按 id 升序，明细摘要的顺序才稳定） */
     private List<DeliveryItem> itemsOf(Long deliveryId) {
         return deliveryItemService.list(new LambdaQueryWrapper<DeliveryItem>()
                 .eq(DeliveryItem::getDeliveryId, deliveryId).orderByAsc(DeliveryItem::getId));
     }
 
-    /** 明细摘要：{@code ["orderItemId:skuId:qty", ...]} 排序 —— 「包裹里到底是什么」的指纹来源 */
+    /** 明细摘要：{@code ["orderItemId:skuId:qty", ...]} 排序 —— 「包裹里到底是什么」的摘要来源 */
     private List<String> itemLines(Long deliveryId) {
         List<String> lines = new ArrayList<>();
         for (DeliveryItem item : itemsOf(deliveryId)) {
             lines.add(item.getOrderItemId() + ":" + item.getProductSkuId() + ":" + item.getQuantity());
         }
-        return ConfirmCodeService.sortedLines(lines);
+        lines.sort(Comparator.naturalOrder());
+        return lines;
     }
 
     /** 回补摘要：按 skuId 汇总件数（库存是按 sku 回补的，同 sku 多条明细必须合并后才对得上） */

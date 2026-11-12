@@ -1,12 +1,10 @@
 package com.qiqi.mall.catalog.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.qiqi.mall.shared.common.PreviewResult;
 import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.shared.guard.CatalogDeleteGuard;
 import com.qiqi.mall.shared.guard.OptimisticLockGuard;
-import com.qiqi.mall.shared.security.ConfirmCodeService;
-import com.qiqi.mall.shared.security.ConfirmOps;
-import com.qiqi.mall.shared.security.ConfirmRequest;
 import com.qiqi.mall.catalog.entity.Attribute;
 import com.qiqi.mall.catalog.entity.Product;
 import com.qiqi.mall.catalog.entity.Sku;
@@ -16,6 +14,7 @@ import com.qiqi.mall.catalog.service.ProductService;
 import com.qiqi.mall.catalog.service.SkuService;
 import com.qiqi.mall.catalog.service.SkuSpecService;
 import com.qiqi.mall.catalog.service.SpecTextHelper;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -37,18 +36,16 @@ public class SkuController {
     private final AttributeService attributeService;
     private final ProductService productService;
     private final SpecTextHelper specTextHelper;
-    private final ConfirmCodeService confirmCodeService;
 
     public SkuController(SkuService skuService, SkuSpecService skuSpecService, AttributeService attributeService,
                          ProductService productService, SpecTextHelper specTextHelper,
-                         CatalogDeleteGuard deleteGuard, ConfirmCodeService confirmCodeService) {
+                         CatalogDeleteGuard deleteGuard) {
         this.skuService = skuService;
         this.skuSpecService = skuSpecService;
         this.attributeService = attributeService;
         this.productService = productService;
         this.specTextHelper = specTextHelper;
         this.deleteGuard = deleteGuard;
-        this.confirmCodeService = confirmCodeService;
     }
 
     /** 列表：带规格文本，可按商品过滤 */
@@ -123,15 +120,16 @@ public class SkuController {
         return Result.ok();
     }
 
-    /** 删除 SKU：被订单明细 / 购物车引用时不允许删 */
     /**
-     * 删除规格：被订单明细/购物车引用时拒绝。
-     * 确认码：?dryRun=true 预演；指纹 = 订单明细引用数 + 购物车引用数 —— 引用数变了执行会被拒。
+     * 删除规格（SKU）：被订单明细/购物车引用时拒绝。
+     *
+     * <p>校验顺序：**① 存在性 → ② 引用数守卫 → ③ 执行**；{@code ?dryRun=true} 只算不落库，
+     * 返回「将删除哪个 SKU（含所属商品、售价、库存），当前被多少条订单明细/购物车引用」的中文描述。
      */
+    @Operation(summary = "删除规格（SKU，被引用时拒绝）；?dryRun=true 只预演，返回将要发生什么")
     @DeleteMapping("/{id}")
     public Result<?> delete(@PathVariable Long id,
-                            @RequestParam(required = false) Boolean dryRun,
-                            @RequestBody(required = false) ConfirmRequest req) {
+                            @RequestParam(required = false) Boolean dryRun) {
         Sku sku = skuService.getById(id);
         if (sku == null) return Result.fail("规格不存在");
         long orderItems = deleteGuard.countOrderItemsOfSku(id);
@@ -145,12 +143,7 @@ public class SkuController {
                 + "。当前被 " + orderItems + " 条订单明细、" + carts + " 个购物车引用"
                 + (blocked != null ? " —— 删除会被拒绝。" : "。删除后不可恢复。");
 
-        if (ConfirmCodeService.isDryRun(dryRun)) {
-            return Result.ok(confirmCodeService.preflight(willDo, ConfirmOps.SKU_DELETE, id, orderItems, carts));
-        }
-        String error = confirmCodeService.verify(req == null ? null : req.getConfirmCode(),
-                ConfirmOps.SKU_DELETE, id, orderItems, carts);
-        if (error != null) return Result.fail(error);
+        if (PreviewResult.isDryRun(dryRun)) return Result.ok(PreviewResult.of(willDo));
         if (blocked != null) return Result.fail(blocked);
 
         skuService.removeById(id);

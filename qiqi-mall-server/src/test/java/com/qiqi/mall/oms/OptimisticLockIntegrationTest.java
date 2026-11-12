@@ -46,13 +46,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * ③ 不带 version 保存 → code=400 + 「缺少版本号，请刷新页面后重试」（fail-closed，不静默降级）
  * ④ 版本号乱填（V+99）→ code=409
  * </pre>
- * 另有 ⑤ 列表/详情接口都返回 version（前端要拿它回传），⑥ 见上面 5 个资源。
- * ⑦ 回归：{@code ConfirmGateIntegrationTest}(18) + {@code OrderConfirmCodeIntegrationTest}(10)
- * + {@code ApiKeyAuthIntegrationTest}(10) 必须仍全绿 —— 另一个命令跑，见 README「乐观锁」一节。
+ * 另有 ⑥ 列表/详情接口都返回 version（前端要拿它回传）。
+ *
+ * <p>本类**不依赖**任何确认码机制（confirmCode 整套已删除，见
+ * {@code DryRunPreviewIntegrationTest}）：发货单的 PUT 现在是「存在性 → version → 状态守卫」三段，
+ * 直接带 version 打即可。
  *
  * <p>数据自建（商品/SKU/订单/发货单/会员全部自己造，跑完全删），不复用种子里的可变数据。
- * 发货单的 PUT 还要过确认码闸门，所以这里走「真预演拿码 → 带码 + 带 version 执行」的完整链路，
- * 顺带证明 version 校验没有抢到码校验前面（缺码时仍先报缺码）。
  *
  * <p>运行：cd qiqi-mall-server && mvn -o test -Dtest=OptimisticLockIntegrationTest
  */
@@ -262,43 +262,33 @@ class OptimisticLockIntegrationTest {
 
     @Test
     @org.junit.jupiter.api.Order(5)
-    @DisplayName("⑤ delivery_order：A 带 V 改仓成功 → V+1；B 用旧 V → 409 且仓没被覆盖（码顺序不被打乱）")
+    @DisplayName("⑤ delivery_order：A 带 V 改仓成功 → V+1；B 用旧 V → 409 且仓没被覆盖")
     void delivery_lostUpdatePrevented() {
         Long orderId = newOrder(8);
         Long id = newDelivery(orderId, warehouseA, 2);
         int v = versionOf("delivery_order", id);
 
-        // 缺码 → 仍然先报缺码（乐观锁不许抢跑）
-        JsonNode noCode = fail(put("/admin/deliveries/" + id, deliveryBody(warehouseB, v, null)), 1);
-        System.out.printf("⑤ delivery 缺确认码 → message=%s%n", noCode.path("message").asText());
-        assertThat(noCode.path("message").asText()).startsWith("缺少确认码");
-        assertThat(warehouseOf(id)).isEqualTo(warehouseA);
-
-        // A：预演拿码 → 带码 + 带 V 执行
-        String codeA = previewDeliveryEdit(id, warehouseB);
-        ok(put("/admin/deliveries/" + id, deliveryBody(warehouseB, v, codeA)));
+        // A：带 V 改仓
+        ok(put("/admin/deliveries/" + id, deliveryBody(warehouseB, v)));
         int vAfterA = versionOf("delivery_order", id);
         System.out.printf("⑤ delivery A 改仓 → 仓 %d→%d，version %d→%d%n", warehouseA, warehouseOf(id), v, vAfterA);
         assertThat(warehouseOf(id)).isEqualTo(warehouseB);
         assertThat(vAfterA).isEqualTo(v + 1);
 
-        // B：重新预演拿一张新码（码是一次性的），但还拿着旧 V
-        String codeB = previewDeliveryEdit(id, warehouseA);
-        JsonNode conflict = fail(put("/admin/deliveries/" + id, deliveryBody(warehouseA, v, codeB)), 409);
+        // B：还拿着旧 V
+        JsonNode conflict = fail(put("/admin/deliveries/" + id, deliveryBody(warehouseA, v)), 409);
         System.out.printf("⑤ delivery B 用旧 V=%d 改仓 → code=409 message=%s%n", v, conflict.path("message").asText());
         assertThat(conflict.path("message").asText()).isEqualTo(MSG_CONFLICT);
         assertThat(warehouseOf(id)).as("A 的改动不能被覆盖").isEqualTo(warehouseB);
 
-        // 不带 version → 400（code 会先被消费掉，所以每次都要重新预演）
-        String codeC = previewDeliveryEdit(id, warehouseA);
-        JsonNode missing = fail(put("/admin/deliveries/" + id, deliveryBody(warehouseA, null, codeC)), 400);
+        // 不带 version → 400（fail-closed）
+        JsonNode missing = fail(put("/admin/deliveries/" + id, deliveryBody(warehouseA, null)), 400);
         System.out.printf("⑤ delivery 不带 version → code=400 message=%s%n", missing.path("message").asText());
         assertThat(missing.path("message").asText()).isEqualTo(MSG_MISSING_VERSION);
         assertThat(warehouseOf(id)).isEqualTo(warehouseB);
 
         // 乱填 version → 409
-        String codeD = previewDeliveryEdit(id, warehouseA);
-        JsonNode bogus = fail(put("/admin/deliveries/" + id, deliveryBody(warehouseA, vAfterA + 99, codeD)), 409);
+        JsonNode bogus = fail(put("/admin/deliveries/" + id, deliveryBody(warehouseA, vAfterA + 99)), 409);
         System.out.printf("⑤ delivery 版本号乱填 V+99 → code=409 message=%s%n", bogus.path("message").asText());
         assertThat(bogus.path("message").asText()).isEqualTo(MSG_CONFLICT);
         assertThat(warehouseOf(id)).isEqualTo(warehouseB);
@@ -439,19 +429,9 @@ class OptimisticLockIntegrationTest {
         return "{\"nickname\":\"" + nickname + "\"" + (version == null ? "" : ",\"version\":" + version) + "}";
     }
 
-    private static String deliveryBody(Long warehouseId, Integer version, String confirmCode) {
+    private static String deliveryBody(Long warehouseId, Integer version) {
         return "{\"warehouseId\":" + warehouseId
-                + (version == null ? "" : ",\"version\":" + version)
-                + (confirmCode == null ? "" : ",\"confirmCode\":\"" + confirmCode + "\"") + "}";
-    }
-
-    /** 真预演拿一张编辑包裹的确认码（码是一次性的，每执行一次就得重新拿） */
-    private String previewDeliveryEdit(Long deliveryId, Long warehouseId) {
-        JsonNode dry = ok(put("/admin/deliveries/" + deliveryId + "?dryRun=true",
-                "{\"warehouseId\":" + warehouseId + "}"));
-        String code = dry.path("confirmCode").asText();
-        assertThat(code).as("预演必须签发确认码：%s", dry).isNotBlank();
-        return code;
+                + (version == null ? "" : ",\"version\":" + version) + "}";
     }
 
     // ------------------------------------------------------------------ 状态查询

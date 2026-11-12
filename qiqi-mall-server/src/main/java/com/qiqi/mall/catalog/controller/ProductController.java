@@ -1,16 +1,15 @@
 package com.qiqi.mall.catalog.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.qiqi.mall.shared.common.PreviewResult;
 import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.shared.guard.CatalogDeleteGuard;
 import com.qiqi.mall.shared.guard.OptimisticLockGuard;
-import com.qiqi.mall.shared.security.ConfirmCodeService;
-import com.qiqi.mall.shared.security.ConfirmOps;
-import com.qiqi.mall.shared.security.ConfirmRequest;
 import com.qiqi.mall.catalog.entity.Product;
 import com.qiqi.mall.catalog.entity.ProductGallery;
 import com.qiqi.mall.catalog.service.ProductGalleryService;
 import com.qiqi.mall.catalog.service.ProductService;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -28,14 +27,12 @@ public class ProductController {
     private final ProductService productService;
     private final CatalogDeleteGuard deleteGuard;
     private final ProductGalleryService productGalleryService;
-    private final ConfirmCodeService confirmCodeService;
 
     public ProductController(ProductService productService, ProductGalleryService productGalleryService,
-                            CatalogDeleteGuard deleteGuard, ConfirmCodeService confirmCodeService) {
+                            CatalogDeleteGuard deleteGuard) {
         this.productService = productService;
         this.productGalleryService = productGalleryService;
         this.deleteGuard = deleteGuard;
-        this.confirmCodeService = confirmCodeService;
     }
 
     @GetMapping
@@ -102,13 +99,17 @@ public class ProductController {
     /**
      * 删除商品：被订单明细引用时不允许删（提示改为下架），购物车引用也不允许。
      *
-     * <p>确认码：?dryRun=true 预演（删不了的直接回中文原因，不会签出一个注定失败的码）；
-     * 指纹 = 订单明细引用数 + 购物车引用数 + 下辖 SKU 数 —— 预演后引用数变了，执行会被拒。
+     * <p>校验顺序：**① 存在性 → ② 引用数守卫 → ③ 执行**。
+     * {@code ?dryRun=true} 只算不落库：把「会连带删掉什么、当前被多少条订单明细/购物车引用」
+     * 用中文说清；删不掉的（有引用）也照实说「删除会被拒绝，建议改为下架」，
+     * 让预演永远 code=0、前端只有一条渲染路径。
+     *
+     * <p>并发：本接口删的是整行（幂等），引用数由引用守卫兜底，不需要 version。
      */
+    @Operation(summary = "删除商品（级联 SKU/相册，被引用时拒绝）；?dryRun=true 只预演")
     @DeleteMapping("/{id}")
     public Result<?> delete(@PathVariable Long id,
-                            @RequestParam(required = false) Boolean dryRun,
-                            @RequestBody(required = false) ConfirmRequest req) {
+                            @RequestParam(required = false) Boolean dryRun) {
         Product product = productService.getById(id);
         if (product == null) return Result.fail("商品不存在");
         long orderItems = deleteGuard.countOrderItemsOfProduct(id);
@@ -116,21 +117,12 @@ public class ProductController {
         long skus = deleteGuard.countSkusOfProduct(id);
         String blocked = deleteGuard.checkProduct(id);
 
-        // 文案口径（用户定的样例）：把「删不掉」和「建议改下架」直接写进预演描述，
-        // 而不是让 dryRun 直接失败 —— 预演永远 code=0，前端只有一条渲染路径；
-        // 真正执行时 blocked 仍会在码校验之后拦下（顺序：码 → 引用守卫）。
         String willDo = "将删除商品「" + product.getName() + "」（id=" + product.getId() + "）"
                 + (skus > 0 ? "，下辖 " + skus + " 个 SKU 与相册一并删除" : "及其相册")
                 + "。当前被 " + orderItems + " 条订单明细、" + carts + " 个购物车引用"
                 + (blocked != null ? " —— 删除会被拒绝，建议改为下架。" : "。删除后不可恢复。");
 
-        if (ConfirmCodeService.isDryRun(dryRun)) {
-            return Result.ok(confirmCodeService.preflight(willDo, ConfirmOps.PRODUCT_DELETE, id,
-                    orderItems, carts, skus));
-        }
-        String error = confirmCodeService.verify(req == null ? null : req.getConfirmCode(),
-                ConfirmOps.PRODUCT_DELETE, id, orderItems, carts, skus);
-        if (error != null) return Result.fail(error);
+        if (PreviewResult.isDryRun(dryRun)) return Result.ok(PreviewResult.of(willDo));
         if (blocked != null) return Result.fail(blocked);
 
         productService.removeById(id);
