@@ -7,11 +7,16 @@ import com.qiqi.mall.shared.security.CaptchaService;
 import com.qiqi.mall.shared.security.CaptchaStore;
 import com.qiqi.mall.shared.security.JwtService;
 import com.qiqi.mall.member.service.AdminService;
+import com.qiqi.mall.shared.web.ClientIp;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
+
+import jakarta.servlet.http.HttpServletRequest;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -21,6 +26,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/admin/auth")
 public class AdminAuthController {
+
+    private static final Logger log = LoggerFactory.getLogger(AdminAuthController.class);
 
     private final AdminService adminService;
     private final PasswordEncoder passwordEncoder;
@@ -51,15 +58,20 @@ public class AdminAuthController {
 
     /** 登录：{username, password, captchaId?, captchaCode?} */
     @PostMapping("/login")
-    public ResponseEntity<Result<Map<String, Object>>> login(@RequestBody LoginRequest request) {
+    public ResponseEntity<Result<Map<String, Object>>> login(@RequestBody LoginRequest request,
+                                                            HttpServletRequest httpRequest) {
         String username = request.getUsername();
         if (username == null || username.isBlank() || request.getPassword() == null) {
+            log.warn("admin login fail: username={} ip={} reason=empty-credential",
+                    username, ClientIp.resolve(httpRequest));
             return ResponseEntity.badRequest().body(Result.fail("用户名和密码不能为空"));
         }
 
         // 需要验证码时先校验（一次性消费）
         if (captchaStore.captchaRequired(username)) {
             if (!captchaStore.verifyAndConsume(request.getCaptchaId(), request.getCaptchaCode())) {
+                log.warn("admin login fail: username={} ip={} reason=captcha-mismatch",
+                        username, ClientIp.resolve(httpRequest));
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Result.fail("验证码错误，请重新获取"));
             }
         }
@@ -68,10 +80,13 @@ public class AdminAuthController {
         if (admin == null || !passwordMatches(request.getPassword(), admin.getPassword())
                 || admin.getStatus() == null || admin.getStatus() != 1) {
             captchaStore.increaseFail(username);
+            log.warn("admin login fail: username={} ip={} reason=bad-credential-or-disabled",
+                    username, ClientIp.resolve(httpRequest));
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Result.fail("用户名或密码错误"));
         }
 
         captchaStore.clearFail(username);
+        log.info("admin login ok: username={} ip={}", username, ClientIp.resolve(httpRequest));
         String token = jwtService.issue(admin.getId(), admin.getUsername(), JwtService.ROLE_ADMIN);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("accessToken", token);

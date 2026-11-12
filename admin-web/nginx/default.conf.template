@@ -1,3 +1,12 @@
+# 真实客户端 IP 透传：公网请求经过 ECS Caddy → Tailscale → 本机 nginx 两层代理，
+# 直连对端（$remote_addr）已经是 ECS 的 Tailscale IP，真实访客 IP 只存在于上游给的
+# X-Real-IP / X-Forwarded-For 里。规则：上游给了 X-Real-IP 就沿用，没给才回落到直连地址。
+# 注意：map 必须放在 http/server 作用域之外（本文件在 conf.d 下被 http 层 include）。
+map $http_x_real_ip $qiqi_client_ip {
+    default $http_x_real_ip;
+    ""      $remote_addr;
+}
+
 server {
     listen       80;
     server_name  _;
@@ -23,7 +32,7 @@ server {
     location /admin/ {
         proxy_pass ${BACKEND_UPSTREAM};
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Real-IP $qiqi_client_ip;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_connect_timeout 10s;
@@ -36,7 +45,7 @@ server {
         # 注意：proxy_pass 不带 URI，原样透传 /qiqi-mall/** 给 MinIO（bucket 名就在路径里）
         proxy_pass http://minio:9000;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Real-IP $qiqi_client_ip;
         expires 7d;
     }
 

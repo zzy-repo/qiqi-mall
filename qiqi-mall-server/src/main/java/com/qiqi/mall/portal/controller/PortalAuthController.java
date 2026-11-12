@@ -5,11 +5,16 @@ import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.member.entity.Member;
 import com.qiqi.mall.shared.security.JwtService;
 import com.qiqi.mall.member.service.MemberService;
+import com.qiqi.mall.shared.web.ClientIp;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
+
+import jakarta.servlet.http.HttpServletRequest;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -19,6 +24,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/portal/auth")
 public class PortalAuthController {
+
+    private static final Logger log = LoggerFactory.getLogger(PortalAuthController.class);
 
     private final MemberService memberService;
     private final PasswordEncoder passwordEncoder;
@@ -31,8 +38,11 @@ public class PortalAuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<Result<Map<String, Object>>> login(@RequestBody AuthRequest request) {
+    public ResponseEntity<Result<Map<String, Object>>> login(@RequestBody AuthRequest request,
+                                                            HttpServletRequest httpRequest) {
         if (isBlank(request.getUsername()) || isBlank(request.getPassword())) {
+            log.warn("member login fail: username={} ip={} reason=empty-credential",
+                    request.getUsername(), ClientIp.resolve(httpRequest));
             return ResponseEntity.badRequest().body(Result.fail("用户名和密码不能为空"));
         }
         Member member = memberService.getOne(
@@ -40,19 +50,25 @@ public class PortalAuthController {
         if (member == null || isBlank(member.getPassword())
                 || !passwordEncoder.matches(request.getPassword(), member.getPassword())
                 || member.getStatus() == null || member.getStatus() != 1) {
+            log.warn("member login fail: username={} ip={} reason=bad-credential-or-disabled",
+                    request.getUsername(), ClientIp.resolve(httpRequest));
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Result.fail("用户名或密码错误"));
         }
+        log.info("member login ok: username={} ip={}", request.getUsername(), ClientIp.resolve(httpRequest));
         return ResponseEntity.ok(Result.ok(tokenBody(member)));
     }
 
     @PostMapping("/register")
-    public ResponseEntity<Result<Map<String, Object>>> register(@RequestBody AuthRequest request) {
+    public ResponseEntity<Result<Map<String, Object>>> register(@RequestBody AuthRequest request,
+                                                               HttpServletRequest httpRequest) {
         if (isBlank(request.getUsername()) || isBlank(request.getPassword())) {
             return ResponseEntity.badRequest().body(Result.fail("用户名和密码不能为空"));
         }
         Long exists = memberService.count(
                 new LambdaQueryWrapper<Member>().eq(Member::getUsername, request.getUsername()));
         if (exists != null && exists > 0) {
+            log.warn("member register fail: username={} ip={} reason=username-taken",
+                    request.getUsername(), ClientIp.resolve(httpRequest));
             return ResponseEntity.badRequest().body(Result.fail("用户名已被占用"));
         }
         Member member = new Member();
@@ -62,6 +78,7 @@ public class PortalAuthController {
         member.setPhone(request.getPhone());
         member.setStatus(1);
         memberService.save(member);
+        log.info("member register ok: username={} ip={}", request.getUsername(), ClientIp.resolve(httpRequest));
         // 注册成功自动登录
         return ResponseEntity.ok(Result.ok(tokenBody(member)));
     }

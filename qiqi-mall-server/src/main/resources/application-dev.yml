@@ -2,6 +2,9 @@
 server:
   port: ${SERVER_PORT:8081}
   address: 0.0.0.0
+  # 真实客户端 IP 透传：让 Spring 用 X-Forwarded-For / X-Forwarded-Proto / X-Forwarded-Host
+  # 解析真实 IP、协议与主机（依赖 shared/web/ClientIp 与 nginx 传上游头，见 nginx/qiqi.conf）
+  forward-headers-strategy: framework
 spring:
   servlet:
     multipart:
