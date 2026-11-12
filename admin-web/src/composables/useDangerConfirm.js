@@ -15,6 +15,14 @@
  *
  * 弹窗之所以留下来，是因为「先看清将要发生什么再确认」本身有价值 —— 它和确认码是两件事。
  *
+ * **带业务表单的入口（退货审核 / 编辑·拆分包裹 / 合并·删除包裹）的收起时机**：
+ * 表单**不在提交时关**，而是等预演通过后才关（`onPreviewOk`）。原因是一次实测回退：
+ * 早先的写法是 `visible.value = false` → `await danger.run(...)`，预演被后端守卫拦下时
+ * （例如「该申请已处理，不能重复审核」）只有一条 2 秒就消失的 toast，而**表单已经关了、
+ * 用户刚填的内容全丢**。旧版是「表单留在原地 + 错误提示 + 改一下就能重提」，这版必须一样：
+ *   - 预演失败 → 表单从未关过（`onPreviewOk` 不会被调用），错误同时写回表单内（`onPreviewError`）；
+ *   - 预演成功 → 才收表单，屏幕上只剩一个确认框（不会出现两个弹窗叠着）。
+ *
  * 后端契约（现行，确认码已下线）：
  *  ① 预演：同一路径 + ?dryRun=true → { code:0, data:{ willDo, ... } }，库里零变化，
  *     **不再签发任何确认码**（没有有效期、没有倒计时、没有一次性作废）；
@@ -131,6 +139,21 @@ const execute = async () => {
 }
 
 /**
+ * 预演失败的中文原因（**原样透出，不做任何截断**）。
+ *
+ * 为什么单独抽一个函数：`预演失败：` 后面必须跟上「为什么」——
+ * 后端每条失败都是人话（`该申请已处理，不能重复审核` / `数据已被他人修改…` / `缺少版本号…`），
+ * 只回一句「预演失败」等于什么都没说，用户只知道失败了，不知道该改哪里。
+ * request.js 已把后端 message 挂在 err.message 上，这里只做「空值兜底」，绝不再加工。
+ */
+const failureText = (e) => {
+  const msg = typeof e?.message === 'string' ? e.message.trim() : ''
+  if (msg) return msg
+  if (typeof e === 'string' && e.trim()) return e.trim()
+  return '后端没有返回具体原因'
+}
+
+/**
  * 跑一次「预演 → 确认 → 执行」。
  *
  * @param {() => Promise<any>} dryRun 预演接口（同一个路径 + ?dryRun=true），要返回 { willDo, ... }
@@ -138,6 +161,8 @@ const execute = async () => {
  * @param {any} [version] 行级版本号（乐观锁）；exec 会收到它，纯状态流转类接口不用给
  * @param {() => any} [onSuccess] 执行成功后的刷新（关窗 + 成功提示之后调用）
  * @param {(err: any) => boolean} [onError] 执行失败时的接管钩子：返回 true 表示「已自行处理」（弹窗收起）
+ * @param {() => any} [onPreviewOk] **预演成功后**调用（带业务表单的入口在这一刻才收起表单）
+ * @param {(err: any) => any} [onPreviewError] 预演就失败时调用（把原因留在业务表单里，而不是只发一条会消失的 toast）
  * @param {string} [title] 弹窗标题
  * @param {string} [confirmText] 确认按钮文案
  * @param {string} [successText] 成功 toast 文案
@@ -145,7 +170,8 @@ const execute = async () => {
  * @returns {Promise<boolean>} true=执行成功；false=用户取消，或失败后关闭弹窗
  */
 const run = async ({
-  dryRun, exec, onSuccess, onError, version, title, confirmText, successText, details
+  dryRun, exec, onSuccess, onError, onPreviewOk, onPreviewError,
+  version, title, confirmText, successText, details
 } = {}) => {
   clear()
   // 先把弹窗开起来显示「正在预演」：预演也是一次网络请求，不给反馈的话用户会以为按钮点了没用
@@ -167,9 +193,27 @@ const run = async ({
     dangerState._exec = exec
     dangerState._onSuccess = onSuccess || null
     dangerState._onError = onError || null
+    // 预演通过 → 这时才让业务表单收起（见 onPreviewOk 注释）。
+    // 顺序有意：先填好确认框的 willDo / 明细，再收表单，用户不会看到「确认框空白 + 表单消失」的空档。
+    if (onPreviewOk) {
+      try {
+        await onPreviewOk()
+      } catch {
+        // 收起表单失败不能影响这次确认（顶多两个弹窗叠一下，用户仍然能确认/取消）
+      }
+    }
   } catch (e) {
-    // 预演就失败（守卫不通过 / 后端报错）：直接告诉用户，不弹一个空白确认框
-    ElMessage.error('预演失败：' + (e?.message || e))
+    // 预演就失败（守卫不通过 / 后端报错）：先让业务表单把原因显示在自己身上（用户填的内容一个都没丢），
+    // 再发一条 toast 兜底，最后收起确认弹窗 —— 绝不允许出现「表单已关 + 只剩一闪而过的提示」。
+    const reason = failureText(e)
+    if (onPreviewError) {
+      try {
+        onPreviewError(e)
+      } catch {
+        // 钩子自己的异常不能盖住真正的原因
+      }
+    }
+    ElMessage.error('预演失败：' + reason)
     finish(false)
   } finally {
     dangerState.previewing = false

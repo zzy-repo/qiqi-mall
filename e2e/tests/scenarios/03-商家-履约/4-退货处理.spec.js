@@ -235,10 +235,17 @@ test.describe('03-商家-履约 › 4-退货处理', () => {
       await expect(dialog.locator('.el-form-item').filter({ hasText: '处理结果' }), '弹窗应能打开').toBeVisible()
       await pickAuditResult(dialog, '拒绝')
       const outcome = await submitAudit(dialog)
-      // 新 UI：提交后先收起表单、再走「预演」，守卫在预演阶段就拒绝 → 弹窗自己收起 + 一条失败 toast
+      // 新 UI：预演失败时表单**不收起**（表单只在预演通过后才收），守卫在预演阶段就拒绝
+      // → 表单停在原地 + 原因写回表单内（data-testid=return-apply-form-preview-error）+ 一条失败 toast
       expect(outcome, '预演阶段应被服务端守卫拦下（不会进入确认执行）').toBe('preview-failed')
       await expectToastError(page, '该申请已处理，不能重复审核')
-      await expect(dialog, '表单弹窗不会停在原地（新 UI 先收起、再预演）').toBeHidden({ timeout: 10_000 })
+      await expect(dialog, '预演失败时表单必须停在原地（不能把用户刚选的内容丢掉）').toBeVisible()
+      const inlineError = dialog.locator('[data-testid="return-apply-form-preview-error"]')
+      await expect(inlineError, '预演失败的原因要留在表单里，而不是只发一条会消失的 toast')
+        .toBeVisible({ timeout: 10_000 })
+      await expect(inlineError, '表单内的原因就是服务端那句守卫').toContainText('该申请已处理，不能重复审核')
+      await expect(dialog.locator('.el-radio.is-checked').first(), '刚选的「拒绝」不能被重置掉')
+        .toContainText('拒绝')
     })
 
     await test.step('⑦ 申请与订单都没被第二次审核改动', async () => {

@@ -394,6 +394,16 @@
           </el-table>
         </el-form-item>
       </el-form>
+      <!-- 预演失败的原因留在表单里（不是只发一条会消失的 toast）：
+           用户能看到「为什么」、刚填的数量/仓一个都没丢，改一下就能重新提交。 -->
+      <el-alert
+        v-if="dlgError"
+        type="error"
+        :closable="false"
+        show-icon
+        :title="dlgError"
+        data-testid="delivery-form-preview-error"
+      />
       <template #footer>
         <el-button data-testid="delivery-form-cancel" @click="dlgVisible = false">取消</el-button>
         <el-button type="primary" data-testid="delivery-form-submit" @click="submitDeliveryDialog">
@@ -430,6 +440,15 @@
           </el-select>
         </el-form-item>
       </el-form>
+      <!-- 合并 / 删除并入：预演失败的原因同样留在弹窗里，选好的目标包裹不丢 -->
+      <el-alert
+        v-if="mergeError"
+        type="error"
+        :closable="false"
+        show-icon
+        :title="mergeError"
+        data-testid="delivery-merge-preview-error"
+      />
       <template #footer>
         <el-button data-testid="delivery-merge-cancel" @click="mergeVisible = false">取消</el-button>
         <el-button type="primary" data-testid="delivery-merge-submit" @click="submitMerge">确定</el-button>
@@ -672,11 +691,15 @@ const dlgMode = ref('edit')          // edit 改仓改量 | split 拆分
 const dlgDelivery = ref(null)
 const dlgWarehouseId = ref(null)
 const dlgItems = ref([])
+/** 编辑/拆分弹窗里预演失败的原因（留在弹窗内，用户填的数量不丢） */
+const dlgError = ref('')
 const mergeVisible = ref(false)
 const mergeMode = ref('merge')       // merge 合并 | delete 删除并入
 const mergeDeliveryRow = ref(null)
 const mergeTargetId = ref(null)
 const mergeOptions = ref([])
+/** 合并/删除弹窗里预演失败的原因（留在弹窗内，选好的目标包裹不丢） */
+const mergeError = ref('')
 
 // 改量的上限是「该订单明细的下单数量」，这样既能减也能加回来
 const orderItemMax = (orderItemId) => {
@@ -700,6 +723,7 @@ const openDeliveryEdit = (d) => {
   dlgDelivery.value = d
   dlgWarehouseId.value = d.warehouseId
   dlgItems.value = itemsToDialogRows(d, 'edit')
+  dlgError.value = ''
   dlgVisible.value = true
 }
 
@@ -708,14 +732,47 @@ const openDeliverySplit = (d) => {
   dlgDelivery.value = d
   dlgWarehouseId.value = null            // 默认沿用原仓
   dlgItems.value = itemsToDialogRows(d, 'split')
+  dlgError.value = ''
   dlgVisible.value = true
 }
 
 /**
- * 编辑 / 拆分待下发包裹：先把表单收成「原参数」payload，再交给 danger 走
- * 「预演（同路径 + ?dryRun=true，body 同原参数）→ 确认 → 执行」。
- * 编辑分支的 payload 里带行级 version（乐观锁）：预演和执行发的是同一份 body，所以两边都带。
- * 表单弹窗先关掉，避免两个弹窗叠着；预演失败时由 danger 直接 toast，用户可重新打开表单改。
+ * 拆 / 合 / 删 的 409/400 → 统一冲突弹窗（与商品/SKU/发货单编辑同一套）。
+ *
+ * 为什么这三个操作也要 409：别人可能同时在同一包裹上拆分 / 合并 / 删除，
+ * 版本号对不上就说明「你看到的那一行已经变了」，必须刷新后重来，而不是只 toast 一句。
+ * 返回 true 表示已接管（DangerConfirmDialog 收起，改弹 ConflictDialog）。
+ *
+ * @param {any} d 操作发起时的那一行（用于重拉它所属订单的发货单）
+ * @param {() => any} [afterRefresh] 刷新完成后的额外动作（例如重新打开编辑表单）
+ */
+const deliveryConflict = (d, afterRefresh) => (e) => {
+  if (e?.bizCode !== 409 && e?.bizCode !== 400) return false
+  handleSaveError(e, {
+    onRefresh: async () => {
+      await loadDeliveries(d.orderId)
+      await load()
+      const fresh = deliveries.value.find((x) => x.id === d.id)
+      if (!fresh) {
+        ElMessage.warning('该包裹已不存在（可能已被他人合并或删除），请重新打开订单详情')
+        return
+      }
+      if (afterRefresh) afterRefresh(fresh)
+    }
+  })
+  return true
+}
+
+/**
+ * 编辑 / 拆分待下发包裹：先把表单收成 payload，再交给 danger 走
+ * 「预演（同路径 + ?dryRun=true）→ 确认 → 执行」。
+ *
+ * version（乐观锁）：编辑、拆分都要带，取自 GET /admin/deliveries?orderId= 的该行 `d.version`，
+ * 由 danger.run 通过 `exec(version)` 交给执行接口（预演不带 version，后端在版本校验之前就返回）。
+ *
+ * 表单收起时机：**预演通过后才收**（onPreviewOk）。预演失败时表单原地不动、用户填的仓/数量全在，
+ * 原因写在弹窗内（onPreviewError）—— 早先是「先关表单再预演」，预演被守卫拦下就只剩一条 toast，
+ * 用户输入全丢，属于体验回退。
  */
 const submitDeliveryDialog = async () => {
   const d = dlgDelivery.value
@@ -736,32 +793,26 @@ const submitDeliveryDialog = async () => {
       ElMessage.warning('请至少给一条明细填写要拆出的数量')
       return
     }
+    // 拆分的 version 由 danger.run 的 exec(version) 拼进 body（见下）
     payload = { newWarehouseId: dlgWarehouseId.value || null, items }
   }
-  dlgVisible.value = false
+  dlgError.value = ''
   await danger.run({
     title: isEdit ? '⚠️ 确认修改包裹' : '⚠️ 确认拆分包裹',
     confirmText: isEdit ? '确认修改' : '确认拆分',
     successText: isEdit ? '已保存（该包裹标记为人工调整）' : '已拆分',
+    version: d.version,
     dryRun: () => (isEdit ? updateDeliveryDryRun(d.id, payload) : splitDeliveryDryRun(d.id, payload)),
-    exec: () => (isEdit ? updateDelivery(d.id, payload) : splitDelivery(d.id, payload)),
-    // 409/400 交给统一冲突处理器：DangerConfirmDialog 收起，改弹冲突弹窗；
-    // 点「刷新」→ 重拉该订单的发货单，并用最新那一行重新打开「修改包裹」表单让用户再改
-    onError: (e) => {
-      if (e?.bizCode !== 409 && e?.bizCode !== 400) return false
-      handleSaveError(e, {
-        onRefresh: async () => {
-          await loadDeliveries(d.orderId)
-          const fresh = deliveries.value.find((x) => x.id === d.id)
-          if (!fresh) {
-            ElMessage.warning('该包裹已不存在（可能已被他人删除），请刷新订单详情')
-            return
-          }
-          openDeliveryEdit(fresh)
-        }
-      })
-      return true
+    exec: (version) => (isEdit ? updateDelivery(d.id, payload) : splitDelivery(d.id, payload, version)),
+    // ✅ 预演通过后才收表单；预演失败时表单不动、原因写回弹窗内
+    onPreviewOk: () => { dlgVisible.value = false },
+    onPreviewError: (e) => {
+      dlgError.value = '预演失败：' + (e?.message || '后端没有返回具体原因')
     },
+    // 409/400 交给统一冲突处理器：DangerConfirmDialog 收起，改弹冲突弹窗；
+    // 点「刷新」→ 重拉该订单的发货单；编辑分支顺带用最新那一行重新打开表单让用户再改，
+    // 拆分分支让用户在新数据上重新决定拆多少（拆多少本来就依赖最新数量）。
+    onError: deliveryConflict(d, isEdit ? (fresh) => openDeliveryEdit(fresh) : null),
     onSuccess: async () => {
       await loadDeliveries(d.orderId)
       await load()
@@ -773,6 +824,7 @@ const openDeliveryMerge = (d) => {
   mergeMode.value = 'merge'
   mergeDeliveryRow.value = d
   mergeTargetId.value = null
+  mergeError.value = ''
   mergeOptions.value = deliveries.value.filter((x) => x.status === 0 && x.id !== d.id)
   if (!mergeOptions.value.length) {
     ElMessage.warning('没有其他「待下发」包裹可以合并')
@@ -781,6 +833,7 @@ const openDeliveryMerge = (d) => {
   mergeVisible.value = true
 }
 
+/** 合并 / 删除并入：与编辑/拆分同一套「预演通过才收表单 + 409 交冲突弹窗」 */
 const submitMerge = async () => {
   const d = mergeDeliveryRow.value
   if (!d) return
@@ -790,13 +843,20 @@ const submitMerge = async () => {
     return
   }
   const isDelete = mergeMode.value === 'delete'
-  mergeVisible.value = false
+  mergeError.value = ''
   await danger.run({
     title: isDelete ? '⚠️ 确认删除包裹（并入目标包裹）' : '⚠️ 确认合并包裹',
     confirmText: isDelete ? '确认删除' : '确认合并',
     successText: isDelete ? '已删除（明细已并入目标包裹）' : '已合并',
+    // 合并 / 删除都带发起方那一行的 version（乐观锁）；预演不需要
+    version: d.version,
     dryRun: () => (isDelete ? deleteDeliveryDryRun(d.id, targetId) : mergeDeliveryDryRun(d.id, targetId)),
-    exec: () => (isDelete ? deleteDelivery(d.id, targetId) : mergeDelivery(d.id, targetId)),
+    exec: (version) => (isDelete ? deleteDelivery(d.id, targetId, version) : mergeDelivery(d.id, targetId, version)),
+    onPreviewOk: () => { mergeVisible.value = false },
+    onPreviewError: (e) => {
+      mergeError.value = '预演失败：' + (e?.message || '后端没有返回具体原因')
+    },
+    onError: deliveryConflict(d),
     onSuccess: async () => {
       await loadDeliveries(d.orderId)
       await load()
@@ -815,6 +875,7 @@ const removeDelivery = async (d) => {
     mergeMode.value = 'delete'
     mergeDeliveryRow.value = d
     mergeTargetId.value = null
+    mergeError.value = ''
     mergeOptions.value = others
     mergeVisible.value = true
     return
@@ -824,8 +885,11 @@ const removeDelivery = async (d) => {
     title: '⚠️ 确认删除空包裹',
     confirmText: '确认删除',
     successText: '已删除',
+    // DELETE 的 version 走 query（见 api/delivery.js 的注释：DELETE 带 body 过代理不可靠）
+    version: d.version,
     dryRun: () => deleteDeliveryDryRun(d.id),
-    exec: () => deleteDelivery(d.id, null),
+    exec: (version) => deleteDelivery(d.id, null, version),
+    onError: deliveryConflict(d),
     onSuccess: async () => {
       await loadDeliveries(d.orderId)
       await load()

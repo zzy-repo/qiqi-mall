@@ -13,8 +13,10 @@ const BASE = '/deliveries'
  *   ② 执行：同一路径 + 业务 body（确认码已下线，不再需要 confirmCode）。
  * 所以每个写操作都有成对的 `xxxDryRun(...)`（预演）与 `xxx(...)`（执行）。
  *
- * 乐观锁：只有「编辑待下发包裹」（PUT /{id}）需要 body 带 version，
- * 预演与执行的 body 都要带（同一份 payload 分别发两次），缺了后端回 400、过期回 409。
+ * 乐观锁：待下发包裹的四个人工干预入口（编辑 / 拆分 / 合并 / 删除）都要带行级 version，
+ * 版本号一律从 GET /admin/deliveries?orderId= 的**该行**取；缺了后端 400、过期 409。
+ * 其中编辑走 body，拆分 / 合并走 body，**删除走 query**（见 deleteDelivery 的注释）。
+ * 预演（?dryRun=true）**都不需要 version**：后端在版本校验之前就返回预演结果。
  */
 
 // ---------------------------------------------------------------------------
@@ -77,24 +79,36 @@ export const updateDelivery = (id, data) => request.put(`${BASE}/${id}`, data)
 export const updateDeliveryDryRun = (id, data) =>
   request.put(`${BASE}/${id}`, data, { params: { dryRun: true } })
 
-/** 拆分待下发包裹：拆出一个新的待下发包裹。body = {newWarehouseId, items} */
-export const splitDelivery = (id, data) => request.post(`${BASE}/${id}/split`, data)
-/** 拆分预演：同一路径 + ?dryRun=true */
+/**
+ * 拆分待下发包裹：拆出一个新的待下发包裹。
+ * body = { newWarehouseId, items, version }
+ * version 来自 GET /admin/deliveries?orderId= 的对应行（乐观锁）；缺了后端 400、过期 409。
+ */
+export const splitDelivery = (id, data, version) =>
+  request.post(`${BASE}/${id}/split`, { ...data, version })
+/**
+ * 拆分预演：**不带 version**。
+ * 后端在版本校验**之前**就返回预演结果（预演不落库、也不占用版本），所以预演不需要版本号；
+ * 真带上了反而会让「预演过了、执行 409」这种正常并发场景变得更难解释。
+ */
 export const splitDeliveryDryRun = (id, data) =>
   request.post(`${BASE}/${id}/split`, data, { params: { dryRun: true } })
 
-/** 合并待下发包裹：把 id 并入 targetId。body = { targetId } */
-export const mergeDelivery = (id, targetId) => request.post(`${BASE}/${id}/merge`, { targetId })
-/** 合并预演：同一路径 + ?dryRun=true，body 仍是 { targetId } */
+/** 合并待下发包裹：把 id 并入 targetId。body = { targetId, version } */
+export const mergeDelivery = (id, targetId, version) =>
+  request.post(`${BASE}/${id}/merge`, { targetId, version })
+/** 合并预演：不带 version（同上，预演在版本校验之前返回） */
 export const mergeDeliveryDryRun = (id, targetId) =>
   request.post(`${BASE}/${id}/merge`, { targetId }, { params: { dryRun: true } })
 
 /**
  * 删除待下发包裹：还有明细时必须带 targetId（等同于并入别处）。
- * 目标在 query（后端 @RequestParam）。
+ *
+ * ⚠️ targetId 与 **version 都走 query**，不走 body：DELETE 带 body 过代理/CDN 不可靠
+ * （nginx / 部分中间件会丢掉 DELETE 的 body，后端 `@RequestBody` 就拿不到 → 莫名 400）。
  */
-export const deleteDelivery = (id, targetId) =>
-  request.delete(`${BASE}/${id}`, { params: targetId ? { targetId } : {} })
-/** 删除预演：?dryRun=true&targetId= */
+export const deleteDelivery = (id, targetId, version) =>
+  request.delete(`${BASE}/${id}`, { params: { ...(targetId ? { targetId } : {}), version } })
+/** 删除预演：?dryRun=true&targetId=（不带 version，同拆/合） */
 export const deleteDeliveryDryRun = (id, targetId) =>
   request.delete(`${BASE}/${id}`, { params: targetId ? { targetId, dryRun: true } : { dryRun: true } })

@@ -65,6 +65,17 @@
           </el-radio-group>
         </el-form-item>
       </el-form>
+      <!-- 预演失败的原因留在表单里（不是只发一条会消失的 toast）：
+           用户能看到「为什么」、并且已填的内容一个都没丢，改一下就能重新提交。 -->
+      <el-alert
+        v-if="previewError"
+        type="error"
+        :closable="false"
+        show-icon
+        :title="previewError"
+        data-testid="return-apply-form-preview-error"
+        style="margin-top: 4px"
+      />
       <template #footer>
         <el-button data-testid="return-apply-form-cancel" @click="visible = false">取消</el-button>
         <el-button type="primary" :loading="saving" data-testid="return-apply-form-submit" @click="submit">确定</el-button>
@@ -120,6 +131,8 @@ const load = async () => {
 
 const visible = ref(false)
 const saving = ref(false)
+/** 预演失败的原因（显示在表单内；清空重试时会重置） */
+const previewError = ref('')
 const formRef = ref()
 const form = reactive({ id: null, orderId: null, memberId: null, reasonId: null, description: '', status: 0, returnReason: '' })
 
@@ -131,6 +144,7 @@ const rules = {
 
 const openForm = (row) => {
   Object.assign(form, row ? { ...row } : { id: null, orderId: null, memberId: null, reasonId: null, description: '', status: 0, returnReason: '' })
+  previewError.value = ''
   visible.value = true
   formRef.value?.clearValidate()
 }
@@ -162,13 +176,19 @@ const submit = async () => {
     return
   }
   const applyId = form.id
-  visible.value = false
+  previewError.value = ''
   await danger.run({
     title: '⚠️ 确认审核退货申请',
     confirmText: form.status === 1 ? '确认通过' : '确认拒绝',
     successText: '审核完成',
     dryRun: () => updateReturnApplyDryRun(applyId, body),
     exec: () => updateReturnApply(applyId, body),
+    // ✅ 预演通过后才收表单：预演失败时表单原地不动、用户填的内容全在，
+    //    错误由 onPreviewError 写回表单内（旧版的体验：表单停住 + 错误提示 + 改一下就能重提）
+    onPreviewOk: () => { visible.value = false },
+    onPreviewError: (e) => {
+      previewError.value = '预演失败：' + (e?.message || '后端没有返回具体原因')
+    },
     onSuccess: () => load()
   })
 }
