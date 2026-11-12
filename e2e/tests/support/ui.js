@@ -25,7 +25,8 @@ async function waitLoginForm(page, usernameTid, timeout = 6000) {
 // ---------------------------------------------------------------------------
 
 /** 后台登录（走真实登录页；已登录则直接复用会话） */
-export async function adminLogin(page, username = 'admin', password = '123456') {
+// 口令取值：ADMIN_PASSWORD 用于容器栈（测试环境 admin 是 24 位强口令）；e2e 独立库不传就回落 123456
+export async function adminLogin(page, username = 'admin', password = process.env.ADMIN_PASSWORD || '123456') {
   await page.goto(`${ADMIN}/login`)
   if (!(await waitLoginForm(page, 'login-form-username'))) {
     await expect(page, '已登录时不应停留在登录页').not.toHaveURL(/\/login/, { timeout: 10_000 })
