@@ -12,6 +12,41 @@
 ④ list_deliveries(orderId)  回读，确认包裹数与方案一致
 ```
 
+## 工具清单（按域）
+
+| 域 | 工具 | 读/写 | 后端接口 |
+|---|---|---|---|
+| 订单 | `list_pending_orders` | 只读 | `GET /admin/orders?status=7` |
+| 订单 | `preview_split` | 只读（发票据） | `POST /admin/orders/{id}/split-preview` |
+| 订单 | `execute_audit_pass` | **写** | `POST /admin/orders/{id}/audit-pass` |
+| 订单 | `list_deliveries` | 只读 | `GET /admin/deliveries?orderId=` |
+| 商品 | `search_products` | 只读 | `GET /admin/products`（后端只支持 publishStatus，关键字/分类/分页在工具层做） |
+| 商品 | `get_product_detail` | 只读 | `GET /admin/products/{id}` + `GET /admin/skus?productId=` |
+| 商品 | `list_categories` | 只读 | `GET /admin/categories`（扁平 → 工具层拼树） |
+| 商品 | `list_product_types` | 只读 | `GET /admin/product-types` + 每类型 `GET /admin/attributes?typeId=` |
+| 商品 | `list_attributes` | 只读 | `GET /admin/attributes?typeId=` |
+| 商品 | `list_skus` | 只读 | `GET /admin/skus?productId=` |
+
+令牌口径：**只读工具不需要操作票据；写工具必须走 `confirm.mjs`**。
+
+## 目录结构（新增域照这个模式加文件）
+
+```
+src/
+├── index.mjs          入口：McpServer + StdioServerTransport，调 registerAll(server, { writeEnabled })
+├── mall.mjs           REST 客户端（登录/Bearer/解 {code,message,data}/401 重登）
+├── confirm.mjs        操作票据（一次性/5 分钟/绑方案 hash）—— 只给写工具用
+└── tools/
+    ├── index.mjs      统一注册入口（按域 import；文件头有「新增域」清单）
+    ├── _shared.mjs    公共件：text / fail / clampPage / paginate（分页全项目统一 1/10/50）
+    ├── order.mjs      订单域 4 个工具
+    └── catalog.mjs    商品域 6 个只读工具
+```
+
+新增一个域 = 新建 `src/tools/<域>.mjs` + 在 `src/tools/index.mjs` 加一行 import/调用；
+工具内一律「中文 title + 说清什么时候用的 description + zod `.describe()` 参数 +
+文本摘要 + `JSON:` 两段 + 空结果明确文案 + `fail(e)` 兜错」。
+
 ## 运行
 
 ```bash
@@ -23,13 +58,25 @@ export MCP_ENABLE_WRITE=1     # 0=只读（默认 0），1=开放写工具
 npm start
 ```
 
-`npm test` 跑闭环测试：用 SDK client 通过 stdio 真启动本 server，逐条断言 12 步
-（含「预览不落库」「假 token 被拒」「同一 token 只能用一次」「写开关只注册 2 个工具」）。
+`npm test` 跑两套测试：用 SDK client 通过 stdio 真启动本 server，逐条断言。
+
+- `test/loop.mjs`（12 条）：订单闭环，含「预览不落库」「假 token 被拒」「同一 token 只能用一次」「写开关生效」
+- `test/catalog.mjs`（26 条）：商品域 6 个只读工具，含分页夹取、空结果文案、**只读校验（调用前后 product/sku 行数不变）**
 测试会消费 `qiqi_mall_test` 里 **id=3** 的订单，跑完记得复位：
 
 ```bash
 bash ../scripts/reset-test-db.sh     # 或 cd ../e2e && npm run reset:test
 ```
+
+> ⚠️ 复位脚本会 `TRUNCATE admin`（种子只带 `admin`/`123456`），**把运维账号 `ai_operator` 一起清掉**，
+> 之后再跑 `npm test` 会全员「登录失败」。复位后补回：
+>
+> ```bash
+> TOKEN=$(curl -s -X POST http://127.0.0.1:18080/admin/auth/login -H 'Content-Type: application/json' \
+>   -d '{"username":"admin","password":"123456"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["accessToken"])')
+> curl -s -X POST http://127.0.0.1:18080/admin/admins -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+>   -d '{"username":"ai_operator","password":"Ai@2026#ops","nickname":"AI 运营助手","status":1}'
+> ```
 
 ## 用 MCP Inspector 调试
 
@@ -45,7 +92,7 @@ npx -y @modelcontextprotocol/inspector \
 
 踩坑记录（v2.15.0 实测）：
 
-- **stdio 子进程拿不到父进程 env** → 不传 `-e` 会只注册 2 个只读工具（`MCP_ENABLE_WRITE` 不生效）
+- **stdio 子进程拿不到父进程 env** → 不传 `-e` 会漏掉写工具（`MCP_ENABLE_WRITE` 不生效，只剩 8 个只读工具）
 - UI URL 参数是 `?MCP_INSPECTOR_API_TOKEN=…`（不是旧版的 `MCP_PROXY_AUTH_TOKEN`）
 - UI 用的是 **Mantine**，不是 MUI：Run 按钮文案是 `Execute Tool`，连服务器点 `span.mantine-Switch-track`
 - 成功后参数输入框会被 React 受控组件清空（想连点两次同参，靠 state 保留而不是输入框）
@@ -80,7 +127,7 @@ bash scripts/start-inspector.sh    # 在仓库根目录执行
 |---|---|---|
 | `MALL_BASE` | `http://127.0.0.1:18080` | 后端网关地址 |
 | `MALL_USER` / `MALL_PASS` | — | 专用运维账号（不要用 admin） |
-| `MCP_ENABLE_WRITE` | `0` | `0`=只注册 2 个只读工具；`1`=注册全部 4 个 |
+| `MCP_ENABLE_WRITE` | `0` | `0`=只注册 8 个只读工具（订单 2 + 商品 6）；`1`=再加 2 个写工具（共 10 个） |
 
 见 `.env.example`。
 

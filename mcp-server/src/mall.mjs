@@ -115,4 +115,45 @@ export function orderDetail(orderId) {
   return request('GET', `/admin/orders/${encodeURIComponent(orderId)}`);
 }
 
+// ---------- 商品域（catalog）只读接口 ----------
+// ⚠️ 后端实际形态（已读 Controller 确认，别按"标准分页"想当然）：
+//   GET /admin/products      只支持 publishStatus 过滤，**不分页**，直接返回 List<Product>
+//   GET /admin/skus          支持 productId 过滤，**不分页**，返回带 specText 的 List
+//   GET /admin/attributes    支持 typeId 过滤，**不分页**
+//   GET /admin/categories、/admin/product-types 全量返回，**不分页**，也不含子级/属性
+// 因此分页/关键字/分类树这些都在工具层做（见 src/tools/catalog.mjs）。
+
+/** 商品列表（全量；publishStatus: 0 下架 / 1 上架，可选） */
+export function listProducts({ publishStatus } = {}) {
+  const qs = publishStatus === undefined || publishStatus === null ? '' : `?publishStatus=${encodeURIComponent(publishStatus)}`;
+  return request('GET', `/admin/products${qs}`);
+}
+
+/** 商品详情 => {product, gallery}（后端聚合：商品 + 相册） */
+export function productDetail(id) {
+  return request('GET', `/admin/products/${encodeURIComponent(id)}`);
+}
+
+/** 分类全量（扁平；parentId=0 为顶级，后端不返回树） */
+export function listCategories() {
+  return request('GET', '/admin/categories');
+}
+
+/** 商品类型全量（扁平；**不含**属性，属性要另调 listAttributes） */
+export function listProductTypes() {
+  return request('GET', '/admin/product-types');
+}
+
+/** 属性列表（typeId 可选：不传=全部属性） */
+export function listAttributes({ typeId } = {}) {
+  const qs = typeId === undefined || typeId === null ? '' : `?typeId=${encodeURIComponent(typeId)}`;
+  return request('GET', `/admin/attributes${qs}`);
+}
+
+/** SKU 列表（productId 可选：不传=全部 SKU），每项含 specText 规格文本 */
+export function listSkus({ productId } = {}) {
+  const qs = productId === undefined || productId === null ? '' : `?productId=${encodeURIComponent(productId)}`;
+  return request('GET', `/admin/skus${qs}`);
+}
+
 export const mallBase = BASE;

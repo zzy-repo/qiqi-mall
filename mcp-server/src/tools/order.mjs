@@ -1,18 +1,13 @@
-// 4 个工具：2 个只读 + 2 个写（写工具受 MCP_ENABLE_WRITE 控制）
+// 订单域工具：现有 4 个（2 只读 + 2 写；写工具受 MCP_ENABLE_WRITE 控制）
+// ⚠️ 这批是从 src/tools.mjs 原样搬过来的，**行为一字未改**（输出文本、错误文案、注册顺序都保持原样），
+//    只把 text/money/fail 抽到 ./_shared.mjs。
 
 import { z } from 'zod';
-import { listPendingOrders, splitPreview, auditPass, listDeliveries } from './mall.mjs';
-import { issue, consume, hashPlan } from './confirm.mjs';
+import { listPendingOrders, splitPreview, auditPass, listDeliveries } from '../mall.mjs';
+import { issue, consume, hashPlan } from '../confirm.mjs';
+import { text, money, fail } from './_shared.mjs';
 
 // ---------- 展示辅助 ----------
-
-function text(payload) {
-  return { content: [{ type: 'text', text: typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2) }] };
-}
-
-function money(n) {
-  return n === null || n === undefined ? '-' : String(n);
-}
 
 function planToText(plan) {
   return plan
@@ -37,15 +32,14 @@ function deliveriesToText(list) {
     .join('\n');
 }
 
-/** 后端/校验错误统一转成「模型能看懂的一句话」，不抛给协议层 */
-function fail(err) {
-  console.error('[mcp] tool failed:', err?.message || err);
-  return { isError: true, content: [{ type: 'text', text: `❌ ${err?.message || String(err)}` }] };
-}
-
 // ---------- 注册 ----------
 
-export function registerTools(server, { writeEnabled }) {
+/**
+ * 注册订单域工具。
+ * @param {import('@modelcontextprotocol/sdk/server/mcp.js').McpServer} server
+ * @param {{ writeEnabled: boolean }} ctx
+ */
+export function registerOrderTools(server, { writeEnabled } = {}) {
   // ① 只读：待审核列表
   server.registerTool(
     'list_pending_orders',
@@ -106,7 +100,7 @@ export function registerTools(server, { writeEnabled }) {
   );
 
   if (!writeEnabled) {
-    console.error('[mcp] MCP_ENABLE_WRITE!=1 → 只注册 2 个只读工具');
+    console.error('[mcp] MCP_ENABLE_WRITE!=1 → 订单域只注册 2 个只读工具');
     return;
   }
 

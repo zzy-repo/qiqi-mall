@@ -242,17 +242,26 @@ async function main() {
 
   await client.close();
 
-  // ⑫ 写开关：MCP_ENABLE_WRITE=0 → 只 2 个工具
+  // ⑫ 写开关：MCP_ENABLE_WRITE=0 → 只剩只读工具（订单 2 个 + 商品域 6 个），写工具消失
   try {
     const ro = await connectServer({ MCP_ENABLE_WRITE: '0' }, 'ro');
     const { tools } = await ro.listTools();
     const names = tools.map((t) => t.name).sort();
-    const want = ['list_pending_orders', 'preview_split'];
-    const pass = tools.length === 2 && want.every((n) => names.includes(n));
-    assert(pass, '⑫ MCP_ENABLE_WRITE=0 → tools/list 只 2 个只读工具', `${tools.length} 个：${names.join(', ')}`);
+    const want = [
+      'list_pending_orders',
+      'preview_split',
+      'search_products',
+      'get_product_detail',
+      'list_categories',
+      'list_product_types',
+      'list_attributes',
+      'list_skus',
+    ];
+    const pass = tools.length === want.length && want.every((n) => names.includes(n)) && !names.includes('execute_audit_pass');
+    assert(pass, '⑫ MCP_ENABLE_WRITE=0 → tools/list 只剩 8 个只读工具（订单 2 + 商品 6），写工具消失', `${tools.length} 个：${names.join(', ')}`);
     await ro.close();
   } catch (e) {
-    ko('⑫ MCP_ENABLE_WRITE=0 → tools/list 只 2 个只读工具', e.message);
+    ko('⑫ MCP_ENABLE_WRITE=0 → tools/list 只剩 8 个只读工具（订单 2 + 商品 6），写工具消失', e.message);
   }
 
   // ---------------- 总结 ----------------
