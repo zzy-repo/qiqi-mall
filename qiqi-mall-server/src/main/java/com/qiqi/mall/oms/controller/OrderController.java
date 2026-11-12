@@ -10,11 +10,14 @@ import com.qiqi.mall.order.entity.OrderItem;
 import com.qiqi.mall.oms.entity.ReturnApply;
 import com.qiqi.mall.oms.service.OrderItemService;
 import com.qiqi.mall.oms.service.OrderService;
+import com.qiqi.mall.oms.service.ConfirmCodeService;
 import com.qiqi.mall.oms.service.ReturnApplyService;
 import com.qiqi.mall.oms.service.SplitOrderService;
 import com.qiqi.mall.catalog.service.SkuService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -25,20 +28,25 @@ import java.util.List;
 @RequestMapping("/admin/orders")
 public class OrderController {
 
+    private static final Logger log = LoggerFactory.getLogger(OrderController.class);
+
     private final OrderService orderService;
     private final OrderItemService orderItemService;
     private final ReturnApplyService returnApplyService;
     private final SplitOrderService splitOrderService;
     private final SkuService skuService;
+    /** 操作确认码：split-preview 签发、audit-pass 强制校验 */
+    private final ConfirmCodeService confirmCodeService;
 
     public OrderController(OrderService orderService, OrderItemService orderItemService,
                            ReturnApplyService returnApplyService, SplitOrderService splitOrderService,
-                           SkuService skuService) {
+                           SkuService skuService, ConfirmCodeService confirmCodeService) {
         this.orderService = orderService;
         this.orderItemService = orderItemService;
         this.returnApplyService = returnApplyService;
         this.splitOrderService = splitOrderService;
         this.skuService = skuService;
+        this.confirmCodeService = confirmCodeService;
     }
 
     /**
@@ -116,13 +124,50 @@ public class OrderController {
     }
 
     /**
-     * 审核通过：待审核(7) → 待发货(8)，守卫：仅 status=7；随后触发拆单生成发货单。
+     * 审核通过：待审核(7) → 待发货(8)，随后触发拆单生成发货单。
+     *
+     * <p>守卫顺序（每一步都是中文错误，前端可直接展示）：
+     * <ol>
+     *   <li>confirmCode 为空 → 缺确认码（说明调用方没走拆单预览）</li>
+     *   <li>码消费不到 → 无效 / 已用过 / 已过期（一次性，取出即删）</li>
+     *   <li>码里的 orderId 与路径 id 不一致 → 码是别的单的</li>
+     *   <li>重算当前方案指纹不一致 → 预览之后仓库/库存/明细被改动，拒绝执行</li>
+     *   <li>status != 7 → 原有守卫（状态流转只能从待审核出发）</li>
+     * </ol>
      */
-    @Operation(summary = "审核通过订单：自动按仓库拆单，生成待下发发货单")
+    @Operation(summary = "审核通过订单：需带 confirmCode（由 split-preview 签发），自动按仓库拆单并生成待下发发货单")
     @PostMapping("/{id}/audit-pass")
-    public Result<java.util.List<com.qiqi.mall.oms.entity.DeliveryOrder>> auditPass(@PathVariable Long id) {
+    public Result<java.util.List<com.qiqi.mall.oms.entity.DeliveryOrder>> auditPass(
+            @PathVariable Long id,
+            @RequestBody(required = false) AuditPassRequest req) {
+        String confirmCode = req == null ? null : req.getConfirmCode();
+        if (confirmCode == null || confirmCode.isBlank()) {
+            return Result.fail("缺少确认码：请先预览拆单方案");
+        }
         Order order = orderService.getById(id);
         if (order == null) return Result.fail("订单不存在");
+
+        ConfirmCodeService.Consumed consumed = confirmCodeService.consume(confirmCode);
+        if (consumed == null) {
+            // 文案带上真实有效期（默认 5 分钟，见 app.confirm-code.ttl-minutes），不写死数字
+            long ttlMinutes = Math.max(1, confirmCodeService.ttlSeconds() / 60);
+            return Result.fail("确认码无效、已使用或已过期（" + ttlMinutes + " 分钟），请重新预览拆单方案");
+        }
+        if (!id.equals(consumed.orderId())) {
+            return Result.fail("确认码与订单不匹配，请重新预览");
+        }
+        // 重算指纹：方案不可复现（SKU 失去分仓库存等）同样视为「方案已变化」，一律拒绝
+        String currentPlanHash;
+        try {
+            currentPlanHash = confirmCodeService.hashPlan(splitOrderService.recomputePlan(id));
+        } catch (RuntimeException e) {
+            log.warn("audit-pass 重算拆单方案失败，按方案已变化处理 orderId={}: {}", id, e.getMessage());
+            return Result.fail("拆单方案已变化（仓库或库存被改动），拒绝执行，请重新预览");
+        }
+        if (!currentPlanHash.equals(consumed.planHash())) {
+            return Result.fail("拆单方案已变化（仓库或库存被改动），拒绝执行，请重新预览");
+        }
+
         if (order.getStatus() == null || order.getStatus() != 7) return Result.fail("只有待审核订单可以审核通过");
         order.setStatus(8);
         orderService.updateById(order);
@@ -131,17 +176,29 @@ public class OrderController {
 
     /**
      * 拆单方案预览（dry-run）：只算不落库，守卫：仅 status=7 待审核。
-     * 返回 [{warehouseId, warehouseName, items:[{orderItemId, productSkuId, productName, quantity}]}]
-     * 审核弹窗里的「查看拆单方案」就走这里；调用前后 delivery_order 行数不变。
+     * 返回 {@code {plan:[{warehouseId, warehouseName, items:[...]}], confirmCode:"<uuid>", expiresInSec:300}}。
+     *
+     * <p>⚠️ 破坏性变更：返回结构从 {@code List<Map>} 变成 {@code Map}（多了 confirmCode / expiresInSec）。
+     * confirmCode 就是 audit-pass 的必传票据 —— 只有真正算过方案的人才拿得到码，
+     * 这样绕过前端直调 audit-pass 的请求一律被后端拒掉。
      */
-    @Operation(summary = "拆单方案预览（dry-run，不落库）：看清会拆成几个包裹、分别从哪个仓发")
+    @Operation(summary = "拆单方案预览（dry-run，不落库）：返回方案 + 一次性确认码 confirmCode（5 分钟有效）")
     @PostMapping("/{id}/split-preview")
-    public Result<java.util.List<java.util.Map<String, Object>>> splitPreview(@PathVariable Long id) {
-        return Result.ok(splitOrderService.preview(id));
+    public Result<java.util.Map<String, Object>> splitPreview(@PathVariable Long id) {
+        java.util.List<java.util.Map<String, Object>> plan = splitOrderService.preview(id);
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("plan", plan);
+        body.put("confirmCode", confirmCodeService.issue(id, plan));
+        body.put("expiresInSec", confirmCodeService.ttlSeconds());
+        return Result.ok(body);
     }
 
     /**
      * 审核不通过：待审核(7) → 已关闭(4)，守卫：仅 status=7；联动回补库存（下单即扣模型）。
+     *
+     * <p>为什么不加确认码：本批口径是「只给有方案可绑的写操作加码」。audit-reject 不绑任何方案，
+     * 后果单一且明确（关闭订单 + 回补库存，可预测、可逆性靠退货/重下单），
+     * 硬塞一个码只会让「一键拒绝」多两次往返而没有增加任何防偷换能力。
      */
     @Operation(summary = "审核不通过订单：订单关闭并回补库存")
     @PostMapping("/{id}/audit-reject")
@@ -174,6 +231,19 @@ public class OrderController {
     public Result<Void> delete(@PathVariable Long id) {
         orderService.removeById(id);
         return Result.ok();
+    }
+
+    /** 审核通过的请求体：必传 confirmCode（split-preview 签发的一次性码） */
+    public static class AuditPassRequest {
+        private String confirmCode;
+
+        public String getConfirmCode() {
+            return confirmCode;
+        }
+
+        public void setConfirmCode(String confirmCode) {
+            this.confirmCode = confirmCode;
+        }
     }
 
     /** 创建/更新订单时的请求体：订单 + 明细 */

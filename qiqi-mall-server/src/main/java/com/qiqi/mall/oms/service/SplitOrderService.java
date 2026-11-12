@@ -61,6 +61,25 @@ public class SplitOrderService {
         if (order.getStatus() == null || order.getStatus() != 7) {
             throw new IllegalStateException("只有待审核订单可以预览拆单方案");
         }
+        return buildPlan(orderId);
+    }
+
+    /**
+     * 重算当前方案（**不校验 status**）：只给「确认码指纹比对」用。
+     *
+     * <p>为什么不直接复用 {@link #preview(Long)}：audit-pass 的校验顺序是
+     * ④ 比对指纹 → ⑤ 再看 status==7。若这里也守 status，状态不对的订单会先抛
+     * 「只有待审核订单可以预览拆单方案」，把「码对、但单子已被别人审过」误报成别的原因。
+     *
+     * @throws IllegalStateException 订单不存在 / 没有明细 / SKU 无法确定发货仓（= 方案已不可复现）
+     */
+    public List<Map<String, Object>> recomputePlan(Long orderId) {
+        if (orderService.getById(orderId) == null) throw new IllegalStateException("订单不存在");
+        return buildPlan(orderId);
+    }
+
+    /** preview 与 recomputePlan 的共同实现：同一套归属口径 => 「预览即所得」 */
+    private List<Map<String, Object>> buildPlan(Long orderId) {
         List<OrderItem> items = orderItemService.list(new LambdaQueryWrapper<OrderItem>()
                 .eq(OrderItem::getOrderId, orderId).orderByAsc(OrderItem::getId));
         if (items.isEmpty()) throw new IllegalStateException("订单没有明细，无法预览拆单方案");

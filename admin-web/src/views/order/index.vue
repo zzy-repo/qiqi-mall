@@ -343,7 +343,7 @@
           type="info"
           :closable="false"
           show-icon
-          title="点「通过」才会真正生成这些包裹；现在是只读预览。"
+          title="点「通过」才会真正生成这些包裹；现在是只读预览（审核通过时后端会核对这份方案没变）。"
           style="margin-bottom: 12px"
         />
         <el-table :data="previewPlan" border size="small" empty-text="没有可拆的明细">
@@ -357,7 +357,9 @@
             </template>
           </el-table-column>
         </el-table>
-        <div class="preview-tip">共 {{ previewPlan.length }} 个包裹</div>
+        <div class="preview-tip">
+          共 {{ previewPlan.length }} 个包裹 · 确认码 {{ Math.round(previewExpiresInSec / 60) }} 分钟内有效，仅可使用一次
+        </div>
       </div>
       <template #footer>
         <el-button data-testid="order-split-preview-close" @click="previewVisible = false">关闭</el-button>
@@ -457,9 +459,10 @@ import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listOrders, createOrder, updateOrder } from '../../api/order'
 import {
-  listDeliveries, dispatchDelivery, cancelDelivery, wmsCallback, auditPassOrder, auditRejectOrder,
+  listDeliveries, dispatchDelivery, cancelDelivery, wmsCallback, auditRejectOrder,
   deliveryCounts, splitPreviewOrder, updateDelivery, splitDelivery, mergeDelivery, deleteDelivery
 } from '../../api/delivery'
+import request from '../../api/request'
 import { listWarehouses } from '../../api/warehouse'
 import { Search } from '@element-plus/icons-vue'
 import { listMembers } from '../../api/member'
@@ -603,7 +606,15 @@ const audit = async (row) => {
   if (action === 'close') return
   try {
     if (action === 'pass') {
-      await auditPassOrder(row.id)
+      const code = await ensureConfirmCode(row)
+      if (!code) return
+      try {
+        await auditPassWithCode(row.id, code)
+      } finally {
+        // 码是一次性的：无论成败都作废，下次点通过会重新预览签发
+        confirmCode.value = null
+        confirmCodeOrderId.value = null
+      }
       ElMessage.success('审核通过，已生成发货单')
     } else {
       await auditRejectOrder(row.id)
@@ -635,17 +646,54 @@ const loadPackageCounts = async () => {
 const previewVisible = ref(false)
 const previewLoading = ref(false)
 const previewPlan = ref([])
+// 操作确认码：后端 split-preview 下发、audit-pass 强制校验（一次性，默认 5 分钟）
+const confirmCode = ref(null)
+const confirmCodeOrderId = ref(null)
+const previewExpiresInSec = ref(300)
+
 const openSplitPreview = async (row) => {
   previewVisible.value = true
   previewLoading.value = true
   previewPlan.value = []
   try {
-    previewPlan.value = (await splitPreviewOrder(row.id)) || []
+    const resp = (await splitPreviewOrder(row.id)) || {}
+    previewPlan.value = resp.plan || []
+    // 预览即签票：这份码绑定的就是「用户刚看到的方案」，点通过时直接用
+    confirmCode.value = resp.confirmCode || null
+    confirmCodeOrderId.value = row.id
+    previewExpiresInSec.value = resp.expiresInSec || 300
   } catch (e) {
     ElMessage.error('预览失败：' + e.message)
     previewVisible.value = false
   } finally {
     previewLoading.value = false
+  }
+}
+
+/** 审核通过：后端要求必带确认码 */
+const auditPassWithCode = (id, code) => request.post(`/orders/${id}/audit-pass`, { confirmCode: code })
+
+/**
+ * 取本次「通过」要用的确认码。
+ * 优先复用「查看拆单方案」时拿到的码（同一订单）；没预览过就现场预览一次再提交 ——
+ * 选这个方案而不是「提示请先查看方案」，是为了不把常规审核从 1 步变成 2 步
+ * （原设计就是默认一键通过）。真正的防偷换在后端：码绑定订单 + 方案指纹，方案变了会被拒。
+ */
+const ensureConfirmCode = async (row) => {
+  if (confirmCode.value && confirmCodeOrderId.value === row.id) return confirmCode.value
+  try {
+    const resp = (await splitPreviewOrder(row.id)) || {}
+    confirmCode.value = resp.confirmCode || null
+    confirmCodeOrderId.value = row.id
+    previewExpiresInSec.value = resp.expiresInSec || 300
+    if (!confirmCode.value) {
+      ElMessage.error('没能取到确认码，请先点「查看拆单方案」再审核')
+      return null
+    }
+    return confirmCode.value
+  } catch (e) {
+    ElMessage.error('取确认码失败：' + e.message)
+    return null
   }
 }
 
