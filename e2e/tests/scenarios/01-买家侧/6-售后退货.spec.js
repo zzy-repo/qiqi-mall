@@ -22,6 +22,7 @@ import {
 import { tid } from '../../support/tid.js'
 import { memberNickOf, receiverOf, returnDescriptionOf } from '../../support/fixtures.js'
 import { demoName, demoUsername } from '../../support/images.js'
+import { withBackstage } from '../../support/backstage.js'
 
 
 /**
@@ -33,6 +34,51 @@ import { demoName, demoUsername } from '../../support/images.js'
  * 断言依据：portal/order/index.vue（申请退货 v-if status 1|2、售后台来自 GET /portal/returns）、
  *          PortalReturnController 守卫、后台 return-apply 审核
  */
+
+/**
+ * 后台准备：登录 + 把商品1 第一个 SKU 库存补回 50（幕布上下文，不进买家视角的录像）。
+ * @returns 管理端令牌（需要在 admin 域里读，只能在幕布里顺手带出来）
+ */
+async function prepareStock(browser) {
+  return withBackstage(browser, async (admin) => {
+    await adminLogin(admin)
+    await adminSetSkuStock(admin, 1, 0, 50)
+    return adminTokenOf(admin)
+  })
+}
+
+/**
+ * 在幕布里推进后台状态，同时让买家页不断刷新列表 —— 画面里能看到状态自己变过去，
+ * 既没有后台画面，也不会留下十几秒静止。
+ * @param doneText 买家侧列表里出现这个文案就算推进完成
+ */
+async function backstageUntil(browser, buyerPage, orderSn, doneText, run) {
+  const working = withBackstage(browser, run)
+  let done = false
+  for (let i = 0; i < 24 && !done; i++) {
+    await buyerPage.reload()
+    await buyerPage.waitForTimeout(1200)
+    done = (await buyerPage.locator('.el-table__body tr').first().innerText()).includes(doneText)
+  }
+  await working
+  return done
+}
+
+/** 幕布里把订单推到「已发货」（管理员审核 + 下发 + 出库，真实 UI） */
+async function shipInBackstage(browser, buyerPage, orderSn) {
+  return backstageUntil(browser, buyerPage, orderSn, '已发货', async (admin) => {
+    await adminLogin(admin)
+    await toShipped(admin, orderSn)
+  })
+}
+
+/** 幕布里审核退货申请（通过 / 拒绝），等买家侧列表出现对应结果 */
+async function auditReturnInBackstage(browser, buyerPage, orderSn, approve) {
+  const doneText = approve ? '退款成功' : '退货被拒绝'
+  return backstageUntil(browser, buyerPage, orderSn, doneText, async (admin) => {
+    await auditReturn(admin, orderSn, approve)
+  })
+}
 
 /** 买家把订单推进到「已发货」（管理员审核 + 下发 + 出库，真实 UI） */
 async function toShipped(page, orderSn) {
@@ -83,16 +129,17 @@ async function auditReturn(page, orderSn, approve) {
 }
 
 test.describe('买家侧 06 售后退货', () => {
-  test('申请退货：选原因提交后进入退款中，入口消失（不能重复申请）', async ({ page, request }) => {
+  test('申请退货：选原因提交后进入退款中，入口消失（不能重复申请）', async ({ page, request, browser }) => {
     const username = demoUsername('张小雨') || `e2e_return_${stamp()}`
-    await adminLogin(page)
-    await adminSetSkuStock(page, 1, 0, 50)
+    // 后台补库存/审核发货都在幕布里点，买家视角的片子里不出现后台画面
+    const prep = prepareStock(browser)
     await memberRegisterAndLogin(page, username, '123456', memberNickOf(username))
 
     const { skus } = await getProductApi(request, 1)
     await addSpecToCart(page, 1, skus[0].specText)
+    await prep
     const orderSn = await submitCartOrder(page, receiverOf(username))
-    await toShipped(page, orderSn)
+    await shipInBackstage(browser, page, orderSn)
 
     const row = await applyReturn(page, orderSn)
     await expect(row, '申请后售后列应显示退款处理中').toContainText('退款处理中', { timeout: 15_000 })
@@ -118,22 +165,21 @@ test.describe('买家侧 06 售后退货', () => {
     await expect(row.getByTestId('orders-row-return'), '待审核订单不应有申请退货入口').toHaveCount(0)
   })
 
-  test('管理员审核通过：退款成功 + 库存回补，买家看到结果', async ({ page, request }) => {
+  test('管理员审核通过：退款成功 + 库存回补，买家看到结果', async ({ page, request, browser }) => {
     const username = demoUsername('陈可') || `e2e_return_pass_${stamp()}`
-    await adminLogin(page)
-    await adminSetSkuStock(page, 1, 0, 50)
-    const at = await adminTokenOf(page)
+    const prep = prepareStock(browser)          // 幕布里补库存，令牌顺手带出来
     await memberRegisterAndLogin(page, username, '123456', memberNickOf(username))
 
     const { skus } = await getProductApi(request, 1)
     const sku = skus[0]
     await addSpecToCart(page, 1, sku.specText)
+    const at = await prep
     const orderSn = await submitCartOrder(page, receiverOf(username))
-    await toShipped(page, orderSn)
+    await shipInBackstage(browser, page, orderSn)
 
     const stockBefore = (await getProductApi(request, 1)).skus.find((s) => s.id === sku.id).stock
     await applyReturn(page, orderSn)
-    await auditReturn(page, orderSn, true)
+    await auditReturnInBackstage(browser, page, orderSn, true)
 
     // 库存回补
     const stockAfter = (await getProductApi(request, 1)).skus.find((s) => s.id === sku.id).stock
@@ -148,19 +194,18 @@ test.describe('买家侧 06 售后退货', () => {
     expect((await getMemberReturnsApi(request, token))[0].status, '申请应为已通过(1)').toBe(1)
   })
 
-  test('管理员审核拒绝：订单回到已付款，买家看到退货被拒绝', async ({ page, request }) => {
+  test('管理员审核拒绝：订单回到已付款，买家看到退货被拒绝', async ({ page, request, browser }) => {
     const username = demoUsername('王建国') || `e2e_return_reject_${stamp()}`
-    await adminLogin(page)
-    await adminSetSkuStock(page, 1, 0, 50)
-    const at = await adminTokenOf(page)
+    const prep = prepareStock(browser)
     await memberRegisterAndLogin(page, username, '123456', memberNickOf(username))
 
     const { skus } = await getProductApi(request, 1)
     await addSpecToCart(page, 1, skus[0].specText)
+    const at = await prep
     const orderSn = await submitCartOrder(page, receiverOf(username))
-    await toShipped(page, orderSn)
+    await shipInBackstage(browser, page, orderSn)
     await applyReturn(page, orderSn)
-    await auditReturn(page, orderSn, false)
+    await auditReturnInBackstage(browser, page, orderSn, false)
 
     expect((await getAdminOrderBySnApi(request, at, orderSn)).status, '拒绝后订单应回到已付款(1)').toBe(1)
 
