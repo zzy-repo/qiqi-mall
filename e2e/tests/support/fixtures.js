@@ -18,10 +18,12 @@
  *      用 data-testid（行锚点 `*-row-<id>`）或先用接口查出 id 再定位。
  *
  * 唯一性与「重名」的处理：
- *   · 商品/分类的名字取自小池子，多轮跑会重名 → 用 `newestByName()` 取「最新一条」，
- *     行内定位优先用 `product-row-<id>` / `category-row-<id>` 这类行锚点，不靠名字过滤。
- *   · 仓库名后端允许重名，但列表是按名字定位的 → 名字里带一个像真实库位编号的后缀（B482 这种），
- *     既不重复也仍然「像真的」。
+ *   · **所有「会写进库的名字」都追加同一个唯一尾巴**（`nameTail()` / `nameSuffix()`，见下方
+ *     「唯一尾巴」一节）：9 位纯数字，如 `亚麻抱枕套 · 轻奢款 · 954500593`。名字本身唯一之后，
+ *     「按名字精确匹配」这一类断言（`newestByName()` / 「删完按名字应为 0 条」）才站得住，
+ *     也顺手保证不会误删上一轮或别人留下的同款数据。
+ *   · 行内定位仍然优先用 `product-row-<id>` / `category-row-<id>` 这类行锚点，不靠名字过滤。
+ *   · 仓库名后端允许重名，但列表是按名字定位的 → 尾巴是 `（B954500593）` 这种库位编号样式。
  */
 
 // ---------------------------------------------------------------------------
@@ -42,6 +44,47 @@ export function pick(arr, seed) {
 
 /** 只用于唯一性、不显示的键（登录名/内部备注用） */
 export const uniqueKey = (base) => `${base}_${stamp()}`
+
+// ---------------------------------------------------------------------------
+// 唯一尾巴：所有「会写进库的名字」共用这一个后缀来源
+// ---------------------------------------------------------------------------
+
+/**
+ * 为什么必须有它（红队实测的假红，2026-11-12）：
+ *   名字池很小（22 个品名 × 8 个款式），只靠 seed 取名字 → 跨轮次必然撞名。
+ *   上一轮中断留下 id=30「亚麻抱枕套 · 轻奢款」、id=31「胡桃木餐具垫 · 家用两件套」，
+ *   这一轮 productNameOf(seed) 又正好生成同一个名字 → 「删除后按名字精确匹配应为 0 条」
+ *   删掉一条还剩一条 → 断言红，但代码没问题。根治办法：名字自带唯一尾巴。
+ *
+ * 三条规则（以后加名字函数时照这个来）：
+ *   1. 一次运行只算一次「运行号」= 3 位毫秒 + 3 位随机，再拼 3 位递增序号 → 9 位数字
+ *      （形如 `954500593`）。跨轮次、跨 shard 进程都不会撞；不用 UUID（太长、截图难看）。
+ *   2. 同一个 seed 反复调用返回**同一个**尾巴（内存缓存，幂等）→ 用例里名字前后一致，
+ *      `newestByName()` / 「按名字精确匹配」的断言语义不变，而且更强：
+ *      这个名字只属于本轮这一条数据，不会误命中/误删历史残留。
+ *   3. **所有**名字函数都走这一个入口，不许各写一套随机（否则尾巴互不相干，也没法解释）。
+ */
+const TAIL_RUN = `${String(Date.now() % 1000).padStart(3, '0')}${String(
+  Math.floor(Math.random() * 1000)
+).padStart(3, '0')}`
+let tailSeq = 0
+const tailCache = new Map()
+
+/** 取「本轮唯一」的短尾巴（纯数字，如 954500593）；同一个 seed 恒定拿到同一个 */
+export function nameTail(seed) {
+  const key = String(seed ?? '')
+  const cached = tailCache.get(key)
+  if (cached) return cached
+  const tail = `${TAIL_RUN}${String(tailSeq++).padStart(3, '0')}`
+  tailCache.set(key, tail)
+  return tail
+}
+
+/** 名字后缀，统一格式 ` · 954500593`（商品/分类/类型/属性/退货说明都用它） */
+export const nameSuffix = (seed) => ` · ${nameTail(seed)}`
+
+/** 昵称/管理员昵称的后缀：不带空格（履约场景会把昵称拼进登录名，空格容易惹麻烦） */
+export const nickSuffix = (seed) => `·${nameTail(seed)}`
 
 // ---------------------------------------------------------------------------
 // 真实图片池（MinIO 上的种子图，都是真照片，不是色块）
@@ -121,12 +164,15 @@ export const productNames = [
   '椴木砧板', '低款搪瓷碗'
 ]
 
-/** 款式限定词（和商品名组合，避免多轮跑重名，同时保持自然） */
+/** 款式限定词（和商品名组合，读起来自然；唯一性由 nameSuffix 的尾巴保证，不靠它） */
 export const productEditions = ['经典款', '轻奢款', '家用款', '礼盒装', '升级款', '联名款', '旅行装', '家用两件套']
 
-/** 生成一个「好看的」商品名，如「手冲咖啡滤杯 · 礼盒装」 */
+/**
+ * 生成一个「好看的」商品名，如「手冲咖啡滤杯 · 礼盒装 · 954500593」。
+ * 尾巴保证跨轮次唯一（见「唯一尾巴」一节）；同一个 seed 恒定同一个名字。
+ */
 export function productNameOf(seed) {
-  return `${pick(productNames, seed)} · ${pick(productEditions, `${seed}-ed`)}`
+  return `${pick(productNames, seed)} · ${pick(productEditions, `${seed}-ed`)}${nameSuffix(seed)}`
 }
 
 /** 商品描述（展示在 C 端详情页，必须像人写的） */
@@ -147,7 +193,8 @@ export const memberNicks = [
   '许星野', '温以宁', '陆见微', '宋知遥', '周予安', '白露',
   '孟云舟', '乔之南'
 ]
-export const memberNickOf = (seed) => pick(memberNicks, seed)
+/** 会员昵称：带唯一尾巴，如「林晚·954500593」（不带空格：履约场景会把昵称拼进登录名） */
+export const memberNickOf = (seed) => `${pick(memberNicks, seed)}${nickSuffix(seed)}`
 
 /** 地址簿（买家侧地址页 / 结算页收货信息都用它，字段与表单一一对应） */
 export const addressBook = [
@@ -178,26 +225,28 @@ export const warehouseBases = ['杭州云栖仓', '北京亦庄仓', '广州南�
  */
 export function warehouseNameOf(seed, salt = '') {
   const key = `${seed}#${salt}`
-  let h = 0
-  for (let i = 0; i < key.length; i++) h = (h * 131 + key.charCodeAt(i)) % 100000
-  return `${pick(warehouseBases, key)}（B${(h % 900) + 100}）`
+  return `${pick(warehouseBases, key)}（B${nameTail(key)}）`
 }
 
 /** 管理员昵称（列表里的「昵称」列会显示） */
 export const adminNicks = ['陈运营', '许客服', '周仓管', '孙财务']
-export const adminNickOf = (seed) => pick(adminNicks, seed)
+/** 管理员昵称：带唯一尾巴，如「陈运营·954500593」 */
+export const adminNickOf = (seed) => `${pick(adminNicks, seed)}${nickSuffix(seed)}`
 
 /** 商品分类（展示在分类树与 C 端筛选项） */
 export const categoryNames = ['家居日用', '文具办公', '户外运动', '宠物生活', '餐厨用品', '收纳整理', '织物家纺', '绿植花器']
-export const categoryOf = (seed) => pick(categoryNames, seed)
+/** 分类名：带唯一尾巴（多轮跑不会和历史残留撞名） */
+export const categoryOf = (seed) => `${pick(categoryNames, seed)}${nameSuffix(seed)}`
 
 /** 商品类型（展示在类型列表） */
 export const typeNames = ['家居好物', '服饰配件', '数码配件', '餐厨好物', '户外装备', '母婴用品', '宠物用品', '办公文具']
-export const typeOf = (seed) => pick(typeNames, seed)
+/** 类型名：带唯一尾巴 */
+export const typeOf = (seed) => `${pick(typeNames, seed)}${nameSuffix(seed)}`
 
 /** 属性名（展示在属性列表与 SKU 规格上） */
 export const attributeNames = ['颜色', '尺码', '材质', '容量', '风格', '口味', '净含量', '工艺']
-export const attributeOf = (seed) => pick(attributeNames, seed)
+/** 属性名：带唯一尾巴 */
+export const attributeOf = (seed) => `${pick(attributeNames, seed)}${nameSuffix(seed)}`
 
 /** 属性值（展示在 SKU 规格文本里） */
 export const attributeValues = ['曜石黑', '雾霾蓝', '暖石白', '原木色', '深灰', '米杏']
@@ -209,7 +258,8 @@ export const returnDescriptions = [
   '颜色和页面展示差得比较多，想换成米杏色。',
   '尺寸比预期大，放不进柜子，申请退货。'
 ]
-export const returnDescriptionOf = (seed) => pick(returnDescriptions, seed)
+/** 退货说明：正文后面留一个「（954500593）」当工单尾号，多轮跑不会撞成同一句话 */
+export const returnDescriptionOf = (seed) => `${pick(returnDescriptions, seed)}（${nameTail(seed)}）`
 
 // ---------------------------------------------------------------------------
 // 断言用：从列表里取「最新一条」
@@ -236,8 +286,11 @@ export function uniqueDisplayName(base, existingNames = []) {
 }
 
 /**
- * 同名数据在库里会累积（商品/分类等名字取自小池子），
- * 断言要针对「本次刚创建的那条」，所以一律取 id 最大的一条。
+ * 按名字取「本次刚创建的那条」（一律取 id 最大的一条）。
+ *
+ * 名字现在自带唯一尾巴（见「唯一尾巴」一节），正常情况下只可能有一条命中；
+ * 保留「取 id 最大」是为了兜住两类情况：① 调用方传的是**不带尾巴**的种子名字
+ * （如 `categoryNames[0]`）；② 同一轮里某个用例故意造同名数据（重名回归）。
  */
 export function newestByName(list, name) {
   return (list || [])

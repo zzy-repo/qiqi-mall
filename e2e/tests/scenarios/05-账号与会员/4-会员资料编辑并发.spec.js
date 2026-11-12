@@ -82,7 +82,7 @@ const adminTokenForCleanup = async (request) => {
 }
 
 test.describe('商家侧 8 会员资料编辑并发', () => {
-  test('两个会话同时编辑同一会员：甲保存生效，乙被 409 拦住（库里没被覆盖），刷新后拿到甲的值再改才成功', async ({ browser, request }) => {
+  test('两个会话同时编辑同一会员：甲保存生效，乙被 409 拦住（库里没被覆盖），刷新后拿到甲的值再改才成功', async ({ browser, page, request }) => {
     test.setTimeout(300_000)
 
     const username = memberLoginOf(Date.now() + 21)
@@ -93,8 +93,9 @@ test.describe('商家侧 8 会员资料编辑并发', () => {
 
     const ctxA = await browser.newContext()
     const pageA = await ctxA.newPage()
-    const ctxB = await browser.newContext()
-    const pageB = await ctxB.newPage()
+    // 会话乙用 page fixture（与 02/6-商品编辑并发冲突、02/7-SKU编辑并发冲突 同一写法）：
+    // 被 409 拦住的是乙，用 fixture 才能录到；甲仍走独立 context，两套 storageState 互不可见。
+    const pageB = page
 
     let memberId = null
     let tokenA = null
@@ -233,7 +234,6 @@ test.describe('商家侧 8 会员资料编辑并发', () => {
         test.info().annotations.push({ type: '清理失败', description: String(e.message || e) })
       }
       await ctxA.close().catch(() => {})
-      await ctxB.close().catch(() => {})
     }
   })
 })
