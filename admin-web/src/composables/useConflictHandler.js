@@ -100,7 +100,8 @@ export function handleSaveError(err, { onRefresh } = {}) {
     refreshAfterConflict({ close: false })
     return 'outdated'
   }
-  // 其他错误：后端中文原因直接给用户（调用方通常还会补一句上下文）
-  ElMessage.error(err?.message || '保存失败')
+  // 其他错误：这里**不**弹提示 —— 三个调用方（商品 / SKU / 订单）拿到 'other' 之后都会补一条
+  // 带上下文的 ElMessage.error('保存失败：…')。以前两处都弹，同一个失败会在屏幕上叠出两条
+  // 几乎一样的提示（「数据处理失败，请稍后重试」+「保存失败：数据处理失败，请稍后重试」）。
   return 'other'
 }

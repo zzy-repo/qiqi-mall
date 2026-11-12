@@ -583,6 +583,12 @@ const reloadForm = async () => {
 const submit = async () => {
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
+  // 明细是订单的核心内容，商品/规格没选全时后端只回一句「数据处理失败，请稍后重试」，
+  // 用户在弹窗里既看不出哪一行错、也不知道订单根本没建成。这里先拦住并说清怎么改。
+  if (!form.items.length || form.items.some((i) => !i.productId || !i.productSkuId)) {
+    ElMessage.warning('请至少填写一条完整的订单明细（先选商品，再选规格）')
+    return
+  }
   saving.value = true
   try {
     // 整行 spread：form 来自 openForm 里对列表行（含 version）的展开，

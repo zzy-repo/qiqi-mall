@@ -158,8 +158,11 @@ const goCheckout = () => {
   if (!getToken()) {
     return router.push({ path: '/login', query: { redirect: `/product/${product.value.id}` } })
   }
+  // 「立即购买」= 加购后直奔结算页。
+  // 原来这里跳的是 /cart，结果「立即购买」和「加入购物车」落到同一个页面，
+  // 用户点「立即购买」后还得再点一次「去结算」，按钮文案和实际行为对不上。
   addToCart({ productSkuId: skuId.value, quantity: quantity.value })
-    .then(() => router.push('/cart'))
+    .then(() => router.push('/checkout'))
     .catch((e) => ElMessage.error('操作失败：' + e.message))
 }
 
