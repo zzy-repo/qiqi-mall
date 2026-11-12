@@ -134,3 +134,38 @@ export async function getMemberReturnsApi(request, token) {
   const res = await request.get(`${API}/portal/returns`, auth(token))
   return (await res.json()).data
 }
+
+// ---------------------------------------------------------------------------
+// 发货单（包裹）状态 与「父订单聚合」口径 —— 纯断言侧常量/纯函数，不发任何请求
+//
+// 见 DeliveryFlowService：子单 0待下发 1已下发 2已拣货 3已出库 4运输中 5已签收 9已取消；
+//     父单聚合：全部子单 ≥已签收 → 3 已完成；全部 ≥已出库 → 2 已发货；部分出库 → 9 部分发货；
+//              一张都没出库（仅退货被拒这条路径）→ 8 待发货。
+//
+// 为什么放在这里：退货被拒后的订单状态由「未取消包裹」聚合推导，凡是断言这件事的 spec
+// 都得用同一份实现（买家侧 6-售后退货、商家侧 4-退货处理…），否则口径会各写一份、逐步过期。
+// ---------------------------------------------------------------------------
+
+export const DELIVERY_OUTBOUND = 3
+export const DELIVERY_SIGNED = 5
+export const DELIVERY_CANCELLED = 9
+
+/** 父订单状态码 → 文案（与后端 OrderStatus 对齐） */
+export const ORDER_STATUS_TEXT = ['待付款', '已付款', '已发货', '已完成', '已关闭', '退款中', '已退款', '待审核', '待发货', '部分发货']
+
+/** 子发货单状态码 → 文案（只用于日志可读性） */
+export const deliveryStatusText = (status) => `${{ 0: '待下发', 1: '已下发', 2: '已拣货', 3: '已出库', 4: '运输中', 5: '已签收', 9: '已取消' }[status] ?? status}`
+
+/**
+ * 按「未取消的包裹」推导父订单状态 —— 断言不写死数字，而是照着后端的聚合规则算一遍再对撞。
+ * 这样后端口径（子单是事实源）变、或包裹张数变，断言都会自己跟上，而不是变成一条过期常量。
+ * @param active 未取消的包裹（已剔除 status=9）
+ * @returns 聚合出的父单状态码；0 张包裹（直发单）时返回 null，调用方应自行决定怎么断
+ */
+export function aggregateOrderStatusOf(active) {
+  if (active.length === 0) return null                                        // 直发单：没有子单事实可依
+  if (active.every((d) => d.status >= DELIVERY_SIGNED)) return 3              // 已完成
+  if (active.every((d) => d.status >= DELIVERY_OUTBOUND)) return 2            // 已发货（全部出库）
+  if (active.some((d) => d.status >= DELIVERY_OUTBOUND)) return 9             // 部分发货
+  return 8                                                                    // 待发货（都还没出库）
+}

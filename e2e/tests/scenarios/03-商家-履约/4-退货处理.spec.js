@@ -39,7 +39,14 @@ import {
   memberTokenOf,
   getProductApi,
   getAdminOrderBySnApi,
-  getMemberReturnsApi
+  getMemberReturnsApi,
+  listDeliveriesApi,
+  // 发货单状态 + 父订单聚合口径：与 01-买家侧/6-售后退货.spec.js 共用同一份实现（见 assert.js）
+  DELIVERY_OUTBOUND,
+  DELIVERY_CANCELLED,
+  ORDER_STATUS_TEXT,
+  deliveryStatusText,
+  aggregateOrderStatusOf
 } from '../../support/assert.js'
 
 /**
@@ -51,14 +58,17 @@ import {
  *
  * 覆盖：
  *   ① 审核通过：申请已通过 + 订单已退款 + 退款流水（金额=实付）+ 库存回补 + 买家看到「退款成功」
- *   ② 审核拒绝：填拒绝理由 + 订单回到已付款 + 库存不变 + 不产生退款流水 + 买家看到「退货被拒绝」
+ *   ② 审核拒绝：填拒绝理由 + 订单由包裹聚合推导回「已发货(2)」 + 库存不变 + 不产生退款流水 + 买家看到「退货被拒绝」
  *   ③ 守卫：已处理的申请再点「审核」→ 服务端拒绝（该申请已处理，不能重复审核），状态与流水都不变
  *   ④ 边界：拒绝时不填理由 —— 按代码实际行为，前端规则里「详细说明」不是必填、后端也只判 null，
  *      所以空串照样提交成功，且说明会被存成空（不会保留买家原说明）
  *
  * 断言依据（读过代码，不是猜的）：
  *   ReturnApplyController.update：status!=0 → fail("该申请已处理，不能重复审核")；
- *     通过 → 订单 6 已退款 + 记退款流水 + 回补库存；拒绝 → 订单 1 已付款；
+ *     通过 → 订单 6 已退款 + 记退款流水 + 回补库存；
+ *     拒绝 → 有未取消包裹时 recomputeOrderStatusAfterReturnReject（交包裹聚合推导），
+ *            只有直发单（一张包裹都没有）才硬写 1 已付款 —— 本 spec 的前置步骤③ 必出库，
+ *            所以拒绝后的正确结果由「未取消包裹」聚合得出（这里是 2 已发货），不是常量 1；
  *     `if (body.getDescription() != null) exist.setDescription(...)` → 说明非必填，空串会覆盖。
  *   PortalReturnController.apply：仅已付款/已发货可申请，且不能有第二个待处理申请；申请后订单转 5 退款中。
  *   return-apply/index.vue：审核入口对任何状态都渲染（前端没有状态守卫），拦截完全靠服务端。
@@ -131,6 +141,48 @@ async function prepareReturnRequest(page, request, { description } = {}) {
   return { orderSn, skuId, stockBefore, adminToken, memberToken, totalAmount }
 }
 
+/**
+ * 退货被拒后的订单状态断言：由「未取消包裹」聚合推导，而不是写死一个常量。
+ *
+ * 为什么不再写死：后端拒绝分支已经是 `activeDeliveryCount(orderId) > 0 ? 交包裹聚合 : 硬写 1`，
+ * 而本 spec 的前置步骤③ 一定会把订单推到「已发货」（有出库包裹），所以拒绝后的正确结果
+ * 是聚合值（2 已发货）。旧断言写 1 的当日口径（无条件硬写已付款）已过期。
+ * 照 01-买家侧/6-售后退货.spec.js 已验证的口径：常量 / ORDER_STATUS_TEXT / aggregateOrderStatusOf
+ * 全部来自 support/assert.js，两份 spec 共用同一份实现。
+ *
+ * @returns 聚合推导出的期望订单状态码（调用方用它去对撞买家侧页面文案）
+ */
+async function expectOrderStatusByDeliveryAggregate(request, at, orderSn, label) {
+  const orderAfter = await getAdminOrderBySnApi(request, at, orderSn)
+  const deliveries = await listDeliveriesApi(request, at, orderAfter.id)
+  const active = deliveries.filter((d) => d.status !== DELIVERY_CANCELLED)
+  const expected = aggregateOrderStatusOf(active)
+  console.log(
+    `[4-退货处理/${label}] 订单 ${orderSn}(id=${orderAfter.id}) status=${orderAfter.status}` +
+    `(${ORDER_STATUS_TEXT[orderAfter.status]})；包裹=${deliveries.length} 张` +
+    `[${deliveries.map((d) => `${d.deliverySn}:${deliveryStatusText(d.status)}`).join(', ')}]` +
+    `；未取消=${active.length} 张 → 聚合期望 status=${expected}(${ORDER_STATUS_TEXT[expected]})`
+  )
+  // 防退化：前置步骤③ 必须留下未取消的包裹，否则本用例会悄悄退化成「直发单」路径
+  expect(
+    active.length,
+    `断言前提：前置步骤③ 出库后应留下未取消的包裹（实际 ${deliveries.length} 张，全部已取消或没有包裹）`
+  ).toBeGreaterThan(0)
+  expect(
+    orderAfter.status,
+    `拒绝后订单状态应由包裹聚合推导：未取消包裹 [${active.map((d) => deliveryStatusText(d.status)).join(', ')}]`
+    + ` → 期望 ${expected}(${ORDER_STATUS_TEXT[expected]})，实际 ${orderAfter.status}(${ORDER_STATUS_TEXT[orderAfter.status]})`
+  ).toBe(expected)
+  // 分叉断言：包裹出过库，父单就不可能说「已付款(1)」；拒绝后也不该卡在「退款中(5)」
+  expect(
+    orderAfter.status,
+    `分叉：包裹已出库/已签收（${active.filter((d) => d.status >= DELIVERY_OUTBOUND).map((d) => `${d.deliverySn}:${deliveryStatusText(d.status)}`).join(', ')}）时，`
+    + `订单不能是「已付款(1)」，实际 ${orderAfter.status}(${ORDER_STATUS_TEXT[orderAfter.status]})`
+  ).not.toBe(1)
+  expect(orderAfter.status, '退货审核已拒绝，订单不应仍停在「退款中(5)」').not.toBe(5)
+  return expected
+}
+
 test.describe('03-商家-履约 › 4-退货处理', () => {
   test('审核通过：退款流水 + 库存回补 + 买家看到退款成功', async ({ page, request }) => {
     const ctx = await prepareReturnRequest(page, request)
@@ -172,7 +224,7 @@ test.describe('03-商家-履约 › 4-退货处理', () => {
     })
   })
 
-  test('审核拒绝：填拒绝理由 → 订单回到已付款，买家看到退货被拒绝', async ({ page, request }) => {
+  test('审核拒绝：填拒绝理由 → 订单由包裹聚合回到已发货，买家看到退货被拒绝', async ({ page, request }) => {
     const buyerNote = returnDescriptionOf('reject')
     const ctx = await prepareReturnRequest(page, request, { description: buyerNote })
     const rejectReason = '商品已拆封使用，影响二次销售，不符合退货条件'
@@ -193,8 +245,9 @@ test.describe('03-商家-履约 › 4-退货处理', () => {
       await expect(after, '拒绝理由应落到说明列').toContainText('不符合退货条件')
     })
 
-    await test.step('⑥ 服务端事实：订单回到已付款，申请已拒绝且记下拒绝理由', async () => {
-      expect((await getAdminOrderBySnApi(request, ctx.adminToken, ctx.orderSn)).status, '拒绝后订单应回到已付款(1)').toBe(1)
+    await test.step('⑥ 服务端事实：订单由包裹聚合推导回「已发货」，申请已拒绝且记下拒绝理由', async () => {
+      const expected = await expectOrderStatusByDeliveryAggregate(request, ctx.adminToken, ctx.orderSn, '拒绝')
+      expect(expected, '前置步骤③ 已出库，聚合结果应为已发货(2)').toBe(2)
       const returns = await getMemberReturnsApi(request, ctx.memberToken)
       expect(returns[0].status, '申请应为已拒绝(2)').toBe(2)
       expect(returns[0].description, '说明应被拒绝理由覆盖').toBe(rejectReason)
@@ -207,10 +260,14 @@ test.describe('03-商家-履约 › 4-退货处理', () => {
       expect(stockAfter, '拒绝不应回补库存').toBe(ctx.stockBefore)
     })
 
-    await test.step('⑧ 买家侧看到退货被拒绝、订单回到已付款', async () => {
+    await test.step('⑧ 买家侧看到退货被拒绝、订单状态与包裹聚合结果一致', async () => {
+      const expected = await expectOrderStatusByDeliveryAggregate(request, ctx.adminToken, ctx.orderSn, '拒绝-买家侧')
       const row = await memberOrderRowOf(page, ctx.orderSn)
       expect(await memberAfterSaleTextOf(row), '买家售后列应显示「退货被拒绝」').toBe('退货被拒绝')
-      expect((await row.locator('.el-tag').first().innerText()).trim(), '买家侧订单状态应为已付款').toBe('已付款')
+      expect(
+        (await row.locator('.el-tag').first().innerText()).trim(),
+        `买家侧订单状态应与包裹聚合结果一致（期望 ${ORDER_STATUS_TEXT[expected]}）`
+      ).toBe(ORDER_STATUS_TEXT[expected])
     })
   })
 
@@ -287,7 +344,8 @@ test.describe('03-商家-履约 › 4-退货处理', () => {
       const row = await returnApplyRow(page, ctx.orderSn)
       expect(await returnApplyStatusOf(row), '申请应显示「已拒绝」').toBe('已拒绝')
 
-      expect((await getAdminOrderBySnApi(request, ctx.adminToken, ctx.orderSn)).status, '订单应回到已付款(1)').toBe(1)
+      const expected = await expectOrderStatusByDeliveryAggregate(request, ctx.adminToken, ctx.orderSn, '拒绝-空理由')
+      expect(expected, '前置步骤③ 已出库，聚合结果应为已发货(2)').toBe(2)
       const returns = await getMemberReturnsApi(request, ctx.memberToken)
       expect(returns[0].status, '申请应为已拒绝(2)').toBe(2)
       expect(returns[0].description, '说明应被清空').toBe('')

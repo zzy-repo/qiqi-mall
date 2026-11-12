@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
-import { execFileSync } from 'node:child_process'
 import { PORTAL, ADMIN, API } from '../../support/env.js'
+import { queryDb } from '../../support/db.js'
 import {
   adminLogin,
   memberLogin,
@@ -45,25 +45,9 @@ const PRODUCT_ID = 1
 
 /**
  * 分片库名：确认收货的并发闸门是数据库行级版本号，只有直接查库才能证明
- * 「状态就是 3、版本只被推进了一次」。库名由 API_BASE 端口决定，与 scripts/e2e-run.sh 一致。
+ * 「状态就是 3、版本只被推进了一次」。库名由 API_BASE 端口决定 —— 映射唯一维护在
+ * e2e/tests/support/db.js 的 DB_OF_PORT（本 spec 原先自带一份，已收口）。
  */
-const DB_OF_PORT = { 8091: 'qiqi_mall_e2e_a', 8092: 'qiqi_mall_e2e_b', 8093: 'qiqi_mall_e2e_c', 8094: 'qiqi_mall_e2e_d' }
-
-const dbOfApi = () => {
-  const port = Number(new URL(API).port)
-  const db = DB_OF_PORT[port]
-  if (!db) throw new Error(`认不出 API_BASE=${API} 对应哪个 e2e 分片库（见 DB_OF_PORT）`)
-  return db
-}
-
-/** 直连库执行（读：断言；写：**仅**清理本用例自造的数据，见 purgeOrderBySn） */
-const queryDb = (sql) =>
-  execFileSync('mysql', [
-    '-h', '127.0.0.1', '-P', process.env.MYSQL_PORT || '3306',
-    `-u${process.env.MYSQL_USER || 'root'}`,
-    `-p${process.env.MYSQL_PASSWORD || 'qiqi123456'}`,
-    dbOfApi(), '-N', '-B', '-e', sql
-  ], { encoding: 'utf8' }).trim()
 
 /** 库里这张订单的 (status, version) —— 证明「只推进了一次」 */
 const orderRowOf = (orderSn) => {
@@ -209,11 +193,22 @@ test.describe('买家侧 09 确认收货并发', () => {
 
       let respA, respB
       await test.step('④ 两页同一时刻点「确认收货」（真并发）', async () => {
-        const pA = confirmRespOf(page, created.orderId)
-        const pB = confirmRespOf(page2, created.orderId)
+        // 确认收货现在带二次确认（不可逆终态流转）：点行内按钮只弹框，真正发 POST 的是弹框里的「确定」。
+        // 所以并发点法改成「两页先把框弹出来 → 再同一时刻点确定」，闸门仍是同一瞬间发出的两个请求。
         await Promise.all([
           row1.getByTestId('orders-row-confirm').click(),
           row2.getByTestId('orders-row-confirm').click()
+        ])
+        const boxA = page.locator('.el-message-box')
+        const boxB = page2.locator('.el-message-box')
+        await expect(boxA, '甲点「确认收货」后应弹二次确认框').toBeVisible()
+        await expect(boxB, '乙点「确认收货」后应弹二次确认框').toBeVisible()
+
+        const pA = confirmRespOf(page, created.orderId)
+        const pB = confirmRespOf(page2, created.orderId)
+        await Promise.all([
+          boxA.getByRole('button', { name: '确定' }).click(),
+          boxB.getByRole('button', { name: '确定' }).click()
         ])
         respA = await pA
         respB = await pB

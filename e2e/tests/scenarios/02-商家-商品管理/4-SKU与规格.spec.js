@@ -12,7 +12,8 @@ import { attributeValues, newestByName, productNameOf, realGalleryImages, realSk
  * 商家侧 02-商品管理 / 4-SKU 与规格
  *
  * 覆盖：按类型属性生成 SKU（规格值取自该类型的属性）/ 规格值整组替换（编辑时改规格）/
- *       价格与库存编辑 / SKU 图上传与列表展示 / 必填校验 / 删除入口缺失（断言现状）
+ *       价格与库存编辑 / SKU 图上传与列表展示 / 必填校验 / 删除：被订单明细或购物车引用时
+ *       后端拒删并回显中文原因，新建的无引用 SKU 可删
  * 断言依据：admin/product/skus.vue（规格行 = 属性下拉 + 值输入，提交时整组替换 specs）、
  *          SkuController（保存 sku + specs）
  */

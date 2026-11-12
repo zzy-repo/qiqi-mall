@@ -18,8 +18,9 @@ import { newestByName, productDescriptionOf, productNameOf, realGalleryImages, r
  * 商家侧 02-商品管理 / 3-商品维护
  *
  * 覆盖：新增（名称/分类/类型/描述/主图/相册含排序）→ 编辑（改名/改描述）→ 上下架切换 →
- *       下架后 C 端列表与详情都不可见 → 上架恢复 → 删除入口缺失（断言现状，见报告）
- * 断言依据：admin/product/index.vue（操作列只有「编辑」「SKU」，没有删除）、
+ *       下架后 C 端列表与详情都不可见 → 上架恢复 → 删除：被订单明细或购物车引用时后端拒删
+ *       并提示改为下架，无引用可删
+ * 断言依据：admin/product/index.vue（操作列有「编辑」「SKU」「删除」，删除走统一危险确认弹窗）、
  *          PortalCatalogController 只返回 publish_status=1
  */
 

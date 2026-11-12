@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
-import { execFileSync } from 'node:child_process'
 import { PORTAL, ADMIN, API } from '../../support/env.js'
+import { queryDb } from '../../support/db.js'
 import { adminLogin, memberRegisterAndLogin, addSpecToCart, adminSetSkuStock } from '../../support/ui.js'
 import { editSku } from '../../support/catalog-ui.js'
 import {
@@ -47,23 +47,7 @@ const GRAB_STOCK = 2
 /** 每人买多少件 */
 const QTY_PER_BUYER = 2
 
-const DB_OF_PORT = { 8091: 'qiqi_mall_e2e_a', 8092: 'qiqi_mall_e2e_b', 8093: 'qiqi_mall_e2e_c', 8094: 'qiqi_mall_e2e_d' }
-
-const dbOfApi = () => {
-  const port = Number(new URL(API).port)
-  const db = DB_OF_PORT[port]
-  if (!db) throw new Error(`认不出 API_BASE=${API} 对应哪个 e2e 分片库（见 DB_OF_PORT）`)
-  return db
-}
-
-/** 直连库执行（读：断言；写：**仅**清理本用例自造的数据，见 purgeOrderBySn） */
-const queryDb = (sql) =>
-  execFileSync('mysql', [
-    '-h', '127.0.0.1', '-P', process.env.MYSQL_PORT || '3306',
-    `-u${process.env.MYSQL_USER || 'root'}`,
-    `-p${process.env.MYSQL_PASSWORD || 'qiqi123456'}`,
-    dbOfApi(), '-N', '-B', '-e', sql
-  ], { encoding: 'utf8' }).trim()
+// 库名由 API_BASE 端口决定；映射唯一维护在 e2e/tests/support/db.js 的 DB_OF_PORT（本 spec 原先自带一份，已收口）。
 
 /** 该 SKU 的库存（库里的真实值，不是页面显示） */
 const stockOf = (skuId) => Number(queryDb(`select stock from sku where id = ${skuId}`))

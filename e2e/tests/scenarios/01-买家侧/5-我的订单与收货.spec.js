@@ -133,7 +133,13 @@ test.describe('买家侧 05 我的订单与收货', () => {
 
     const row = await memberOrderRow(page, orderSn)
     await expect(row).toContainText('已发货')
+    // 确认收货是不可逆终态流转 → 点按钮先弹二次确认，真正发请求的是弹框里的「确定」
     await row.getByTestId('orders-row-confirm').click()
+    const confirmBox = page.locator('.el-message-box')
+    await expect(confirmBox, '点「确认收货」应先弹二次确认框').toBeVisible()
+    await expect(confirmBox, '确认框必须说清后果：确认后订单完成、不可撤销')
+      .toContainText('确认已收到货？确认后订单完成，不可撤销。')
+    await confirmBox.getByRole('button', { name: '确定' }).click()
     await expect(row, '确认收货后应为已完成').toContainText('已完成', { timeout: 15_000 })
 
     // 入口消失（只有已发货订单才有确认收货按钮）

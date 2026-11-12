@@ -19,8 +19,9 @@ import { attributeNames, attributeOf, newestByName, typeNames, typeOf, uniqueDis
  * 商家侧 02-商品管理 / 1-商品类型与属性
  *
  * 覆盖：类型新增 / 改名 / 必填校验；属性挂在类型下（聚合）新增 / 改名 / is_filter 开关；
- *       属性页只显示本类型的属性（聚合关系）；类型删除 —— **后台没有删除入口**（见报告）
- * 断言依据：admin/product-type/index.vue、attributes.vue（操作列只有「编辑」「属性」）
+ *       属性页只显示本类型的属性（聚合关系）；类型与属性的删除 —— 被引用时后端拒删并回显中文原因，
+ *       无引用可删
+ * 断言依据：admin/product-type/index.vue、attributes.vue（操作列有「编辑」「属性」「删除」）
  */
 
 test.describe('商家侧 1 商品类型与属性', () => {
