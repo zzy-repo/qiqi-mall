@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DeadlockLoserDataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.PessimisticLockingFailureException;
@@ -74,6 +75,33 @@ public class GlobalExceptionHandler {
     public Result<Void> handleLockConflict(Exception e) {
         log.warn("数据库锁冲突（已由重试/上层兜底处理）: {}", e.getMessage());
         return Result.fail("系统繁忙，请重试");
+    }
+
+    /**
+     * 完整性/外键约束兜底：把「MySQL 的 SQL 原文」翻成一句人话。
+     *
+     * <p>为什么要有这条：业务代码已经按依赖顺序显式删、并且删前把「有物流记录/有退货申请」
+     * 翻成了具体文案（见 {@code OrderPurgeService} / {@code DeliveryEditService}），
+     * 但**将来新增的引用（新表挂到 order / delivery_order 上）不一定立刻被覆盖**。
+     * 没有这条兜底时，外键拦截会落到 {@link #handleDataAccess} →「数据处理失败，请稍后重试」——
+     * 用户既不知道删不掉什么，也不知道下一步该干什么，只能来问「为什么点删除没反应」。
+     *
+     * <p>这里只翻译、不改语义：删除被引用 → 明确说「被其它记录引用，无法删除」；
+     * 其它完整性失败（非空/长度/类型）→ 说「字段不合法」。
+     * SQL 原文仍然只进日志（error），不会透给前端。
+     *
+     * <p>注意：{@code DuplicateKeyException} 是本类的子类，Spring 会挑更具体的
+     * {@link #handleDuplicateKey} 处理唯一键冲突，不会走到这里。
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public Result<Void> handleDataIntegrityViolation(DataIntegrityViolationException e) {
+        log.error("数据完整性约束拦截了本次写入/删除", e);
+        String raw = e.getMostSpecificCause() == null ? "" : String.valueOf(e.getMostSpecificCause().getMessage());
+        String lower = raw.toLowerCase();
+        if (lower.contains("foreign key") || lower.contains("cannot delete or update a parent row")) {
+            return Result.fail("数据被其它记录引用，无法删除（请先处理关联的物流、退货、明细等记录）");
+        }
+        return Result.fail("数据不符合约束，未能保存（请检查必填字段或重复记录）");
     }
 
     /** 其它数据访问异常：日志留原文，响应只给可读提示，避免 SQL 细节透出 */

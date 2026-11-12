@@ -9,6 +9,8 @@ import com.qiqi.mall.oms.entity.Warehouse;
 import com.qiqi.mall.oms.wms.MockWmsService;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.shared.guard.OptimisticLockGuard;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,6 +28,8 @@ import java.util.TreeMap;
  */
 @Service
 public class DeliveryFlowService {
+
+    private static final Logger log = LoggerFactory.getLogger(DeliveryFlowService.class);
 
     private final DeliveryOrderService deliveryOrderService;
     private final DeliveryItemService deliveryItemService;
@@ -269,17 +273,218 @@ public class DeliveryFlowService {
         };
     }
 
-    /** 父订单状态聚合（图23 黄框） */
+    // ------------------------------------------------------------------ 买家确认收货：口径②（子单是事实源）
+
+    /**
+     * 该订单下**未取消**的包裹张数。
+     *
+     * <p>0 = 直发路径（单仓直发，订单由管理员「发货」直接从 1 已付款 置到 2 已发货，压根没有包裹行），
+     * 此时「子单是事实源」这条口径没有事实可依：父单状态只能由买家确认收货这一步自己推进
+     * （此时那一次写入是唯一写者，不存在两个写者抢同一个字段的问题）。
+     */
+    public int activeDeliveryCount(Long orderId) {
+        return (int) deliveryOrderService.list(new LambdaQueryWrapper<DeliveryOrder>()
+                        .eq(DeliveryOrder::getOrderId, orderId)).stream()
+                .filter(d -> d.getStatus() != DeliveryOrder.CANCELLED)
+                .count();
+    }
+
+    /**
+     * 口径②（用户拍板：**子单是事实源**）：买家确认收货时，把该订单下所有未取消、**已经在途**
+     * （≥ 已出库）的包裹推到「已签收」；父单状态随后由 {@link #recomputeOrderStatus} 从子单推导出来（不再硬写 3）。
+     *
+     * <p>**只推已经出过库的包裹**：待下发 / 已下发 / 已拣货的包裹货还在商家手里，买家不可能收到 ——
+     * 把它们推到「已签收」等于让包裹凭空跳过整条 WMS 流程（下发 → 拣货 → 出库 → 运输），
+     * 还会凭空补一条现实里不存在的运单号。所以这类情况**直接拒绝确认收货**并说明原因
+     * （口径② 管的是「父单状态由子单推导」，不是「买家一按就把包裹推到终点」）。
+     *
+     * <p>为什么必须推子单、而不是只把父单写成 3：父单状态是**推导值**，唯一事实源是包裹。
+     * 只在父单上写 3，父单就和子单事实分叉了 —— 之后任何一个包裹的状态变化都会按子单重新聚合，
+     * 把「已完成」写回「已发货」（真实的倒退序列见 OptimisticLockIntegrationTest ㉒：
+     * ① 买家确认收货 → 订单 3；② 此时另一个包裹还在运输中；③ WMS 晚到的回传让 allSigned 变 false、
+     * allOutbound 变 true；④ 订单被写回 2）。
+     *
+     * <p>落库路径与 WMS 回传 signed 一致：`updateById`（带 @Version）+ 影响行数校验 + 补运单 ——
+     * 不绕过状态机直接 UPDATE 状态字段，是为了让「包裹已签收」在库里与回传签收长得一样，
+     * 也避免漏掉「已签收的包裹必须有运单」这个副作用（没走过出库回传的包裹本来没有运单）。
+     *
+     * <p>0 行 = 这张包裹刚被别人改过（并发的另一个「确认收货」/ 晚到的回传）→ 抛 409 回滚整笔
+     * （父单、其它包裹一起回滚），文案用买家视角的「订单状态已变化，请刷新后重试」。
+     *
+     * @return 本次真正被推进的包裹数（幂等：已签收的跳过，重复调用不会重复推进）
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public int signRemainingDeliveries(Long orderId) {
+        List<DeliveryOrder> active = deliveryOrderService.list(new LambdaQueryWrapper<DeliveryOrder>()
+                        .eq(DeliveryOrder::getOrderId, orderId)
+                        .orderByAsc(DeliveryOrder::getId)).stream()
+                .filter(d -> d.getStatus() != DeliveryOrder.CANCELLED)
+                .toList();
+
+        // ① 还有包裹没出库（待下发 / 已下发 / 已拣货）→ **拒绝确认收货**。
+        // 货还在商家手里，买家不可能收到；如果照样把它推到「已签收」，等于让这个包裹凭空跳过
+        // 下发 → 拣货 → 出库 → 运输整条 WMS 流程，还要再凭空补一条现实里不存在的运单号。
+        // 口径② 说的是「父单状态由子单推导」，**不是**「买家一按就把包裹推到终点」。
+        List<DeliveryOrder> notOutbound = active.stream()
+                .filter(d -> d.getStatus() < DeliveryOrder.OUTBOUND).toList();
+        if (!notOutbound.isEmpty()) {
+            String current = statusText(notOutbound.get(0).getStatus());
+            log.warn("拒绝确认收货：订单 {} 还有 {} 个包裹未出库（当前：{}），不允许把包裹直接推到已签收",
+                    orderId, notOutbound.size(), current);
+            throw new IllegalStateException("该订单还有 " + notOutbound.size() + " 个包裹尚未出库（当前："
+                    + current + "），暂不能确认收货；请等包裹发出后再确认");
+        }
+
+        // ② 只推**已经在途**的包裹（≥ 已出库）：出库/运输中 → 已签收。
+        // 这些包裹真出过库，`saveLogisticsIfAbsent` 在这里只是「出库回传漏写运单」的兜底，
+        // 不是给没出库的包裹伪造运单（上面那道守卫已经保证走到这里的一定出过库）。
+        int signed = 0;
+        for (DeliveryOrder delivery : active) {
+            if (delivery.getStatus() >= DeliveryOrder.SIGNED) continue;       // 已签收：幂等跳过
+            delivery.setStatus(DeliveryOrder.SIGNED);
+            int rows = deliveryOrderService.getBaseMapper().updateById(delivery);
+            OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_ORDER_STATE_CHANGED);
+            saveLogisticsIfAbsent(delivery);                                  // 已出库的包裹该有运单（缺了才补）
+            signed++;
+        }
+        return signed;
+    }
+
+    /**
+     * 父订单状态聚合（图23 黄框）：**父单状态是推导值，事实源是子单**。
+     * 全部子单 ≥ 已出库 → 2 已发货；部分出库 → 9 部分发货；全部已签收 → 3 已完成；其余不动。
+     *
+     * <p><b>为什么这里不需要「终态不许降级」的守卫</b>（口径②，用户拍板「子单是事实源」）：
+     * 曾经出现过「已完成(3) 被写回 已发货(2)」，根因**不是**聚合算错了，而是当时
+     * {@code PortalOrderController#confirm} 绕开子单**直接硬写** order.status=3，
+     * 于是父单与子单事实分叉（父单已完成、还有包裹在运输中），下一次聚合当然只能按子单算出 2。
+     * 口径②把写入口收敛成一处：确认收货改为「先把在途包裹推到已签收 → 再由这里推导父单」
+     * （见 {@link #signRemainingDeliveries}）。子单已是事实，聚合就永远算不出更早的状态，
+     * 再加一道「禁止降级」只会把真正的分叉藏起来（掩盖二次写入），而不是消除它。
+     * 回归用例：OptimisticLockIntegrationTest ㉒（确认收货后所有在途包裹 = 已签收、订单 = 已完成，
+     * 之后任意晚到的回传/重复聚合都不许把订单改回 2）。
+     *
+     * <p><b>不许被聚合改写的状态：已关闭(4) / 已退款(6) / 退款中(5)</b>。
+     * 4、6 不是包裹推导出来的，而是外部业务动作（审核不通过 / 退货审核通过退款）的结论；
+     * 一旦进入就代表「这单已经结束了」，晚到的包裹回传不该把它写成 2 已发货 / 9 部分发货。
+     * <b>5 退款中虽然不是终态，但同样不让包裹回传改写</b>：它是「退款正在审批中」这个
+     * <b>进行中的业务动作</b>，下一步只能由退货审核写成 6 已退款（或审核拒绝时由
+     * {@link #recomputeOrderStatusAfterReturnReject} 交还给包裹聚合）—— 如果这期间一张在途包裹的
+     * 回传就能把订单改回 2 已发货 / 9 部分发货，退款流程的状态就丢了：管理员在「退款中」列表里
+     * 再也找不到这张单，买家却还在等退款。所以它的语义和 4/6 一样：**只有业务动作能改它**。
+     * 已完成(3) **不加**守卫：口径②下它本来就是子单推导出来的结论（全部子单已签收），
+     * 再加一道「3 不许动」就成了两套逻辑（一套推导、一套终态锁），反而会把真正的分叉藏起来。
+     * 回归用例：OptimisticLockIntegrationTest ㉓（已退款 / 已关闭订单 + 在途包裹 + 晚到回传 → 状态不变）、
+     * ㉖（退款中 + 在途包裹 + 晚到回传 → 状态不变，但 5→6 的退货审核通过仍照常生效）。
+     *
+     * <p><b>全部包裹被取消时退回待审核(7)</b>（另一个死锁）：拆单只在「审核通过」内部触发，
+     * 没有独立入口。若一张订单的包裹全被取消，订单会停在 8 待发货 —— 既没有包裹可发（发货/回传/签收
+     * 全都没对象），也没法重新拆单（审核通过只接受 7 待审核）→ 这张订单永远出不去。
+     * 所以这里把「有包裹行、但没有一张未取消的」识别成「拆单结果被撤销」，退回 7 待审核，
+     * 让管理员重新审核拆单。**同时把 split_status 归零**：否则重新审核时 {@code split()} 会命中
+     * 「已拆过」的幂等分支，把几张已取消的包裹原样返回，一张新包裹都不生成（状态退回了、单还是拆不了）。
+     * 注意 4/6/5 在上面就 return 了，所以这条只在「在途阶段」生效。
+     */
     public void recomputeOrderStatus(Long orderId) {
+        recompute(orderId, false, false);
+    }
+
+    /**
+     * 退货审核**被拒绝**后用：把订单从「5 退款中」交还给包裹聚合（口径②：子单是事实源）。
+     *
+     * <p>为什么需要这个专用入口：{@link #recomputeOrderStatus} 现在会跳过 5 退款中（不许包裹回传改写
+     * 进行中的退款），而「审核拒绝」恰恰是**唯一有权把订单从 5 拿走**的业务动作 —— 它必须能穿过那道守卫，
+     * 否则拒绝之后订单会永远卡在「退款中」。这里只是放开「5 这一条」的跳过判断，
+     * 4/6 的终态守卫、以及下面整套聚合规则完全不变。
+     */
+    public void recomputeOrderStatusAfterReturnReject(Long orderId) {
+        recompute(orderId, true, false);
+    }
+
+    /**
+     * 删除**待处理**退货申请后用：把订单从「5 退款中」交还给包裹聚合（口径②：子单是事实源）。
+     *
+     * <p>为什么必须有这个入口（缺陷：删掉申请后订单永远卡在「退款中」，真死路）：
+     * 订单进 5 的唯一写者是「登记退货申请」，出 5 的写者只有两个 ——
+     * （a）退货审核通过 → 6 已退款；（b）退货审核拒绝 → {@link #recomputeOrderStatusAfterReturnReject}。
+     * 而后台还有第三条出口：{@code DELETE /admin/return-applies/{id}} 直接删掉那条待处理申请。
+     * 旧实现只删申请、订单一动不动：5 被聚合跳过（不许包裹回传改写进行中的退款），
+     * 审核通过又要求「必须还有一条待处理申请」（申请已经没了）→ 这张订单没有任何写者能把它带出来。
+     *
+     * <p>所以删除待处理申请 = 退款流程被撤销，订单必须交回聚合推导（**不硬写某个固定状态**，
+     * 保持「子单是事实源」这唯一口径）：
+     * <ul>
+     *   <li>有在途包裹：包裹都出库 → 2 已发货；部分出库 → 9 部分发货；都签收 → 3 已完成；
+     *       一张都没出库 → 8 待发货；</li>
+     *   <li>没有任何有效包裹（一张包裹行都没有的直发单 / 包裹全被取消）：没有子单事实可依，
+     *       回到 7 待审核（拆单标记一并归零），让人重新走审核流程。</li>
+     * </ul>
+     * 4/6 终态守卫不变（已关闭/已退款不会被这条路径改写）。
+     */
+    public void recomputeOrderStatusAfterReturnApplyDeleted(Long orderId) {
+        recompute(orderId, true, true);
+    }
+
+    /**
+     * @param leaveReturnInProgress true 只应来自「退货审核拒绝 / 删除待处理退货申请」：
+     *                              允许把订单从 5 退款中交回聚合
+     * @param noParcelToPendingAudit true 只应来自「删除待处理退货申请」：连一张包裹行都没有的直发单
+     *                              也要退回 7 待审核（否则订单没有任何事实可依，只能卡在 5）
+     */
+    private void recompute(Long orderId, boolean leaveReturnInProgress, boolean noParcelToPendingAudit) {
         Order order = orderService.getById(orderId);
         if (order == null) return;
+        Integer current = order.getStatus();
+        // 终态不出让：已关闭(4) / 已退款(6) 是业务终局，不允许被包裹回传聚合改写
+        // （已完成(3) 不在此列 —— 口径②下它由子单推导得出，不需要额外守卫，避免又变成两套逻辑）
+        if (current != null && (current == 4 || current == 6)) {
+            log.info("订单 {} 已是「{}」，跳过包裹聚合（终态不被回传改写）",
+                    orderId, current == 4 ? "已关闭" : "已退款");
+            return;
+        }
+        // 5 退款中：不是终态，但是「退款进行中」这个业务动作的结论，同样不许被包裹回传改写
+        // （只有退货审核拒绝能把它交回来，见 recomputeOrderStatusAfterReturnReject）
+        if (current != null && current == 5 && !leaveReturnInProgress) {
+            log.info("订单 {} 正处于「退款中」（退货申请审批中），跳过包裹聚合（退款流程状态不被回传改写）", orderId);
+            return;
+        }
         List<DeliveryOrder> children = deliveryOrderService.list(
                 new LambdaQueryWrapper<DeliveryOrder>().eq(DeliveryOrder::getOrderId, orderId));
-        if (children.isEmpty()) return;
+        if (children.isEmpty()) {
+            // 一张包裹行都没有（直发单）：聚合没有事实可依，正常调用一律不动状态。
+            // 唯一例外是「删掉了待处理退货申请」—— 那一步把订单从 5 交回来，必须给它一个可继续的状态，
+            // 否则它会永远停在「退款中」（审核通过要求有申请、申请已被删）。
+            if (!noParcelToPendingAudit) return;
+            if (current != null && current == 7 && (order.getSplitStatus() == null || order.getSplitStatus() == 0)) {
+                return;                                   // 已经是待审核且未拆：不必再写一次
+            }
+            order.setStatus(7);
+            order.setSplitStatus(0);
+            log.info("订单 {} 的待处理退货申请已删除，且该订单没有任何包裹（直发单）→ 回「待审核(7)」并清空拆单标记",
+                    orderId);
+            int rows = orderService.getBaseMapper().updateById(order);
+            OptimisticLockGuard.requireAffected(rows);
+            return;
+        }
         // 已取消的子单不参与聚合
         List<DeliveryOrder> active = children.stream()
                 .filter(d -> d.getStatus() != DeliveryOrder.CANCELLED).toList();
-        if (active.isEmpty()) return;
+        if (active.isEmpty()) {
+            // 有包裹行、但没有一张在途：全部包裹都被取消了 —— 拆单结果已被撤销。
+            // 停在 8 待发货是死锁（没包裹可发、又不能重新拆单），退回 7 待审核让人重新审核拆单。
+            boolean needStatus = current == null || current != 7;
+            boolean needSplitFlag = order.getSplitStatus() == null || order.getSplitStatus() != 0;
+            if (!needStatus && !needSplitFlag) return;            // 已经是待审核且未拆：不必再写一次
+            order.setStatus(7);
+            // split_status 必须一起归零：它还是 1 的话，重新审核时 split() 会走「已拆过」的幂等分支
+            // 直接返回那几张**已取消**的包裹，一张新包裹都不会生成 —— 状态退回 7 了却还是拆不了单。
+            order.setSplitStatus(0);
+            log.info("订单 {} 的 {} 张包裹已全部取消（无在途包裹），退回「待审核(7)」并清空拆单标记，以便重新审核拆单",
+                    orderId, children.size());
+            int rows = orderService.getBaseMapper().updateById(order);
+            OptimisticLockGuard.requireAffected(rows);
+            return;
+        }
 
         boolean allOutbound = active.stream().allMatch(d -> d.getStatus() >= DeliveryOrder.OUTBOUND);
         boolean allSigned = active.stream().allMatch(d -> d.getStatus() >= DeliveryOrder.SIGNED);
@@ -292,7 +497,11 @@ public class DeliveryFlowService {
         } else if (anyOutbound) {
             order.setStatus(9);            // 部分发货（中间态）
         } else {
-            return;                        // 仍停留在待发货
+            // 一张都没出库：包裹侧推不出「更早」的结论，正常在途订单本来就停在 8 待发货 —— 不写。
+            // 唯一例外是退货审核拒绝把订单从 5 交回来时：必须落回 8 待发货，否则会永远卡在「退款中」。
+            if (!leaveReturnInProgress) return;
+            order.setStatus(8);
+            log.info("订单 {} 的退货申请被拒，且包裹都还没出库 → 由子单推导回「待发货(8)」", orderId);
         }
         // 父订单聚合也是写：0 行 = 读完之后别人改过这张订单 → 409 回滚整笔（子单状态一起回滚），
         // 不允许「子单已出库、父单状态没跟上」这种半截状态悄悄提交

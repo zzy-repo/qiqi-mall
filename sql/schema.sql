@@ -15,6 +15,7 @@ DROP TABLE IF EXISTS member_address;
 DROP TABLE IF EXISTS return_apply;
 DROP TABLE IF EXISTS order_item;
 DROP TABLE IF EXISTS `order`;
+DROP TABLE IF EXISTS stock_ledger;
 DROP TABLE IF EXISTS return_reason;
 DROP TABLE IF EXISTS order_setting;
 DROP TABLE IF EXISTS delivery_logistics;
@@ -353,3 +354,22 @@ CREATE TABLE `ai_api_key` (
   UNIQUE KEY `uk_key_hash` (`key_hash`),
   KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 接口访问密钥';
+
+-- SKU 库存台账（详见 sql/migrate-stock-ledger.sql）
+-- 所有扣/补 sku.stock 的地方都先记一行台账：idem_key 唯一 = 同一触发不会记第二遍；
+-- 无外键：台账是审计证据，不随订单/规格被级联删除。
+CREATE TABLE `stock_ledger` (
+  `id`         BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `order_id`   BIGINT      NOT NULL COMMENT '关联订单（无外键：台账是审计证据，不随订单级联删除）',
+  `sku_id`     BIGINT      NOT NULL COMMENT '规格（无外键，同上）',
+  `delta`      INT         NOT NULL COMMENT '库存变化量：负数=扣减（下单），正数=回补',
+  `reason`     VARCHAR(32) NOT NULL COMMENT 'ORDER_CREATE / AUDIT_REJECT / DELIVERY_CANCEL / RETURN_REFUND',
+  `ref_type`   VARCHAR(16) NULL     COMMENT '触发单据类型：DELIVERY / RETURN_APPLY；下单为 NULL',
+  `ref_id`     BIGINT      NULL     COMMENT '触发单据 id：发货单 id / 退货申请 id；下单为 NULL',
+  `idem_key`   VARCHAR(96) NOT NULL COMMENT '幂等键 orderId:skuId:reason:refId（refId 缺省 0）',
+  `created_at` DATETIME    NOT NULL COMMENT '记账时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_idem` (`idem_key`),
+  KEY `idx_order_sku` (`order_id`, `sku_id`),
+  KEY `idx_sku` (`sku_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='SKU 库存台账（扣/补全量记账 + 幂等去重）';

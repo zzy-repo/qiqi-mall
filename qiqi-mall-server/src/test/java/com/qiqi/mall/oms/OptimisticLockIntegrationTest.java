@@ -1,6 +1,7 @@
 package com.qiqi.mall.oms;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.qiqi.mall.oms.service.DeliveryFlowService;
 import com.qiqi.mall.oms.wms.MockWmsService;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -105,6 +106,9 @@ class OptimisticLockIntegrationTest {
     private MockWmsService mockWms;      // 为了数「WMS 到底被外呼了几次」
 
     @Autowired
+    private DeliveryFlowService deliveryFlowService;   // ㉒ 直接触发聚合（模拟晚到的子单变化）
+
+    @Autowired
     private DataSource dataSource;       // 造并发：独立连接上开事务，把行锁攥在手里
 
     private final List<Long> createdProducts = new ArrayList<>();
@@ -149,6 +153,8 @@ class OptimisticLockIntegrationTest {
             // 否则删 order 级联到 delivery_order 时会被外键挡住（⑪ 回传出库会写运单）
             jdbc.update("DELETE l FROM delivery_logistics l JOIN delivery_order d ON d.id = l.delivery_id "
                     + "WHERE d.order_id = ?", orderId);
+            // 台账没有外键（是审计证据，不随订单级联）：用例自己造的扣/补行要清掉，别攒在库里
+            jdbc.update("DELETE FROM stock_ledger WHERE order_id = ?", orderId);
             jdbc.update("DELETE FROM `order` WHERE id = ?", orderId);      // 级联明细/发货单/包裹明细
         }
         for (Long productId : createdProducts) {
@@ -1010,6 +1016,546 @@ class OptimisticLockIntegrationTest {
         assertThat(deliveryExists(empty)).as("删除后包裹必须消失").isFalse();
     }
 
+    // ================================================================== ㉒ 确认收货：子单是事实源（口径②）
+
+    /*
+     * 口径②（用户拍板）：**子单是事实源** —— 父单状态永远由包裹推导。
+     *
+     * 修之前这里的序列会真实倒退（就是这条用例当初标 @Disabled 固化的那个 Bug）：
+     *   ① 买家点「确认收货」→ 老实现直接把父单写成 3 已完成，**一个包裹都不碰**
+     *   ② 此时另一个包裹还在运输中（子单事实：一个已签收、一个未签收）
+     *   ③ WMS 晚到的回传（已出库 → 运输中）触发聚合：allSigned=false、allOutbound=true
+     *   ④ 父单被写回 2 已发货 ← 已完成变成已发货
+     *
+     * 修之后（口径②）：确认收货先把**所有在途包裹推到已签收**，再由聚合推导父单 = 3。
+     * 于是「父单已完成 + 还有包裹在途」这个分叉的组合在库里根本不可能出现，晚到的回传也再算不出更早的状态。
+     */
+    @Test
+    @org.junit.jupiter.api.Order(22)
+    @DisplayName("㉒ 确认收货：所有在途包裹一并推到已签收、订单由子单推导为已完成；晚到回传/再聚合都不许退回已发货")
+    void confirmReceipt_signsAllParcels_orderStaysCompleted() {
+        PortalSession buyer = registerPortalMember();
+        Long orderId = newOrderOfMember(2, buyer.memberId());        // 2 已发货：确认收货的前置状态
+        Long signedParcel = newDelivery(orderId, warehouseA, 1);     // 包裹 A：已签收
+        Long movingParcel = newDelivery(orderId, warehouseB, 1);     // 包裹 B：还在运输中
+        jdbc.update("UPDATE delivery_order SET status = 5 WHERE id = ?", signedParcel);   // 5 已签收
+        jdbc.update("UPDATE delivery_order SET status = 4 WHERE id = ?", movingParcel);   // 4 运输中
+        System.out.printf("㉒ 初始：订单=%d（已发货），包裹A=%d（已签收），包裹B=%d（运输中）%n",
+                orderStatus(orderId), deliveryStatus(signedParcel), deliveryStatus(movingParcel));
+
+        // ① 买家确认收货
+        JsonNode data = ok(postWithToken("/portal/orders/" + orderId + "/confirm", buyer.jwt()));
+        int orderAfterConfirm = orderStatus(orderId);
+        int signedAfter = deliveryStatus(signedParcel);
+        int movingAfter = deliveryStatus(movingParcel);
+        System.out.printf("㉒ ① 确认收货 → 订单=%d（已完成），包裹A=%d，包裹B=%d（在途包裹被一并推到已签收）%n",
+                orderAfterConfirm, signedAfter, movingAfter);
+
+        assertThat(orderAfterConfirm).as("确认收货后订单必须由子单推导成 3 已完成").isEqualTo(3);
+        assertThat(data.path("order").path("status").asInt()).as("接口返回的也是聚合后的真实状态").isEqualTo(3);
+        assertThat(signedAfter).as("已签收的包裹保持 5").isEqualTo(5);
+        assertThat(movingAfter)
+                .as("**关键：在途包裹必须被一并推到已签收(5)，不能只把父单盖成已完成**").isEqualTo(5);
+        assertThat(logisticsCount(movingParcel))
+                .as("被推成已签收的包裹必须有运单（否则物流页是空的）").isEqualTo(1);
+
+        // ② 「晚到的 WMS 回传」再打一次：包裹 B 揽收事件（幂等，不推进也不回退）
+        ok(post("/admin/deliveries/" + movingParcel + "/wms-callback?event=transit", null));
+        System.out.printf("㉒ ② 晚到回传 transit（幂等）→ 订单=%d，包裹B=%d%n",
+                orderStatus(orderId), deliveryStatus(movingParcel));
+        assertThat(orderStatus(orderId)).as("幂等回传不许把订单改回 2").isEqualTo(3);
+
+        // ③ 更硬的一条：直接触发一次聚合（模拟任意晚到的子单变化把聚合跑起来）
+        deliveryFlowService.recomputeOrderStatus(orderId);
+        System.out.printf("㉒ ③ 再跑一次聚合 recomputeOrderStatus → 订单=%d%n", orderStatus(orderId));
+        assertThat(orderStatus(orderId)).as("**已完成是子单推导出来的结论，再聚合仍是 3，绝不能退回 2**")
+                .isEqualTo(3);
+
+        // ④ 真正晚到的写者：再塞一张待下发包裹并取消它（cancel 会触发聚合）→ 订单仍是 3
+        Long lateParcel = newDelivery(orderId, warehouseA, 1);
+        Long skuId = jdbc.queryForObject(
+                "SELECT product_sku_id FROM delivery_item WHERE delivery_id = ? LIMIT 1", Long.class, lateParcel);
+        int stockBefore = stockOf(skuId);
+        ok(post("/admin/deliveries/" + lateParcel + "/cancel", null));
+        int orderAfterLateWriter = orderStatus(orderId);
+        jdbc.update("UPDATE sku SET stock = ? WHERE id = ?", stockBefore, skuId);   // 撤销 cancel 的库存回补
+        System.out.printf("㉒ ④ 晚到的写者（取消一张待下发包裹触发聚合）→ 订单=%d%n", orderAfterLateWriter);
+        assertThat(orderAfterLateWriter).as("晚到的写者只能改包裹，不许把已完成订单退回已发货").isEqualTo(3);
+        assertThat(deliveryStatus(lateParcel)).as("被取消的包裹自身状态确实变了（证明聚合真的跑过）").isEqualTo(9);
+    }
+
+    // ================================================================== ㉓ 终态不出让：已退款(6)/已关闭(4) 不参与聚合
+
+    /*
+     * 同类残余（口径② 之外的那一半）：「已关闭 / 已退款」的订单被晚到的包裹回传聚合成「已发货」。
+     *
+     *  ① 订单已经是 6 已退款（退货审核通过）或 4 已关闭（审核不通过），但还有一个在途包裹
+     *  ② 晚到的 WMS 回传触发 recomputeOrderStatus
+     *  ③ 旧实现按子单算出 allOutbound → 把订单写成 2 已发货 / 9 部分发货 ← 商业上明显不对
+     *
+     * 4/6 不在口径② 的射程内：口径② 说的是「订单**还没终局**时，状态由包裹推导」；
+     * 已关闭 / 已退款是**外部业务动作**的结论（不是包裹推导出来的），一旦进入就是业务终局。
+     * 3 已完成反而**不加**守卫 —— 它本来就由子单推导得出（全部已签收），再加一道就成了两套逻辑。
+     */
+    @Test
+    @org.junit.jupiter.api.Order(23)
+    @DisplayName("㉓ 已退款(6)/已关闭(4) + 在途包裹 + 晚到回传 → 订单状态不被聚合成 2/9（终态不出让）")
+    void terminalStatusNotOverwrittenByAggregation() {
+        // ---------------- 场景 A：已退款(6)
+        Long refunded = newOrder(6);                                     // 6 已退款
+        Long parcelA = newDelivery(refunded, warehouseA, 1);
+        jdbc.update("UPDATE delivery_order SET status = 4 WHERE id = ?", parcelA);   // 4 运输中（在途）
+        System.out.printf("㉓-A 初始：订单=%d（已退款），包裹=%d（运输中）%n",
+                orderStatus(refunded), deliveryStatus(parcelA));
+
+        deliveryFlowService.recomputeOrderStatus(refunded);               // ① 直接触发一次聚合
+        System.out.printf("㉓-A ① 直接聚合 → 订单=%d（必须仍是 6）%n", orderStatus(refunded));
+        assertThat(orderStatus(refunded)).as("已退款(6) 订单不许被聚合成 2 已发货").isEqualTo(6);
+
+        // ② 晚到的 WMS 回传（运输中 → 已签收）同样会触发聚合
+        ok(post("/admin/deliveries/" + parcelA + "/wms-callback?event=signed", null));
+        System.out.printf("㉓-A ② 晚到回传 signed → 订单=%d，包裹=%d（包裹照常推进）%n",
+                orderStatus(refunded), deliveryStatus(parcelA));
+        assertThat(deliveryStatus(parcelA)).as("子单照常推进到已签收（被拦的只是父单聚合）").isEqualTo(5);
+        assertThat(orderStatus(refunded)).as("**已退款(6) 是业务终局，晚到回传不许改写**").isEqualTo(6);
+
+        // ---------------- 场景 B：已关闭(4)
+        Long closed = newOrder(4);                                       // 4 已关闭
+        Long parcelB = newDelivery(closed, warehouseA, 1);
+        jdbc.update("UPDATE delivery_order SET status = 3 WHERE id = ?", parcelB);   // 3 已出库
+        deliveryFlowService.recomputeOrderStatus(closed);
+        System.out.printf("㉓-B 初始+聚合：订单=%d（已关闭），包裹=%d（已出库）%n",
+                orderStatus(closed), deliveryStatus(parcelB));
+        assertThat(orderStatus(closed)).as("已关闭(4) 订单不许被聚合成 2 已发货").isEqualTo(4);
+
+        ok(post("/admin/deliveries/" + parcelB + "/wms-callback?event=transit", null));
+        System.out.printf("㉓-B 晚到回传 transit → 订单=%d，包裹=%d%n",
+                orderStatus(closed), deliveryStatus(parcelB));
+        assertThat(deliveryStatus(parcelB)).as("子单照常推进到运输中").isEqualTo(4);
+        assertThat(orderStatus(closed)).as("**已关闭(4) 是业务终局，晚到回传不许改写**").isEqualTo(4);
+    }
+
+    // ================================================================== ㉔ 确认收货守卫：还有包裹没出库 → 拒绝
+
+    /*
+     * 口径② 的正确形态是「父单状态由子单推导」，**不是**「买家一按就把包裹推到终点」。
+     * 旧实现把该订单所有未取消、未达已签收的包裹一律推到已签收，于是：
+     *   ① 一张「待下发」的包裹凭空变成「已签收」—— 下发/拣货/出库全跳过；
+     *   ② 还凭空补了一条现实里不存在的运单号（saveLogisticsIfAbsent）。
+     * 货还在商家手里，买家不可能收到，所以这里必须是**拒绝**而不是「硬推进」。
+     */
+    @Test
+    @org.junit.jupiter.api.Order(24)
+    @DisplayName("㉔ 确认收货守卫：还有包裹没出库（待下发）→ 拒绝并说明原因，包裹与运单都不许被凭空推进")
+    void confirmRejectedWhenAnyParcelNotOutbound() {
+        PortalSession buyer = registerPortalMember();
+        Long orderId = newOrderOfMember(2, buyer.memberId());             // 2 已发货
+        Long outbound = newDelivery(orderId, warehouseA, 1);              // 包裹 A：已出库（该有运单）
+        Long pending = newDelivery(orderId, warehouseB, 1);               // 包裹 B：待下发（货还在商家手里）
+        jdbc.update("UPDATE delivery_order SET status = 3 WHERE id = ?", outbound);   // 3 已出库
+        // 出库回传会写运单：A 本来就有 1 条，B 一条都没有
+        jdbc.update("INSERT INTO delivery_logistics (delivery_id, company, track_no) VALUES (?, '测试快递', ?)",
+                outbound, "TRK" + System.nanoTime());
+        int outboundLogisticsBefore = logisticsCount(outbound);
+        int pendingLogisticsBefore = logisticsCount(pending);
+        System.out.printf("㉔ 初始：订单=%d（已发货），包裹A=%d（已出库，运单 %d 条），包裹B=%d（待下发，运单 %d 条）%n",
+                orderStatus(orderId), deliveryStatus(outbound), outboundLogisticsBefore,
+                deliveryStatus(pending), pendingLogisticsBefore);
+
+        ResponseEntity<JsonNode> resp = postWithToken("/portal/orders/" + orderId + "/confirm", buyer.jwt());
+        JsonNode body = failBody(resp.getBody(), 1);                     // 业务失败（code=1），不是 500
+        String message = body.path("message").asText();
+        System.out.printf("㉔ ① 确认收货被拒：code=%d，message=%s%n", body.path("code").asInt(), message);
+
+        assertThat(message).as("必须给出明确中文原因（还有几个包裹没出库 + 该怎么办）")
+                .contains("尚未出库").contains("暂不能确认收货");
+        assertThat(message).as("原因里要指出是哪个状态的包裹（待下发）").contains("待下发");
+        assertThat(resp.getStatusCode().value())
+                .as("业务守卫是 code=1 的可读失败（不是 HTTP 4xx/5xx）").isEqualTo(200);
+
+        // 库里一个字节都不许变：包裹不推进、订单不写、运单不凭空产生
+        assertThat(deliveryStatus(pending)).as("**待下发的包裹绝不能被凭空推到已签收**").isEqualTo(0);
+        assertThat(deliveryStatus(outbound)).as("已出库的包裹也不该被这次失败的确认推进").isEqualTo(3);
+        assertThat(orderStatus(orderId)).as("订单状态不动（确认收货被整笔拒绝）").isEqualTo(2);
+        assertThat(logisticsCount(pending)).as("**没出过库的包裹不许凭空多出运单号**").isEqualTo(pendingLogisticsBefore);
+        assertThat(logisticsCount(outbound)).as("已出库包裹的运单条数不变").isEqualTo(outboundLogisticsBefore);
+        System.out.printf("㉔ ② 复核：订单=%d，包裹A=%d（运单 %d 条），包裹B=%d（运单 %d 条）%n",
+                orderStatus(orderId), deliveryStatus(outbound), logisticsCount(outbound),
+                deliveryStatus(pending), logisticsCount(pending));
+    }
+
+    // ================================================================== ㉕ 确认收货：只推在途包裹，不造运单
+
+    @Test
+    @org.junit.jupiter.api.Order(25)
+    @DisplayName("㉕ 确认收货：已出库/运输中两张包裹都推到已签收、订单由子单推导为已完成，且不多造运单")
+    void confirmSignsOnlyInTransitParcels_withoutFabricatingLogistics() {
+        PortalSession buyer = registerPortalMember();
+        Long orderId = newOrderOfMember(2, buyer.memberId());             // 2 已发货
+        Long outbound = newDelivery(orderId, warehouseA, 1);              // 包裹 A：已出库(3)
+        Long moving = newDelivery(orderId, warehouseB, 1);                // 包裹 B：运输中(4)
+        jdbc.update("UPDATE delivery_order SET status = 3 WHERE id = ?", outbound);
+        jdbc.update("UPDATE delivery_order SET status = 4 WHERE id = ?", moving);
+        // 两张包裹都真出过库（出库回传会写运单）→ 各 1 条
+        jdbc.update("INSERT INTO delivery_logistics (delivery_id, company, track_no) VALUES (?, '测试快递', ?)",
+                outbound, "TRK" + System.nanoTime());
+        jdbc.update("INSERT INTO delivery_logistics (delivery_id, company, track_no) VALUES (?, '测试快递', ?)",
+                moving, "TRK" + System.nanoTime());
+        int outboundLogisticsBefore = logisticsCount(outbound);
+        int movingLogisticsBefore = logisticsCount(moving);
+        System.out.printf("㉕ 初始：订单=%d（已发货），包裹A=%d（已出库，运单 %d 条），包裹B=%d（运输中，运单 %d 条）%n",
+                orderStatus(orderId), deliveryStatus(outbound), outboundLogisticsBefore,
+                deliveryStatus(moving), movingLogisticsBefore);
+
+        JsonNode data = ok(postWithToken("/portal/orders/" + orderId + "/confirm", buyer.jwt()));
+        System.out.printf("㉕ ① 确认收货成功 → 订单=%d（已完成），包裹A=%d，包裹B=%d；运单 A=%d 条、B=%d 条%n",
+                orderStatus(orderId), deliveryStatus(outbound), deliveryStatus(moving),
+                logisticsCount(outbound), logisticsCount(moving));
+
+        assertThat(orderStatus(orderId)).as("全部子单已签收 → 父单由子单推导为 3 已完成").isEqualTo(3);
+        assertThat(data.path("order").path("status").asInt()).as("接口回读的也是聚合后的真实状态").isEqualTo(3);
+        assertThat(deliveryStatus(outbound)).as("已出库的包裹被推到已签收").isEqualTo(5);
+        assertThat(deliveryStatus(moving)).as("运输中的包裹被推到已签收").isEqualTo(5);
+        // 关键：两张包裹出库时已经各有 1 条运单，这次确认**不许**再补新的（不凭空造运单号）
+        assertThat(logisticsCount(outbound)).as("**不许给已出库包裹再造一条运单**").isEqualTo(outboundLogisticsBefore);
+        assertThat(logisticsCount(moving)).as("**不许给运输中包裹再造一条运单**").isEqualTo(movingLogisticsBefore);
+        System.out.printf("㉕ ② 运单条数前后一致：A %d→%d，B %d→%d%n",
+                outboundLogisticsBefore, logisticsCount(outbound), movingLogisticsBefore, logisticsCount(moving));
+    }
+
+    // ================================================================== ㉖ 退款中(5) 不许被包裹聚合覆盖
+
+    /*
+     * ①：订单进入 5 退款中之后，只要还有在途包裹，任何一次回传（transit/signed）都会触发聚合，
+     * 旧实现按子单算出 allOutbound/allSigned，把订单写成 2 已发货 / 9 部分发货 / 3 已完成 ——
+     * 和 4/6 是同一个病：**业务动作写下的"退款进行中"被包裹回传覆盖掉了**。
+     * 5 不是终态，但它是「退款正在审批中」这个进行中的业务动作，下一步只能由退货审核写成 6。
+     */
+    @Test
+    @org.junit.jupiter.api.Order(26)
+    @DisplayName("㉖ 退款中(5) + 在途包裹：回传 transit/signed 不许把订单写成 2/9/3；5→6 的退货审核通过照常生效")
+    void returnInProgressNotOverwrittenByAggregation() {
+        Long orderId = newOrderWithItem(5, 1);                       // 5 退款中（买家申请退货后的状态）
+        Long parcel = newDelivery(orderId, warehouseA, 1);
+        jdbc.update("UPDATE delivery_order SET status = 3 WHERE id = ?", parcel);   // 3 已出库（在途）
+        System.out.printf("㉖ 初始：订单=%d（退款中），包裹=%d（已出库）%n",
+                orderStatus(orderId), deliveryStatus(parcel));
+
+        ok(post("/admin/deliveries/" + parcel + "/wms-callback?event=transit", null));
+        System.out.printf("㉖ ① 回传 transit → 订单=%d，包裹=%d%n", orderStatus(orderId), deliveryStatus(parcel));
+        assertThat(deliveryStatus(parcel)).as("子单照常推进到运输中").isEqualTo(4);
+        assertThat(orderStatus(orderId)).as("**退款中(5) 不许被包裹回传聚合成 2 已发货**").isEqualTo(5);
+
+        ok(post("/admin/deliveries/" + parcel + "/wms-callback?event=signed", null));
+        System.out.printf("㉖ ② 回传 signed → 订单=%d，包裹=%d%n", orderStatus(orderId), deliveryStatus(parcel));
+        assertThat(deliveryStatus(parcel)).isEqualTo(5);
+        assertThat(orderStatus(orderId)).as("**全部包裹已签收也不许把退款中写成 3 已完成**").isEqualTo(5);
+
+        deliveryFlowService.recomputeOrderStatus(orderId);           // 直接聚合同样被跳过
+        System.out.printf("㉖ ③ 直接聚合 → 订单=%d（仍必须 5）%n", orderStatus(orderId));
+        assertThat(orderStatus(orderId)).as("**直接调用聚合也不许改写退款中**").isEqualTo(5);
+
+        // 5 → 6 的正常流转不受影响（退货审核通过不走聚合）
+        Long applyId = newReturnApply(orderId, memberId);
+        Long skuId = jdbc.queryForObject(
+                "SELECT product_sku_id FROM order_item WHERE order_id = ? ORDER BY id LIMIT 1", Long.class, orderId);
+        int stockBefore = stockOf(skuId);
+        ok(put("/admin/return-applies/" + applyId, "{\"status\":1}"));
+        System.out.printf("㉖ ④ 退货审核通过 → 申请=%d，订单=%d（6 已退款）%n",
+                returnApplyStatusOf(applyId), orderStatus(orderId));
+        assertThat(returnApplyStatusOf(applyId)).isEqualTo(1);
+        assertThat(orderStatus(orderId)).as("5→6 是退货审核写出来的，不许被上面的聚合守卫挡掉").isEqualTo(6);
+        jdbc.update("UPDATE sku SET stock = ? WHERE id = ?", stockBefore, skuId);   // 还原被回补的库存
+    }
+
+    // ================================================================== ㉗ 审核通过写 6 必须先校验原状态
+
+    @Test
+    @org.junit.jupiter.api.Order(27)
+    @DisplayName("㉗ 已关闭(4) 订单 + 待处理退货申请 → 审核通过被拒（中文原因），订单仍是 4，不退款不回补")
+    void returnAuditPass_requiresRefundInProgress() {
+        Long orderId = newOrderWithItem(4, 2);                       // 4 已关闭
+        Long applyId = newReturnApply(orderId, memberId);
+        Long skuId = jdbc.queryForObject(
+                "SELECT product_sku_id FROM order_item WHERE order_id = ? ORDER BY id LIMIT 1", Long.class, orderId);
+        String sn = orderSnOf(orderId);
+        int stockBefore = stockOf(skuId);
+
+        // dryRun 与真做同一套守卫
+        JsonNode dryBody = failBody(put("/admin/return-applies/" + applyId + "?dryRun=true", "{\"status\":1}").getBody(), 1);
+        System.out.printf("㉗ ① 预演就被拒：code=%d message=%s%n",
+                dryBody.path("code").asInt(), dryBody.path("message").asText());
+        assertThat(dryBody.path("message").asText()).contains("退款中");
+
+        ResponseEntity<JsonNode> resp = put("/admin/return-applies/" + applyId, "{\"status\":1}");
+        JsonNode body = failBody(resp.getBody(), 1);
+        System.out.printf("㉗ ② 审核通过被拒：HTTP %d code=%d message=%s%n",
+                resp.getStatusCode().value(), body.path("code").asInt(), body.path("message").asText());
+
+        assertThat(resp.getStatusCode().value()).as("业务守卫是 code=1 的可读失败").isEqualTo(200);
+        assertThat(body.path("message").asText()).as("必须说清「为什么」：订单不是退款中")
+                .contains("退款中").contains("已关闭");
+        System.out.printf("㉗ ③ 复核：订单=%d（仍 4 已关闭），申请=%d（仍待处理），退款流水=%d 条，sku %d 库存 %d→%d%n",
+                orderStatus(orderId), returnApplyStatusOf(applyId), paymentCountByType(sn, 2),
+                skuId, stockBefore, stockOf(skuId));
+        assertThat(orderStatus(orderId)).as("**已关闭(4) 绝不许被写成已退款(6)**").isEqualTo(4);
+        assertThat(returnApplyStatusOf(applyId)).as("申请状态也不许被改（这笔请求整体不成立）").isZero();
+        assertThat(paymentCountByType(sn, 2)).as("**一条退款流水都不许记**").isZero();
+        assertThat(stockOf(skuId)).as("**库存一件都不许回补**").isEqualTo(stockBefore);
+    }
+
+    // ================================================================== ㉘ ship：8 待发货 / 1 已付款 + 出库闸门
+
+    static final String MSG_PARCEL_NOT_OUTBOUND = "该订单还有包裹未出库，不能标记为已发货；请先在履约页下发并等待仓库回传出库";
+
+    @Test
+    @org.junit.jupiter.api.Order(28)
+    @DisplayName("㉘ ship 接受待发货(8)/已付款(1)，但 8 且包裹全部未出库 → 拒绝（父单不许甩开子单）；其它状态仍拒绝")
+    void ship_acceptsPendingShipmentAndPaid() {
+        // ① 8 待发货 + 包裹停在「待下发」：**必须拒绝**。
+        //    审核通过只生成待下发包裹，货还在商家手里；此刻把父单硬写成 2 已发货，
+        //    父单说已发货、子单还在商家手上，之后任何一次回传按子单聚合又会把状态写回来（真实分叉）。
+        Long pendingShip = newOrder(8);
+        Long parcel = newEmptyDelivery(pendingShip, warehouseA);           // 待下发(0)
+        JsonNode blocked = failBody(post("/admin/orders/" + pendingShip + "/ship", null).getBody(), 1);
+        System.out.printf("㉘ ① 订单8（包裹待下发）发货被拒 → code=%d message=%s，订单=%d%n",
+                blocked.path("code").asInt(), blocked.path("message").asText(), orderStatus(pendingShip));
+        assertThat(blocked.path("message").asText()).isEqualTo(MSG_PARCEL_NOT_OUTBOUND);
+        assertThat(orderStatus(pendingShip)).as("被拒时订单必须仍是 8 待发货").isEqualTo(8);
+
+        // ①' 预演跑同一套守卫（不许「预演说能发、真做被拒」）
+        JsonNode dryBlocked = failBody(post("/admin/orders/" + pendingShip + "/ship?dryRun=true", null).getBody(), 1);
+        assertThat(dryBlocked.path("message").asText()).isEqualTo(MSG_PARCEL_NOT_OUTBOUND);
+        assertThat(orderStatus(pendingShip)).as("预演零落库").isEqualTo(8);
+
+        // ①'' 已下发 / 已拣货 同样不算出库：货还在仓库里，一样拒绝
+        jdbc.update("UPDATE delivery_order SET status = 1 WHERE id = ?", parcel);
+        assertThat(failBody(post("/admin/orders/" + pendingShip + "/ship", null).getBody(), 1)
+                .path("message").asText()).isEqualTo(MSG_PARCEL_NOT_OUTBOUND);
+        jdbc.update("UPDATE delivery_order SET status = 2 WHERE id = ?", parcel);
+        assertThat(failBody(post("/admin/orders/" + pendingShip + "/ship", null).getBody(), 1)
+                .path("message").asText()).isEqualTo(MSG_PARCEL_NOT_OUTBOUND);
+        assertThat(orderStatus(pendingShip)).as("三种未出库状态都不许改父单").isEqualTo(8);
+
+        // ② 包裹出库（≥ 已出库 3）之后才放行。这里直接把包裹置为已出库来构造
+        //    「子单已出库、父单仍停在 8」这一历史分叉残留（正常链路里聚合会自己把父单推到 2）——
+        //    守卫要保证的正是：这种残留状态下 ship 不再把父单与子单进一步拉开。
+        jdbc.update("UPDATE delivery_order SET status = 3 WHERE id = ?", parcel);
+        JsonNode dry = ok(post("/admin/orders/" + pendingShip + "/ship?dryRun=true", null));
+        System.out.printf("㉘ ② 订单8（包裹已出库）预演 → willDo=%s%n", dry.path("willDo").asText());
+        assertThat(dry.path("willDo").asText()).contains("待发货→已发货");
+        ok(post("/admin/orders/" + pendingShip + "/ship", null));
+        System.out.printf("㉘ ② 订单8 真调 → 订单=%d（2 已发货）%n", orderStatus(pendingShip));
+        assertThat(orderStatus(pendingShip)).as("**至少一张包裹已出库 → 8 待发货可以发**").isEqualTo(2);
+
+        // ②' 已取消的包裹不能替父单「作证出库」：唯一一张包裹是已取消 → 依然拒绝
+        Long onlyCancelled = newOrder(8);
+        Long cancelled = newEmptyDelivery(onlyCancelled, warehouseA);
+        jdbc.update("UPDATE delivery_order SET status = 9 WHERE id = ?", cancelled);
+        assertThat(failBody(post("/admin/orders/" + onlyCancelled + "/ship", null).getBody(), 1)
+                .path("message").asText()).isEqualTo(MSG_PARCEL_NOT_OUTBOUND);
+        assertThat(orderStatus(onlyCancelled)).as("已取消包裹不算出库").isEqualTo(8);
+
+        // ② 1 已付款（历史直发单）仍照旧
+        Long paid = newOrder(1);
+        ok(post("/admin/orders/" + paid + "/ship", null));
+        System.out.printf("㉘ ③ 订单1 真调 → 订单=%d（2 已发货）%n", orderStatus(paid));
+        assertThat(orderStatus(paid)).as("1 已付款仍可发货（保持原行为）").isEqualTo(2);
+
+        // ③ 其它状态仍拒绝：5 退款中
+        Long refunding = newOrder(5);
+        JsonNode body = failBody(post("/admin/orders/" + refunding + "/ship", null).getBody(), 1);
+        System.out.printf("㉘ ④ 订单5 发货被拒 → code=%d message=%s，订单=%d%n",
+                body.path("code").asInt(), body.path("message").asText(), orderStatus(refunding));
+        assertThat(body.path("message").asText()).contains("待发货").contains("已付款").contains("退款中");
+        assertThat(orderStatus(refunding)).as("被拒时订单状态不动").isEqualTo(5);
+    }
+
+    // ================================================================== ㉙ 退货被拒：交回包裹聚合
+
+    /*
+     * ④：退货被拒旧实现硬写 1 已付款。但那张订单的包裹可能已经出库/签收 —— 父单与子单分叉，
+     * 之后任何一次回传按子单重新聚合又把它改回 2/9（真实的状态倒退）。
+     * 口径②：子单是事实源，有包裹就让聚合推导；只有直发单（无包裹）才写 1。
+     */
+    @Test
+    @org.junit.jupiter.api.Order(29)
+    @DisplayName("㉙ 退货被拒：有在途包裹 → 订单由包裹聚合（出库=2、签收=3，绝不硬写 1）；直发单 → 1 已付款")
+    void returnReject_aggregatesFromParcelsInsteadOfHardWritingPaid() {
+        // A：包裹已出库 → 聚合出 2 已发货
+        Long orderA = newOrderWithItem(5, 1);
+        Long parcelA = newDelivery(orderA, warehouseA, 1);
+        jdbc.update("UPDATE delivery_order SET status = 3 WHERE id = ?", parcelA);
+        Long applyA = newReturnApply(orderA, memberId);
+        ok(put("/admin/return-applies/" + applyA, "{\"status\":2}"));
+        System.out.printf("㉙-A 包裹已出库 + 退货被拒 → 订单=%d（由子单推导），包裹=%d%n",
+                orderStatus(orderA), deliveryStatus(parcelA));
+        assertThat(orderStatus(orderA)).as("**包裹已出库 → 订单必须是 2 已发货，不是硬写的 1 已付款**").isEqualTo(2);
+        assertThat(deliveryStatus(parcelA)).as("包裹自己不参与退货，状态不变").isEqualTo(3);
+
+        // B：包裹已签收 → 聚合出 3 已完成（不会出现「已付款却挂着已签收包裹」）
+        Long orderB = newOrderWithItem(5, 1);
+        Long parcelB = newDelivery(orderB, warehouseB, 1);
+        jdbc.update("UPDATE delivery_order SET status = 5 WHERE id = ?", parcelB);
+        Long applyB = newReturnApply(orderB, memberId);
+        ok(put("/admin/return-applies/" + applyB, "{\"status\":2}"));
+        System.out.printf("㉙-B 包裹已签收 + 退货被拒 → 订单=%d（由子单推导），包裹=%d%n",
+                orderStatus(orderB), deliveryStatus(parcelB));
+        assertThat(orderStatus(orderB)).as("**包裹已签收 → 订单 3 已完成，绝不与子单分叉**").isEqualTo(3);
+
+        // C：直发单（没有任何包裹）→ 才写 1 已付款
+        Long direct = newOrder(5);
+        Long applyC = newReturnApply(direct, memberId);
+        ok(put("/admin/return-applies/" + applyC, "{\"status\":2}"));
+        System.out.printf("㉙-C 直发单（无包裹）+ 退货被拒 → 订单=%d（1 已付款）%n", orderStatus(direct));
+        assertThat(orderStatus(direct)).as("没有子单事实可依 → 回到已付款").isEqualTo(1);
+    }
+
+    // ================================================================== ㉚ 全部包裹取消 → 退回待审核
+
+    @Test
+    @org.junit.jupiter.api.Order(30)
+    @DisplayName("㉚ 全部包裹被取消 → 订单从 8 退回 7 待审核（拆单标记清空），且能重新审核拆单")
+    void allParcelsCancelled_returnsToPendingAudit() {
+        Long orderId = newOrderWithItem(8, 1);                       // 8 待发货，split_status=1
+        Long parcel = newDelivery(orderId, warehouseA, 1);           // 拆出来的唯一在途包裹
+        System.out.printf("㉚ 初始：订单=%d（待发货），split_status=%d，包裹=%d（待下发）%n",
+                orderStatus(orderId), orderSplitStatus(orderId), deliveryStatus(parcel));
+
+        ok(post("/admin/deliveries/" + parcel + "/cancel", null));
+        System.out.printf("㉚ ① 取消唯一包裹 → 包裹=%d（已取消），订单=%d（待审核），split_status=%d%n",
+                deliveryStatus(parcel), orderStatus(orderId), orderSplitStatus(orderId));
+        assertThat(deliveryStatus(parcel)).isEqualTo(9);
+        assertThat(orderStatus(orderId)).as("**不再卡在 8 待发货，退回 7 待审核**").isEqualTo(7);
+        assertThat(orderSplitStatus(orderId)).as("拆单标记必须清空，否则重新审核会返回那几张已取消的包裹").isZero();
+
+        // ② 能真的重新审核拆单（生成新的在途包裹）
+        ok(post("/admin/orders/" + orderId + "/audit-pass", null));
+        List<Long> parcels = jdbc.queryForList(
+                "SELECT id FROM delivery_order WHERE order_id = ? ORDER BY id", Long.class, orderId);
+        List<Long> active = jdbc.queryForList(
+                "SELECT id FROM delivery_order WHERE order_id = ? AND status <> 9 ORDER BY id", Long.class, orderId);
+        System.out.printf("㉚ ② 重新审核通过 → 订单=%d，包裹共 %d 张，其中在途 %d 张（状态=%s）%n",
+                orderStatus(orderId), parcels.size(), active.size(),
+                active.isEmpty() ? "-" : String.valueOf(deliveryStatus(active.get(0))));
+        assertThat(orderStatus(orderId)).isEqualTo(8);
+        assertThat(active).as("**必须重新拆出新包裹（不是把已取消的包裹原样返回）**").isNotEmpty();
+        assertThat(deliveryStatus(active.get(0))).as("新包裹是待下发").isZero();
+    }
+
+    // ================================================================== ㉛ 删「待处理」退货申请 → 订单交回聚合
+
+    @Test
+    @org.junit.jupiter.api.Order(31)
+    @DisplayName("㉛ 删掉「待处理」退货申请后订单不再卡在 5 退款中：无包裹→7 待审核（可重走审核），有出库包裹→按子单聚合")
+    void deletePendingReturnApply_releasesOrderFromRefundInProgress() {
+        Long reasonId = jdbc.queryForObject("SELECT id FROM return_reason ORDER BY id LIMIT 1", Long.class);
+
+        // A：直发单（一张包裹行都没有）—— 删掉待处理申请后必须回 7 待审核，并且能重新走完整个审核流程
+        Long direct = newOrderWithItem(5, 1);
+        Long applyA = newReturnApply(direct, memberId);
+        ok(delete("/admin/return-applies/" + applyA, null));
+        System.out.printf("㉛-A 直发单：删待处理申请 #%d → 订单 %d（应为 7 待审核），split_status=%d%n",
+                applyA, orderStatus(direct), orderSplitStatus(direct));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM return_apply WHERE id = ?", Integer.class, applyA))
+                .as("申请真的被删掉").isZero();
+        assertThat(orderStatus(direct)).as("**没有包裹可依 → 回 7 待审核，不许永远卡在 5 退款中**").isEqualTo(7);
+        assertThat(orderSplitStatus(direct)).as("拆单标记一并归零，重新审核时才能真的拆出新包裹").isZero();
+
+        // A'：能重新走审核流程 —— 重新登记申请 → 订单回 5 → 审核通过 → 6 已退款
+        JsonNode again = ok(post("/admin/return-applies", "{\"orderId\":" + direct + ",\"memberId\":" + memberId
+                + ",\"returnReason\":\"重新申请退货\",\"reasonId\":" + reasonId + "}"));
+        Long applyA2 = again.path("id").asLong();
+        System.out.printf("㉛-A' 重新登记申请 #%d → 订单 %d（应为 5 退款中）%n", applyA2, orderStatus(direct));
+        assertThat(orderStatus(direct)).isEqualTo(5);
+        ok(put("/admin/return-applies/" + applyA2, "{\"status\":1}"));
+        System.out.printf("㉛-A'' 审核通过 → 订单 %d（应为 6 已退款）%n", orderStatus(direct));
+        assertThat(orderStatus(direct)).as("重新走一遍审核流程要真的能通过").isEqualTo(6);
+
+        // B：有已出库包裹 —— **不硬写 7**，交回聚合，按子单推导出 2 已发货
+        Long shipped = newOrderWithItem(5, 1);
+        Long parcel = newDelivery(shipped, warehouseA, 1);
+        jdbc.update("UPDATE delivery_order SET status = 3 WHERE id = ?", parcel);
+        Long applyB = newReturnApply(shipped, memberId);
+        ok(delete("/admin/return-applies/" + applyB, null));
+        System.out.printf("㉛-B 包裹已出库：删待处理申请 #%d → 订单 %d（应为 2 已发货，由子单聚合）%n",
+                applyB, orderStatus(shipped));
+        assertThat(orderStatus(shipped)).as("有子单事实就按子单聚合（2 已发货），不是硬写某个固定状态").isEqualTo(2);
+
+        // C：该订单还有**另一条**待处理申请在审批中 → 退款流程没结束，状态不许动（仍 5）
+        Long multi = newOrderWithItem(5, 1);
+        Long applyC1 = newReturnApply(multi, memberId);
+        Long applyC2 = newReturnApply(multi, memberId);
+        ok(delete("/admin/return-applies/" + applyC1, null));
+        System.out.printf("㉛-C 删一条（还有 #%d 待处理）→ 订单 %d（应仍为 5 退款中）%n", applyC2, orderStatus(multi));
+        assertThat(orderStatus(multi)).as("还有别的申请在审批中 → 不动订单状态").isEqualTo(5);
+
+        // D：删的是「已拒绝」的历史申请（不是待处理）→ 与退款流程无关，状态不许动（仍 5）
+        Long history = newOrderWithItem(5, 1);
+        Long applyD = newReturnApply(history, memberId);
+        jdbc.update("UPDATE return_apply SET status = 2 WHERE id = ?", applyD);
+        ok(delete("/admin/return-applies/" + applyD, null));
+        System.out.printf("㉛-D 删的是已拒绝的历史申请 → 订单 %d（应仍为 5）%n", orderStatus(history));
+        assertThat(orderStatus(history)).as("删历史结论不改订单状态").isEqualTo(5);
+    }
+
+    // ================================================================== ㉜ 后台建单扣库存 + 台账
+
+    @Test
+    @org.junit.jupiter.api.Order(32)
+    @DisplayName("㉜ 后台建单扣库存并记 ORDER_CREATE 台账（与买家下单同口径）；库存不足 → 整笔拒绝，库存/订单/台账都不变")
+    void adminCreateOrder_deductsStockAndWritesLedger() {
+        Long productId = newProduct("后台建单扣库存商品");
+        String productName = jdbc.queryForObject("SELECT name FROM product WHERE id = ?", String.class, productId);
+        Long skuA = newSku(productId, "12.00", 10);
+        Long skuB = newSku(productId, "13.00", 5);
+
+        // ① 建单：2 条明细各 3 件 → 两个 SKU 各扣 3 件，台账多 2 行 ORDER_CREATE（delta = -3）
+        int stockABefore = stockOf(skuA);
+        int stockBBefore = stockOf(skuB);
+        JsonNode created = ok(post("/admin/orders", createOrderBody(productId, skuA, skuB, 3)));
+        Long orderId = created.path("id").asLong();
+        createdOrders.add(orderId);
+        System.out.printf("㉜ ① 建单成功 id=%d，总额=%s；sku%d 库存 %d→%d，sku%d 库存 %d→%d%n",
+                orderId, created.path("totalAmount").asText(), skuA, stockABefore, stockOf(skuA),
+                skuB, stockBBefore, stockOf(skuB));
+        assertThat(stockOf(skuA)).as("**后台建单必须扣库存（skuA 10-3=7）**").isEqualTo(stockABefore - 3);
+        assertThat(stockOf(skuB)).as("**后台建单必须扣库存（skuB 5-3=2）**").isEqualTo(stockBBefore - 3);
+        assertThat(jdbc.queryForObject("SELECT COALESCE(SUM(product_quantity),0) FROM order_item WHERE order_id = ?",
+                Integer.class, orderId)).as("明细数量落在库里").isEqualTo(6);
+
+        List<Map<String, Object>> ledger = jdbc.queryForList(
+                "SELECT sku_id, delta, reason, idem_key FROM stock_ledger WHERE order_id = ? ORDER BY sku_id", orderId);
+        System.out.printf("㉜ ① 台账 %d 行：%s%n", ledger.size(), ledger);
+        assertThat(ledger).as("**两条明细各记一行 ORDER_CREATE 台账**").hasSize(2);
+        assertThat(ledger.get(0).get("reason").toString()).isEqualTo("ORDER_CREATE");
+        assertThat(((Number) ledger.get(0).get("delta")).intValue()).isEqualTo(-3);
+        assertThat(((Number) ledger.get(1).get("delta")).intValue()).isEqualTo(-3);
+
+        // ② 库存不足：skuB 只剩 2 件，再建「3 件」的单 → 必须整笔拒绝，且库存 / 订单 / 台账都不许变
+        int orderCountBefore = jdbc.queryForObject("SELECT COUNT(*) FROM `order`", Integer.class);
+        int ledgerCountBefore = jdbc.queryForObject("SELECT COUNT(*) FROM stock_ledger", Integer.class);
+        JsonNode body = failBody(post("/admin/orders", createOrderBody(productId, skuA, skuB, 3)).getBody(), 1);
+        System.out.printf("㉜ ② 库存不足建单被拒 → code=%d message=%s；sku%d 仍 %d 件；订单数 %d→%d；台账 %d→%d%n",
+                body.path("code").asInt(), body.path("message").asText(), skuB, stockOf(skuB),
+                orderCountBefore, jdbc.queryForObject("SELECT COUNT(*) FROM `order`", Integer.class),
+                ledgerCountBefore, jdbc.queryForObject("SELECT COUNT(*) FROM stock_ledger", Integer.class));
+        assertThat(body.path("message").asText()).isEqualTo("库存不足：" + productName + " 只剩 2 件");
+        assertThat(stockOf(skuB)).as("被拒时库存一件都不许扣").isEqualTo(stockBBefore - 3);
+        assertThat(stockOf(skuA)).as("同一笔里的前一条明细也要跟着回滚（不许只扣一半）").isEqualTo(stockABefore - 3);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM `order`", Integer.class))
+                .as("**不许建出「扣了库存但订单没建」或反过来的半截单**").isEqualTo(orderCountBefore);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM stock_ledger", Integer.class))
+                .as("台账也要一起回滚，不留孤儿扣减行").isEqualTo(ledgerCountBefore);
+
+        // ③ 扣完库存之后走「审核不通过」：回补 3 件 —— 库存回到下单前（净变化 0，不再虚增）
+        int before = stockOf(skuA);
+        ok(post("/admin/orders/" + orderId + "/audit-reject", null));
+        System.out.printf("㉜ ③ 审核不通过回补：sku%d 库存 %d→%d（应回到建单前 %d）%n",
+                skuA, before, stockOf(skuA), stockABefore);
+        assertThat(stockOf(skuA)).as("**建单扣 3 + 审核不通过补 3 = 净 0，不再虚增**").isEqualTo(stockABefore);
+    }
+
     // ================================================================== 数据构造
 
     private Long newProduct(String name) {
@@ -1137,6 +1683,21 @@ class OptimisticLockIntegrationTest {
     private static String skuBody(Long productId, String price, int stock, Integer version) {
         return "{\"sku\":{\"productId\":" + productId + ",\"price\":" + price + ",\"stock\":" + stock
                 + (version == null ? "" : ",\"version\":" + version) + "}}";
+    }
+
+    /** 后台建单请求体：两条明细（skuA / skuB 各 quantity 件），总金额由后端按快照价重算；state=7 待审核便于接着走审核不通过 */
+    private String createOrderBody(Long productId, Long skuA, Long skuB, int quantity) {
+        return "{\"order\":{\"orderSn\":\"ADM" + System.currentTimeMillis()
+                + ThreadLocalRandom.current().nextInt(1000, 9999) + "\""
+                + ",\"memberId\":" + memberId + ",\"status\":7,\"payType\":1"
+                + ",\"receiverName\":\"后台建单用例\",\"receiverPhone\":\"13700000000\""
+                + ",\"receiverAddress\":\"自动化测试地址（跑完即删）\",\"splitStatus\":0}"
+                + ",\"items\":["
+                + "{\"productId\":" + productId + ",\"productSkuId\":" + skuA
+                + ",\"productName\":\"后台建单用例-规格A\",\"productPrice\":12.00,\"productQuantity\":" + quantity + "},"
+                + "{\"productId\":" + productId + ",\"productSkuId\":" + skuB
+                + ",\"productName\":\"后台建单用例-规格B\",\"productPrice\":13.00,\"productQuantity\":" + quantity + "}"
+                + "]}";
     }
 
     private static String orderBody(String receiverName, Integer version) {

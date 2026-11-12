@@ -16,6 +16,7 @@ TRUNCATE TABLE member_address;
 TRUNCATE TABLE return_apply;
 TRUNCATE TABLE order_item;
 TRUNCATE TABLE `order`;
+TRUNCATE TABLE stock_ledger;
 TRUNCATE TABLE return_reason;
 TRUNCATE TABLE order_setting;
 TRUNCATE TABLE payment_record;

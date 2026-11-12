@@ -9,6 +9,8 @@ import com.qiqi.mall.catalog.service.ProductService;
 import com.qiqi.mall.catalog.service.SkuService;
 import com.qiqi.mall.shared.common.OrderSnGenerator;
 import com.qiqi.mall.shared.guard.OptimisticLockGuard;
+import com.qiqi.mall.stock.StockLedgerContext;
+import com.qiqi.mall.stock.entity.StockLedger;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -56,26 +58,35 @@ public class OrderTransactionalCreator {
 
         BigDecimal total = BigDecimal.ZERO;
         List<OrderItem> items = new ArrayList<>();
-        for (ItemInput input : inputs) {
-            Sku sku = skuService.getById(input.skuId());
-            if (sku == null) continue;
-            Product product = productService.getById(sku.getProductId());
-            int qty = input.quantity() == null || input.quantity() < 1 ? 1 : input.quantity();
+        // 每次扣减库存都要记台账（缺陷：扣/补两边本来都没有台账）。先声明「这次扣减属于哪张订单、
+        // 什么原因、由哪张单据触发」，库存接口在里面按幂等键记账；没有声明会 fail-closed 抛异常 ——
+        // 不允许出现「改了库存但账上没有」。下单这一侧有幂等令牌兜住重复提交，台账仍要记，账才完整。
+        StockLedgerContext.Attribution outerLedgerContext = StockLedgerContext.open(
+                order.getId(), StockLedger.REASON_ORDER_CREATE, null, null);
+        try {
+            for (ItemInput input : inputs) {
+                Sku sku = skuService.getById(input.skuId());
+                if (sku == null) continue;
+                Product product = productService.getById(sku.getProductId());
+                int qty = input.quantity() == null || input.quantity() < 1 ? 1 : input.quantity();
 
-            // 原子扣减：把「判断+减法」压进一条 SQL，避免 check-then-act 超卖
-            if (!skuService.deductStock(sku.getId(), qty)) {
-                throw new IllegalStateException("库存不足：" + (product == null ? "" : product.getName()));
+                // 原子扣减：把「判断+减法」压进一条 SQL，避免 check-then-act 超卖
+                if (!skuService.deductStock(sku.getId(), qty)) {
+                    throw new IllegalStateException("库存不足：" + (product == null ? "" : product.getName()));
+                }
+
+                OrderItem item = new OrderItem();
+                item.setOrderId(order.getId());
+                item.setProductId(sku.getProductId());
+                item.setProductSkuId(sku.getId());
+                item.setProductName(product == null ? "" : product.getName());
+                item.setProductPrice(sku.getPrice());
+                item.setProductQuantity(qty);
+                items.add(item);
+                total = total.add(sku.getPrice().multiply(BigDecimal.valueOf(qty)));
             }
-
-            OrderItem item = new OrderItem();
-            item.setOrderId(order.getId());
-            item.setProductId(sku.getProductId());
-            item.setProductSkuId(sku.getId());
-            item.setProductName(product == null ? "" : product.getName());
-            item.setProductPrice(sku.getPrice());
-            item.setProductQuantity(qty);
-            items.add(item);
-            total = total.add(sku.getPrice().multiply(BigDecimal.valueOf(qty)));
+        } finally {
+            StockLedgerContext.close(outerLedgerContext);
         }
         if (items.isEmpty()) throw new IllegalStateException("商品信息无效，无法下单");
 

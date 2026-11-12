@@ -7,6 +7,7 @@ TRUNCATE TABLE member_address;
 TRUNCATE TABLE return_apply;
 TRUNCATE TABLE order_item;
 TRUNCATE TABLE `order`;
+TRUNCATE TABLE stock_ledger;
 TRUNCATE TABLE return_reason;
 TRUNCATE TABLE order_setting;
 TRUNCATE TABLE payment_record;
@@ -173,6 +174,15 @@ INSERT INTO inventory (id, sku_id, warehouse_id, stock) VALUES
   (7, 3, 1, 0),   (8, 3, 2, 0),   (9, 3, 3, 50),
   (10, 4, 1, 200),(11, 5, 1, 30), (12, 6, 1, 15),
   (13, 7, 1, 500),(14, 8, 1, 300),(15, 9, 1, 1000);
+
+-- 兜底：凡「一条分仓记录都没有」的规格，一律按它的总库存落默认仓（深圳仓 id=1）。
+-- 口径与 scripts/backfill-inventory.sh 完全一致：**只补缺口、绝不覆盖**人工配过的分仓数据，
+-- 默认仓 = warehouse.status=1 里 id 最小的那个（与 SplitOrderService 的兜底同一口径）。
+-- 上面的显式 INSERT 已经把当前种子的 SKU 1–9 配齐，所以正常导入时这条插入 0 行 ——
+-- 它守的是「以后种子加了 SKU 却忘了配分仓」这种情形（那种单会因「无法确定发货仓」卡在待审核）。
+INSERT INTO inventory (sku_id, warehouse_id, stock)
+SELECT s.id, 1, s.stock FROM sku s
+WHERE NOT EXISTS (SELECT 1 FROM inventory i WHERE i.sku_id = s.id);
 
 -- 订单设置（全局单行）
 INSERT INTO order_setting (id, auto_confirm_days, auto_close_minutes) VALUES

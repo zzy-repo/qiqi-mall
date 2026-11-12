@@ -10,6 +10,7 @@ import com.qiqi.mall.catalog.entity.Product;
 import com.qiqi.mall.catalog.entity.Sku;
 import com.qiqi.mall.shared.security.CurrentUser;
 import com.qiqi.mall.oms.entity.PaymentRecord;
+import com.qiqi.mall.oms.service.DeliveryFlowService;
 import com.qiqi.mall.oms.service.OrderCreateService;
 import com.qiqi.mall.oms.service.OrderItemService;
 import com.qiqi.mall.oms.service.OrderService;
@@ -42,18 +43,21 @@ public class PortalOrderController {
     private final OrderCreateService orderCreateService;
     private final IdempotentTokenStore idempotentTokenStore;
     private final CartService cartService;
+    private final DeliveryFlowService deliveryFlowService;
 
     public PortalOrderController(OrderService orderService, OrderItemService orderItemService,
                                  PaymentRecordService paymentRecordService,
                                  OrderCreateService orderCreateService,
                                  IdempotentTokenStore idempotentTokenStore,
-                                 CartService cartService) {
+                                 CartService cartService,
+                                 DeliveryFlowService deliveryFlowService) {
         this.orderService = orderService;
         this.orderItemService = orderItemService;
         this.paymentRecordService = paymentRecordService;
         this.orderCreateService = orderCreateService;
         this.idempotentTokenStore = idempotentTokenStore;
         this.cartService = cartService;
+        this.deliveryFlowService = deliveryFlowService;
     }
 
     /**
@@ -152,17 +156,46 @@ public class PortalOrderController {
         return Result.ok(detailBody(order));
     }
 
-    /** 确认收货：已发货(2) → 已完成(3)，守卫：仅本人订单且 status=2 */
+    /**
+     * 确认收货：已发货(2) → 已完成(3)；守卫：仅本人订单且 status=2。
+     *
+     * <p><b>口径②（用户拍板）：子单是事实源 —— 父单状态是推导值，这里不再硬写 order.status=3。</b>
+     * 顺序是「先把事实推到位，再让聚合算父单」：
+     * <pre>
+     * ① {@link com.qiqi.mall.oms.service.DeliveryFlowService#signRemainingDeliveries} 把该订单所有
+     *    未取消、未签收的包裹推到「已签收」（与 WMS 回传 signed 同一条落库路径 + 补运单）
+     * ② {@link com.qiqi.mall.oms.service.DeliveryFlowService#recomputeOrderStatus} 由子单推导父单 → 3 已完成
+     * </pre>
+     * 这样父单与子单不会分叉：老实现只写父单、不碰子单，于是「父单已完成 + 另一个包裹还在运输中」
+     * 这个组合是真实存在的，之后晚到的 WMS 回传按子单重新聚合就把已完成为写回已发货（状态倒退）。
+     *
+     * <p><b>唯一的例外：直发路径</b>（订单下没有任何未取消的包裹 —— 单仓直发时订单由管理员「发货」
+     * 直接从 1 置到 2，根本没有包裹行；或包裹都被取消了）。此时不存在子单事实，父单只能由这一步推进，
+     * 这一笔写入是唯一写者，不存在两个写者抢同一个状态字段。
+     *
+     * <p>整笔一个事务：推子单 / 聚合写父单 / 补运单任一步失败 → 全部回滚（不会留下「包裹已签收、订单没完成」）。
+     */
     @PostMapping("/{id}/confirm")
+    @Transactional(rollbackFor = Exception.class)
     public Result<Map<String, Object>> confirm(@PathVariable Long id) {
         Order order = orderService.getById(id);
         if (order == null || !order.getMemberId().equals(CurrentUser.id())) return Result.fail("订单不存在");
         if (order.getStatus() != 2) return Result.fail("只有已发货订单可以确认收货");
-        order.setStatus(3);
-        // 0 行 = 读出来之后订单被别人改过（例如另一边已经在确认收货）→ 409，同样是买家视角文案
-        int rows = orderService.getBaseMapper().updateById(order);
-        OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_ORDER_STATE_CHANGED);
-        return Result.ok(detailBody(order));
+
+        if (deliveryFlowService.activeDeliveryCount(id) > 0) {
+            // ① 先写事实：所有在途包裹 → 已签收（0 行 = 被别人改过 → 409 回滚整笔）
+            deliveryFlowService.signRemainingDeliveries(id);
+            // ② 再推导父单：全部子单已签收 → 3 已完成（父单状态由子单算出，不是硬写）
+            deliveryFlowService.recomputeOrderStatus(id);
+        } else {
+            // 直发路径：没有子单事实可依，只能由买家这一步推进（唯一写者）
+            order.setStatus(3);
+            // 0 行 = 读出来之后订单被别人改过（例如另一边已经在确认收货）→ 409，买家视角文案
+            int rows = orderService.getBaseMapper().updateById(order);
+            OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_ORDER_STATE_CHANGED);
+        }
+        // 回读：返回的状态必须是库里真实的那个（聚合算出来的 3，而不是我们以为的 3）
+        return Result.ok(detailBody(orderService.getById(id)));
     }
 
     private Map<String, Object> detailBody(Order order) {

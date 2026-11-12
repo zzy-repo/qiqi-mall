@@ -66,6 +66,8 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
             new Rule("/admin/attributes", "catalog:read", "catalog:write"),
             new Rule("/admin/skus", "catalog:read", "catalog:write"),
             new Rule("/admin/upload", "catalog:read", "catalog:write"),
+            // 按 URL 拉图（AI 补商品图用）：与 multipart 上传同一类权限 —— 它也是「往对象存储里写图」
+            new Rule("/admin/upload/image-from-url", "catalog:read", "catalog:write"),
             // 会员域：会员 / 购物车 / 收货地址
             new Rule("/admin/members", "member:read", "member:write"),
             new Rule("/admin/carts", "member:read", "member:write"),

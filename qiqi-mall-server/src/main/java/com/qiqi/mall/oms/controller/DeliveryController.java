@@ -16,6 +16,8 @@ import com.qiqi.mall.oms.service.DeliveryOrderService;
 import com.qiqi.mall.oms.service.WarehouseService;
 import com.qiqi.mall.shared.common.PreviewResult;
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.stock.StockLedgerContext;
+import com.qiqi.mall.stock.entity.StockLedger;
 import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -91,7 +93,22 @@ public class DeliveryController {
         if (PreviewResult.isDryRun(dryRun)) {
             return Result.ok(PreviewResult.of(deliveryFlowService.previewCancel(id)));
         }
-        return Result.ok(deliveryFlowService.cancel(id));
+        // 回补库存要记台账（缺陷：这条入口原来也是裸的 stock = stock + N）。
+        // 回补的落点是 DeliveryFlowService#cancel 里那句 skuService.restoreStock(...)，
+        // 而那个文件由另一路改动占用 —— 所以在这里（它唯一的入口）声明归属：
+        // 「本次回补属于哪张订单、原因 DELIVERY_CANCEL、由这张发货单触发」，
+        // 库存接口在同一个线程里按这个上下文记账、查重。发货单不存在时不声明（cancel 自己会报错）。
+        DeliveryOrder delivery = deliveryOrderService.getById(id);
+        if (delivery == null) {
+            return Result.ok(deliveryFlowService.cancel(id));
+        }
+        StockLedgerContext.Attribution outer = StockLedgerContext.open(delivery.getOrderId(),
+                StockLedger.REASON_DELIVERY_CANCEL, StockLedger.REF_TYPE_DELIVERY, delivery.getId());
+        try {
+            return Result.ok(deliveryFlowService.cancel(id));
+        } finally {
+            StockLedgerContext.close(outer);
+        }
     }
 
     /** WMS 回传入口：event = pick | outbound | transit | signed（幂等）。 */

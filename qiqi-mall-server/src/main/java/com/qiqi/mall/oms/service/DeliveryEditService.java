@@ -3,6 +3,7 @@ package com.qiqi.mall.oms.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.qiqi.mall.oms.dto.DeliveryItemQty;
 import com.qiqi.mall.oms.entity.DeliveryItem;
+import com.qiqi.mall.oms.entity.DeliveryLogistics;
 import com.qiqi.mall.oms.entity.DeliveryOrder;
 import com.qiqi.mall.oms.entity.Warehouse;
 import com.qiqi.mall.order.entity.Order;
@@ -47,15 +48,18 @@ public class DeliveryEditService {
     private final OrderItemService orderItemService;
     private final OrderService orderService;
     private final WarehouseService warehouseService;
+    private final DeliveryLogisticsService deliveryLogisticsService;
 
     public DeliveryEditService(DeliveryOrderService deliveryOrderService, DeliveryItemService deliveryItemService,
                                OrderItemService orderItemService, OrderService orderService,
-                               WarehouseService warehouseService) {
+                               WarehouseService warehouseService,
+                               DeliveryLogisticsService deliveryLogisticsService) {
         this.deliveryOrderService = deliveryOrderService;
         this.deliveryItemService = deliveryItemService;
         this.orderItemService = orderItemService;
         this.orderService = orderService;
         this.warehouseService = warehouseService;
+        this.deliveryLogisticsService = deliveryLogisticsService;
     }
 
     // ------------------------------------------------------------------
@@ -181,6 +185,12 @@ public class DeliveryEditService {
 
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> delete(Long deliveryId, Long targetDeliveryId) {
+        // 依赖检查排在状态守卫之前：有物流记录时真正的原因不是「状态不对」，而是
+        // 「运单已经产生、删了就对不上账」—— 必须说准，别让人以为改状态就能删。
+        DeliveryOrder current = deliveryOrderService.getById(deliveryId);
+        if (current == null) throw new IllegalStateException("发货单不存在：" + deliveryId);
+        String blockReason = blockReasonOfLogistics(current);
+        if (blockReason != null) throw new IllegalStateException(blockReason);
         DeliveryOrder delivery = requirePending(deliveryId, "删除");
         List<DeliveryItem> items = itemsOf(deliveryId);
         if (!items.isEmpty()) {
@@ -268,6 +278,10 @@ public class DeliveryEditService {
 
     /** 预演「删除」（有明细时必须指定并入目标，等同合并） */
     public String previewDelete(Long deliveryId, Long targetDeliveryId) {
+        DeliveryOrder current = deliveryOrderService.getById(deliveryId);
+        if (current == null) throw new IllegalStateException("发货单不存在：" + deliveryId);
+        String blockReason = blockReasonOfLogistics(current);
+        if (blockReason != null) throw new IllegalStateException(blockReason);
         DeliveryOrder delivery = requirePending(deliveryId, "删除");
         List<String> items = itemLines(deliveryId);
         if (items.isEmpty()) {
@@ -336,6 +350,28 @@ public class DeliveryEditService {
     // ------------------------------------------------------------------
     // 内部
     // ------------------------------------------------------------------
+
+    /**
+     * 发货单上的物流记录检查：有运单就不能删（{@code delivery_logistics.delivery_id} 对
+     * {@code delivery_order} 是 NO ACTION，DB 层只会回一句「数据处理失败」）。
+     *
+     * <p>返回 {@code null} 表示没有物流记录、可以继续走状态守卫；否则返回中文原因（含运单号），
+     * 并给出「先作废物流 / 改为取消」的出路 —— 要么删干净，要么说清为什么不能删。
+     */
+    private String blockReasonOfLogistics(DeliveryOrder delivery) {
+        List<DeliveryLogistics> logistics = deliveryLogisticsService.list(
+                new LambdaQueryWrapper<DeliveryLogistics>()
+                        .eq(DeliveryLogistics::getDeliveryId, delivery.getId())
+                        .orderByAsc(DeliveryLogistics::getId));
+        if (logistics.isEmpty()) return null;
+        List<String> tracks = new ArrayList<>();
+        for (DeliveryLogistics row : logistics) {
+            tracks.add(row.getTrackNo() == null ? ("物流#" + row.getId()) : row.getTrackNo());
+        }
+        return "该发货单 " + delivery.getDeliverySn() + "（id=" + delivery.getId() + "）有 "
+                + logistics.size() + " 条物流记录（运单号 " + String.join("、", tracks)
+                + "），无法删除；请先在履约页作废物流，或改为取消发货单。";
+    }
 
     /** 统一守卫：只有待下发可以改 */
     private DeliveryOrder requirePending(Long deliveryId, String action) {
