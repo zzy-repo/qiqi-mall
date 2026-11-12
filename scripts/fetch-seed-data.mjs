@@ -110,11 +110,27 @@ async function fetchProducts() {
 // ---------------------------------------------------------------------------
 
 let adminToken = null
+
+// admin 密码不再硬编码：ADMIN_PASSWORD 环境变量优先，其次读密钥文件；都拿不到就快速失败。
+const ADMIN_SECRET_FILE = process.env.ADMIN_PASSWORD_FILE || '/root/.qiqi-secrets/admin.txt'
+function readAdminPassword() {
+  const fromEnv = process.env.ADMIN_PASSWORD
+  if (fromEnv) return fromEnv
+  try {
+    const pw = readFileSync(ADMIN_SECRET_FILE, 'utf8').trim()
+    if (pw) return pw
+  } catch {
+    // 落到下面统一报错
+  }
+  console.error(`❌ 缺少 admin 密码（未设置 ADMIN_PASSWORD，且读不到 ${ADMIN_SECRET_FILE}）`)
+  process.exit(1)
+}
+
 async function login() {
   const res = await fetch(`${API_BASE}/admin/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'admin', password: '123456' }),
+    body: JSON.stringify({ username: 'admin', password: readAdminPassword() }),
     signal: AbortSignal.timeout(20_000)
   })
   const body = await res.json()
@@ -322,6 +338,10 @@ async function main() {
 --   商品数据来源：DummyJSON（https://dummyjson.com），图片经 POST /admin/upload/image 落 MinIO
 --   生成时间：${new Date().toISOString()}
 -- 幂等策略：SET FOREIGN_KEY_CHECKS=0 → 逐表 TRUNCATE → 按固定 id 插入 → 恢复外键检查（可反复重跑）
+-- 口令说明：本文件里 admin 的哈希是「演示弱口令」占位，只为让种子自己能登录，不含真实口令。
+--   → 测试库复位后由 scripts/set-admin-password.sh 从 /root/.qiqi-secrets/admin.txt 覆盖；
+--   → e2e 独立库走 scripts/reset-e2e-db.sh，不跑那一步，仍用本行的占位哈希。
+--   换口令请改密钥文件（chmod 600），不要把真实哈希写进本文件（它被 git 跟踪、且会被重生成覆盖）。
 
 USE ${DB};
 

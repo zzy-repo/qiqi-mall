@@ -21,6 +21,9 @@
 #     再固定 id 重灌，所以重跑 = 整体复位，不会漂移）。
 #   - 字符集坑同样交给 init-test-db.sh 处理：容器里的 mysql 客户端默认 latin1，
 #     必须显式 --default-character-set=utf8mb4，否则中文会被二次编码成乱码。
+#   - admin 口令也交给 init-test-db.sh 的收尾步骤（scripts/set-admin-password.sh）：
+#     种子里的 admin 哈希是演示弱口令，复位后必须用 /root/.qiqi-secrets/admin.txt 覆盖，
+#     否则「复位一次就把后台口令打回弱口令」。那一步失败时本脚本会失败退出（不再静默）。
 #
 # 安全边界：
 #   - 只碰 qiqi_mall_test，绝不碰 dev 库 qiqi_mall（init-test-db.sh 只 USE 测试库；
@@ -61,8 +64,24 @@ snapshot() {
 
 echo "▶ 复位前 $DB_NAME（member/order/product/sku/inventory）：$(snapshot)"
 
-# 真正干活：复用 init-test-db.sh（幂等重置 + 固定 id 重灌种子）
-"$REPO_DIR/scripts/init-test-db.sh" | grep -E '^▶|^✓|^!' || true
+# 真正干活：复用 init-test-db.sh（幂等重置 + 固定 id 重灌种子
+# + 末尾用密钥文件覆盖 admin 口令 —— 那一步也在这里，因为它是本脚本唯一的重灌入口）
+# 注意：保留 init-test-db.sh 的退出码。以前是 `| grep ... || true`，会把「admin 口令重设失败」
+# 也一起吞掉，脚本照样报「✅ 已复位」—— 那正好是要堵的安全回退（库里还是种子弱口令）。
+init_log="$(mktemp)"
+set +e
+"$REPO_DIR/scripts/init-test-db.sh" 2>&1 | tee "$init_log" | grep -E '^▶|^✓|^!|^✅|^已更新'
+init_rc="${PIPESTATUS[0]}"
+set -e
+if [[ "$init_rc" -ne 0 ]]; then
+  echo >&2
+  echo "✗ init-test-db.sh 退出码 $init_rc：复位没跑完，$DB_NAME 可能还停在种子弱口令上" >&2
+  echo "  完整输出：" >&2
+  grep -E '^✗|^❌|^!' "$init_log" >&2 || cat "$init_log" >&2
+  rm -f "$init_log"
+  exit 1
+fi
+rm -f "$init_log"
 
 echo
 echo "▶ 复位后 $DB_NAME（member/order/product/sku/inventory）：$(snapshot)"

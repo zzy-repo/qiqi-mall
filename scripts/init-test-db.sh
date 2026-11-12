@@ -9,6 +9,9 @@
 #   - 02-seed.sql 是 fetch-seed-data.mjs 生成的，内部 SET FOREIGN_KEY_CHECKS=0 + 逐表 TRUNCATE →
 #     每次清空重灌，固定 id 插入（不含自增漂移）
 #   所以重跑的语义是「测试库整体重置」，dev 库 qiqi_mall 完全不受影响。
+#   - 最后一步调用 scripts/set-admin-password.sh 覆盖 admin 口令：种子里的 admin 哈希是演示
+#     弱口令，不覆盖就等于把后台口令打回弱口令（安全回退）。口令只从 ADMIN_PASSWORD 或
+#     /root/.qiqi-secrets/admin.txt 读，脚本里没有任何默认值；该步骤失败会让本脚本失败。
 #
 # 依赖：qiqi-mysql 容器在跑（docker compose up -d mysql），本地有 docker CLI。
 # 种子文件缺失时会提示先生成：node scripts/fetch-seed-data.mjs
@@ -25,6 +28,16 @@ SEED="$REPO_DIR/sql/testdb/02-seed.sql"
 
 if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
   echo "✗ 容器 $CONTAINER 没在运行，先 docker compose up -d mysql" >&2
+  exit 1
+fi
+
+# 预检（必须在动库之前）：admin 口令拿得到才允许开始灌种子。
+#   否则会出现「种子已灌完、收尾步骤才失败」——库里就停在种子弱口令上，
+#   而那正是要堵的安全回退。所以这里先探一次，拿不到就一步都不动。
+ADMIN_SECRET_FILE="${ADMIN_SECRET_FILE:-/root/.qiqi-secrets/admin.txt}"
+if [ -z "${ADMIN_PASSWORD:-}" ] && [ ! -s "$ADMIN_SECRET_FILE" ]; then
+  echo "❌ 缺少 admin 密码：设 ADMIN_PASSWORD，或写入 $ADMIN_SECRET_FILE（chmod 600）" >&2
+  echo "   预检失败，未改动任何数据（避免灌完种子却停在弱口令上）" >&2
   exit 1
 fi
 
@@ -66,6 +79,19 @@ echo
 echo "▶ 隔离确认：dev 库 qiqi_mall 未被改动"
 mysql_exec -t -e "SELECT 'qiqi_mall.product' t, COUNT(*) c FROM qiqi_mall.product
 UNION ALL SELECT 'qiqi_mall.order', COUNT(*) FROM qiqi_mall.\`order\`;"
+
+# 安全收尾（必须最后一步，且失败即整体失败）：
+#   02-seed.sql 里 admin 的口令哈希是固定的演示弱口令。灌完种子不覆盖的话，
+#   这次复位就等于把后台 admin 口令打回了弱口令 —— 这就是要堵的回退。
+#   口令只能来自 ADMIN_PASSWORD 或 /root/.qiqi-secrets/admin.txt（脚本里没有默认值），
+#   set-admin-password.sh 自己幂等（已是目标口令就不写库），所以重复跑本脚本不会漂。
+#   放在 init-test-db.sh（而不是只放 reset-test-db.sh）：这是「重灌测试库」的唯一入口，
+#   直接跑本脚本的人也受保护；reset-test-db.sh 复用本脚本，自然一起被覆盖。
+#   e2e 独立库走的是 reset-e2e-db.sh（不经过本脚本），仍然保持种子里的演示弱口令。
+echo
+echo "▶ 用密钥文件重设 admin 口令（覆盖种子弱口令）"
+"$REPO_DIR/scripts/set-admin-password.sh"
+echo "✅ 已用密钥文件重设 admin 密码（不回退到种子弱密码）"
 
 echo
 echo "✓ 完成。容器栈（server-1/server-2，库名由 MYSQL_DATABASE 注入）连的就是 $DB_NAME。"

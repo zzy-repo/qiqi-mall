@@ -2,9 +2,16 @@
 # 图片上传链路自检：登录 → 上传一张 PNG → 校验返回 URL 可取回
 set -e
 BASE=${1:-http://127.0.0.1:8081}
+# admin 密码不再硬编码：ADMIN_PASSWORD 优先，其次读密钥文件 /root/.qiqi-secrets/admin.txt
+ADMIN_PASS="${ADMIN_PASSWORD:-$(cat /root/.qiqi-secrets/admin.txt 2>/dev/null || true)}"
+if [ -z "${ADMIN_PASS:-}" ]; then
+  echo "❌ 缺少 admin 密码" >&2
+  exit 1
+fi
+LOGIN_BODY=$(ADMIN_PASS="$ADMIN_PASS" python3 -c 'import json,os;print(json.dumps({"username":"admin","password":os.environ["ADMIN_PASS"]}))')
 TOKEN=$(curl -s -m 8 -X POST "$BASE/admin/auth/login" -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"123456"}' | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')
-[ -n "$TOKEN" ] || { echo "登录失败（检查后端是否启动、admin/123456 是否可用）"; exit 1; }
+  --data "$LOGIN_BODY" | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')
+[ -n "$TOKEN" ] || { echo "登录失败（检查后端是否启动、admin 密码是否可用）"; exit 1; }
 
 python3 - <<'PY'
 import struct, zlib

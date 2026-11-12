@@ -11,6 +11,14 @@
 #     ② 同一地址（不带 dryRun）+ 业务 body → 直接执行（body 里没有 confirmCode）
 #   预演和执行跑的是同一套业务守卫，所以「预演就不过」= 这次操作本来就不该执行。
 B=${B:-http://127.0.0.1:8081}
+# admin 密码不再硬编码：ADMIN_PASSWORD 环境变量优先，其次读 /root/.qiqi-secrets/admin.txt
+# 注意：本脚本 B 默认指向 dev 后端（qiqi_mall 库），若那边 admin 仍是旧密码，
+#       就显式传 ADMIN_PASSWORD=<该环境的密码> 覆盖，别改这个默认读取逻辑。
+ADMIN_PASS="${ADMIN_PASSWORD:-$(cat /root/.qiqi-secrets/admin.txt 2>/dev/null || true)}"
+if [ -z "${ADMIN_PASS:-}" ]; then
+  echo "❌ 缺少 admin 密码" >&2
+  exit 1
+fi
 J() { python3 -c "import sys,json;d=json.load(sys.stdin);print($1)"; }
 
 FAIL=0
@@ -85,7 +93,7 @@ echo "  预期(口径②): 支付后 status=7待审核（0→1→7 同一次调�
 check "$(echo "$PAY" | J "d['data']['order']['status']")" "7" "支付后 order.status=7"
 
 echo "=== 步骤3 管理员审核通过（自动拆单）——L3 写操作，先预演看 willDo 再执行 ==="
-AT=$(curl -s -m 8 -X POST $B/admin/auth/login -H 'Content-Type: application/json' -d '{"username":"admin","password":"123456"}' | J "d['data']['accessToken']")
+AT=$(curl -s -m 8 -X POST $B/admin/auth/login -H 'Content-Type: application/json' -d "{\"username\":\"admin\",\"password\":\"$ADMIN_PASS\"}" | J "d['data']['accessToken']")
 INV_BEFORE=$(mysql -h127.0.0.1 -uroot -pqiqi123456 -N -e "USE qiqi_mall; SELECT GROUP_CONCAT(CONCAT(sku_id,':',warehouse_id,'=',stock)) FROM inventory WHERE sku_id IN (1,3);" 2>/dev/null)
 preview_and_exec "audit-pass 审核通过" POST "$B/admin/orders/$OID/audit-pass" POST "$B/admin/orders/$OID/audit-pass" "" \
   || { echo "  ✗ 审核通过没走通，后面没有发货单可演示，终止。"; echo "OID=$OID"; exit 1; }

@@ -6,6 +6,12 @@
 set -u
 MODE=${1:-memory}
 GW=${GW:-http://127.0.0.1:18080}
+# admin 密码不再硬编码：ADMIN_PASSWORD 环境变量优先，其次读 /root/.qiqi-secrets/admin.txt
+ADMIN_PASS="${ADMIN_PASSWORD:-$(cat /root/.qiqi-secrets/admin.txt 2>/dev/null || true)}"
+if [ -z "${ADMIN_PASS:-}" ]; then
+  echo "❌ 缺少 admin 密码" >&2
+  exit 1
+fi
 STAMP=$(date +%s)
 MARK="exp_${MODE}_${STAMP}"
 
@@ -48,7 +54,7 @@ if [ "$MODE" = "redis" ]; then
   CODE=$(docker exec qiqi-redis redis-cli get "captcha:$CID" 2>/dev/null | tr -d '\r')
   if [ -n "$CODE" ]; then
     RES=$(curl -s -m 8 -X POST "$GW/admin/auth/login" -H 'Content-Type: application/json' \
-      -d "{\"username\":\"admin\",\"password\":\"123456\",\"captchaId\":\"$CID\",\"captchaCode\":\"$CODE\"}")
+      -d "{\"username\":\"admin\",\"password\":\"$ADMIN_PASS\",\"captchaId\":\"$CID\",\"captchaCode\":\"$CODE\"}")
     echo "跨实例验证码登录: $(echo "$RES" | grep -o '"code":[0-9]*')（code=0 表示通过）"
   else
     echo "跨实例验证码登录: 从 Redis 取不到明文（异常）"

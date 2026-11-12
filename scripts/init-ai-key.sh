@@ -11,12 +11,19 @@
 # 用法：
 #   scripts/init-ai-key.sh                 # 没有就建，有就告知
 #   scripts/init-ai-key.sh --force         # 删掉同名 key 再建一把新的
-#   BASE_URL=http://127.0.0.1:8081 ADMIN_USER=admin ADMIN_PASS=123456 scripts/init-ai-key.sh
+#   BASE_URL=http://127.0.0.1:8081 ADMIN_USER=admin scripts/init-ai-key.sh
+#
+# admin 密码不再有默认值：统一从 ADMIN_PASSWORD 环境变量读，
+# 没有就读密钥文件 /root/.qiqi-secrets/admin.txt，两者都没有 → 立刻失败退出。
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://127.0.0.1:8081}"
 ADMIN_USER="${ADMIN_USER:-admin}"
-ADMIN_PASS="${ADMIN_PASS:-123456}"
+ADMIN_PASS="${ADMIN_PASSWORD:-${ADMIN_PASS:-$(cat /root/.qiqi-secrets/admin.txt 2>/dev/null || true)}}"
+if [ -z "${ADMIN_PASS:-}" ]; then
+  echo "❌ 缺少 admin 密码" >&2
+  exit 1
+fi
 KEY_NAME="${KEY_NAME:-本地开发-全权}"
 OUT_FILE="${OUT_FILE:-/tmp/qiqi-mall-ai-key.txt}"
 FORCE=0
@@ -49,7 +56,8 @@ if [ "$CAPTCHA_REQUIRED" = "true" ]; then
   exit 1
 fi
 
-LOGIN=$(api POST /admin/auth/login "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PASS\"}")
+LOGIN_BODY=$(jq -nc --arg u "$ADMIN_USER" --arg p "$ADMIN_PASS" '{username:$u,password:$p}')
+LOGIN=$(api POST /admin/auth/login "$LOGIN_BODY")
 TOKEN=$(echo "$LOGIN" | jq -r '.data.accessToken // empty')
 if [ -z "$TOKEN" ]; then
   echo "!! 登录失败：$(echo "$LOGIN" | jq -r '.message // .')" >&2
