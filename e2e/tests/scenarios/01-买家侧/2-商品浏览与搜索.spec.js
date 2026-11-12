@@ -24,7 +24,7 @@ import { tid } from '../../support/tid.js'
  * 买家侧 02 商品浏览与搜索（docs/flows/02-业务场景/01-买家侧/2-商品浏览与搜索）
  *
  * 覆盖：首页列表（含图片真实渲染）/ 分类筛选 / 关键词命中 / 关键词无结果 /
- *       详情页规格切换与价格+库存联动 / 下架商品在 C 端不可见（列表与详情都不可见）
+ *       详情页规格切换与价格+库存联动、主图 × 相册缩略图联动 / 下架商品在 C 端不可见（列表与详情都不可见）
  * 断言依据：PortalCatalogController（列表只返回 publish_status=1；详情对下架返回「商品不存在或已下架」）
  */
 
@@ -90,7 +90,7 @@ test.describe('买家侧 02 商品浏览与搜索', () => {
   })
 
   test('详情页规格切换：价格与库存跟着当前 SKU 走', async ({ page, request }) => {
-    const { product, skus } = await getProductApi(request, 1)
+    const { product, skus, gallery } = await getProductApi(request, 1)
     expect(skus.length, '该商品应有多个 SKU').toBeGreaterThan(1)
 
     await page.goto(`${PORTAL}/product/1`)
@@ -110,6 +110,49 @@ test.describe('买家侧 02 商品浏览与搜索', () => {
       await expect(detailStock(page), `选第 ${i + 1} 个规格后库存应为 ${sku.stock}`)
         .toContainText(String(sku.stock))
     }
+
+    // ---------- 详情页主图 × 相册缩略图联动 ----------
+    // 相册是 SPU 级；主图优先级：用户点的缩略图 > 当前规格图 > 商品主图。
+    // 以前主图完全不看选中态，点缩略图只换蓝框、大图不动。
+    const cover = tid(page, 'product-detail-cover').locator('img')
+    const thumbs = tid(page, 'product-detail-gallery-item')
+
+    await expect(cover, '详情页主图元素应存在').toBeVisible()
+    await expect(thumbs, `相册缩略图数量应等于接口相册数（${gallery.length}）`).toHaveCount(gallery.length)
+
+    // 只有一张缩略图就没法验「点第 2 张换主图」——明确跳过，不伪造成两张
+    if (gallery.length < 2) {
+      test.skip(true, `商品 ${product.id} 相册只有 ${gallery.length} 张图，无法验证「点第 2 张缩略图换主图」（不伪造第二张图）`)
+    }
+
+    // 先点第 1 张（对齐选中态）：主图应等于第 1 张的地址
+    const firstThumbSrc = await thumbs.nth(0).locator('img').getAttribute('src')
+    expect(firstThumbSrc, '第 1 张缩略图应有 src').toBeTruthy()
+    await thumbs.nth(0).click()
+    await page.waitForTimeout(400)
+    await expect(cover, '点第 1 张缩略图后主图 src 应等于第 1 张缩略图的 src').toHaveAttribute(
+      'src',
+      firstThumbSrc
+    )
+
+    // 点第 2 张：主图必须精确等于第 2 张缩略图的 src，且与点之前确实不同（防两张图同址假绿）
+    const secondThumbSrc = await thumbs.nth(1).locator('img').getAttribute('src')
+    expect(secondThumbSrc, '第 2 张缩略图应有 src').toBeTruthy()
+    expect(secondThumbSrc, '第 2 张缩略图应与第 1 张是不同地址，否则这条用例没有意义').not.toBe(firstThumbSrc)
+
+    const coverBeforeClick = await cover.getAttribute('src')
+    await thumbs.nth(1).click()
+    await page.waitForTimeout(400)
+    const coverAfterClick = await cover.getAttribute('src')
+    expect(coverAfterClick, '点第 2 张缩略图后主图 src 应精确等于第 2 张缩略图的 src').toBe(secondThumbSrc)
+    expect(coverAfterClick, '点缩略图前后主图 src 必须真的不同（不是「非空」就算过）').not.toBe(coverBeforeClick)
+
+    // 切一个配了图的规格：主图跟着规格图走，相册选中态不能还停留在刚才那张
+    const skuWithPic = skus.find((s) => s.pic && s.pic !== secondThumbSrc)
+    expect(skuWithPic, '该商品应存在一个「配了图且图与当前相册项不同」的规格').toBeTruthy()
+    await tid(page, `product-detail-sku-${skuWithPic.id}`).click()
+    await page.waitForTimeout(500)
+    await expect(cover, `切到规格 ${skuWithPic.id} 后主图应为该规格图`).toHaveAttribute('src', skuWithPic.pic)
   })
 
   /**
