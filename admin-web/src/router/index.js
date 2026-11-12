@@ -57,7 +57,10 @@ const routes = [
         meta: { title: '购物车', parent: '会员列表' }
       },
       {
-        path: 'admin',
+        // 注意：不能叫 'admin'。nginx 的 `location /admin/` 把 /admin/** 全部代理给后端 API，
+        // SPA 路由占用 'admin' 会导致硬刷新（F5）直接吃到 401 白屏。
+        // 前端路由用 'admins'，后端接口前缀仍是 /admin。
+        path: 'admins',
         name: 'Admin',
         component: () => import('../views/admin/index.vue'),
         meta: { title: '管理员' }

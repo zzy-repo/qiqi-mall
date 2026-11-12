@@ -29,7 +29,7 @@
             <span>用户</span>
           </template>
           <el-menu-item index="/member" data-testid="nav-member">会员列表</el-menu-item>
-          <el-menu-item index="/admin" data-testid="nav-admin">管理员</el-menu-item>
+          <el-menu-item index="/admins" data-testid="nav-admin">管理员</el-menu-item>
           <el-menu-item index="/api-keys" data-testid="nav-api-keys">令牌管理</el-menu-item>
         </el-sub-menu>
         <el-sub-menu index="order">
