@@ -87,9 +87,17 @@ unset ADMIN_PASSWORD
 
 # 单条 spec / 带路径过滤：--shard 会把它只分给一个 shard，另一个 shard 报「No tests found」
 # 并以非零退出，看起来像失败。所以只要给了文件过滤，就自动退回单 shard（除非显式指定 E2E_SHARDS）。
-if [[ -z "${E2E_SHARDS:-}" ]]; then
-  for a in "${PASS_ARGS[@]:-}"; do
-    [[ "$a" == -* ]] && continue
+#
+# ⚠️ 坑（今晚踩过，别再改回去）：这里以前写的是
+#      for a in "${PASS_ARGS[@]:-}"; do …; done
+#   空数组时 `${arr[@]:-}` 会**迭代一次空字符串**（不是零次），于是 `[[ "" == -* ]]` 为假 →
+#   走进「给了文件过滤」的分支 → 把 WANT_SHARDS 改成 1。现象就是：不传任何额外参数直接
+#   `./scripts/e2e-run.sh --output=…` 会**静默降级成单分片**（日志里 shards=1，没有权重分片、
+#   也没跑机器互斥锁），跑得慢一倍而且没人报错。
+#   修法：先判长度再展开，彻底不用 `${arr[@]:-}`——长度判断是显式的，不存在「空迭代」的歧义。
+if [[ -z "${E2E_SHARDS:-}" && ${#PASS_ARGS[@]} -gt 0 ]]; then
+  for a in "${PASS_ARGS[@]}"; do
+    [[ "$a" == -* ]] && continue     # 选项（如 --list）不算文件过滤
     WANT_SHARDS=1
     break
   done
