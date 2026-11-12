@@ -22,6 +22,14 @@ import { newestByName, productDescriptionOf, productNameOf, realGalleryImages, r
  *          PortalCatalogController 只返回 publish_status=1
  */
 
+/**
+ * 演示口径的「分类 / 类型」：本场景的商品都是家居日用品（折叠露营椅、陶瓷马克杯这类），
+ * 挂到「手机数码 / 手机」下画面会很别扭。这里只断言保存成功与展示，不依赖类型属性，
+ * 所以换成自然家居类目；4-SKU 场景要「颜色/内存」属性生成规格，那边保持「手机数码 / 手机」。
+ */
+const CATEGORY = '家具'
+const TYPE = '食品家居'
+
 test.describe('商家侧 3 商品维护', () => {
   test('新增商品（主图+相册+描述）→ 编辑 → 落库与 C 端展示都正确', async ({ page, request }) => {
     const seed = stamp()
@@ -43,10 +51,11 @@ test.describe('商家侧 3 商品维护', () => {
       // 分类 / 类型
       await tid(page, 'product-form-category').first().click()
       await page.waitForTimeout(400)
-      await page.locator('.el-tree-select__popper:visible li.el-select-dropdown__item').first().click()
+      await page.locator('.el-tree-select__popper:visible li.el-select-dropdown__item')
+        .filter({ hasText: new RegExp(`^${CATEGORY}$`) }).first().click()
       await tid(page, 'product-form-type').first().click()
       await page.waitForTimeout(400)
-      await page.locator('.el-select-dropdown__item:visible').first().click()
+      await page.locator('.el-select-dropdown__item:visible').filter({ hasText: TYPE }).first().click()
       // 主图 + 两张相册（排序 1 / 2）
       await tid(page, 'product-form-cover').locator('input[type="text"]').fill(cover)
       await expectImageLoaded(tid(page, 'product-form-cover').locator('.preview img'), '主图预览')
@@ -106,7 +115,7 @@ test.describe('商家侧 3 商品维护', () => {
       const { cover } = realGalleryImages(seed)
       const name = productNameOf(`${seed}-pub`)
       await openProducts(page)
-      await addProduct(page, { name, categoryName: '手机数码', typeName: '手机' })
+      await addProduct(page, { name, categoryName: CATEGORY, typeName: TYPE })
       // 拿到本轮这条的 id，后续一律按 id 定位（同名商品在库里会累积，按文本会取到旧那条）
       const created = newestByName(await getAdminProductsApi(request, token, name), name)
       expect(created, '商品应创建成功').toBeTruthy()
@@ -168,10 +177,11 @@ test.describe('商家侧 3 商品维护', () => {
     await dialog.getByTestId('product-form-name').fill(empty)
     await dialog.locator('.el-form-item').filter({ hasText: '分类' }).locator('.el-select__wrapper').click()
     await page.waitForTimeout(400)
-    await page.locator('.el-tree-select__popper:visible li.el-select-dropdown__item').first().click()
+    await page.locator('.el-tree-select__popper:visible li.el-select-dropdown__item')
+      .filter({ hasText: new RegExp(`^${CATEGORY}$`) }).first().click()
     await dialog.locator('.el-form-item').filter({ hasText: '类型' }).locator('.el-select__wrapper').click()
     await page.waitForTimeout(400)
-    await page.locator('.el-select-dropdown__item:visible').first().click()
+    await page.locator('.el-select-dropdown__item:visible').filter({ hasText: TYPE }).first().click()
     await dialog.getByTestId('product-form-submit').click()
     await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
     await page.waitForTimeout(1000)
