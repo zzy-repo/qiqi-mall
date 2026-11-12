@@ -23,6 +23,7 @@ import { tid } from '../../support/tid.js'
 import { memberNickOf, receiverOf, returnDescriptionOf } from '../../support/fixtures.js'
 import { demoName, demoUsername } from '../../support/images.js'
 import { withBackstage } from '../../support/backstage.js'
+import { confirmDanger } from '../../support/danger-ui.js'
 
 
 /**
@@ -83,9 +84,9 @@ async function auditReturnInBackstage(browser, buyerPage, orderSn, approve) {
 /** 买家把订单推进到「已发货」（管理员审核 + 下发 + 出库，真实 UI） */
 async function toShipped(page, orderSn) {
   const row = await adminSearchOrderRow(page, orderSn)
-  await row.getByTestId('order-row-audit').click()
-  await page.locator('.el-message-box__btns').getByRole('button', { name: '通过', exact: true }).click()
-  await page.waitForTimeout(1500)
+  // 新 UI：行内「审核通过」→ 统一确认弹窗 → 确认执行
+  await row.getByTestId('order-row-audit-pass').click()
+  await confirmDanger(page, { willDo: '待审核→待发货' })
   const table = await openOrderDrawer(page, orderSn)
   const dRow = table.locator('.el-table__body tr').first()
   await clickDispatch(page, dRow)
@@ -121,6 +122,8 @@ async function auditReturn(page, orderSn, approve) {
   await expect(dialog).toBeVisible()
   await dialog.getByTestId(approve ? 'return-apply-form-status-pass' : 'return-apply-form-status-reject').click()
   await tid(page, 'return-apply-form-submit').click()
+  // 新 UI：提交后还要过统一确认弹窗（预演说清退款金额 / 回补哪些库存）
+  await confirmDanger(page, { willDo: approve ? '审核为「通过」' : '审核为「拒绝」' })
   await expect(page.locator('.el-message--success').first(), '审核应保存成功').toBeVisible({ timeout: 15_000 })
   await page.reload()
   await page.waitForTimeout(1200)

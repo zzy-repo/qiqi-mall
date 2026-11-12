@@ -13,6 +13,7 @@ import {
   clickDispatch,
   clickWmsCallback
 } from '../support/ui.js'
+import { confirmDanger } from '../support/danger-ui.js'
 import {
   adminTokenOf,
   getProductApi,
@@ -53,9 +54,9 @@ test.describe('场景5 拆单履约', () => {
 
     // ---------- 管理员审核通过（UI）→ 自动拆单 ----------
     const adminRow = await adminSearchOrderRow(page, orderSn)
-    await adminRow.getByRole('button', { name: '审核' }).click()
-    await page.locator('.el-message-box__btns').getByRole('button', { name: '通过', exact: true }).click()
-    await page.waitForTimeout(2000)
+    // 新 UI：行内「审核通过」→ 统一确认弹窗（先预演拆单方案，再确认执行）
+    await adminRow.getByTestId('order-row-audit-pass').click()
+    await confirmDanger(page, { willDo: '待审核→待发货' })
     await expect(adminRow, '订单应为待发货').toContainText('待发货')
 
     // 只读复核拆单结果

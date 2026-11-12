@@ -32,6 +32,7 @@ import {
 } from '../../support/admin-ui-config.js'
 import { adminTokenOf, getProductApi, memberTokenOf, getMemberReturnsApi } from '../../support/assert.js'
 import { memberNickOf, receiverOf, returnDescriptionOf } from '../../support/fixtures.js'
+import { confirmDanger } from '../../support/danger-ui.js'
 
 /**
  * 04-商家-基础配置 / 3-退货原因字典
@@ -214,9 +215,9 @@ test.describe('04-商家-基础配置 › 3-退货原因字典', () => {
         // 推到「已发货」：申请退货只对已付款/已发货开放
         await adminLoginResilient(page)
         const row = await adminSearchOrderRow(page, orderSn)
-        await row.getByTestId('order-row-audit').click()
-        await page.locator('.el-message-box__btns').getByRole('button', { name: '通过', exact: true }).click()
-        await page.waitForTimeout(1500)
+        // 新 UI：行内「审核通过」→ 统一确认弹窗（预演说明「待审核→待发货」）→ 确认执行
+        await row.getByTestId('order-row-audit-pass').click()
+        await confirmDanger(page, { willDo: '待审核→待发货' })
         const table = await openOrderDrawer(page, orderSn)
         const deliveryRow = table.locator('.el-table__body tr').first()
         await clickDispatch(page, deliveryRow)

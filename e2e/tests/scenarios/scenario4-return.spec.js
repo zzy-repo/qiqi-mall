@@ -20,6 +20,8 @@ import {
   getAdminOrderBySnApi,
   getMemberReturnsApi
 } from '../support/assert.js'
+import { confirmDanger } from '../support/danger-ui.js'
+import { tid } from '../support/tid.js'
 
 /**
  * 场景4 售后退货（docs/flows/6-场景4-售后退货.mmd）
@@ -48,9 +50,9 @@ test.describe('场景4 售后退货', () => {
 
     // ---------- 管理员审核通过 → 抽屉里「下发」+「出库」→ 订单已发货 ----------
     const adminRow = await adminSearchOrderRow(page, orderSn)
-    await adminRow.getByRole('button', { name: '审核' }).click()
-    await page.locator('.el-message-box__btns').getByRole('button', { name: '通过', exact: true }).click()
-    await page.waitForTimeout(2000)
+    // 新 UI：行内「审核通过」→ 统一确认弹窗（预演说明「待审核→待发货」）→ 确认执行
+    await adminRow.getByTestId('order-row-audit-pass').click()
+    await confirmDanger(page, { willDo: '待审核→待发货' })
     await expect(adminRow, '审核通过后订单应为待发货').toContainText('待发货')
 
     const deliveryTable = await openOrderDrawer(page, orderSn)
@@ -90,11 +92,13 @@ test.describe('场景4 售后退货', () => {
 
     const applyRow = page.locator('.el-table__body tr').filter({ hasText: orderSn }).first()
     await expect(applyRow, '管理员退货申请列表应出现新申请').toBeVisible()
-    await applyRow.getByRole('button', { name: '审核' }).click()
-    await page.waitForTimeout(800)
-    await page.locator('.el-dialog .el-radio', { hasText: '通过' }).first().click()
-    await page.getByRole('button', { name: '确定' }).click()
-    await page.waitForTimeout(1500)
+    await applyRow.getByTestId('return-apply-row-audit').click()
+    const auditDialog = tid(page, 'return-apply-form-dialog')
+    await expect(auditDialog, '审核弹窗应打开').toBeVisible()
+    await auditDialog.getByTestId('return-apply-form-status-pass').click()
+    await tid(page, 'return-apply-form-submit').click()
+    // 新 UI：表单收起后走统一确认弹窗（预演写明「审核为「通过」」+ 退款金额 + 回补库存）
+    await confirmDanger(page, { willDo: '审核为「通过」' })
     await expect(page.locator('.el-message--success').first(), '管理员审核应保存成功').toBeVisible()
 
     await page.reload()

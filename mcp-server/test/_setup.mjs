@@ -148,27 +148,15 @@ export async function adminRequest(method, path, body) {
 }
 
 /**
- * 管理端 DELETE（高危写）：新后端要求 confirmCode，老后端不要求 → 两种都兼容。
- *   ① 先按直连方式 DELETE；成功就完事（老后端 / 尚未加码的接口）
- *   ② 返回「缺少确认码」→ `?dryRun=true` 预演拿码 → 带 body { confirmCode } 再删一次
- * 这样清理逻辑不会因为后端灰度升级而留垃圾数据。
+ * 管理端 DELETE（清理自建数据用）。
+ * 确认码机制已整套下线（后端不再签发、也不再校验），所以这里就是一次直连 DELETE ——
+ * 并发保护由行级 version 乐观锁承担，删除整行本身幂等，不需要预演换码那一跳。
  */
-async function adminDeleteWithConfirm(path) {
+async function adminDelete(path) {
   const auth = await adminAuth();
-  const first = await http('DELETE', path, { headers: auth.headers });
-  if (first.payload?.code === 0) return;
-
-  const firstMsg = first.payload?.message || `HTTP ${first.status}`;
-  if (!/确认码/.test(firstMsg)) throw new Error(`DELETE ${path} 失败：${firstMsg}`);
-
-  const pre = await http('DELETE', `${path}${path.includes('?') ? '&' : '?'}dryRun=true`, { headers: auth.headers });
-  const code = pre.payload?.data?.confirmCode;
-  if (pre.payload?.code !== 0 || !code) {
-    throw new Error(`DELETE ${path} 预演失败：${pre.payload?.message || `HTTP ${pre.status}`}`);
-  }
-  const done = await http('DELETE', path, { headers: auth.headers, body: { confirmCode: code } });
-  if (done.payload?.code !== 0) {
-    throw new Error(`DELETE ${path} 失败：${done.payload?.message || `HTTP ${done.status}`}`);
+  const res = await http('DELETE', path, { headers: auth.headers });
+  if (res.payload?.code !== 0) {
+    throw new Error(`清理失败 DELETE ${path}: ${res.payload?.message || `HTTP ${res.status}`}`);
   }
 }
 
@@ -361,7 +349,7 @@ export async function createPendingOrder({ qty = 2, skuCount = 1 } = {}) {
   try {
     await portalRequest('POST', `/portal/orders/${created.id}/pay?payType=1`, { token: member.accessToken });
   } catch (e) {
-    await adminDeleteWithConfirm(`/admin/orders/${created.id}`).catch(() => {});
+    await adminDelete(`/admin/orders/${created.id}`).catch(() => {});
     await adminRequest('DELETE', `/admin/members/${member.memberId}`).catch(() => {});
     throw new Error(`支付失败（POST /portal/orders/${created.id}/pay）：${e.message}`);
   }
@@ -369,7 +357,7 @@ export async function createPendingOrder({ qty = 2, skuCount = 1 } = {}) {
   // ⑤ 回读确认真的落到 7，否则后面所有断言都是空中楼阁
   const detail = await adminRequest('GET', `/admin/orders/${created.id}`);
   if (detail?.order?.status !== 7) {
-    await adminDeleteWithConfirm(`/admin/orders/${created.id}`).catch(() => {});
+    await adminDelete(`/admin/orders/${created.id}`).catch(() => {});
     await adminRequest('DELETE', `/admin/members/${member.memberId}`).catch(() => {});
     throw new Error(
       `造单后订单 ${created.id} 的状态是 ${detail?.order?.status}（期望 7 待审核）——` +
@@ -407,7 +395,7 @@ export async function cleanupOrder(orderId, { memberId, orderSn } = {}) {
   // ① 删订单：DB 侧 order_item / delivery_order / delivery_item 都是 ON DELETE CASCADE，
   //    所以一行 DELETE 就把这次造的全部业务数据带走
   try {
-    await adminDeleteWithConfirm(`/admin/orders/${Number(orderId)}`);
+    await adminDelete(`/admin/orders/${Number(orderId)}`);
     deleted = true;
     notes.push(`订单 ${orderId} 已删除（级联清掉明细/发货单）`);
   } catch (e) {

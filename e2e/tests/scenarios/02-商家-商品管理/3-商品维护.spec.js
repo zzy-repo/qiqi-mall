@@ -9,6 +9,7 @@ import {
   productRowOf
 } from '../../support/catalog-ui.js'
 import { expectImageLoaded } from '../../support/images.js'
+import { dangerWillDo, confirmDanger, confirmDangerExpectError, dismissDanger } from '../../support/admin-ui.js'
 import { adminTokenOf, getAdminProductsApi, getProductApi } from '../../support/assert.js'
 import { tid } from '../../support/tid.js'
 import { newestByName, productDescriptionOf, productNameOf, realGalleryImages, realImage } from '../../support/fixtures.js'
@@ -164,10 +165,13 @@ test.describe('商家侧 3 商品维护', () => {
     const usedRow = page.getByTestId('product-row-1')
     await expect(usedRow).toBeVisible()
     await usedRow.getByTestId('product-row-delete').click()
-    await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
-    const errText = page.locator('.el-message--error').first()
-    await expect(errText, '被订单引用的商品应被拒绝').toContainText('不能删除', { timeout: 15_000 })
-    await expect(errText).toContainText('下架')
+    // 新 UI：删除商品走统一确认弹窗；被引用时预演就写明「删除会被拒绝，建议改为下架」，
+    // 点「确认执行」后后端拒绝的中文原因留在弹窗里（不再是一闪而过的 toast）
+    await expect(dangerWillDo(page), '预演应说明这次删除会被拒绝').toContainText('删除会被拒绝', { timeout: 20_000 })
+    const blockedMsg = await confirmDangerExpectError(page)
+    expect(blockedMsg, '被订单引用的商品应被拒绝').toContain('不能删除')
+    expect(blockedMsg, '应提示改为下架').toContain('下架')
+    await dismissDanger(page)
     expect((await getAdminProductsApi(request, token, seedProduct.name)).length, '商品应仍存在').toBe(1)
 
     // ② 新建的空商品 → 可以删
@@ -187,7 +191,7 @@ test.describe('商家侧 3 商品维护', () => {
     await page.waitForTimeout(1000)
 
     await page.locator('.el-table__body tr').filter({ hasText: empty }).first().getByTestId('product-row-delete').click()
-    await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
+    await confirmDanger(page, { willDo: '将删除商品' })
     await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
     await page.waitForTimeout(800)
     expect((await getAdminProductsApi(request, token, empty)).length, '空商品应被删除').toBe(0)

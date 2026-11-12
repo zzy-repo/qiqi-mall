@@ -18,6 +18,7 @@ import { execFileSync } from 'node:child_process'
 import { API, ADMIN, PORTAL } from './env.js'
 import { returnDescriptionOf } from './fixtures.js'
 import { adminLogin } from './ui.js'
+import { confirmDanger, confirmDangerOrToastError } from './danger-ui.js'
 
 // ---------------------------------------------------------------------------
 // 登录（后端刚重启时首个请求可能 500，只在这种情况重试一次）
@@ -110,9 +111,16 @@ export const auditDescriptionValue = async (dialog) => {
   return input.inputValue()
 }
 
-/** 点「确定」提交审核（不自动 reload，调用方自己决定要不要等提示） */
-export const submitAudit = async (dialog) => {
+/**
+ * 点「确定」提交审核（不自动 reload，调用方自己决定要不要等提示）。
+ * 新 UI：表单收起后走统一确认弹窗（预演写明「审核为「通过/拒绝」」+ 退款金额 / 回补库存），
+ * 这里必须再点一次「确认执行」，否则请求根本不会发出去。
+ */
+export const submitAudit = async (dialog, { willDo } = {}) => {
+  const page = dialog.page()
   await dialog.getByRole('button', { name: '确定' }).click()
+  // @returns 'confirmed'（已执行）| 'preview-failed'（预演阶段就被服务端守卫拦下，只有 toast）
+  return confirmDangerOrToastError(page, { willDo })
 }
 
 /**
@@ -126,7 +134,7 @@ export const auditReturnApply = async (page, orderSn, { result, description }) =
   const dialog = await openAuditDialog(page, row)
   await pickAuditResult(dialog, result)
   if (description !== undefined) await fillAuditDescription(dialog, description)
-  await submitAudit(dialog)
+  await submitAudit(dialog, { willDo: result === '通过' ? '审核为「通过」' : '审核为「拒绝」' })
 }
 
 // ---------------------------------------------------------------------------
@@ -252,13 +260,14 @@ export const adminOrderRowOf = async (page, orderSn) => {
   return row
 }
 
-/** 订单审核通过（真实点击：行内「审核」→ 确认框「通过」），审核通过后自动生成发货单 */
+/**
+ * 订单审核通过（真实点击：行内「审核通过」→ 统一确认弹窗 →「确认执行」），通过后自动生成发货单。
+ * 新 UI：「审核」+ ElMessageBox 的通过/不通过选择框已删，两个分支各是一级行按钮。
+ */
 export const adminAuditOrderPass = async (page, row) => {
-  await row.getByRole('button', { name: '审核' }).click()
-  const box = page.locator('.el-message-box')
-  await expect(box, '应弹出审核确认框').toBeVisible()
-  await box.locator('.el-message-box__btns').getByRole('button', { name: '通过', exact: true }).click()
-  await page.waitForTimeout(2000)
+  await row.getByTestId('order-row-audit-pass').click()
+  await confirmDanger(page, { willDo: '待审核→待发货' })
+  await page.waitForTimeout(1200)
 }
 
 /** 订单行状态文案 */

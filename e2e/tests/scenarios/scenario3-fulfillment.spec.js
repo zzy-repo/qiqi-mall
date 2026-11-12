@@ -12,6 +12,7 @@ import {
   clickDispatch,
   clickWmsCallback
 } from '../support/ui.js'
+import { confirmDanger } from '../support/danger-ui.js'
 import {
   adminTokenOf,
   memberTokenOf,
@@ -48,14 +49,16 @@ async function buyAsNewMember(page, username, specText) {
   return orderSn
 }
 
-/** 管理员侧真实审核通过：订单列表 → 「审核」→ 确认框「通过」 */
+/**
+ * 管理员侧真实审核通过：订单列表 → 行内「审核通过」→ 预演确认弹窗 →「确认执行」。
+ * 新 UI：原来的「审核」+ ElMessageBox（通过/不通过二选一）已拆成两个一级行按钮，
+ * 点下去直接进统一确认弹窗，弹窗里先说明「待审核→待发货」。
+ */
 async function auditPassByUi(page, orderSn) {
   const row = await adminSearchOrderRow(page, orderSn)
   await expect(row, '提交后订单应为待审核').toContainText('待审核')
-  await row.getByRole('button', { name: '审核' }).click()
-  // 注意：'不通过' 也含 '通过' 二字，必须用精确文本
-  await page.locator('.el-message-box__btns').getByRole('button', { name: '通过', exact: true }).click()
-  await page.waitForTimeout(2000)
+  await row.getByTestId('order-row-audit-pass').click()
+  await confirmDanger(page, { willDo: '待审核→待发货' })
   await expect(row, '审核通过后订单应为待发货').toContainText('待发货')
   return row
 }

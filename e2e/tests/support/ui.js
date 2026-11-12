@@ -9,6 +9,7 @@
 import { expect } from '@playwright/test'
 import { PORTAL, ADMIN } from './env.js'
 import { tid, tidPrefix } from './tid.js'
+import { confirmDanger } from './danger-ui.js'
 
 /**
  * 已经在登录态时，/login 会被路由守卫重定向走（页面上没有表单），
@@ -184,9 +185,11 @@ export async function openOrderDrawer(page, orderSn) {
 export const deliveryRowOf = (deliveryTable, warehouseName) =>
   deliveryTable.locator('.el-table__body tr').filter({ hasText: warehouseName }).first()
 
-/** 点行内「下发」，断言状态变为已下发 */
+/** 点行内「下发」→ 统一确认弹窗「确认执行」→ 断言状态变为已下发 */
 export async function clickDispatch(page, row) {
   await row.getByTestId('delivery-row-dispatch').click()
+  // 新 UI：下发是高危写操作，必须先在弹窗里看清「待下发→已下发」再确认
+  await confirmDanger(page, { willDo: '待下发→已下发' })
   await expect(row, '下发后发货单应为已下发').toContainText('已下发')
 }
 
@@ -201,6 +204,8 @@ export async function clickWmsCallback(page, row, label, expectText) {
   const item = page.locator('.el-dropdown-menu__item:visible').filter({ hasText: label }).first()
   await expect(item, `WMS 回传下拉应出现「${label}」选项`).toBeVisible()
   await item.click()
+  // 新 UI：回传同样要过一次统一确认弹窗（弹窗里写明「状态 X→Y」）
+  await confirmDanger(page)
   await expect(row, `回传(${label})后发货单状态应为${expectText}`).toContainText(expectText)
 }
 

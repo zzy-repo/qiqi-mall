@@ -17,6 +17,7 @@ import { tid } from '../../support/tid.js'
 import { memberNickOf, receiverOf } from '../../support/fixtures.js'
 import { demoUsername } from '../../support/images.js'
 import { withBackstage } from '../../support/backstage.js'
+import { confirmDanger } from '../../support/danger-ui.js'
 
 
 /**
@@ -64,9 +65,9 @@ async function shipOrderInBackstage(browser, buyerPage, orderSn) {
 /** 把订单推进到「已发货」：管理员审核 → 抽屉下发 → 出库（真实 UI） */
 async function shipOrderByUi(page, orderSn) {
   const row = await adminSearchOrderRow(page, orderSn)
-  await row.getByTestId('order-row-audit').click()
-  await page.locator('.el-message-box__btns').getByRole('button', { name: '通过', exact: true }).click()
-  await page.waitForTimeout(1500)
+  // 新 UI：行内「审核通过」→ 统一确认弹窗（预演说明「待审核→待发货」）→ 确认执行
+  await row.getByTestId('order-row-audit-pass').click()
+  await confirmDanger(page, { willDo: '待审核→待发货' })
   await expect(row, '审核通过后应为待发货').toContainText('待发货')
   const table = await openOrderDrawer(page, orderSn)
   const dRow = table.locator('.el-table__body tr').first()

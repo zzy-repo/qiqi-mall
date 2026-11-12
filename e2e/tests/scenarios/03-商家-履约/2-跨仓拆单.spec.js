@@ -5,10 +5,8 @@ import {
   adminLoginHardened,
   gotoOrderList,
   searchOrderRow,
-  openAuditBox,
   openSplitPreview,
-  closeSplitPreview,
-  confirmAuditPass,
+  auditPassOrder,
   openOrderDrawer,
   deliveryRowBySn,
   orderStatusOf,
@@ -23,9 +21,13 @@ import { memberLoginOf } from '../../support/member-login.js'
  * 03-商家-履约 / 2-跨仓拆单（docs/flows/02-业务场景/03-商家-履约/2-跨仓拆单/1-业务时序图.mmd）
  *
  * 两个用例（各自一段视频，单段都在 90s 内）：
- *   用例一：跨仓订单 —— 审核前「查看拆单方案」预览 2 个包裹且**不落库** → 通过后真拆成 2 个发货单
- *          （各归其仓、source=0）→ 列表与抽屉的包裹数一致
- *   用例二：单仓订单 —— 预览只有 1 个包裹 → 通过后只生成 1 个发货单（同仓不拆）
+ *   用例一：跨仓订单 —— 审核前在确认弹窗里预演拆单方案（2 个包裹）且**不落库**（点「取消」不执行）
+ *          → 再走审核通过 → 真拆成 2 个发货单（各归其仓、source=0）→ 列表与抽屉的包裹数一致
+ *   用例二：单仓订单 —— 预演只有 1 个包裹 → 通过后只生成 1 个发货单（同仓不拆）
+ *
+ * 新 UI 变更点：原来的「审核」+「查看拆单方案」独立预览弹窗都没了。
+ * 现在点行内「审核通过」就进统一确认弹窗，拆单方案渲染在它的 details 区；
+ * 「只看方案不执行」= 打开弹窗 → 读 details → 点「取消」（取消不发任何请求）。
  */
 test.describe('03-商家-履约 › 2-跨仓拆单', () => {
   test('用例一：跨仓订单先预览再拆成两个包裹（预览不落库）', async ({ page, request }) => {
@@ -48,25 +50,26 @@ test.describe('03-商家-履约 › 2-跨仓拆单', () => {
       crossSn = await submitCartOrder(page, receiverOf(buyer))
     })
 
-    await test.step('③ 审核弹窗「查看拆单方案」：预览 2 个包裹，且不落库', async () => {
+    await test.step('③ 预演拆单方案（不执行）：2 个包裹，且不落库', async () => {
       await gotoOrderList(page)
       const row = await searchOrderRow(page, crossSn)
       const token = await adminTokenOf(page)
       const order = await getAdminOrderBySnApi(request, token, crossSn)
       const before = await listDeliveriesApi(request, token, order.id)
-      expect(before.length, '预览前不应有任何发货单').toBe(0)
+      expect(before.length, '预演前不应有任何发货单').toBe(0)
 
-      await openAuditBox(page, row)
-      const plan = await openSplitPreview(page)
-      expect(plan.length, '跨仓订单应预览出 2 个包裹').toBe(2)
+      // 点「审核通过」→ 确认弹窗里预演方案（details 区）→ 点「取消」不执行
+      const plan = await openSplitPreview(page, row)
+      expect(plan.length, '跨仓订单应预演出 2 个包裹').toBe(2)
       const names = plan.map((t) => t.split('\n')[0].trim())
       expect(new Set(names).size, '两个包裹应落在不同的仓').toBe(2)
 
       const during = await listDeliveriesApi(request, token, order.id)
-      expect(during.length, '预览是 dry-run，发货单数必须还是 0').toBe(0)
+      expect(during.length, '预演是 dry-run，发货单数必须还是 0').toBe(0)
+      expect(await orderStatusOf(row), '取消了预演，订单应仍是待审核').toContain('待审核')
 
-      await closeSplitPreview(page)
-      await confirmAuditPass(page)
+      // 正式审核通过（第二次点同一个按钮，这次确认执行）
+      await auditPassOrder(page, row)
       await expectToastSuccess(page)
       expect(await orderStatusOf(row), '通过后订单应为待发货').toContain('待发货')
     })
@@ -115,11 +118,9 @@ test.describe('03-商家-履约 › 2-跨仓拆单', () => {
     await test.step('③ 预览只有 1 个包裹 → 通过后只生成 1 个发货单', async () => {
       await gotoOrderList(page)
       const row = await searchOrderRow(page, singleSn)
-      await openAuditBox(page, row)
-      const plan = await openSplitPreview(page)
-      expect(plan.length, '单仓订单预览就是 1 个包裹').toBe(1)
-      await closeSplitPreview(page)
-      await confirmAuditPass(page)
+      const plan = await openSplitPreview(page, row)   // 预演后取消，不执行
+      expect(plan.length, '单仓订单预演就是 1 个包裹').toBe(1)
+      await auditPassOrder(page, row)
       await expectToastSuccess(page)
 
       const token = await adminTokenOf(page)

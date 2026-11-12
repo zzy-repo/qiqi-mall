@@ -21,13 +21,17 @@
  * ---------------------------------------------------------------------------
  * 未覆盖清单：这些位置拿不到 data-testid，只能按下面的写法兜底（都有原因）
  * ---------------------------------------------------------------------------
- * 1) ElMessageBox（确认框）的按钮 —— `通过 / 不通过 / 确定 / 取消`
+ * 1) ElMessageBox（确认框）的按钮 —— `确定 / 删除 / 取消`
  *    弹窗由 ElMessageBox 内部渲染，按钮不在任何模板里。
- *    写法：`page.locator('.el-message-box__btns').getByRole('button', { name: '通过', exact: true })`
+ *    写法：`page.locator('.el-message-box__btns').getByRole('button', { name: '确定' })`
+ *    注意：**高危写操作已经不弹 ElMessageBox**，统一走 DangerConfirmDialog
+ *    （`danger-confirm-dialog/-willdo/-ok/-cancel/-error`，见 support/danger-ui.js），
+ *    那套有稳定 testid。ElMessageBox 只剩分类/类型/管理员/仓库这类「低危删除」还在用。
  *
- * 2) 订单审核框里的「查看拆单方案 ▸」链接
- *    它在 admin-web 的 order/index.vue 里由 `h('a', ...)` 生成（不是模板），加不了属性。
- *    写法：`page.locator('.split-preview-entry')`
+ * 2) 订单审核的确认弹窗 —— 已合并进 DangerConfirmDialog
+ *    原来审核是「审核」+ ElMessageBox（通过/不通过）+ 独立「查看拆单方案」弹窗，都没有 testid；
+ *    现在拆成两个行按钮 `order-row-audit-pass` / `order-row-audit-reject`，点下去直接进
+ *    统一确认弹窗，拆单方案渲染在它的 `danger-confirm-details` 明细区，全部可断言。
  *
  * 3) el-select / el-tree-select / el-dropdown 的**浮层选项**
  *    下拉面板 teleport 到 body、选项由组件渲染。

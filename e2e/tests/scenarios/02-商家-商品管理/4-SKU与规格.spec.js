@@ -3,6 +3,7 @@ import { PORTAL, API, stamp } from '../../support/env.js'
 import { adminLogin } from '../../support/ui.js'
 import { openProducts, addProduct, openSkus, openSkusById, addSku, editSku } from '../../support/catalog-ui.js'
 import { expectImageLoaded } from '../../support/images.js'
+import { dangerWillDo, confirmDanger, confirmDangerExpectError, dismissDanger } from '../../support/admin-ui.js'
 import { adminTokenOf, getAdminProductsApi, getAdminSkusApi } from '../../support/assert.js'
 import { tid, tidPrefix } from '../../support/tid.js'
 import { attributeValues, newestByName, productNameOf, realGalleryImages, realSkuImages } from '../../support/fixtures.js'
@@ -168,8 +169,12 @@ test.describe('商家侧 4 SKU 与规格', () => {
     const usedSku = page.locator('.el-table__body tr').first()
     await expect(usedSku).toBeVisible()
     await usedSku.getByTestId('sku-row-delete').click()
-    await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
-    await expect(page.locator('.el-message--error').first(), '被订单引用的 SKU 应被拒绝').toContainText('不能删除', { timeout: 15_000 })
+    // 新 UI：删除 SKU 走统一确认弹窗；被引用时预演就写明「删除会被拒绝」，
+    // 点「确认执行」后后端拒绝的中文原因留在弹窗里
+    await expect(dangerWillDo(page), '预演应说明这次删除会被拒绝').toContainText('删除会被拒绝', { timeout: 20_000 })
+    const blockedMsg = await confirmDangerExpectError(page)
+    expect(blockedMsg, '被订单引用的 SKU 应被拒绝').toContain('不能删除')
+    await dismissDanger(page)
 
     // ② 新商品的 SKU（无引用）→ 可以删
     const name = productNameOf(`${stamp()}-del`)
@@ -183,7 +188,7 @@ test.describe('商家侧 4 SKU 与规格', () => {
     expect((await getAdminSkusApi(request, token, product.id)).length, '应有 1 个 SKU').toBe(1)
 
     await page.locator('.el-table__body tr').first().getByTestId('sku-row-delete').click()
-    await page.locator('.el-message-box').getByRole('button', { name: '删除' }).click()
+    await confirmDanger(page, { willDo: '将删除规格 SKU' })
     await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
     await page.waitForTimeout(800)
     expect((await getAdminSkusApi(request, token, product.id)).length, 'SKU 应被删除').toBe(0)

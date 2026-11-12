@@ -137,7 +137,8 @@ test.describe('03-商家-履约 › 4-退货处理', () => {
 
     await test.step('⑤ 管理员在「退货申请」页点审核 → 通过', async () => {
       await auditReturnApply(page, ctx.orderSn, { result: '通过' })
-      await expectToastSuccess(page, '保存成功')
+      // 新 UI：确认弹窗执行成功后的提示是「审核完成」（原来表单直存时是「保存成功」）
+      await expectToastSuccess(page, '审核完成')
       await reloadReturnApplyList(page)
       const row = await returnApplyRow(page, ctx.orderSn)
       expect(await returnApplyStatusOf(row), '申请应显示「已通过」').toBe('已通过')
@@ -183,8 +184,9 @@ test.describe('03-商家-履约 › 4-退货处理', () => {
       await pickAuditResult(dialog, '拒绝')
       expect(await auditDescriptionValue(dialog), '说明应带出买家原说明').toBe(buyerNote)
       await fillAuditDescription(dialog, rejectReason)
-      await submitAudit(dialog)
-      await expectToastSuccess(page, '保存成功')
+      const outcome = await submitAudit(dialog, { willDo: '审核为「拒绝」' })
+      expect(outcome, '拒绝应在确认弹窗里确认后执行').toBe('confirmed')
+      await expectToastSuccess(page, '审核完成')
       await reloadReturnApplyList(page)
       const after = await returnApplyRow(page, ctx.orderSn)
       expect(await returnApplyStatusOf(after), '申请应显示「已拒绝」').toBe('已拒绝')
@@ -217,7 +219,8 @@ test.describe('03-商家-履约 › 4-退货处理', () => {
 
     await test.step('⑤ 先正常审核通过，把申请变成「已处理」', async () => {
       await auditReturnApply(page, ctx.orderSn, { result: '通过' })
-      await expectToastSuccess(page, '保存成功')
+      // 新 UI：确认弹窗执行成功后的提示是「审核完成」（原来表单直存时是「保存成功」）
+      await expectToastSuccess(page, '审核完成')
       await reloadReturnApplyList(page)
       const row = await returnApplyRow(page, ctx.orderSn)
       expect(await returnApplyStatusOf(row), '申请应为已通过').toBe('已通过')
@@ -231,11 +234,11 @@ test.describe('03-商家-履约 › 4-退货处理', () => {
       const dialog = await openAuditDialog(page, row)
       await expect(dialog.locator('.el-form-item').filter({ hasText: '处理结果' }), '弹窗应能打开').toBeVisible()
       await pickAuditResult(dialog, '拒绝')
-      await submitAudit(dialog)
+      const outcome = await submitAudit(dialog)
+      // 新 UI：提交后先收起表单、再走「预演」，守卫在预演阶段就拒绝 → 弹窗自己收起 + 一条失败 toast
+      expect(outcome, '预演阶段应被服务端守卫拦下（不会进入确认执行）').toBe('preview-failed')
       await expectToastError(page, '该申请已处理，不能重复审核')
-
-      await dialog.getByRole('button', { name: '取消' }).click()
-      await expect(dialog).toBeHidden({ timeout: 10_000 })
+      await expect(dialog, '表单弹窗不会停在原地（新 UI 先收起、再预演）').toBeHidden({ timeout: 10_000 })
     })
 
     await test.step('⑦ 申请与订单都没被第二次审核改动', async () => {
@@ -264,11 +267,12 @@ test.describe('03-商家-履约 › 4-退货处理', () => {
       expect(await auditDescriptionValue(dialog), '说明应带出买家原说明').toBe(buyerNote)
       await fillAuditDescription(dialog, '')          // 清空，不填任何拒绝理由
       expect(await auditDescriptionValue(dialog), '说明已被清空').toBe('')
-      await submitAudit(dialog)
+      const outcome = await submitAudit(dialog, { willDo: '审核为「拒绝」' })
+      expect(outcome, '空说明也应能确认执行').toBe('confirmed')
 
       // 实际行为：前端表单规则里「详细说明」不是必填（只校验订单/申请人/原因），后端也只判 null，
       // 所以空串照样提交成功 —— 这是当前实现的事实，不是本次要修的问题。
-      await expectToastSuccess(page, '保存成功')
+      await expectToastSuccess(page, '审核完成')
     })
 
     await test.step('⑥ 拒绝生效，说明存成空串（不保留买家原说明）', async () => {

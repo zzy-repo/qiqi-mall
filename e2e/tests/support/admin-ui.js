@@ -11,6 +11,39 @@ import { ADMIN } from './env.js'
 import { adminLogin } from './ui.js'
 import { tid } from './tid.js'
 import { receiverOf } from './fixtures.js'
+import {
+  dangerDialog,
+  dangerWillDo,
+  dangerDetails,
+  dangerOk,
+  dangerCancel,
+  dangerError,
+  conflictDialog,
+  conflictRefresh,
+  waitDanger,
+  confirmDanger,
+  cancelDanger,
+  dismissDanger,
+  confirmDangerExpectError
+} from './danger-ui.js'
+
+// 高危操作确认弹窗 / 冲突弹窗的定位器与流程统一从 danger-ui.js 出，这里再导出一次，
+// 复用方（spec 与其它 support 文件）只认 admin-ui.js 这一个入口即可。
+export {
+  dangerDialog,
+  dangerWillDo,
+  dangerDetails,
+  dangerOk,
+  dangerCancel,
+  dangerError,
+  conflictDialog,
+  conflictRefresh,
+  waitDanger,
+  confirmDanger,
+  cancelDanger,
+  dismissDanger,
+  confirmDangerExpectError
+}
 
 // ---------------------------------------------------------------------------
 // 通用：登录（带一次 500 重试）
@@ -85,28 +118,34 @@ export const searchOrderRow = async (page, orderSn) => {
   return row
 }
 
-/** 打开审核确认框（不点任何按钮，便于先看拆单方案预览） */
-export const openAuditBox = async (page, row) => {
-  await row.getByTestId('order-row-audit').click()
-  const box = page.locator('.el-message-box')
-  await expect(box, '应弹出审核确认框').toBeVisible()
-  return box
-}
-
-/** 在已打开的审核确认框里点「通过」 */
-export const confirmAuditPass = async (page) => {
-  const box = page.locator('.el-message-box')
-  await box.locator('.el-message-box__btns').getByRole('button', { name: '通过', exact: true }).click()
-  await page.waitForTimeout(2000)
-}
-
-/** 点「审核」并选「通过」（走审核弹窗，不点「查看拆单方案」） */
+/**
+ * 审核通过：行内「审核通过」→ 预演确认弹窗 →「确认执行」。
+ *
+ * 新 UI 把原来的「审核」+ ElMessageBox（通过/不通过二选一）拆成了两个一级行按钮，
+ * 点下去直接进统一的「预演 → 确认 → 执行」弹窗（DangerConfirmDialog，全站单例）。
+ * 这里多了一道**验收点**（旧版没有）：弹窗必须用中文说清「待审核→待发货」。
+ */
 export const auditPassOrder = async (page, row) => {
-  await row.getByTestId('order-row-audit').click()
-  const box = page.locator('.el-message-box')
-  await expect(box, '应弹出审核确认框').toBeVisible()
-  await box.locator('.el-message-box__btns').getByRole('button', { name: '通过', exact: true }).click()
-  await page.waitForTimeout(2000)
+  await row.getByTestId('order-row-audit-pass').click()
+  await confirmDanger(page, { willDo: '待审核→待发货' })
+  await page.waitForTimeout(1200)   // 等列表按新状态重拉
+}
+
+/**
+ * 「只看拆单方案、不执行」：点「审核通过」→ 等预演把方案列进弹窗明细区 → 点「取消」。
+ *
+ * 原来独立的「拆单方案预览」弹窗（order-split-preview-dialog）已并入 danger 弹窗的
+ * details 区，所以「只看不做」= 打开 → 断言/读取明细 → 取消（取消不发任何请求）。
+ * @returns 明细区每行的文本（第 1 行是「仓名（N 条明细）」）
+ */
+export const openSplitPreview = async (page, row) => {
+  await row.getByTestId('order-row-audit-pass').click()
+  await waitDanger(page, { willDo: '待审核→待发货' })
+  const details = dangerDetails(page)
+  await expect(details, '预演弹窗应把拆单方案列进明细区（哪个仓、几条明细、哪些商品）').toBeVisible()
+  const plan = await details.locator('.detail-row').allInnerTexts()
+  await cancelDanger(page)
+  return plan
 }
 
 /**
@@ -168,37 +207,20 @@ export const createOrderViaUi = async (page, { receiver, status = '待审核', i
   return (await firstRow.locator('td').first().innerText()).trim()
 }
 
-/** 点「审核」并选「不通过」（订单关闭 + 回补库存） */
+/** 审核不通过：行内「不通过」→ 预演确认弹窗（说明关闭订单 + 回补哪些库存）→「确认执行」 */
 export const auditRejectOrder = async (page, row) => {
-  await row.getByTestId('order-row-audit').click()
-  const box = page.locator('.el-message-box')
-  await expect(box, '应弹出审核确认框').toBeVisible()
-  await box.locator('.el-message-box__btns').getByRole('button', { name: '不通过' }).click()
-  await page.waitForTimeout(2000)
-}
-
-/** 审核弹窗里点「查看拆单方案」，返回预览弹窗里的包裹行文本 */
-export const openSplitPreview = async (page) => {
-  // 「查看拆单方案」链接是 ElMessageBox 里的 h('a', ...)，拿不到 testid（tid.js 未覆盖第 2 条）
-  await page.locator('.split-preview-entry').click()
-  const dlg = tid(page, 'order-split-preview-dialog')
-  await expect(dlg, '拆单方案预览弹窗应打开').toBeVisible()
+  await row.getByTestId('order-row-audit-reject').click()
+  await confirmDanger(page, { willDo: '待审核→已关闭' })
   await page.waitForTimeout(1200)
-  return dlg.locator('.el-table__body tr').allInnerTexts()
 }
 
-/** 关掉拆单方案预览弹窗 */
-export const closeSplitPreview = async (page) => {
-  await tid(page, 'order-split-preview-close').click()
-  await page.waitForTimeout(500)
-}
-
-/** 模拟 WMS 回传：拣货/出库/揽收/签收 */
+/** 模拟 WMS 回传：拣货/出库/揽收/签收（选完事件后还要过一次统一确认弹窗） */
 export const wmsCallback = async (page, row, label) => {
   await row.getByTestId('delivery-row-wms-callback').click()
   await page.waitForTimeout(500)
   await page.locator('.el-dropdown-menu__item:visible').filter({ hasText: label }).first().click()
-  await page.waitForTimeout(1500)
+  await confirmDanger(page)
+  await page.waitForTimeout(800)
 }
 
 /** 订单列表某行的状态文字（行内状态标签有 testid，不再依赖列序） */
@@ -235,11 +257,22 @@ const DELIVERY_ACTION_TID = {
 }
 export const deliveryActionTid = (name) => DELIVERY_ACTION_TID[name]
 
+/**
+ * 「点一下就进确认弹窗」的动作（没有表单要填）。
+ * 编辑/拆分/合并/删除 也走同一个弹窗，但它们先弹表单弹窗，确认动作在
+ * submitDeliveryDialog / submitMergeDialog 里做。
+ */
+const DANGER_ONLY_ACTIONS = new Set(['下发', '取消'])
+/** 这些动作的预演文案里应含的状态流转（验收点：用户得先看清将要发生什么） */
+const DANGER_ACTIONS_WILLDO = { 下发: '待下发→已下发', 取消: '待下发→已取消' }
+
 export const clickDeliveryAction = async (page, row, name) => {
   const testId = DELIVERY_ACTION_TID[name]
   if (testId) await row.getByTestId(testId).click()
   else await row.getByRole('button', { name, exact: true }).click()   // 兜底：未知动作
   await page.waitForTimeout(900)
+  // 下发 / 取消 是「一步到位」的高危操作：点下去直接进统一确认弹窗，没有表单要填
+  if (DANGER_ONLY_ACTIONS.has(name)) await confirmDanger(page, { willDo: DANGER_ACTIONS_WILLDO[name] })
 }
 
 /** 编辑/拆分弹窗（两种模式共用一个弹窗组件） */
@@ -285,10 +318,15 @@ export const setDialogQty = async (page, rowIndex, qty) => {
   await page.waitForTimeout(200)
 }
 
-/** 提交编辑/拆分弹窗 */
+/**
+ * 提交编辑/拆分弹窗。
+ * 新 UI：表单收起后走统一确认弹窗（编辑的 body 里带行级 version，冲突时改弹 ConflictDialog），
+ * 所以这里必须再点一次「确认执行」——这正是这次要覆盖的交互。
+ */
 export const submitDeliveryDialog = async (page) => {
   await tid(page, 'delivery-form-submit').click()
-  await page.waitForTimeout(1500)
+  await confirmDanger(page)
+  await page.waitForTimeout(800)
 }
 
 /** 合并/删除并入弹窗：选目标包裹（按发货单号） */
@@ -300,10 +338,11 @@ export const pickMergeTarget = async (page, deliverySn) => {
   await page.waitForTimeout(300)
 }
 
-/** 提交合并/删除并入弹窗 */
+/** 提交合并/删除并入弹窗（同样是「预演 → 确认 → 执行」） */
 export const submitMergeDialog = async (page) => {
   await tid(page, 'delivery-merge-submit').click()
-  await page.waitForTimeout(1500)
+  await confirmDanger(page)
+  await page.waitForTimeout(800)
 }
 
 // ---------------------------------------------------------------------------
