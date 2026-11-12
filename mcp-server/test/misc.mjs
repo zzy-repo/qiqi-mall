@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 第 4 批：概览 + 上传（misc）工具测试。
 //
-// ① dashboard_overview 在 tools/list 里，title/description 中文；**write=1 时工具总数 = 24**（15 + 9 个新增）
+// ① dashboard_overview 在 tools/list 里，title/description 中文；**write=1 时工具总数 = 38**（第 4 批 24 + 第 5 批补齐 14）
 // ② dashboard_overview 能调通、返回非空，且数据自洽（口径断言，不是「数字等于某个常量」）：
 //      · 商品总数 ≥ 在架数 ≥ 0
 //      · 订单状态分布各档之和 === 订单总数
@@ -12,7 +12,7 @@
 //      这里用裸 HTTP 证明「后端只吃 multipart/form-data 文件流」——
 //      用 JSON 打同一个端点，后端回「Current request is not a multipart request」，
 //      所以它无法用 JSON 入参表达（也就无法在给模型的参数里表达一张图）。
-// ⑤ write=0：dashboard_overview 仍然在，且工具总数 = 21（24 - 3 个纯写工具）
+// ⑤ write=0：dashboard_overview 仍然在，且工具总数 = 26（38 - 12 个纯写工具）
 //
 // 只读文件，不造数据、不写库；跑完什么都不用清理，可连跑两轮。
 //
@@ -48,10 +48,11 @@ async function check(step, fn) {
   }
 }
 
-/** 第 4 批结束后的工具总数：15（原）+ return_apply/return_reason/warehouse/order_setting/member/member_address/member_cart/dashboard_overview/delivery = 24 */
-const TOTAL_WRITE_ON = 24;
-/** write=0 时消失的纯写工具：execute_audit_pass / update_product / update_sku_stock */
-const TOTAL_WRITE_OFF = TOTAL_WRITE_ON - 3;
+/** 第 5 批（覆盖补齐）后的工具总数：24（第 4 批）+ 字典 3 + 商品只读 2 + 商品写 4 + 订单写 5 = 38 */
+const TOTAL_WRITE_ON = 38;
+/** write=0 时消失的纯写工具共 12 个（订单 6 + 商品 6），13 = 25… 这里只关心总数：38 - 12 = 26 */
+const WRITE_ONLY_COUNT = 12;
+const TOTAL_WRITE_OFF = TOTAL_WRITE_ON - WRITE_ONLY_COUNT;
 
 // ---------------- 主流程 ----------------
 async function main() {
@@ -63,7 +64,7 @@ async function main() {
     client = await connectServer({ MCP_ENABLE_WRITE: '1' }, 'misc');
 
     // ① tools/list + 工具总数
-    await check(`① tools/list 含 dashboard_overview，且 write=1 时工具总数 = ${TOTAL_WRITE_ON}（15 原有 + 9 新增）`, async () => {
+    await check(`① tools/list 含 dashboard_overview，且 write=1 时工具总数 = ${TOTAL_WRITE_ON}（第 4 批 24 + 第 5 批补齐 14）`, async () => {
       const { tools } = await client.listTools();
       const names = tools.map((t) => t.name);
       const t = tools.find((x) => x.name === 'dashboard_overview');
@@ -164,7 +165,20 @@ async function main() {
       const ro = await connectServer({ MCP_ENABLE_WRITE: '0' }, 'misc-ro');
       const names = (await ro.listTools()).tools.map((t) => t.name);
       const hasDash = names.includes('dashboard_overview');
-      const leakedWrite = ['execute_audit_pass', 'update_product', 'update_sku_stock'].filter((n) => names.includes(n));
+      const leakedWrite = [
+        'execute_audit_pass',
+        'update_product',
+        'update_sku_stock',
+        'create_order',
+        'update_order',
+        'audit_reject_order',
+        'ship_order',
+        'delete_order',
+        'create_product',
+        'delete_product',
+        'create_sku',
+        'delete_sku',
+      ].filter((n) => names.includes(n));
       await ro.close();
       return {
         pass: hasDash && names.length === TOTAL_WRITE_OFF && leakedWrite.length === 0,

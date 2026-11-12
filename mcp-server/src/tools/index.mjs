@@ -42,6 +42,7 @@
 import { registerOrderTools } from './order.mjs';
 import { registerCatalogTools } from './catalog.mjs';
 import { registerCatalogWriteTools } from './catalog-write.mjs';
+import { registerCatalogDictTools } from './catalog-dict.mjs';
 import { registerDeliveryTools } from './delivery.mjs';
 import { registerReturnsTools } from './returns.mjs';
 import { registerConfigTools } from './config.mjs';
@@ -57,15 +58,16 @@ export function registerAll(server, ctx = {}) {
   const { writeEnabled = false } = ctx;
 
   // 域可以并行/串行注册，互相独立：某域不注册写工具不会影响别的域
-  registerOrderTools(server, { writeEnabled }); // 订单域：6 只读 + 1 写（execute_audit_pass 受 writeEnabled 控制）
-  registerCatalogTools(server, { writeEnabled }); // 商品域：6 只读（全部不写库）
-  registerCatalogWriteTools(server, { writeEnabled }); // 商品域写：2 个（update_product / update_sku_stock，自带写开关门禁）
+  registerOrderTools(server, { writeEnabled }); // 订单域：6 只读 + 6 写（execute_audit_pass / create_order / update_order / audit_reject_order / ship_order / delete_order）
+  registerCatalogTools(server, { writeEnabled }); // 商品域：8 只读（+get_sku_detail / list_sku_attributes，全部不写库）
+  registerCatalogWriteTools(server, { writeEnabled }); // 商品域写：6 个（改：update_product / update_sku_stock；增删：create_product / delete_product / create_sku / delete_sku）
+  registerCatalogDictTools(server, { writeEnabled }); // 商品字典：3 个（category / product_type / attribute，各 action=get|create|update|delete）
 
   // 第 4 批：履约 / 退货 / 基础配置 / 会员 / 概览
-  registerDeliveryTools(server, { writeEnabled }); // 履约：delivery(action) list|get 只读，其余 6 个 L3 动作受写开关控制
-  registerReturnsTools(server, { writeEnabled }); // 退货：return_apply(list|get|audit) + return_reason(list|create|update|delete)
+  registerDeliveryTools(server, { writeEnabled }); // 履约：delivery(action) list|get 只读，其余 7 个 L3 动作（含 wms_callback）受写开关控制
+  registerReturnsTools(server, { writeEnabled }); // 退货：return_apply(list|get|audit|create|delete) + return_reason(list|create|update|delete)
   registerConfigTools(server, { writeEnabled }); // 配置：warehouse(list|create|update|delete) + order_setting(get|update)
-  registerMemberTools(server, { writeEnabled }); // 会员：member / member_address / member_cart
+  registerMemberTools(server, { writeEnabled }); // 会员：member / member_address / member_cart(含 create|update|delete)
   registerMiscTools(server, { writeEnabled }); // 概览：dashboard_overview（只读；upload_image 刻意未做，见 misc.mjs 尾注）
 }
 

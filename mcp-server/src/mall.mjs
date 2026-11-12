@@ -465,4 +465,140 @@ export function dashboardOverview() {
   return request('GET', '/admin/dashboard/overview');
 }
 
+// ---------- 第 5 批（覆盖补齐）：把 admin 后台「人能做」的其余写/读端点补齐 ----------
+// 口径：见 mcp-server/README「工具表」。每个 wrapper 都对着 Controller 真实入参写，
+// 收 version 的收 version、支持 ?dryRun=true 的透 dryRun（只回 willDo，不落库、不需要 version）。
+
+/** 拼 query（值为 undefined / null 的键直接丢掉；dryRun=true 才拼，false 不拼） */
+function qs(params = {}) {
+  const sp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null) continue;
+    if (v === false) continue;
+    sp.set(k, String(v));
+  }
+  const s = sp.toString();
+  return s ? `?${s}` : '';
+}
+
+// ---- 订单写（OrderController 的 create / update / audit-reject / ship / delete）----
+/** POST /admin/orders  body = { order, items }；总额由后端按明细快照价重算 */
+export function createOrder({ order, items } = {}) {
+  return request('POST', '/admin/orders', { body: { order, items } });
+}
+
+/** PUT /admin/orders/{id}  body 必须含 version；后端强制 status=null（状态只能走专用接口） */
+export function updateOrder(id, patch = {}) {
+  return request('PUT', `/admin/orders/${encodeURIComponent(id)}`, { body: { ...patch, id } });
+}
+
+/** POST /admin/orders/{id}/audit-reject?dryRun=true  待审核(7) → 已关闭(4) + 回补总池库存 */
+export function auditRejectOrder(id, { dryRun } = {}) {
+  return request('POST', `/admin/orders/${encodeURIComponent(id)}/audit-reject${qs({ dryRun })}`);
+}
+
+/** POST /admin/orders/{id}/ship?dryRun=true  已付款(1) → 已发货(2)，直发路径不拆单 */
+export function shipOrder(id, { dryRun } = {}) {
+  return request('POST', `/admin/orders/${encodeURIComponent(id)}/ship${qs({ dryRun })}`);
+}
+
+/** DELETE /admin/orders/{id}?dryRun=true  级联删明细/发货单/物流，不可恢复 */
+export function deleteOrder(id, { dryRun } = {}) {
+  return request('DELETE', `/admin/orders/${encodeURIComponent(id)}${qs({ dryRun })}`);
+}
+
+// ---- 发货单 WMS 回传（DeliveryController 的第 9 个端点）----
+// POST /admin/deliveries/{id}/wms-callback?event=pick|outbound|transit|signed[&dryRun=true]
+// event 是 @RequestParam **必填**；不收 version；接口幂等（状态已到/已过则不改数据）。
+export function wmsCallbackDelivery(id, { event, dryRun } = {}) {
+  return request('POST', `/admin/deliveries/${encodeURIComponent(id)}/wms-callback${qs({ event, dryRun })}`);
+}
+
+// ---- 商品写（ProductController create / delete）----
+/** POST /admin/products  body = { product, gallery }；version 由后端置 0 */
+export function createProduct({ product, gallery } = {}) {
+  return request('POST', '/admin/products', { body: { product, gallery } });
+}
+
+/** DELETE /admin/products/{id}?dryRun=true  被订单明细/购物车引用时拒绝（预演也会照实说） */
+export function deleteProduct(id, { dryRun } = {}) {
+  return request('DELETE', `/admin/products/${encodeURIComponent(id)}${qs({ dryRun })}`);
+}
+
+// ---- SKU 写（SkuController create / delete）----
+/** POST /admin/skus  body = { sku, specs }；productId 必填（后端拦），version 由后端置 0 */
+export function createSku({ sku, specs } = {}) {
+  return request('POST', '/admin/skus', { body: { sku, specs } });
+}
+
+/** DELETE /admin/skus/{id}?dryRun=true  被订单明细/购物车引用时拒绝 */
+export function deleteSku(id, { dryRun } = {}) {
+  return request('DELETE', `/admin/skus/${encodeURIComponent(id)}${qs({ dryRun })}`);
+}
+
+/** GET /admin/skus/attributes?productId=  「该商品所属类型下的属性」（前端选规格名用） */
+export function skuAttributes(productId) {
+  return request('GET', `/admin/skus/attributes?productId=${encodeURIComponent(productId)}`);
+}
+
+// ---- 基础字典：分类 / 商品类型 / 属性（三张表都**没有 version 列**）----
+// 并发口径：后端 updateById 影响 0 行 → 409「记录已被删除」；delete 有引用守卫会回可读中文原因。
+export function getCategory(id) {
+  return request('GET', `/admin/categories/${encodeURIComponent(id)}`);
+}
+export function createCategory(body) {
+  return request('POST', '/admin/categories', { body });
+}
+export function updateCategory(id, patch = {}) {
+  return request('PUT', `/admin/categories/${encodeURIComponent(id)}`, { body: { ...patch, id } });
+}
+export function deleteCategory(id) {
+  return request('DELETE', `/admin/categories/${encodeURIComponent(id)}`);
+}
+
+export function getProductType(id) {
+  return request('GET', `/admin/product-types/${encodeURIComponent(id)}`);
+}
+export function createProductType(body) {
+  return request('POST', '/admin/product-types', { body });
+}
+export function updateProductType(id, patch = {}) {
+  return request('PUT', `/admin/product-types/${encodeURIComponent(id)}`, { body: { ...patch, id } });
+}
+export function deleteProductType(id) {
+  return request('DELETE', `/admin/product-types/${encodeURIComponent(id)}`);
+}
+
+export function getAttribute(id) {
+  return request('GET', `/admin/attributes/${encodeURIComponent(id)}`);
+}
+export function createAttribute(body) {
+  return request('POST', '/admin/attributes', { body });
+}
+export function updateAttribute(id, patch = {}) {
+  return request('PUT', `/admin/attributes/${encodeURIComponent(id)}`, { body: { ...patch, id } });
+}
+export function deleteAttribute(id) {
+  return request('DELETE', `/admin/attributes/${encodeURIComponent(id)}`);
+}
+
+// ---- 后台购物车（CartController 的 create / update / delete；GET 已在 member_cart 里）----
+export function createCart(body) {
+  return request('POST', '/admin/carts', { body });
+}
+export function updateCart(id, patch = {}) {
+  return request('PUT', `/admin/carts/${encodeURIComponent(id)}`, { body: { ...patch, id } });
+}
+export function deleteCart(id) {
+  return request('DELETE', `/admin/carts/${encodeURIComponent(id)}`);
+}
+
+// ---- 退货申请（ReturnApplyController 的 create / delete；PUT 审核已在 return_apply.audit）----
+export function createReturnApply(body) {
+  return request('POST', '/admin/return-applies', { body });
+}
+export function deleteReturnApply(id) {
+  return request('DELETE', `/admin/return-applies/${encodeURIComponent(id)}`);
+}
+
 export const mallBase = BASE;

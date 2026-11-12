@@ -76,8 +76,20 @@ async function readProduct(client, productId) {
 }
 
 const uniqueMark = () => String(Date.now()).slice(-6);
-const WRITE_TOOLS = ['update_product', 'update_sku_stock'];
-// write=0 时应当全部在场的只读工具：订单域 6 + 商品域 6 + 第 4 批 6 个「带只读动作」的工具 + 概览 1。
+const WRITE_TOOLS = [
+  'update_product',
+  'update_sku_stock',
+  'create_order',
+  'update_order',
+  'audit_reject_order',
+  'ship_order',
+  'delete_order',
+  'create_product',
+  'delete_product',
+  'create_sku',
+  'delete_sku',
+];
+// write=0 时应当全部在场的只读工具：订单 6 + 商品 8 + 字典 3 + 第 4 批 8 个「带只读动作」的工具 + 概览 1 = 26。
 // ⚠️ 第 4 批的工具是「一个资源一个工具、用 action 区分动作」的形态（delivery / return_apply / return_reason /
 //    warehouse / order_setting / member / member_address / member_cart），write=0 时它们**仍在**，
 //    但 action 枚举里只剩只读动作（各域自己的测试会断言这一点）。
@@ -94,6 +106,11 @@ const READONLY_TOOLS = [
   'list_product_types',
   'list_attributes',
   'list_skus',
+  'get_sku_detail',
+  'list_sku_attributes',
+  'category',
+  'product_type',
+  'attribute',
   'delivery',
   'return_apply',
   'return_reason',
@@ -356,7 +373,7 @@ async function main() {
   }
 
   // ⑦ write=0 → 两个写工具消失，只读工具齐全
-  const step7 = `⑦ MCP_ENABLE_WRITE=0 → update_product / update_sku_stock / execute_audit_pass 全部消失，${READONLY_TOOLS.length} 个只读工具齐全`;
+  const step7 = `⑦ MCP_ENABLE_WRITE=0 → 纯写工具（update_product / update_sku_stock / execute_audit_pass / create_* / delete_* / *_order）全部消失，${READONLY_TOOLS.length} 个只读工具齐全`;
   try {
     const ro = await connectServer({ MCP_ENABLE_WRITE: '0' }, 'ro');
     const names = (await ro.listTools()).tools.map((t) => t.name).sort();

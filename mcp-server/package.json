@@ -3,16 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "qiqi-mall MCP Server（stdio）：订单/商品/履约/退货/配置/会员/概览 24 个工具（version 乐观锁 + dryRun 预演 + 统一分页）",
+  "description": "qiqi-mall MCP Server（stdio）：订单/商品/字典/履约/退货/配置/会员/概览 38 个工具（version 乐观锁 + dryRun 预演 + 统一分页；覆盖后台 100% 面向人端点）",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "start": "node src/index.mjs",
-    "test": "node test/loop.mjs && node test/catalog.mjs && node test/order-read.mjs && node test/optimistic-lock.mjs && node test/delivery.mjs && node test/returns.mjs && node test/config.mjs && node test/member.mjs && node test/misc.mjs",
+    "test": "node test/loop.mjs && node test/catalog.mjs && node test/catalog-write.mjs && node test/catalog-dict.mjs && node test/order-read.mjs && node test/order-write.mjs && node test/optimistic-lock.mjs && node test/delivery.mjs && node test/returns.mjs && node test/config.mjs && node test/member.mjs && node test/misc.mjs",
     "test:loop": "node test/loop.mjs",
     "test:catalog": "node test/catalog.mjs",
+    "test:catalog-write": "node test/catalog-write.mjs",
+    "test:catalog-dict": "node test/catalog-dict.mjs",
     "test:order-read": "node test/order-read.mjs",
+    "test:order-write": "node test/order-write.mjs",
     "test:lock": "node test/optimistic-lock.mjs",
     "test:delivery": "node test/delivery.mjs",
     "test:returns": "node test/returns.mjs",

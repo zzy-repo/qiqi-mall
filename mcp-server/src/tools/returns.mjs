@@ -1,5 +1,6 @@
 // 退货域（returns）工具：2 个
-//   return_apply(action)   list / get / audit      —— 退货申请（audit 是 L3：通过=退款+回补库存）
+//   return_apply(action)   list / get / audit / create / delete —— 退货申请
+//                          （audit 是 L3：通过=退款+回补库存；create/delete 是第 5 批补齐的后台人工操作）
 //   return_reason(action)  list / create / update / delete —— 原因字典（配置类，L2）
 //
 // ── 后端实际形态（已读 ReturnApplyController / ReturnReasonController 确认，跟「标准 REST」不一样）──
@@ -11,6 +12,10 @@
 //      订单行 @Version 更新 0 行 → 409 **整笔回滚**（绝不会「申请已通过、货没退、库存回补两次」）。
 //      工具层**不能**凭空造一个 version 参数：那会让每一次审核都被后端当成非法入参。
 //      （这就是本域与 update_product / member(update) 的区别，别照抄那两处的「zod 必填 version」。）
+//   ④b 第 5 批补齐的两个后台端点（都无守卫、无 version，纯 CRUD）：
+//      POST   /admin/return-applies       body = ReturnApply 实体（orderId 必填语义上；后端不校验存在性）
+//      DELETE /admin/return-applies/{id}  直接删除（**不退款、不回补库存**，只是删掉这条记录）
+//      ⚠️ 后台「新增退货申请」是代客登记场景；真正退钱仍然只走 audit，别把 create 当退款用。
 //   ⑤ 原因字典：List 不分页；PUT 无 version（影响 0 行 → 409「记录已被删除」）；
 //      DELETE 被退货申请引用时后端直接拒绝（历史申请要能追溯原因）。
 
@@ -18,6 +23,8 @@ import { z } from 'zod';
 import {
   listReturnApplies,
   auditReturnApply,
+  createReturnApply,
+  deleteReturnApply,
   listReturnReasons,
   createReturnReason,
   updateReturnReason,
@@ -30,7 +37,7 @@ import { text, fail, failWrite, clampPage, paginate, pageHeader, DEFAULT_PAGE_SI
 const RETURN_STATUS_TEXT = ['待处理', '已通过', '已拒绝'];
 const returnStatusLabel = (v) => RETURN_STATUS_TEXT[v] ?? `未知状态(${v ?? '-'})`;
 
-const APPLY_ACTIONS_ALL = ['list', 'get', 'audit'];
+const APPLY_ACTIONS_ALL = ['list', 'get', 'audit', 'create', 'delete'];
 const APPLY_ACTIONS_READONLY = ['list', 'get'];
 
 const pageSchema = {
@@ -59,24 +66,26 @@ function applyRowText(r, i) {
 export function registerReturnsTools(server, { writeEnabled } = {}) {
   const applyActions = writeEnabled ? APPLY_ACTIONS_ALL : APPLY_ACTIONS_READONLY;
   if (!writeEnabled) {
-    console.error('[mcp] MCP_ENABLE_WRITE!=1 → return_apply 只开放 list / get（audit 不开放）；return_reason 只开放 list');
+    console.error('[mcp] MCP_ENABLE_WRITE!=1 → return_apply 只开放 list / get（audit/create/delete 不开放）；return_reason 只开放 list');
   }
 
   // ---------------- ① 退货申请 ----------------
   server.registerTool(
     'return_apply',
     {
-      title: '退货申请（查 / 审核）',
+      title: '退货申请（查 / 审核 / 代客登记 / 删除）',
       description:
         '按 action 处理退货申请。list=按状态/订单分页查（只读）；get=看单条申请详情（只读）；' +
-        'audit=审核（**L3 高影响**）。' +
+        'audit=审核（**L3 高影响**）；create=代客登记一条退货申请（后台手工补录）；delete=删掉这条申请记录。' +
         '⚠️ audit 的后果很重：**通过(1) = 订单退款 + 记一条退款流水 + 把该订单全部明细的数量回补到 SKU 总池库存 + 订单转已退款(6)**；' +
         '**拒绝(2) = 订单退回已付款(1)，不退款、不回补库存**。两者都不可撤回（后端只允许「待处理」被审核一次）。' +
         '所以：先 list / get 看清申请与订单，把「退多少钱、回补多少件」念给用户确认，并建议先 dryRun=true 预演（后端会返回 willDo 的中文后果描述）再执行。' +
         '后端没有版本号可传（return_apply 表无 version 列），并发靠「仅待处理可审」的状态守卫 + 影响行数闸门兜住：' +
         '别人刚审过 / 订单被别人改过 → 409，此时请重新读一次再决定，不要盲目重试。',
       inputSchema: {
-        action: z.enum(applyActions).describe('list=列表(只读) / get=详情(只读) / audit=审核(L3，通过即退款+回补库存)'),
+        action: z
+          .enum(applyActions)
+          .describe('list=列表(只读) / get=详情(只读) / audit=审核(L3，通过即退款+回补库存) / create=代客登记 / delete=删除记录'),
         applyId: z.number().int().positive().optional().describe('退货申请 id：get / audit 必填（list 时忽略）'),
         status: z.number().int().min(0).max(2).optional().describe('list 过滤：0待处理 / 1已通过 / 2已拒绝；不传=全部'),
         orderId: z.number().int().positive().optional().describe('list 过滤：只看某笔订单的退货申请；不传=全部订单'),
@@ -89,12 +98,15 @@ export function registerReturnsTools(server, { writeEnabled } = {}) {
           .describe('audit 的审核结论（**必填**）：1=通过（退款+回补库存，订单转已退款） / 2=拒绝（订单退回已付款）'),
         description: z.string().optional().describe('audit 时顺带写回申请说明（可选；不传=不改）'),
         dryRun: z.boolean().optional().describe('true=只预演：返回 willDo（不落库、不退款、不回补库存），建议审核前先跑一次'),
+        memberId: z.number().int().positive().optional().describe('create **必填**：申请会员 id（后端 member_id NOT NULL）'),
+        returnReason: z.string().min(1).optional().describe('create **必填**：原因文字（如「质量问题」；后端 return_reason NOT NULL）'),
+        reasonId: z.number().int().positive().optional().describe('create **必填**：原因字典 id（先用 return_reason(action=list) 查；后端 reason_id NOT NULL）'),
         ...pageSchema,
       },
     },
-    async ({ action, applyId, status, orderId, auditStatus, description, dryRun, page, size }) => {
-      if (!writeEnabled && action === 'audit') {
-        return fail(new Error('写操作未启用：return_apply(action=audit) 需要 MCP_ENABLE_WRITE=1'));
+    async ({ action, applyId, status, orderId, auditStatus, description, dryRun, memberId, returnReason, reasonId, page, size }) => {
+      if (!writeEnabled && action !== 'list' && action !== 'get') {
+        return fail(new Error(`写操作未启用：return_apply(action=${action}) 需要 MCP_ENABLE_WRITE=1`));
       }
       try {
         if (action === 'list') {
@@ -124,6 +136,62 @@ export function registerReturnsTools(server, { writeEnabled } = {}) {
               `  原因=${found.returnReason ?? '-'}（reasonId=${found.reasonId ?? '-'}） 会员=${found.memberId ?? '-'}\n` +
               `  说明=${found.description ?? '-'}\n\n` +
               `JSON:\n${JSON.stringify(found, null, 2)}`
+          );
+        }
+
+        // ---------- create（代客登记；无 version、无守卫）----------
+        // ⚠️ 后端 POST /admin/return-applies 是裸 save，**不校验必填**：order_id / member_id / reason_id /
+        //    return_reason 在库里都是 NOT NULL，缺任何一个是 SQL 报错 → 用户只会看到「数据处理失败，请稍后重试」。
+        //    所以这四项由工具层先拦，并说清缺哪个（省掉一次 500 与一轮瞎猜）。
+        if (action === 'create') {
+          if (!orderId) throw new Error('action=create 必须给 orderId（这条申请是哪笔订单的）');
+          if (!memberId) throw new Error('action=create 必须给 memberId（后端 member_id 是 NOT NULL，缺了只会报「数据处理失败」）');
+          if (!reasonId) throw new Error('action=create 必须给 reasonId（先用 return_reason(action=list) 查；后端 reason_id 是 NOT NULL）');
+          if (!returnReason) throw new Error('action=create 必须给 returnReason（原因文字，后端 return_reason 是 NOT NULL）');
+          const body = {
+            orderId,
+            status: 0,
+            ...(memberId === undefined ? {} : { memberId }),
+            ...(returnReason === undefined ? {} : { returnReason }),
+            ...(reasonId === undefined ? {} : { reasonId }),
+            ...(description === undefined ? {} : { description }),
+          };
+          const created = await createReturnApply(body);
+          return text(
+            `✅ 已代客登记退货申请：id=${created?.id}（订单 ${orderId}）状态=${returnStatusLabel(created?.status)}(${created?.status}) ` +
+              `原因=${created?.returnReason ?? '-'}\n` +
+              `  ⚠️ 这只是「登记」：没退款、没回补库存、订单状态没变。真正退钱请走 return_apply(action=audit, auditStatus=1)。\n\n` +
+              `JSON:\n${JSON.stringify(created, null, 2)}`
+          );
+        }
+
+        // ---------- delete（删记录；不退款、不回补库存）----------
+        if (action === 'delete') {
+          if (!applyId) throw new Error('action=delete 必须给 applyId');
+          let before = null;
+          try {
+            const rows = await listReturnApplies({});
+            before = (Array.isArray(rows) ? rows : []).find((r) => Number(r.id) === Number(applyId)) ?? null;
+          } catch {
+            before = null;
+          }
+          try {
+            await deleteReturnApply(applyId);
+          } catch (e) {
+            return failWrite(e, { action: '退货申请删除', label: `applyId=${applyId}`, rereadTool: 'return_apply(action=list)' });
+          }
+          let gone = true;
+          try {
+            const rows = await listReturnApplies({});
+            gone = !(Array.isArray(rows) ? rows : []).some((r) => Number(r.id) === Number(applyId));
+          } catch {
+            gone = true;
+          }
+          return text(
+            `✅ 退货申请 ${applyId} 已删除${before ? `（原状态=${returnStatusLabel(before.status)}、订单=${before.orderSn || `#${before.orderId}`}）` : ''}。\n` +
+              `  ⚠️ 删除只是去掉这条记录：**不退款、不回补库存、订单状态不变**。\n` +
+              `  回读核对：${gone ? '已不存在（符合预期）' : '⚠️ 仍能读到，请人工核查'}\n\n` +
+              `JSON:\n${JSON.stringify({ applyId, deleted: true, verifiedGone: gone, before }, null, 2)}`
           );
         }
 

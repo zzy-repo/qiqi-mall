@@ -45,7 +45,7 @@ const deliveryCount = () => Number(sql(`SELECT COUNT(*) FROM ${DB}.delivery_orde
 const deliveryCountOf = (id) => Number(sql(`SELECT COUNT(*) FROM ${DB}.delivery_order WHERE order_id = ${Number(id)}`));
 const orderStatus = (id) => Number(sql(`SELECT status FROM ${DB}.\`order\` WHERE id = ${Number(id)}`));
 
-// ---------------- 写开关应保留的只读工具清单（订单域 6 + 商品域 6 + 第 4 批 9） ----------------
+// ---------------- 写开关应保留的只读工具清单（订单 6 + 商品 8 + 字典 3 + 第 4 批 9 = 26） ----------------
 // 第 4 批是「一个资源一个工具、action 区分动作」的形态：write=0 时工具仍在，但写动作从 action 枚举里摘掉
 // （各域自己的测试会断言「枚举里没有写动作」「调写动作报 MCP_ENABLE_WRITE」）。
 const READONLY_TOOLS = [
@@ -61,6 +61,11 @@ const READONLY_TOOLS = [
   'list_product_types',
   'list_attributes',
   'list_skus',
+  'get_sku_detail',
+  'list_sku_attributes',
+  'category',
+  'product_type',
+  'attribute',
   'delivery',
   'return_apply',
   'return_reason',
@@ -71,8 +76,21 @@ const READONLY_TOOLS = [
   'member_cart',
   'dashboard_overview',
 ];
-/** 写工具（write=1 才注册）：订单域 1 + 商品域 2 —— 都不该出现在 write=0 的清单里 */
-const WRITE_TOOLS = ['execute_audit_pass', 'update_product', 'update_sku_stock'];
+/** 写工具（write=1 才注册）：订单域 5 + 商品域 4 + 原有 3 —— 都不该出现在 write=0 的清单里 */
+const WRITE_TOOLS = [
+  'execute_audit_pass',
+  'update_product',
+  'update_sku_stock',
+  'create_order',
+  'update_order',
+  'audit_reject_order',
+  'ship_order',
+  'delete_order',
+  'create_product',
+  'delete_product',
+  'create_sku',
+  'delete_sku',
+];
 
 // ---------------- 主流程 ----------------
 async function main() {
@@ -233,7 +251,7 @@ async function main() {
 
     // ⑩ 写开关：MCP_ENABLE_WRITE=0 → 只剩只读工具（订单 6 + 商品 6 + 第 4 批 9），3 个写工具全部消失
     const step10 =
-      `⑩ MCP_ENABLE_WRITE=0 → tools/list 只剩 ${READONLY_TOOLS.length} 个只读工具（订单 6 + 商品 6 + 第 4 批 9），` +
+      `⑩ MCP_ENABLE_WRITE=0 → tools/list 只剩 ${READONLY_TOOLS.length} 个只读工具（订单 6 + 商品 8 + 字典 3 + 第 4 批 9），` +
       `写工具（${WRITE_TOOLS.join(' / ')}）全部消失`;
     try {
       const ro = await connectServer({ MCP_ENABLE_WRITE: '0' }, 'ro');

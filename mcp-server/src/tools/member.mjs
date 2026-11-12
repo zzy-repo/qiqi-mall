@@ -1,7 +1,9 @@
 // 会员域（member）工具：3 个
 //   member(action)          list / get / create / update / delete   —— 会员账号（update 吃 version；delete 属 L3）
 //   member_address(action)  list / save / delete                    —— 收货地址（后台视角，L2）
-//   member_cart(action)     list                                    —— 购物车（只读）
+//   member_cart(action)     list / create / update / delete        —— 购物车（第 5 批补齐后台的增删改；
+//                                                                      注意这与 /portal/cart 的买家自助购物车是两份数据口径：
+//                                                                      这里改的是**库里那条记录**，后台运维手段）
 //
 // ── 后端实际形态（已读 MemberController / MemberAddressController / CartController 确认）──
 //   ① GET /admin/members?status=&username=  返回 List、**不分页**（username 是 like 模糊）；每项带 version
@@ -27,6 +29,9 @@ import {
   updateMemberAddress,
   deleteMemberAddress,
   listCarts,
+  createCart,
+  updateCart,
+  deleteCart,
 } from '../mall.mjs';
 import { text, fail, failWrite, clampPage, paginate, pageHeader, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './_shared.mjs';
 
@@ -334,22 +339,88 @@ export function registerMemberTools(server, { writeEnabled } = {}) {
     }
   );
 
-  // ---------------- ③ 购物车（只读） ----------------
+  // ---------------- ③ 购物车（查 / 增 / 改 / 删） ----------------
+  const cartActions = writeEnabled ? ['list', 'create', 'update', 'delete'] : ['list'];
   server.registerTool(
     'member_cart',
     {
-      title: '会员购物车（只读）',
+      title: '会员购物车（查 / 增 / 改 / 删）',
       description:
-        '后台视角查看会员购物车（有哪些商品/SKU、各几件）。用户问"这个会员购物车里有什么""加购了多少"时用。' +
-        '只读、可反复调用；后端返回 List 不分页，工具层按同一套规则（默认 10、最大 50）夹取。' +
-        '⚠️ 后台没有「改购物车」的必要：购物车是买家自助数据，本批刻意只做只读（写属于 C 端 /portal/cart）。',
+        '后台视角查看和维护会员购物车（有哪些商品/SKU、各几件）。用户问"这个会员购物车里有什么""加购了多少"时用 list。' +
+        'create=给会员手工加一条；update=改数量/改 SKU；delete=删掉这一条（后台运维手段，用于纠正脏数据）。' +
+        '⚠️ 这里改的是**库里那条记录**，不是买家在用的小程序购物车（买家自助加购走 C 端 /portal/cart，需要会员身份，API Key 无权调用）。' +
+        '列表后端返回 List 不分页，工具层按同一套规则（默认 10、最大 50）夹取。' +
+        '注意：cart 表**没有版本号** —— 改一条刚被别人删掉的记录 → 后端 409「记录已被删除」，重新 list 一次即可。',
       inputSchema: {
-        memberId: z.number().int().positive().optional().describe('会员 id；不传=全部会员的购物车'),
+        action: z.enum(cartActions).describe('list=列表(只读) / create=新增 / update=改数量或改 SKU / delete=删除'),
+        memberId: z.number().int().positive().optional().describe('会员 id：create 必填；list 不传=全部会员的购物车'),
+        cartId: z.number().int().positive().optional().describe('购物车行 id：update / delete 必填（先用 list 查）'),
+        productId: z.number().int().positive().optional().describe('商品 id：create 必填（后端不校验，但缺了这条数据没有意义）'),
+        productSkuId: z.number().int().positive().optional().describe('SKU id：create 必填；update 传了才改'),
+        quantity: z.number().int().min(1).optional().describe('数量：create 必填；update 传了才改（必须 >= 1，清空请用 delete）'),
         ...pageSchema,
       },
     },
-    async ({ memberId, page, size }) => {
+    async ({ action, memberId, cartId, productId, productSkuId, quantity, page, size }) => {
+      if (!writeEnabled && action !== 'list') {
+        return fail(new Error(`写操作未启用：member_cart(action=${action}) 需要 MCP_ENABLE_WRITE=1（当前只开放 action=list）`));
+      }
       try {
+        if (action === 'create') {
+          if (!memberId) throw new Error('action=create 必须给 memberId');
+          if (!productId || !productSkuId) throw new Error('action=create 必须给 productId 与 productSkuId');
+          if (!quantity) throw new Error('action=create 必须给 quantity（>=1）');
+          const created = await createCart({ memberId, productId, productSkuId, quantity });
+          return text(
+            `✅ 已为会员 ${memberId} 新增购物车行：id=${created?.id} 商品=${created?.productId} SKU=${created?.productSkuId} 数量=${created?.quantity}\n\n` +
+              `JSON:\n${JSON.stringify(created, null, 2)}`
+          );
+        }
+        if (action === 'update') {
+          if (!cartId) throw new Error('action=update 必须给 cartId');
+          const patch = {};
+          if (quantity !== undefined) patch.quantity = quantity;
+          if (productSkuId !== undefined) patch.productSkuId = productSkuId;
+          if (productId !== undefined) patch.productId = productId;
+          if (!Object.keys(patch).length) throw new Error('action=update 至少要给 quantity / productSkuId / productId 其中一个');
+          try {
+            await updateCart(cartId, patch);
+          } catch (e) {
+            return failWrite(e, { action: '购物车修改', label: `cartId=${cartId}`, rereadTool: 'member_cart(action=list)' });
+          }
+          let after = null;
+          try {
+            const rows = await listCarts({ memberId });
+            after = (Array.isArray(rows) ? rows : []).find((c) => Number(c.id) === Number(cartId)) ?? null;
+          } catch {
+            after = null;
+          }
+          return text(
+            `✅ 购物车行 ${cartId} 已更新：${Object.keys(patch).join('、')}\n` +
+              `  当前：${after ? `会员=${after.memberId} 商品=${after.productId} SKU=${after.productSkuId} 数量=${after.quantity}` : '(回读失败，请再 list 一次)'}\n\n` +
+              `JSON:\n${JSON.stringify({ cartId, changed: Object.keys(patch), cart: after }, null, 2)}`
+          );
+        }
+        if (action === 'delete') {
+          if (!cartId) throw new Error('action=delete 必须给 cartId');
+          try {
+            await deleteCart(cartId);
+          } catch (e) {
+            return failWrite(e, { action: '购物车删除', label: `cartId=${cartId}`, rereadTool: 'member_cart(action=list)' });
+          }
+          let gone = true;
+          try {
+            const rows = await listCarts({ memberId });
+            gone = !(Array.isArray(rows) ? rows : []).some((c) => Number(c.id) === Number(cartId));
+          } catch {
+            gone = true;
+          }
+          return text(
+            `✅ 购物车行 ${cartId} 已删除。回读核对：${gone ? '已不存在（符合预期）' : '⚠️ 仍能读到，请人工核查'}\n\n` +
+              `JSON:\n${JSON.stringify({ cartId, deleted: true, verifiedGone: gone }, null, 2)}`
+          );
+        }
+
         const { page: p, size: s } = clampPage({ page, size });
         const rows = await listCarts({ memberId });
         const all = Array.isArray(rows) ? rows : [];

@@ -33,24 +33,38 @@
 | 订单 | `preview_split` | 只读（dry-run 预演） | `POST /admin/orders/{id}/split-preview` → `{willDo, plan}`（无码） |
 | 订单 | `execute_audit_pass` | **写** | `POST /admin/orders/{id}/audit-pass`，入参只有 `{orderId}`（无码） |
 | 订单 | `list_deliveries` | 只读 | `GET /admin/deliveries?orderId=` |
+| 订单 | `create_order` | **写** | `POST /admin/orders`，body `{order,items}`；总额由后端按「明细单价×数量」重算，新建 version=0 |
+| 订单 | `update_order` | **写（带 version）** | `PUT /admin/orders/{id}`（只改收货人/电话/地址/支付方式；**status 被后端强制忽略**，状态只能走审核/发货接口） |
+| 订单 | `audit_reject_order` | **写（L3，支持 dryRun）** | `POST /admin/orders/{id}/audit-reject`：待审核(7)→已关闭(4) + **回补总池库存** |
+| 订单 | `ship_order` | **写（L3，支持 dryRun）** | `POST /admin/orders/{id}/ship`：已付款(1)→已发货(2)，**直发路径不拆单** |
+| 订单 | `delete_order` | **写（L3，支持 dryRun，不可恢复）** | `DELETE /admin/orders/{id}`：级联删明细/发货单/物流 |
 | 商品 | `search_products` | 只读 | `GET /admin/products`（后端只支持 publishStatus，关键字/分类/分页在工具层做） |
 | 商品 | `get_product_detail` | 只读 | `GET /admin/products/{id}` + `GET /admin/skus?productId=` |
 | 商品 | `list_categories` | 只读 | `GET /admin/categories`（扁平 → 工具层拼树） |
 | 商品 | `list_product_types` | 只读 | `GET /admin/product-types` + 每类型 `GET /admin/attributes?typeId=` |
 | 商品 | `list_attributes` | 只读 | `GET /admin/attributes?typeId=` |
 | 商品 | `list_skus` | 只读 | `GET /admin/skus?productId=` |
+| 商品 | `get_sku_detail` | 只读 | `GET /admin/skus/{id}` → `{sku,specs}`（单个 SKU 详情，含规格值） |
+| 商品 | `list_sku_attributes` | 只读 | `GET /admin/skus/attributes?productId=`（该商品所属类型下的属性，建 SKU 时选规格名用） |
+| 商品 | `create_product` | **写** | `POST /admin/products`，body `{product,gallery}`（新建 version=0；**不自动建 SKU**） |
+| 商品 | `delete_product` | **写（支持 dryRun）** | `DELETE /admin/products/{id}`（级联 SKU/相册；被订单明细/购物车引用时拒绝 → 应改为下架） |
+| 商品 | `create_sku` | **写** | `POST /admin/skus`，body `{sku,specs}`（新建 version=0；productId 必填） |
+| 商品 | `delete_sku` | **写（支持 dryRun）** | `DELETE /admin/skus/{id}`（被订单明细/购物车引用时拒绝 → 应把库存改 0） |
+| 字典 | `category(action)` | 1 只读 + 3 写（L2） | `GET /admin/categories/{id}`、`POST /admin/categories`、`PUT/DELETE /admin/categories/{id}`（**表无 version 列**；有子分类/商品引用时拒删） |
+| 字典 | `product_type(action)` | 1 只读 + 3 写（L2） | `GET /admin/product-types/{id}`、`POST`、`PUT/DELETE /admin/product-types/{id}`（被属性/商品引用时拒删） |
+| 字典 | `attribute(action)` | 1 只读 + 3 写（L2） | `GET /admin/attributes/{id}`、`POST`、`PUT/DELETE /admin/attributes/{id}`（被 SKU 规格值使用时拒删） |
 | 商品 | `update_product` | **写（带 version）** | `PUT /admin/products/{id}`，body `{product:{id,version,...}}` |
 | 商品 | `update_sku_stock` | **写（带 version）** | `PUT /admin/skus/{id}`，body `{sku:{id,version,stock/price}}` |
-| 履约 | `delivery(action)` | 2 只读 + 6 个 **L3 写** | `GET /admin/deliveries?orderId=`（**orderId 必填**，无单条详情/无全局列表）、`PUT /{id}`、`POST /{id}/split`、`POST /{id}/merge`、`DELETE /{id}?version=`、`POST /{id}/dispatch`、`POST /{id}/cancel`（六个写动作都支持 `?dryRun=true`） |
-| 退货 | `return_apply(action)` | 2 只读 + 1 个 **L3 写** | `GET /admin/return-applies?status=&orderId=`、`PUT /admin/return-applies/{id}`（审核，支持 `?dryRun=true`；**表无 version 列**） |
+| 履约 | `delivery(action)` | 2 只读 + 7 个 **L3 写** | `GET /admin/deliveries?orderId=`（**orderId 必填**，无单条详情/无全局列表）、`GET /counts?orderIds=`、`PUT /{id}`、`POST /{id}/split`、`POST /{id}/merge`、`DELETE /{id}?version=`、`POST /{id}/dispatch`、`POST /{id}/cancel`、**`POST /{id}/wms-callback?event=pick\|outbound\|transit\|signed`**（模拟 WMS 回传，后台「模拟回传」按钮；幂等、不收 version；7 个写动作都支持 `?dryRun=true`） |
+| 退货 | `return_apply(action)` | 2 只读 + 1 个 **L3 写** + 2 个普通写 | `GET /admin/return-applies?status=&orderId=`、`PUT /admin/return-applies/{id}`（审核，支持 `?dryRun=true`；**表无 version 列**）、`POST /admin/return-applies`（**代客登记**：orderId/memberId/reasonId/returnReason 四项必填，缺一个后端只会 500）、`DELETE /admin/return-applies/{id}`（删记录，**不退款、不回补库存**） |
 | 退货 | `return_reason(action)` | 1 只读 + 3 写（L2） | `GET/POST /admin/return-reasons`、`PUT/DELETE /admin/return-reasons/{id}`（被引用时后端拒删） |
 | 配置 | `warehouse(action)` | 1 只读 + 3 写（L2） | `GET/POST /admin/warehouses`、`PUT/DELETE /admin/warehouses/{id}` |
 | 配置 | `order_setting(action)` | 1 只读 + 1 写（L2，**影响全站**） | `GET/PUT /admin/order-setting`（全局一行，upsert，无 version） |
 | 会员 | `member(action)` | 2 只读 + 3 写 | `GET/POST /admin/members`、`GET/PUT/DELETE /admin/members/{id}`（**PUT 必须 version**；DELETE 是 L3） |
 | 会员 | `member_address(action)` | 1 只读 + 2 写（L2） | `GET/POST /admin/member-addresses`、`PUT/DELETE /admin/member-addresses/{id}`（表无 version 列） |
-| 会员 | `member_cart(action=list)` | 只读 | `GET /admin/carts?memberId=` |
+| 会员 | `member_cart(action)` | 1 只读 + 3 写（L2） | `GET /admin/carts?memberId=`、`POST /admin/carts`、`PUT/DELETE /admin/carts/{id}`（表无 version 列；改的是库里那条记录，不是买家自助购物车） |
 | 概览 | `dashboard_overview()` | 只读 | `GET /admin/dashboard/overview` |
-| — | ~~`upload_image`~~ | **刻意未实现** | 后端只有 `POST /admin/upload/image`，签名是 `@RequestParam("file") MultipartFile` —— 只吃 multipart 文件流，用 JSON 打它会回「Current request is not a multipart request」；MCP 的参数是模型产出的文本，塞 base64 会让上下文爆掉，传本地路径又会把 server 变成任意文件读取通道，所以不上半成品 |
+| — | ~~`upload_image`~~ | **刻意未实现** | 后端只有 `POST /admin/upload/image`，签名是 `@RequestParam("file") MultipartFile` —— 只吃 multipart 文件流，用 JSON 打它会回「Current request is not a multipart request」；MCP 的参数是模型产出的文本，塞 base64 会让上下文爆掉，传本地路径又会把 server 变成任意文件读取通道，所以不上半成品。**已确认后端没有「传 URL 让后端去拉」的接口**（`AdminUploadController` 只有 MultipartFile 一个入口），要补这条得后端先加接口 |
 
 并发控制口径：**只读工具无副作用、可反复调用；写工具靠 `version` 乐观锁**。
 `update_product` / `update_sku_stock` 的 `version` 是 **zod 必填**（缺了在协议层就被拒，请求都到不了后端）；
@@ -63,7 +77,7 @@
 |---|---|---|
 | product / sku / member / delivery_order / order | 有 | 写工具必须带 version；缺 → `400`，冲突 → `409`；成功后工具**回读**新 version 返回给模型 |
 | delivery_order 的 dispatch / cancel | 有，但接口不收 | 后端只让 WMS/运维调用，靠「仅待下发」状态守卫 + 影响行数闸门；工具里没有 version 参数 |
-| return_apply / return_reason / warehouse / order_setting / member_address / cart | **没有** | 接口根本不吃 version；并发靠「UPDATE 影响 0 行 → `409 记录已被删除`」兜底；工具里**不能**造一个 version 参数（那样每次调用都会被当非法入参） |
+| return_apply / return_reason / warehouse / order_setting / member_address / cart / category / product_type / attribute | **没有** | 接口根本不吃 version；并发靠「UPDATE 影响 0 行 → `409 记录已被删除`」兜底；工具里**不能**造一个 version 参数（那样每次调用都会被当非法入参） |
 
 `version` 在 `delivery(action=update|split|merge|delete)` 里是**按 action 必填**（同一个工具还承载不吃 version 的
 `dispatch`/`cancel`），所以走 zod 可选 + 工具层/后端双重把关；`member(action=update)` 与
@@ -89,20 +103,39 @@ src/
 └── tools/
     ├── index.mjs      统一注册入口（按域 import；文件头有「新增域」清单）
     ├── _shared.mjs    公共件：text / fail / failWrite / clampPage / paginate（分页全项目统一 1/10/50）
-    ├── order.mjs      订单域 6 只读 + 1 写（list_orders/get_order_detail/count_deliveries 是第 3 批）
-    ├── catalog.mjs    商品域 6 个只读工具
-    ├── catalog-write.mjs  商品域 2 个写工具（update_product / update_sku_stock，带 version 乐观锁）
-    ├── delivery.mjs   履约域 1 个合并工具 delivery(action)：list/get + 6 个 L3 写动作（update/split/merge/delete/dispatch/cancel）
-    ├── returns.mjs    退货域 2 个：return_apply(list|get|audit) / return_reason(list|create|update|delete)
+    ├── order.mjs      订单域 6 只读 + 6 写（execute_audit_pass / create_order / update_order / audit_reject_order / ship_order / delete_order）
+    ├── catalog.mjs    商品域 8 个只读工具（含 get_sku_detail / list_sku_attributes）
+    ├── catalog-write.mjs  商品域 6 个写工具（改：update_product / update_sku_stock，带 version；增删：create_product / delete_product / create_sku / delete_sku）
+    ├── catalog-dict.mjs   商品字典 3 个：category / product_type / attribute（各 action=get|create|update|delete，三张表无 version）
+    ├── delivery.mjs   履约域 1 个合并工具 delivery(action)：list/get + 7 个 L3 写动作（update/split/merge/delete/dispatch/cancel/wms_callback）
+    ├── returns.mjs    退货域 2 个：return_apply(list|get|audit|create|delete) / return_reason(list|create|update|delete)
     ├── config.mjs     配置域 2 个：warehouse(list|create|update|delete) / order_setting(get|update)
-    ├── member.mjs     会员域 3 个：member / member_address / member_cart
+    ├── member.mjs     会员域 3 个：member / member_address / member_cart(action=list|create|update|delete)
     └── misc.mjs       概览域 1 个：dashboard_overview（upload_image 刻意未做，见文件尾注）
 ```
 
-工具总数：**24 个**（write=1）/ **21 个**（write=0 —— 纯写工具 `execute_audit_pass` /
-`update_product` / `update_sku_stock` 不注册；用 `action` 承载写动作的工具仍在，但 action 枚举里只剩只读动作）。
-测试：`npm test` 串行跑 9 个文件（loop / catalog / order-read / optimistic-lock / delivery / returns / config / member / misc），
+工具总数：**38 个**（write=1）/ **26 个**（write=0 —— 纯写工具 12 个不注册：
+`execute_audit_pass` / `create_order` / `update_order` / `audit_reject_order` / `ship_order` / `delete_order` /
+`update_product` / `update_sku_stock` / `create_product` / `delete_product` / `create_sku` / `delete_sku`；
+用 `action` 承载写动作的工具仍在，但 action 枚举里只剩只读动作）。
+测试：`npm test` 串行跑 12 个文件（loop / catalog / catalog-write / catalog-dict / order-read / order-write /
+optimistic-lock / delivery / returns / config / member / misc），
 自带造数据+清数据，**连跑两轮、第二轮不 reset 库**，两轮都必须 0 失败。
+
+**覆盖口径（2026-11 第 5 批盘点，真 grep 出来的）**：后端 `@GetMapping/@PostMapping/@PutMapping/@DeleteMapping`
+共 **112 个端点**（`grep -rn '@\(Get\|Post\|Put\|Delete\)Mapping' qiqi-mall-server/src/main/java`）。分类：
+
+| 分类 | 数量 | 说明 |
+|---|---|---|
+| 系统内部（不含业务操作） | 6 | `/admin/auth` 3（captcha-required / captcha / login）、`/api/health` 1、`/portal/auth` 2（买家用 JWT 登录注册） |
+| **面向人** | **106** | 后台 admin-web + 商城 portal-web 上「人能点的操作」 |
+| ├ 已覆盖 | **78** | 73 个后台端点（含 `GET /admin/members/{id}/detail` 由 member+address+cart 三个工具组合等价覆盖）+ 5 个 portal 只读（与后台读同一份数据） |
+| └ 缺口 | **28** | 1 形态不支持（`POST /admin/upload/image` 只吃 multipart）、8 红线（`/admin/admins**` 4 + `/admin/api-keys**` 4，后端对 API Key 一律 403）、19 C 端无主体（`/portal/**` 需会员身份，API Key 的 `CurrentUser.id()` 为 null） |
+| 真漏了（本批已补完） | **0** | 第 5 批前有 29 个真漏，本次一次性补齐（见下） |
+
+第 5 批新增覆盖的 **29 个端点**：订单 5（create / update / audit-reject / ship / delete）、
+商品 6（SKU 详情、SKU 可用属性、商品增/删、SKU 增/删）、字典 12（分类/类型/属性 各 get+create+update+delete）、
+履约 1（`wms-callback`）、购物车 3（增改删）、退货申请 2（代客登记 / 删记录）。
 
 新增一个域 = 新建 `src/tools/<域>.mjs` + 在 `src/tools/index.mjs` 加一行 import/调用；
 工具内一律「中文 title + 说清什么时候用的 description + zod `.describe()` 参数 +
@@ -243,7 +276,7 @@ bash scripts/start-inspector.sh    # 在仓库根目录执行
 |---|---|---|
 | `MALL_BASE` | `http://127.0.0.1:18080` | 后端网关地址 |
 | `MALL_API_KEY` | —（**必填**） | 管理端 API Key，随请求头 `X-Api-Key` 发出；**按库隔离**（dev 一把、test 一把），造 key 见上面「认证」 |
-| `MCP_ENABLE_WRITE` | `0` | `0`=只注册 21 个工具（12 个纯只读 + 9 个「只读动作」工具，后者的 action 枚举里写动作被摘掉）；`1`=再加 3 个纯写工具（`execute_audit_pass` / `update_product` / `update_sku_stock`）并放开所有 action 的写动作，共 24 个 |
+| `MCP_ENABLE_WRITE` | `0` | `0`=只注册 26 个只读工具（纯只读 + 「只读动作」工具，后者的 action 枚举里写动作被摘掉）；`1`=再加 12 个纯写工具并放开所有 action 的写动作，共 38 个 |
 
 见 `.env.example`。
 

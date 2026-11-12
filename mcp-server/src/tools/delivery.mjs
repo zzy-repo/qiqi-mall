@@ -1,7 +1,8 @@
-// 履约域（delivery）工具：1 个合并工具 `delivery(action)`，覆盖后端 DeliveryController 的 8 个动作。
+// 履约域（delivery）工具：1 个合并工具 `delivery(action)`，覆盖后端 DeliveryController 的 **9 个端点**
+// （8 个原动作 + 第 5 批补的 wms_callback「模拟 WMS 回传」，后者是后台「模拟回传」按钮的对应接口）。
 //
 // ── 为什么「一个资源一个工具」────────────────────────────────────────────
-// 发货单的 8 个动作共用同一套参数（deliveryId / version / 明细），拆成 8 个工具会让模型在
+// 发货单的动作共用同一套参数（deliveryId / version / 明细），拆成 8 个工具会让模型在
 // 「改仓 vs 拆分」之间反复试错；合并成 `delivery(action=...)` 后，action 枚举本身就是文档。
 // ⚠️ 但**写动作的门禁不能省**：MCP_ENABLE_WRITE!=1 时 action 枚举里只剩 list / get（见 ACTIONS_READONLY）。
 //
@@ -38,6 +39,7 @@ import {
   deleteDelivery,
   dispatchDelivery,
   cancelDelivery,
+  wmsCallbackDelivery,
 } from '../mall.mjs';
 import { text, fail, failWrite, clampPage, paginate, pageHeader, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './_shared.mjs';
 
@@ -61,7 +63,11 @@ const deliverySourceLabel = (v) => (v === 1 ? '人工调整' : v === 0 ? '自动
 // 本工具的 action 全集；write=0 时只剩只读的那两个。
 // 需要 version 的是 update / split / merge / delete（后端收 body.version、delete 收 query.version）；
 // dispatch / cancel 后端不收 version。六个写动作全是 L3，所以描述里逐条写了后果。
-const ACTIONS_ALL = ['list', 'get', 'update', 'split', 'merge', 'delete', 'dispatch', 'cancel'];
+const ACTIONS_ALL = ['list', 'get', 'update', 'split', 'merge', 'delete', 'dispatch', 'cancel', 'wms_callback'];
+
+// WMS 回传事件 → 目标状态（与后端 DeliveryFlowService.targetStatusOf 一一对应，别猜）
+const WMS_EVENTS = ['pick', 'outbound', 'transit', 'signed'];
+const WMS_EVENT_TEXT = { pick: '已拣货(2)', outbound: '已出库(3)', transit: '运输中(4)', signed: '已签收(5)' };
 const ACTIONS_READONLY = ['list', 'get'];
 
 /** 分页参数（全项目统一：page 默认 1、size 默认 10、最大 50，超出夹取不报错） */
@@ -124,18 +130,21 @@ export function registerDeliveryTools(server, { writeEnabled } = {}) {
   // ⚠️ 不能整工具不注册：list / get 是只读的，write=0 时也必须能用（与 order.mjs 的教训一致）。
   const actions = writeEnabled ? ACTIONS_ALL : ACTIONS_READONLY;
   if (!writeEnabled) {
-    console.error('[mcp] MCP_ENABLE_WRITE!=1 → delivery 工具只开放 list / get（update/split/merge/delete/dispatch/cancel 不开放）');
+    console.error(
+      '[mcp] MCP_ENABLE_WRITE!=1 → delivery 工具只开放 list / get（update/split/merge/delete/dispatch/cancel/wms_callback 不开放）'
+    );
   }
 
   server.registerTool(
     'delivery',
     {
-      title: '发货单履约操作（查 / 改仓改量 / 拆合 / 删除 / 下发 / 取消）',
+      title: '发货单履约操作（查 / 改仓改量 / 拆合 / 删除 / 下发 / 取消 / WMS 回传）',
       description:
         '按 action 操作发货单（拆单后的包裹）。' +
         'list=按订单查发货单（分页）、get=看某个包裹详情（含明细与 version）；' +
         'update=改仓/改量、split=拆成两个包裹、merge=并把一个包裹并入另一个、delete=删除包裹、' +
-        'dispatch=下发给仓库（WMS）、cancel=取消并回补库存。' +
+        'dispatch=下发给仓库（WMS）、cancel=取消并回补库存、' +
+        'wms_callback=模拟仓库回传（后台「模拟回传」按钮：拣货/出库/运输/签收）。' +
         '⚠️ 写动作全是 L3（高影响）：update/split/merge/delete/dispatch/cancel 都会真改数据，' +
         '其中 **dispatch 下发后不可撤回**（只能等仓库 WMS 回传拣货/出库/运输/签收），' +
         '**cancel 会回补库存并重算订单状态**，**delete 就是删掉这个包裹**。' +
@@ -147,7 +156,8 @@ export function registerDeliveryTools(server, { writeEnabled } = {}) {
       inputSchema: {
         action: z.enum(actions).describe(
           'list=列表(只读) / get=详情(只读) / update=改仓改量(L3,需version) / split=拆分(L3,需version) / ' +
-            'merge=合并(L3,需version) / delete=删除(L3,需version) / dispatch=下发仓库(L3,不可撤回) / cancel=取消(L3,回补库存)'
+            'merge=合并(L3,需version) / delete=删除(L3,需version) / dispatch=下发仓库(L3,不可撤回) / cancel=取消(L3,回补库存) / ' +
+            'wms_callback=模拟仓库回传(L3，需 event=pick|outbound|transit|signed，接口幂等)'
         ),
         orderId: z
           .number()
@@ -169,6 +179,13 @@ export function registerDeliveryTools(server, { writeEnabled } = {}) {
           .min(1)
           .optional()
           .describe('update=要改量的明细；split=要拆出的明细与数量（split 必填，后端拒绝拆出空包）'),
+        event: z
+          .enum(WMS_EVENTS)
+          .optional()
+          .describe(
+            'wms_callback 必填：仓库回传事件 —— pick=已拣货(→状态2) / outbound=已出库(→3) / transit=运输中(→4) / signed=已签收(→5)。' +
+              '顺序要走全套就得 pick→outbound→transit→signed，跳步会被后端的阶段守卫拒'
+          ),
         version: z
           .number()
           .int()
@@ -186,7 +203,7 @@ export function registerDeliveryTools(server, { writeEnabled } = {}) {
         ...pageSchema,
       },
     },
-    async ({ action, orderId, deliveryId, targetId, warehouseId, newWarehouseId, items, version, dryRun, page, size }) => {
+    async ({ action, orderId, deliveryId, targetId, warehouseId, newWarehouseId, items, event, version, dryRun, page, size }) => {
       // ① 写动作门禁（write=0 时 action 枚举里已经没有它们，这里是第二道闸）
       if (!writeEnabled && !ACTIONS_READONLY.includes(action)) {
         return fail(new Error(`写操作未启用：delivery(action=${action}) 需要 MCP_ENABLE_WRITE=1（当前只开放 ${ACTIONS_READONLY.join(' / ')}）`));
@@ -283,6 +300,44 @@ export function registerDeliveryTools(server, { writeEnabled } = {}) {
             `✅ 发货单 ${deliveryId} 已取消（状态 → 已取消(9)），该包裹的明细数量已**回补到总池库存**，订单状态已重算。\n` +
               (after ? `  回读：状态=${deliveryStatusLabel(after.status)}(${after.status}) version=${after.version ?? '-'}\n` : '') +
               `\nJSON:\n${JSON.stringify({ deliveryId, dryRun: false, cancelled: true, delivery: after ?? resp }, null, 2)}`
+          );
+        }
+
+        // ---------- ⑤b 写：wms_callback（模拟 WMS 回传：人工把包裹往前推一步）----------
+        // 后端 POST /admin/deliveries/{id}/wms-callback?event=&dryRun= ：
+        //   · event **必填**（pick/outbound/transit/signed），不收 version；
+        //   · 状态守卫：只有「已下发(1)」能拣货；已下发/已拣货能出库；只有已出库能揽收；已出库之后才能签收；
+        //   · **幂等**：状态已到或已过该事件 → 不改数据、原样返回（所以重复调用不会把状态推回去）；
+        //   · 执行成功后父订单状态会按所有子单重新聚合（这是「后台点一下模拟回传」最关心的副作用）。
+        if (action === 'wms_callback') {
+          if (!deliveryId) throw new Error('action=wms_callback 必须给 deliveryId');
+          if (!event) throw new Error(`action=wms_callback 必须给 event（${WMS_EVENTS.join(' / ')}）；后台「模拟回传」就是选这四步之一`);
+          const orderIdFor = orderId ?? null;
+          const resp = await wmsCallbackDelivery(deliveryId, { event, dryRun });
+          if (dryRun === true) {
+            return text(
+              `预演（未落库）— 给发货单 ${deliveryId} 回传 ${event}：\n  ${resp?.willDo ?? '(后端没有返回 willDo)'}\n\n` +
+                `JSON:\n${JSON.stringify({ deliveryId, event, dryRun: true, preview: resp }, null, 2)}`
+            );
+          }
+          // 回读：把真实状态与 version 交给模型（resp 是 DeliveryOrder 实体，没有仓名/明细）
+          const oid = resp?.orderId ?? orderIdFor;
+          let after = null;
+          if (oid) {
+            try {
+              const rows = await listDeliveries(oid);
+              after = (Array.isArray(rows) ? rows : []).find((d) => Number(d.id) === Number(deliveryId)) ?? null;
+            } catch {
+              after = null;
+            }
+          }
+          const cur = after?.status ?? resp?.status;
+          return text(
+            `✅ 已记录 WMS 回传「${event}」（${WMS_EVENT_TEXT[event] ?? event}）：发货单 ${deliveryId} 当前状态=${deliveryStatusLabel(cur)}(${cur})。\n` +
+              `  说明：接口幂等 —— 状态已到/已过该事件时不改数据（所以重复回传同一事件是安全的）；\n` +
+              `  父订单（id=${oid ?? '未知'}）的状态已按所有子包裹重新聚合。\n` +
+              (after ? `  回读：仓库=${after.warehouseName || after.warehouseId} version=${after.version ?? '-'} 明细=${(after.items || []).length} 条\n` : '') +
+              `\nJSON:\n${JSON.stringify({ deliveryId, event, dryRun: false, delivery: after ?? resp }, null, 2)}`
           );
         }
 

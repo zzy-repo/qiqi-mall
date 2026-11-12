@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 商品域（catalog）第 1 批测试：6 个只读工具。
+// 商品域（catalog）只读工具测试：8 个（第 1 批 6 个 + 第 5 批覆盖补齐的 get_sku_detail / list_sku_attributes）。
 // 用 SDK client 通过 **stdio 真启动** src/index.mjs，逐条断言：
 //   ① 6 个工具都能在 tools/list 里列出来
 //   ② 6 个工具都能调通且返回非空（用**动态探测到的**商品/SKU/类型 id，不写死种子 id）
@@ -21,6 +21,8 @@ const CATALOG_TOOLS = [
   'list_product_types',
   'list_attributes',
   'list_skus',
+  'get_sku_detail',
+  'list_sku_attributes',
 ];
 
 // ---------------- 结果记录 ----------------
@@ -78,6 +80,7 @@ async function main() {
   // ②0 先探一次：拿到**真实存在**的商品 id / 类型 id，后面的用例全部用它（不再写死 1）
   let sampleProductId = null;
   let sampleTypeId = null;
+  let sampleSkuId = null;
   let catalogTotal = 0;
   try {
     const p = jsonAfter((await call(client, 'search_products', { size: 1 })).text);
@@ -85,12 +88,14 @@ async function main() {
     sampleProductId = p.records?.[0]?.id ?? null;
     const t = jsonAfter((await call(client, 'list_product_types', {})).text);
     sampleTypeId = t.records?.[0]?.id ?? null;
+    const sk = jsonAfter((await call(client, 'list_skus', { productId: sampleProductId, size: 50 })).text);
+    sampleSkuId = sk.records?.[0]?.id ?? null;
     assert(
-      catalogTotal >= 1 && sampleProductId !== null && sampleTypeId !== null,
+      catalogTotal >= 1 && sampleProductId !== null && sampleTypeId !== null && sampleSkuId !== null,
       '②0 商品池非空：至少 1 个在架商品、1 个商品类型（不写死「28 个商品」）',
-      `total=${catalogTotal}, sampleProductId=${sampleProductId}, sampleTypeId=${sampleTypeId}`
+      `total=${catalogTotal}, sampleProductId=${sampleProductId}, sampleTypeId=${sampleTypeId}, sampleSkuId=${sampleSkuId}`
     );
-    if (sampleProductId === null || sampleTypeId === null) {
+    if (sampleProductId === null || sampleTypeId === null || sampleSkuId === null) {
       console.log('\n⚠️ 商品池为空，后续用例无意义，直接失败退出。');
       process.exit(1);
     }
@@ -107,6 +112,8 @@ async function main() {
     ['list_product_types', {}],
     ['list_attributes', { typeId: sampleTypeId }],
     ['list_skus', { productId: sampleProductId }],
+    ['list_sku_attributes', { productId: sampleProductId }],
+    ['get_sku_detail', { skuId: sampleSkuId }],
   ]) {
     try {
       const { text } = await call(client, name, args);
@@ -149,6 +156,33 @@ async function main() {
     );
   } catch (e) {
     ko('②c list_product_types 每个类型都带 attributes', e.message);
+  }
+
+  // ②d get_sku_detail：必须真带 sku 本体 + specs 数组（第 5 批新增的只读工具）
+  try {
+    const j = jsonAfter(detail.get_sku_detail || '');
+    assert(
+      j.sku?.id === sampleSkuId && Array.isArray(j.specs) && typeof j.sku?.price === 'number' && typeof j.sku?.version === 'number',
+      '②d get_sku_detail 返回 {sku(含 price/version), specs[]}（单个 SKU 详情，规格值可读）',
+      `skuId=${j.sku?.id}, price=${j.sku?.price}, version=${j.sku?.version}, specs=${j.specs?.length}`
+    );
+  } catch (e) {
+    ko('②d get_sku_detail 返回 {sku, specs[]}', e.message);
+  }
+
+  // ②e list_sku_attributes：属性必须属于该商品所属类型（后端按 productId→typeId 自己对上去的）
+  try {
+    const j = jsonAfter(detail.list_sku_attributes || '');
+    const rows = j.records || [];
+    const productType = (jsonAfter(detail.get_product_detail || '')?.product || {}).typeId ?? null;
+    const allSameType = rows.length > 0 && rows.every((a) => Number(a.typeId) === Number(productType));
+    assert(
+      allSameType,
+      '②e list_sku_attributes 返回该商品所属类型下的属性（attributeId/name 可直接给 create_sku 用）',
+      `属性 ${rows.length} 条，typeId 全部=${productType}？${allSameType}`
+    );
+  } catch (e) {
+    ko('②e list_sku_attributes 返回该商品所属类型下的属性', e.message);
   }
 
   // ③a 分页：size=2 → 条数 === min(2, total)，且带 total/size/page 契约字段
@@ -237,19 +271,19 @@ async function main() {
 
   await client.close();
 
-  // ⑥ 写开关关闭时：商品域 6 个只读工具仍在，写工具消失（只读工具**总数动态取**，后面加域不用改这里）
+  // ⑥ 写开关关闭时：商品域只读工具仍在，写工具消失（只读工具**总数动态取**，后面加域不用改这里）
   try {
     const ro = await connectServer({ MCP_ENABLE_WRITE: '0' }, 'ro');
     const names = (await ro.listTools()).tools.map((t) => t.name);
     const allThere = CATALOG_TOOLS.every((n) => names.includes(n));
     assert(
       allThere && !names.includes('execute_audit_pass'),
-      `⑥ MCP_ENABLE_WRITE=0 → 商品域 6 个只读工具全部仍在（当前只读工具共 ${names.length} 个，其中含商品域 ${CATALOG_TOOLS.length} 个），写工具消失`,
+      `⑥ MCP_ENABLE_WRITE=0 → 商品域 ${CATALOG_TOOLS.length} 个只读工具全部仍在（当前只读工具共 ${names.length} 个），写工具消失`,
       `${names.length} 个：${names.sort().join(', ')}`
     );
     await ro.close();
   } catch (e) {
-    ko('⑥ MCP_ENABLE_WRITE=0 → 商品域 6 个只读工具全部仍在、写工具消失', e.message);
+    ko(`⑥ MCP_ENABLE_WRITE=0 → 商品域 ${CATALOG_TOOLS.length} 个只读工具全部仍在、写工具消失`, e.message);
   }
 
   // ---------------- 总结 ----------------

@@ -9,7 +9,8 @@
 //        · update 带假 version → 409「数据已被他人修改」（后端拒）
 //        · update 带正确 version → 成功、version +1（回读 + DB 双确认），且**密码不回显**
 //   ④ member_address：save（新增）→ list 命中 → save（带 addressId 修改）→ delete 删除
-//   ⑤ member_cart：只读 list（新会员 → 空车，给明确文案而不是空串）
+//   ⑤ member_cart：list（新会员 → 空车，给明确文案而不是空串）+ 第 5 批补齐的 create / update / delete
+//      （后台「购物车管理」页的增删改按钮；增删净额为 0，不影响后面的行数校验）
 //   ⑥ **只读校验**：全部只读调用前后 member / member_address / cart 行数不变
 //   ⑦ delete 的 L3 后果：**有订单的会员删不掉**（order.member_id 外键无级联，后端报错）——
 //      这正是描述里写「被拒就改成禁用」的原因，必须验到
@@ -235,6 +236,42 @@ async function main() {
       return { pass: j.size === 50 && j.records.length === Math.min(50, j.total), detail: `total=${j.total} size=${j.size}` };
     });
 
+    // ⑤c~⑤e 购物车的增删改（第 5 批覆盖补齐：后台「购物车管理」页能做的操作）
+    let cartId = null;
+    await check('⑤c member_cart(action=create) → 给该会员加一条购物车行，list 能查到', async () => {
+      const prods = await adminRequest('GET', '/admin/products?publishStatus=1');
+      const prod = (Array.isArray(prods) ? prods : [])[0];
+      const skus = await adminRequest('GET', `/admin/skus?productId=${prod.id}`);
+      const sku = (Array.isArray(skus) ? skus : [])[0];
+      const { text } = await call(client, 'member_cart', {
+        action: 'create',
+        memberId,
+        productId: Number(prod.id),
+        productSkuId: Number(sku.id),
+        quantity: 2,
+      });
+      const created = jsonAfter(text);
+      cartId = created?.id ?? null;
+      const list = jsonAfter((await call(client, 'member_cart', { action: 'list', memberId, size: 50 })).text).records;
+      const mine = list.find((c) => Number(c.id) === Number(cartId));
+      samples.push({ tool: 'member_cart create', args: { memberId, productId: prod.id, skuId: sku.id }, line: text.split('\n')[0] });
+      return { pass: !!cartId && mine?.quantity === 2, detail: `cartId=${cartId} 列表命中=${!!mine} 数量=${mine?.quantity}` };
+    });
+
+    await check('⑤d member_cart(action=update) → 改数量生效（回读确认）', async () => {
+      const { text } = await call(client, 'member_cart', { action: 'update', cartId, memberId, quantity: 5 });
+      const list = jsonAfter((await call(client, 'member_cart', { action: 'list', memberId, size: 50 })).text).records;
+      const mine = list.find((c) => Number(c.id) === Number(cartId));
+      return { pass: mine?.quantity === 5 && text.includes('✅'), detail: `回读数量=${mine?.quantity}` };
+    });
+
+    await check('⑤e member_cart(action=delete) → 行被删掉（DB 计数回到原值）', async () => {
+      const { text } = await call(client, 'member_cart', { action: 'delete', cartId, memberId });
+      const list = jsonAfter((await call(client, 'member_cart', { action: 'list', memberId, size: 50 })).text).records;
+      const gone = !list.some((c) => Number(c.id) === Number(cartId));
+      return { pass: gone && text.includes('✅') && dbCount('cart') === before.cart, detail: `列表已无该行=${gone}｜cart 行数=${dbCount('cart')}（原 ${before.cart}）` };
+    });
+
     // ⑥ 只读校验（只读段内没有写操作：地址的新增/删除已在 ④ 完成，这里用净结果对照）
     const afterReads = { member: dbCount('member'), member_address: dbCount('member_address'), cart: dbCount('cart') };
     assert(afterReads.cart === before.cart, '⑥ 只读校验：cart 行数不变（只读工具没写库）', `before=${before.cart}, after=${afterReads.cart}`);
@@ -270,22 +307,21 @@ async function main() {
     client = null;
 
     // ⑧ write=0
-    await check('⑧a write=0 → member 只剩 list/get、member_address 只剩 list、member_cart 仍然只有只读 list', async () => {
+    await check('⑧a write=0 → member=list/get、member_address=list、member_cart=list（写动作全部摘掉）', async () => {
       const ro = await connectServer({ MCP_ENABLE_WRITE: '0' }, 'member-ro');
       const { tools } = await ro.listTools();
       const by = Object.fromEntries(tools.map((t) => [t.name, t]));
       const mEnum = by.member?.inputSchema?.properties?.action?.enum ?? [];
       const aEnum = by.member_address?.inputSchema?.properties?.action?.enum ?? [];
-      // member_cart 本来就是纯只读工具：**没有 action 参数**（不是「枚举里只剩 list」），
-      // 所以这里断言的是「write=0 时它还在、且 schema 里没有 action/没有写入口」。
-      const cartProps = Object.keys(by.member_cart?.inputSchema?.properties ?? {});
+      // 第 5 批给 member_cart 补了 create/update/delete，所以它现在也走「action 枚举摘除」这一套
+      const cEnum = by.member_cart?.inputSchema?.properties?.action?.enum ?? [];
       await ro.close();
       return {
         pass:
           mEnum.length === 2 && mEnum.includes('list') && mEnum.includes('get') &&
           aEnum.length === 1 && aEnum[0] === 'list' &&
-          !!by.member_cart && !cartProps.includes('action'),
-        detail: `member=${mEnum.join('/')}｜member_address=${aEnum.join('/')}｜member_cart 参数=[${cartProps.join(',')}]（无 action）`,
+          cEnum.length === 1 && cEnum[0] === 'list',
+        detail: `member=${mEnum.join('/')}｜member_address=${aEnum.join('/')}｜member_cart=${cEnum.join('/')}`,
       };
     });
     await check('⑧b write=0 → 调 member(action=delete) 在协议层被拒', async () => {
@@ -318,7 +354,7 @@ async function main() {
     for (const r of results.filter((x) => !x.ok)) console.log(`  ❌ ${r.step} — ${r.detail}`);
   } else {
     console.log('✅ 会员域可用：member 增改删（update 强制 version：缺→工具层拒、假→后端 409）、密码永不回显；');
-    console.log('   member_address 增改删、member_cart 只读；有订单的会员删不掉（外键）——被拒时应改为禁用。');
+    console.log('   member_address 增改删、member_cart 增改删；有订单的会员删不掉（外键）——被拒时应改为禁用。');
     console.log('ℹ️ 自建会员/地址已清理，订单已删除；直接重跑即可。');
   }
   console.log('─'.repeat(64));

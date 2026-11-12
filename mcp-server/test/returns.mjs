@@ -59,7 +59,7 @@ const dbOrderStatus = (id) => Number(sql(`SELECT status FROM ${DB}.\`order\` WHE
 const dbReasonExists = (id) => Number(sql(`SELECT COUNT(*) FROM ${DB}.return_reason WHERE id = ${Number(id)}`)) > 0;
 
 const mark = () => String(Date.now()).slice(-7);
-const APPLY_ACTIONS_ALL = ['list', 'get', 'audit'];
+const APPLY_ACTIONS_ALL = ['list', 'get', 'audit', 'create', 'delete'];
 
 // ---------------- 主流程 ----------------
 async function main() {
@@ -140,19 +140,55 @@ async function main() {
       return { pass: r.threw && /name/.test(r.text), detail: r.text.split('\n')[0].slice(0, 100) };
     });
 
-    // ④ 造一条退货申请（用后台 admin 接口造，退货申请本身由买家在 C 端发起；MCP 不暴露 create）
-    await check('④a 造一条「待处理」退货申请（POST /admin/return-applies，测试载体）', async () => {
-      const apply = await adminRequest('POST', '/admin/return-applies', {
+    // ④ 造一条退货申请（第 5 批起走 MCP 工具 return_apply(action=create) —— 顺带验收「代客登记」）
+    await check('④a return_apply(action=create) 代客登记一条「待处理」申请（库内 status=0，且明确「没退款」）', async () => {
+      const { text } = await call(client, 'return_apply', {
+        action: 'create',
         orderId: ORDER_ID,
         memberId: ctx.memberId,
         returnReason: '质量问题',
         description: `MCP 退货域测试 ${M}`,
-        status: 0,
         reasonId,
       });
+      const apply = jsonAfter(text);
       mainApplyId = apply?.id ?? null;
       if (mainApplyId) createdApplies.push(mainApplyId);
-      return { pass: !!mainApplyId && dbApplyStatus(mainApplyId) === 0, detail: `applyId=${mainApplyId} DB status=${dbApplyStatus(mainApplyId)}` };
+      samples.push({ tool: 'return_apply create', args: { orderId: ORDER_ID }, line: text.split('\n')[0] });
+      return {
+        pass: !!mainApplyId && dbApplyStatus(mainApplyId) === 0 && /没退款/.test(text),
+        detail: `applyId=${mainApplyId} DB status=${dbApplyStatus(mainApplyId)}｜文案含「没退款」=${/没退款/.test(text)}`,
+      };
+    });
+    await check('④b return_apply(action=create) 缺 orderId / memberId / reasonId → 工具层中文错误（后端是裸 save，缺了只会 500）', async () => {
+      const r1 = await expectError(client, 'return_apply', { action: 'create' });
+      const r2 = await expectError(client, 'return_apply', { action: 'create', orderId: ORDER_ID });
+      const r3 = await expectError(client, 'return_apply', { action: 'create', orderId: ORDER_ID, memberId: ctx.memberId });
+      return {
+        pass: r1.threw && /orderId/.test(r1.text) && r2.threw && /memberId/.test(r2.text) && r3.threw && /reasonId/.test(r3.text),
+        detail: `缺 orderId→${r1.text.split('\n')[0].slice(0, 40)}｜缺 memberId→${r2.text.split('\n')[0].slice(0, 40)}｜缺 reasonId→${r3.text.split('\n')[0].slice(0, 40)}`,
+      };
+    });
+    await check('④c return_apply(action=delete) → 删掉一条临时申请（列表里查不到，且明确「没退款/不回补库存」）', async () => {
+      const tmp = jsonAfter(
+        (await call(client, 'return_apply', {
+          action: 'create',
+          orderId: ORDER_ID,
+          memberId: ctx.memberId,
+          reasonId,
+          returnReason: '质量问题',
+          description: `MCP 临时 ${M}`,
+        })).text
+      );
+      const tmpId = tmp?.id ?? null;
+      if (tmpId) createdApplies.push(tmpId);
+      const { text } = await call(client, 'return_apply', { action: 'delete', applyId: tmpId });
+      const list = jsonAfter((await call(client, 'return_apply', { action: 'list', size: 50 })).text).records;
+      const gone = !list.some((r) => Number(r.id) === Number(tmpId));
+      if (gone) {
+        const i = createdApplies.indexOf(tmpId);
+        if (i >= 0) createdApplies.splice(i, 1); // 已删掉，收尾不用再删
+      }
+      return { pass: !!tmpId && gone && /不退款/.test(text) && /不回补库存/.test(text), detail: `临时 applyId=${tmpId}｜列表已无该行=${gone}` };
     });
 
     const before = { return_apply: dbCount('return_apply'), return_reason: dbCount('return_reason') };

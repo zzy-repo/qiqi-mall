@@ -12,6 +12,8 @@
 //        · update 带正确 version → 成功、version +1（回读 + DB 双确认）
 //   ⑥ split / merge / delete 三个编辑动作各自改完包数符合预期（+1 / -1 / -1），且返回里带**新 version**
 //   ⑦ dispatch / cancel：dryRun 预演不落库（状态不变）；真执行后状态变了，且**已下发的包裹不能再改**
+//   ⑦b wms_callback（第 5 批补齐）：后台「模拟回传」按钮 —— 缺 event 报中文错、dryRun 不落库、
+//      pick→outbound→transit→signed 四步把状态推到 5、重复 signed 幂等、跳步不改数据
 //      （这是「下发不可撤回」在接口层面的证据）；重复 dispatch / 重复 cancel 都被状态守卫拒
 //   ⑧ write=0：delivery 仍在，但 action 枚举里只剩 list / get；调 dispatch 被拒并说明需要 MCP_ENABLE_WRITE
 //
@@ -64,7 +66,7 @@ const dbDelivery = (id) => {
 };
 const snapshot = () => ({ delivery_order: dbCount('delivery_order'), delivery_item: dbCount('delivery_item'), order: dbCount('order') });
 
-const ACTIONS_ALL = ['list', 'get', 'update', 'split', 'merge', 'delete', 'dispatch', 'cancel'];
+const ACTIONS_ALL = ['list', 'get', 'update', 'split', 'merge', 'delete', 'dispatch', 'cancel', 'wms_callback'];
 const ACTIONS_READONLY = ['list', 'get'];
 
 // ---------------- 主流程 ----------------
@@ -335,6 +337,51 @@ async function main() {
       return { pass: r.threw && /待下发/.test(r.text), detail: r.text.split('\n')[0].slice(0, 90) };
     });
 
+    // ⑩e~⑩g WMS 回传（第 5 批补齐的第 9 个 action）：后台「模拟回传」按钮的对应接口
+    //   POST /admin/deliveries/{id}/wms-callback?event=pick|outbound|transit|signed
+    //   不收 version；幂等；父订单状态会按所有子单重新聚合。
+    await check('⑩e wms_callback 缺 event → 中文错误（event 是后端必填参数）', async () => {
+      const r = await expectError(client, 'delivery', { action: 'wms_callback', deliveryId: dispatchedId });
+      return { pass: r.threw && /event/.test(r.text), detail: r.text.split('\n')[0].slice(0, 90) };
+    });
+    await check('⑩f wms_callback dryRun=true → willDo 写明「状态 X→Y」，且不落库（仍是已下发 1）', async () => {
+      const { text } = await call(client, 'delivery', { action: 'wms_callback', deliveryId: dispatchedId, event: 'pick', dryRun: true });
+      const j = jsonAfter(text);
+      const row = dbDelivery(dispatchedId);
+      samples.push({ tool: 'delivery wms_callback(dryRun)', args: { deliveryId: dispatchedId, event: 'pick' }, line: text.split('\n').slice(0, 2).join(' ') });
+      return {
+        pass: typeof j.preview?.willDo === 'string' && /已下发/.test(j.preview.willDo) && /已拣货/.test(j.preview.willDo) && row.status === 1,
+        detail: `willDo=${(j.preview?.willDo || '').slice(0, 80)}…｜库里状态=${row.status}（未变）`,
+      };
+    });
+    await check('⑩g 四步回传 pick→outbound→transit→signed → 状态 1→2→3→4→5，且重复 signed 幂等不变', async () => {
+      const trail = [];
+      for (const [event, want] of [['pick', 2], ['outbound', 3], ['transit', 4], ['signed', 5]]) {
+        const { text } = await call(client, 'delivery', { action: 'wms_callback', deliveryId: dispatchedId, event });
+        const row = dbDelivery(dispatchedId);
+        trail.push(`${event}→${row.status}`);
+        if (row.status !== want) throw new Error(`回传 ${event} 后库里状态=${row.status}，期望 ${want}（工具返回：${text.split('\n')[0]}）`);
+      }
+      // 幂等：再回传一次 signed，状态不会回退也不会报错
+      const { text: again } = await call(client, 'delivery', { action: 'wms_callback', deliveryId: dispatchedId, event: 'signed' });
+      const dbAfter = sql(`SELECT status FROM ${DB}.delivery_order WHERE id = ${Number(dispatchedId)}`);
+      const orderRow = sql(`SELECT status FROM ${DB}.\`order\` WHERE id = ${Number(ORDER_ID)}`);
+      samples.push({ tool: 'delivery wms_callback', args: { deliveryId: dispatchedId, event: 'signed' }, line: again.split('\n')[0] });
+      return {
+        pass: trail.join(',') === 'pick→2,outbound→3,transit→4,signed→5' && Number(dbAfter) === 5 && again.includes('✅') && /幂等/.test(again),
+        detail: `轨迹=${trail.join(' → ')}｜重复 signed 后 DB status=${dbAfter}｜父订单 status=${orderRow}`,
+      };
+    });
+    await check('⑩h 跳步回传被状态守卫拒：包裹已签收(5) 后再回传 pick → 幂等空转或状态守卫拒（不改数据）', async () => {
+      const r = await expectError(client, 'delivery', { action: 'wms_callback', deliveryId: dispatchedId, event: 'pick' });
+      const db = Number(sql(`SELECT status FROM ${DB}.delivery_order WHERE id = ${Number(dispatchedId)}`));
+      // 已签收时 pick 走「current >= target → 幂等空转」分支，也可能被守卫拒 —— 两种都算对，前提是数据没变
+      return {
+        pass: db === 5,
+        detail: r.threw ? `被拒：${r.text.split('\n')[0].slice(0, 70)}｜DB status=${db}` : `幂等空转（不报错）｜DB status=${db}`,
+      };
+    });
+
     // ⑪ cancel：预演不落库 → 真执行 → 重复取消被拒
     let cancelId = null;
     await check('⑪a cancel dryRun=true → willDo 写明「回补库存」，状态仍是待下发(0)', async () => {
@@ -406,6 +453,18 @@ async function main() {
     });
   } finally {
     if (client) await client.close().catch(() => {});
+    // ⚠️ 本批新增 wms_callback(signed) 会生成一条 delivery_logistics（运单）记录，
+    //    而 fk_logi_delivery 是 NO ACTION（没有 ON DELETE CASCADE）——它会把「删订单/删包裹」挡住
+    //    （后端 500「数据处理失败」）。测试自己造的物流记录必须自己先清掉，否则 ctx.cleanup 会失败、
+    //    订单与一次性买家会残留在这张共用测试库里。这是后端 FK 的口径问题，已在报告里单列。
+    try {
+      sql(
+        `DELETE FROM ${DB}.delivery_logistics WHERE delivery_id IN ` +
+          `(SELECT id FROM ${DB}.delivery_order WHERE order_id = ${Number(ORDER_ID)})`
+      );
+    } catch (e) {
+      console.log(`  （清理物流记录跳过：${e.message}）`);
+    }
     if (ctx?.cleanup) {
       const r = await ctx.cleanup();
       console.log(`🧹 清理自建数据：${r.notes.join('；')}`);

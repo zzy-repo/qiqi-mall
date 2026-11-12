@@ -1,4 +1,6 @@
-// 商品域（catalog）只读工具：6 个，全部只读 → 无副作用，可反复调用。
+// 商品域（catalog）只读工具：8 个，全部只读 → 无副作用，可反复调用。
+//   （第 5 批覆盖补齐：+ get_sku_detail → GET /admin/skus/{id}、
+//     + list_sku_attributes → GET /admin/skus/attributes?productId=（后台 SKU 编辑页选规格名用的那个接口））
 //
 // 并发控制口径（全项目统一，本批改）：
 //   只读工具 → 无副作用、可反复调用（含 dry-run 预演 preview_split）
@@ -12,6 +14,8 @@
 //   list_product_types  → GET /admin/product-types + 每个类型 GET /admin/attributes?typeId=（后端不聚合）
 //   list_attributes     → GET /admin/attributes?typeId=
 //   list_skus           → GET /admin/skus?productId=
+//   get_sku_detail      → GET /admin/skus/{id}（{sku,specs}）
+//   list_sku_attributes → GET /admin/skus/attributes?productId=（该商品所属类型下的属性）
 // ⚠️ 详情/列表返回里都带 version（商品本体与每个 SKU 都有）—— 那是写工具的唯一合法输入，别把它过滤掉。
 
 import { z } from 'zod';
@@ -22,6 +26,8 @@ import {
   listProductTypes,
   listAttributes,
   listSkus,
+  skuDetail,
+  skuAttributes,
 } from '../mall.mjs';
 import { text, money, fail, clampPage, paginate, pageHeader, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './_shared.mjs';
 
@@ -316,6 +322,75 @@ export function registerCatalogTools(server, _ctx = {}) {
           )
           .join('\n');
         return text(`${head}\n${body}\n\nJSON:\n${JSON.stringify(paged, null, 2)}`);
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  // ⑦ 单个 SKU 详情（含规格值）
+  server.registerTool(
+    'get_sku_detail',
+    {
+      title: '查看 SKU 详情',
+      description:
+        '查看某一个 SKU 的完整信息：价格、库存、所属商品、主图，以及它的规格值（如「颜色=深空黑、容量=256G」）。' +
+        '用户问"这个规格具体是什么配置/多少钱/还有多少件"时用；改库存/改价前也用它拿最新 version。',
+      inputSchema: {
+        skuId: z.number().int().positive().describe('SKU id（先用 list_skus / get_product_detail 查）'),
+      },
+    },
+    async ({ skuId }) => {
+      try {
+        const data = await skuDetail(skuId);
+        const sku = data?.sku ?? null;
+        const specs = Array.isArray(data?.specs) ? data.specs : [];
+        if (!sku) {
+          return text(`SKU ${skuId} 不存在（后端返回空）。请用 list_skus 按商品查一遍确认 id。\n\nJSON:\n${JSON.stringify(data, null, 2)}`);
+        }
+        const specText = specs.length
+          ? specs.map((s) => `    - attributeId=${s.attributeId} 值=${s.value}`).join('\n')
+          : '    （没有规格值：该商品可能是不带规格的单品）';
+        return text(
+          `SKU ${sku.id}（所属商品 productId=${sku.productId ?? '-'}）\n` +
+            `  价格=${money(sku.price)} 库存=${money(sku.stock)} version=${sku.version ?? '-'}${sku.pic ? ` 图=${sku.pic}` : ''}\n` +
+            `  规格值 ${specs.length} 条：\n${specText}\n\n` +
+            `JSON:\n${JSON.stringify(data, null, 2)}`
+        );
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  // ⑧ 某商品所属类型下的属性（后台 SKU 编辑页「规格名」下拉的数据源）
+  server.registerTool(
+    'list_sku_attributes',
+    {
+      title: '查看商品可用的规格属性',
+      description:
+        '列出某个商品**所属类型**下的全部属性（规格名候选，如「颜色」「容量」）。' +
+        '用户问"这个商品能配哪些规格名"、或要在后台新建 SKU 选规格名时用；' +
+        '与 list_attributes（按 typeId 查全量属性字典）的区别是：这里只需要商品 id，后端会自己把商品→类型对上去。',
+      inputSchema: {
+        productId: z.number().int().positive().describe('商品 id（SPU id）'),
+        ...pageSchema,
+      },
+    },
+    async ({ productId, page, size }) => {
+      try {
+        const { page: p, size: s } = clampPage({ page, size });
+        const rows = await skuAttributes(productId);
+        const paged = paginate(Array.isArray(rows) ? rows : [], { page: p, size: s });
+        if (!paged.records.length) {
+          return text(
+            `商品 ${productId} 所属类型下没有属性（可能该商品还没绑定类型，或类型下没配属性）。\n\nJSON:\n${JSON.stringify(paged, null, 2)}`
+          );
+        }
+        const body = paged.records
+          .map((a, i) => `  ${i + 1}. attributeId=${a.id} 规格名=${a.name}${a.isFilter === 1 ? '（可筛选）' : ''}`)
+          .join('\n');
+        return text(`商品 ${productId} 可用的规格属性：${pageHeader('', paged)}\n${body}\n\nJSON:\n${JSON.stringify(paged, null, 2)}`);
       } catch (e) {
         return fail(e);
       }
