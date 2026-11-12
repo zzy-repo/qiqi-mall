@@ -3,8 +3,8 @@
 把商城后台「订单审核 + 拆单」暴露成 MCP 工具，给 Claude Desktop / 任意 MCP 客户端调用。
 本仓库这一层**只动 MCP 侧、后端一行没改** —— 它就是纯粹的 REST 客户端（认证 = API Key）。
 
-> **并发控制口径（现行）**：**只留 `version` 乐观锁**（后端 406a54b），确认码（confirmCode）
-> 整套已删除 —— 预演只回答「会做什么」（`willDo`），写操作靠 `version` fail-closed 校验
+> **并发控制口径（现行）**：**`version` 乐观锁**（后端 406a54b）——
+> 预演只回答「会做什么」（`willDo`），写操作靠 `version` fail-closed 校验
 > （缺 version → `400`，版本冲突 → `409`）。MCP 是「人的操作的模拟」：人在 UI 上会撞的锁，
 > MCP 走同一个接口必然也会撞到，这正是 `update_product` / `update_sku_stock` 必须带 version 的原因。
 
@@ -13,13 +13,13 @@
 ```
 ① list_pending_orders()                 列出待审核订单（只读）
 ② preview_split(orderId)                拆单方案（dry-run 不落库）→ { willDo（中文预演）, plan }
-③ execute_audit_pass(orderId)           订单 7→8 并真的生成发货单（写；不需要任何凭证）
+③ execute_audit_pass(orderId)           订单 7→8 并真的生成发货单（写；只需 orderId）
 ④ list_deliveries(orderId)              回读，确认包裹数与方案一致
 ```
 
 预演（`POST /admin/orders/{id}/split-preview`，等价于 `?dryRun=true`）返回
 `{ willDo: "将把订单 QQ… 审核通过：状态 待审核→待发货，并按方案生成 N 个发货单", plan: [...] }` ——
-**没有 confirmCode、没有 expiresInSec**。重复执行由后端业务守卫拦（「只有待审核订单可以审核通过」），
+预演本身不写任何数据。重复执行由后端业务守卫拦（「只有待审核订单可以审核通过」），
 期间被抢改由 `version` 乐观锁拦（`409`）。
 
 ## 工具清单（按域）
@@ -42,7 +42,7 @@
 | 商品 | `update_product` | **写（带 version）** | `PUT /admin/products/{id}`，body `{product:{id,version,...}}` |
 | 商品 | `update_sku_stock` | **写（带 version）** | `PUT /admin/skus/{id}`，body `{sku:{id,version,stock/price}}` |
 
-并发控制口径：**只读工具不需要任何票据；写工具靠 `version` 乐观锁**。
+并发控制口径：**只读工具无副作用、可反复调用；写工具靠 `version` 乐观锁**。
 `update_product` / `update_sku_stock` 的 `version` 是 **zod 必填**（缺了在协议层就被拒，请求都到不了后端）；
 后端 409 的中文原因会原样透出，并附上「带 `[409]` + 请重新读取最新 version」的下一步提示。
 成功后后端不回新版本号（`data:null`），**由工具层回读**一次把新 version 交给模型。
@@ -136,7 +136,7 @@ npm start
 `npm test` 跑四套测试：用 SDK client 通过 stdio 真启动本 server，逐条断言。
 **数据自建自清**，跑完库态与跑前一致（不消费种子数据、不需要复位脚本）：
 
-- `test/loop.mjs`（11 条）：订单闭环 —— 预览返回 **willDo + plan 且不含 confirmCode**、
+- `test/loop.mjs`（11 条）：订单闭环 —— 预览返回 **willDo + plan**、
   `execute_audit_pass` 的 schema 只剩必填 `orderId`、预演可反复调用且不落库、
   执行成功且 `deliveries === plan`、真落库、状态 7→8、
   **重复执行被业务守卫拦**（「只有待审核订单可以审核通过」）、回读闭环、写开关生效。
@@ -238,11 +238,11 @@ bash scripts/start-inspector.sh    # 在仓库根目录执行
 - **认证**：只用 API Key（`X-Api-Key`），key 按库隔离、可单独禁用/删除；口令（`MALL_USER`/`MALL_PASS`）不再出现在 MCP 侧。
   key 明文不入库（库里只存 sha256），也不要提交进仓库。
 - **写开关**：`MCP_ENABLE_WRITE=0` 时写工具根本不注册，模型连看都看不到。
-- **并发控制 = version 乐观锁**（确认码已整套删除）：商品/SKU 的更新接口要求 `product.version` / `sku.version`，
+- **并发控制 = version 乐观锁**：商品/SKU 的更新接口要求 `product.version` / `sku.version`，
   缺版本号回 `400`（fail-closed，**绝不**静默降级成后写覆盖），版本冲突回 `409`
   「数据已被他人修改（可能其他人在编辑），请刷新后重试」，且冲突时一个字段都不会被覆盖。
   MCP 侧把 `version` 做成 zod 必填参数、成功后回读新 version、409 时把中文原因和「重新读」的下一步一起交给模型 ——
   所以模型不可能「拿旧 version 硬重试」还以为能成功。
-- **状态守卫仍在后端**：`execute_audit_pass` 不认任何票据，但只有 `status=7` 的订单能审核通过，
+- **状态守卫仍在后端**：只有 `status=7` 的订单能审核通过，
   重复执行/越权状态一律被后端拦住（MCP 只是透出中文原因）。
 - **stdio 纪律**：所有日志走 `console.error`，stdout 只留给 JSON-RPC。

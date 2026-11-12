@@ -1,8 +1,8 @@
-// 商品域（catalog）只读工具：6 个，全部只读 → 不需要任何票据。
+// 商品域（catalog）只读工具：6 个，全部只读 → 无副作用，可反复调用。
 //
 // 并发控制口径（全项目统一，本批改）：
 //   只读工具 → 无副作用、可反复调用（含 dry-run 预演 preview_split）
-//   写工具   → **只留 version 乐观锁**，确认码（confirmCode）整套已删除；
+//   写工具   → **version 乐观锁**（改数据必须带上次读到的 version）；
 //              写工具在 src/tools/catalog-write.mjs（update_product / update_sku_stock，带 version）
 //
 // 与后端接口的对应关系（已读 Controller 确认真实形态）：

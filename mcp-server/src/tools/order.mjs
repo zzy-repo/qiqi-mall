@@ -1,7 +1,7 @@
 // 订单域工具：6 只读 + 1 写（写工具受 MCP_ENABLE_WRITE 控制）
-// 并发控制口径（用户定的，本批改）：**只留 version 乐观锁**，确认码整套已删除 ——
-//   · preview_split     = dry-run 预演，只回答「会做什么」(willDo) + 「拆成几包」(plan)，不签票据
-//   · execute_audit_pass= 只要 { orderId }，不再需要任何凭证；重复执行/期间被改过由后端业务守卫 + version 拒掉
+// 并发控制口径（用户定的）：**version 乐观锁 + 后端业务守卫** ——
+//   · preview_split     = dry-run 预演，回答「会做什么」(willDo) + 「拆成几包」(plan)，纯读、不落库
+//   · execute_audit_pass= 输入就是 { orderId }；重复执行 / 预演后被改过，由后端业务守卫 + version 拒掉
 // ⚠️ 只读工具必须注册在 `if (!writeEnabled) return;` **之前** —— 否则 MCP_ENABLE_WRITE=0 时只读工具也跟着消失。
 //    （第 1 批把 list_deliveries 落在门后面了，本批顺手挪到门前面，行为只多不少：write=0 时现在也能用。）
 
@@ -101,7 +101,7 @@ export function registerOrderTools(server, { writeEnabled } = {}) {
     }
   );
 
-  // ② 只读：拆单预览（dry-run 预演；不签任何票据，回答「会做什么 + 拆成几包」）
+  // ② 只读：拆单预览（dry-run 预演；回答「会做什么 + 拆成几包」，纯读不落库）
   server.registerTool(
     'preview_split',
     {
@@ -109,14 +109,14 @@ export function registerOrderTools(server, { writeEnabled } = {}) {
       description:
         '预览某笔待审核订单会被拆成几个包裹、分别从哪个仓发（纯读，不修改数据、不落库）。' +
         '返回两样东西：willDo（一句中文「将会做什么」）和 plan（每个包裹的仓库与明细）。' +
-        '先把方案和包裹数念给用户，用户明确同意后再调用 execute_audit_pass（执行只需 orderId，不需要任何确认码）。',
+        '先把方案和包裹数念给用户，用户明确同意后再调用 execute_audit_pass（执行时传同一个 orderId 即可）。',
       inputSchema: {
         orderId: z.number().int().positive().describe('待审核订单 id'),
       },
     },
     async ({ orderId }) => {
       try {
-        // ⚠️ 后端返回 { willDo, plan }（确认码整套已删 → 没有 confirmCode / expiresInSec 了）
+        // ⚠️ 后端返回 { willDo, plan }：预演只回答「会做什么 + 拆成几包」
         const resp = await splitPreview(orderId);
         const plan = Array.isArray(resp?.plan) ? resp.plan : [];
         const willDo = typeof resp?.willDo === 'string' && resp.willDo.trim() ? resp.willDo.trim() : '';
@@ -130,7 +130,7 @@ export function registerOrderTools(server, { writeEnabled } = {}) {
         return text(
           `订单 ${orderId} 将拆成 ${plan.length} 个包裹：\n${planToText(plan)}\n\n` +
             (willDo ? `预演描述（willDo）：${willDo}\n\n` : '') +
-            `用户明确同意后，直接调用 execute_audit_pass 并传 orderId=${orderId}（执行不需要确认码）。\n\n` +
+            `用户明确同意后，直接调用 execute_audit_pass 并传 orderId=${orderId}（执行只需这一个参数）。\n\n` +
             `JSON:\n${JSON.stringify({ willDo, plan }, null, 2)}`
         );
       } catch (e) {
@@ -326,8 +326,8 @@ export function registerOrderTools(server, { writeEnabled } = {}) {
   }
 
   // ⑦ 写：确认执行审核（真改数据）。
-  //    ⚠️ 设计说明（本批改）：确认码整套已删除 → 参数回到「只要 orderId」。
-  //    并发保护不再靠票据，而是靠后端的业务守卫（只有 status=7 才能审核通过）+ 热表 version 乐观锁：
+  //    ⚠️ 设计说明：参数就是「只要 orderId」——把 preview_split 预演过的同一笔订单 id 传回来即可。
+  //    并发保护来自后端的业务守卫（只有 status=7 才能审核通过）+ 热表 version 乐观锁：
   //      · 重复执行 → 后端「只有待审核订单可以审核通过」（订单已是 8）
   //      · 期间被别人改过 → 后端版本冲突 code=409
   //    两种都是中文原因，MCP 原样透给模型，让模型知道「不是重试的问题，是状态变了」。
@@ -337,8 +337,8 @@ export function registerOrderTools(server, { writeEnabled } = {}) {
       title: '执行审核通过（写）',
       description:
         '⚠️ 会真实修改数据：订单从待审核(7)变待发货(8)，并按方案生成发货单。' +
-        '**执行只需要 orderId**（确认码已废弃，不需要任何凭证）。' +
-        '⚠️ 这个工具**不会**再强制你先预演（没有一次性票据了，后端不拦「没预演就执行」），所以顺序全靠你：' +
+        '**执行只需要 orderId**（先 preview_split 让用户看清会做什么，执行时把同一个 orderId 传回来）。' +
+        '⚠️ 后端不校验你是否预演过，顺序全靠你：' +
         '**请务必先调用 preview_split，把 willDo 和包裹方案念给用户听、拿到用户明确同意之后再执行**；' +
         '用户没明确说过「同意/执行/通过」就不要调本工具。' +
         '后端仍会自己拦重复执行（订单已不是待审核 → 「只有待审核订单可以审核通过」）和期间被改动（409 版本冲突），' +

@@ -78,9 +78,9 @@ export function listPendingOrders({ size = 20 } = {}) {
 
 /**
  * 拆单预览（dry-run，不落库）=> { willDo:"中文描述", plan:[{warehouseId,warehouseName,items:[...]}] }
- * ⚠️ 并发控制口径（用户定的）：**只留 version 乐观锁**，确认码整套已删除 ——
- *    预演只回答「会做什么」（willDo）+「拆成几包」（plan），不再签发 confirmCode / expiresInSec。
- *    预演也不吃锁：它只是读，真正可能撞锁的是执行。
+ * ⚠️ 并发控制口径（用户定的）：**version 乐观锁 + 后端业务守卫** ——
+ *    预演只回答「会做什么」（willDo）+「拆成几包」（plan），是纯读。
+ *    预演也不吃锁：真正可能撞锁的是执行。
  */
 export function splitPreview(orderId) {
   return request('POST', `/admin/orders/${encodeURIComponent(orderId)}/split-preview`);
@@ -88,7 +88,7 @@ export function splitPreview(orderId) {
 
 /**
  * 审核通过：订单 7→8，并按方案真的生成发货单 => [{id,deliverySn,...}]
- * ⚠️ 不需要任何票据（确认码已删）：orderId 就是全部输入。
+ * ⚠️ orderId 就是全部输入。
  *    并发保护来自后端的业务守卫（仅 status=7 可审核）+ 热表 version 乐观锁，
  *    所以「重复执行 / 期间被别人改过」会由后端带中文原因拒掉，MCP 原样透给模型。
  */

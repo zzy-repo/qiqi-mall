@@ -1,5 +1,15 @@
 // 工具统一注册入口：按域 import 各自的 register 函数。
 //
+// ┌─ 场景验收判据（07-AI集成）─────────────────────────────────────────────
+// │ MCP 场景没有网页 UI，Playwright 不适用，所以 e2e 判据就是本仓库的 MCP 测试全套：
+// │     MCP 场景的场景验收判据 = test/*.mjs 全套两轮全绿；视频见 e2e/report/videos/07-AI集成/
+// │ 具体口径：`npm test`（= loop.mjs + catalog.mjs + order-read.mjs + optimistic-lock.mjs）
+// │ 连跑两轮，**第二轮不 reset 数据库**，两轮都必须 0 失败。测试自带「造数据 + 清数据」，
+// │ 所以两轮之间不需要复位脚本；任何一轮红都算场景不达标（不许靠放宽断言过关）。
+// │ 覆盖场景：1-MCP最小闭环（loop.mjs）、2-并发冲突（AI端）（optimistic-lock.mjs），
+// │           catalog.mjs / order-read.mjs 是两个域的只读回归。
+// └────────────────────────────────────────────────────────────────────
+//
 // ┌─ 新增一个域，照这个模式加一个文件，别往别人的文件里塞 ────────────────
 // │ 1) 新建 src/tools/<域>.mjs，导出 `export function register<域>Tools(server, ctx)`
 // │    - ctx 目前是 { writeEnabled }（写开关）
@@ -10,9 +20,9 @@
 // │ 4) 返回「文本摘要 + JSON:」两段（照 preview_split 的写法），空结果给明确文案
 // │ 5) 报错统一 fail(e)；**写工具**用 _shared.mjs 的 failWrite(e, {...})，
 // │    它会把后端 bizCode（400 缺版本 / 409 版本冲突）显式带进文本，并给出「重新读」的下一步
-// │ 6) 并发控制口径：**只留 version 乐观锁**（确认码整套已删除）。
+// │ 6) 并发控制口径：**version 乐观锁**（改数据必须带上次读到的 version）。
 // │    写工具必须强制 version 参数（zod 必填），成功后回读一次拿新 version；
-// │    只读工具（含 dry-run 预演 preview_split）不需要任何票据。
+// │    只读工具（含 dry-run 预演 preview_split）无副作用，可反复调用。
 // │ 7) 在本文件下面 import 并调用一行；写工具的注册要放在 `if (writeEnabled)` 里
 // └────────────────────────────────────────────────────────────────────
 
