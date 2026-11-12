@@ -9,6 +9,8 @@ import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.order.entity.OrderItem;
 import com.qiqi.mall.shared.common.DeliverySnGenerator;
 import com.qiqi.mall.shared.guard.OptimisticLockGuard;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,6 +39,8 @@ import java.util.Map;
  */
 @Service
 public class DeliveryEditService {
+
+    private static final Logger log = LoggerFactory.getLogger(DeliveryEditService.class);
 
     private final DeliveryOrderService deliveryOrderService;
     private final DeliveryItemService deliveryItemService;
@@ -72,7 +76,7 @@ public class DeliveryEditService {
                 DeliveryItem item = requireItem(row.getDeliveryItemId(), deliveryId);
                 int qty = requirePositive(row.getQuantity());
                 item.setQuantity(qty);
-                deliveryItemService.updateById(item);
+                updateItem(item, "改量");
             }
             assertQuantityNotExceeded(delivery.getOrderId());
         }
@@ -123,7 +127,7 @@ public class DeliveryEditService {
             int left = item.getQuantity() - moveQty;
             if (left > 0) {
                 item.setQuantity(left);
-                deliveryItemService.updateById(item);
+                updateItem(item, "拆分");
             } else {
                 deliveryItemService.removeById(item.getId());      // 整条拆走
             }
@@ -159,11 +163,11 @@ public class DeliveryEditService {
             DeliveryItem exist = findItem(target.getId(), item.getOrderItemId());
             if (exist != null) {                                   // 同一订单明细 → 数量相加
                 exist.setQuantity(exist.getQuantity() + item.getQuantity());
-                deliveryItemService.updateById(exist);
+                updateItem(exist, "合并");
                 deliveryItemService.removeById(item.getId());
             } else {                                               // 直接搬过去
                 item.setDeliveryId(target.getId());
-                deliveryItemService.updateById(item);
+                updateItem(item, "合并");
             }
         }
         deliveryOrderService.removeById(source.getId());
@@ -381,7 +385,28 @@ public class DeliveryEditService {
                 .eq(DeliveryOrder::getOrderId, orderId)
                 .ne(DeliveryOrder::getStatus, DeliveryOrder.CANCELLED));
         order.setSplitStatus(active > 0 ? 1 : 0);
-        orderService.updateById(order);
+        int rows = orderService.getBaseMapper().updateById(order);
+        OptimisticLockGuard.requireAffected(rows);
+    }
+
+    /**
+     * 写回一条发货明细：**先看影响行数再决定要不要继续**。
+     *
+     * <p>{@code delivery_item} 是子表、**没有 version 列**（5 张带 version 的热表是
+     * order / delivery_order / product / sku / member），所以这里的 UPDATE 不带
+     * {@code AND version = ?}：影响行数 0 不可能是「版本冲突」，**只可能是这条明细被别人删了**
+     * （另一个管理员同时在拆/合同一个包裹）。继续往下跑等于往一条不存在的明细上记账，
+     * 所以同样 fail-closed，只是文案说准原因：「{@value OptimisticLockGuard#MSG_DELIVERY_ITEM_DELETED}」。
+     *
+     * @param item   要落库的明细（已改好 quantity / deliveryId）
+     * @param action 当前动作（写进日志便于排查是哪一步撞上的）
+     */
+    private void updateItem(DeliveryItem item, String action) {
+        int rows = deliveryItemService.getBaseMapper().updateById(item);
+        if (rows == 0) {
+            log.warn("发货明细 {} 在{}时已不存在（被并发删除），拒绝继续", item.getId(), action);
+        }
+        OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_DELIVERY_ITEM_DELETED);
     }
 
     /** 拆量不能超过下单数量（按 order_item 汇总所有未取消包裹） */

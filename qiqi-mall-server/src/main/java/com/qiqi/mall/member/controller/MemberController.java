@@ -64,11 +64,10 @@ public class MemberController {
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id, @RequestBody Member body) {
         body.setId(id);
-        OptimisticLockGuard.LockError lockError = OptimisticLockGuard.checkVersion(body.getVersion());
-        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
+        // 缺版本号 → 真 HTTP 400；影响行数 0 → 真 HTTP 409（见 GlobalExceptionHandler）
+        OptimisticLockGuard.requireVersion(body.getVersion());
         int rows = memberService.getBaseMapper().updateById(body);
-        lockError = OptimisticLockGuard.checkAffected(rows);
-        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
+        OptimisticLockGuard.requireAffected(rows);
         return Result.ok();
     }
 

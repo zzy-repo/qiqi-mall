@@ -1,6 +1,7 @@
 package com.qiqi.mall.oms;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.qiqi.mall.oms.wms.MockWmsService;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -20,14 +21,23 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 
+import javax.sql.DataSource;
 import java.math.BigDecimal;
+import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -63,6 +73,7 @@ class OptimisticLockIntegrationTest {
 
     static final String MSG_MISSING_VERSION = "缺少版本号，请刷新页面后重试";
     static final String MSG_CONFLICT = "数据已被他人修改（可能其他人在编辑），请刷新后重试";
+    static final String MSG_ITEM_DELETED = "发货明细已被删除，请刷新后重试";
 
     @Autowired
     private TestRestTemplate rest;
@@ -77,9 +88,16 @@ class OptimisticLockIntegrationTest {
     private Long warehouseA;
     private Long warehouseB;
 
+    @Autowired
+    private MockWmsService mockWms;      // 为了数「WMS 到底被外呼了几次」
+
+    @Autowired
+    private DataSource dataSource;       // 造并发：独立连接上开事务，把行锁攥在手里
+
     private final List<Long> createdProducts = new ArrayList<>();
     private final List<Long> createdOrders = new ArrayList<>();
     private final List<Long> createdMembers = new ArrayList<>();
+    private ExecutorService pool;        // ⑦ 双发 / 各用例的「并发请求」都跑在这儿
 
     // ------------------------------------------------------------------ 准备 / 清理
 
@@ -100,13 +118,20 @@ class OptimisticLockIntegrationTest {
         warehouseA = warehouses.get(0);
         warehouseB = warehouses.get(1);
 
+        pool = Executors.newFixedThreadPool(4);
+
         System.out.printf("[准备] member=%d category=%d type=%d 仓=%d/%d%n",
                 memberId, categoryId, typeId, warehouseA, warehouseB);
     }
 
     @AfterAll
     void cleanup() {
+        if (pool != null) pool.shutdownNow();
         for (Long orderId : createdOrders) {
+            // delivery_logistics 的外键**没有** ON DELETE CASCADE：先清掉，
+            // 否则删 order 级联到 delivery_order 时会被外键挡住（⑪ 回传出库会写运单）
+            jdbc.update("DELETE l FROM delivery_logistics l JOIN delivery_order d ON d.id = l.delivery_id "
+                    + "WHERE d.order_id = ?", orderId);
             jdbc.update("DELETE FROM `order` WHERE id = ?", orderId);      // 级联明细/发货单/包裹明细
         }
         for (Long productId : createdProducts) {
@@ -343,6 +368,322 @@ class OptimisticLockIntegrationTest {
                 + "（page.records 与手工拼 Map 的 SKU/发货单列表也带上了）");
     }
 
+    // ================================================================== ⑦ audit-pass 双发
+
+    @Test
+    @org.junit.jupiter.api.Order(7)
+    @DisplayName("⑦ audit-pass 并发双发：只成功一个、只生成 1 张发货单（绝不多拆一套）")
+    void auditPass_doubleFire_onlyOneSplit() {
+        Long orderId = newOrderWithItem(7, 2);
+        CyclicBarrier barrier = new CyclicBarrier(2);
+        Callable<ResponseEntity<JsonNode>> call = () -> {
+            barrier.await(30, TimeUnit.SECONDS);           // 两个请求同时出发（同一个 status=7）
+            return post("/admin/orders/" + orderId + "/audit-pass", null);
+        };
+
+        Future<ResponseEntity<JsonNode>> f1 = async(call);
+        Future<ResponseEntity<JsonNode>> f2 = async(call);
+        JsonNode b1 = bodyOf(f1);
+        JsonNode b2 = bodyOf(f2);
+
+        int success = (b1.path("code").asInt() == 0 ? 1 : 0) + (b2.path("code").asInt() == 0 ? 1 : 0);
+        JsonNode loser = b1.path("code").asInt() == 0 ? b2 : b1;
+        System.out.printf("⑦ audit-pass 双发 → code=%d / code=%d（成功 %d 个），失败方 code=%d message=%s%n",
+                b1.path("code").asInt(), b2.path("code").asInt(), success,
+                loser.path("code").asInt(), loser.path("message").asText());
+
+        assertThat(success).as("两个请求只能有一个审核通过：%s / %s", b1, b2).isEqualTo(1);
+        assertThat(deliveryCount(orderId)).as("**关键：发货单必须恰好 1 张，不许重复拆单**").isEqualTo(1);
+        assertThat(orderStatus(orderId)).as("订单状态必须是 8 待发货").isEqualTo(8);
+        assertThat(orderSplitStatus(orderId)).as("父单 split_status 必须置 1").isEqualTo(1);
+        assertThat(loser.path("message").asText()).as("失败方必须给出中文原因").isNotBlank();
+    }
+
+    // ================================================================== ⑧ audit-pass 交错窗口
+
+    @Test
+    @org.junit.jupiter.api.Order(8)
+    @DisplayName("⑧ audit-pass 静默失败已堵住：读到 status=7 后被别人改过 → 409，且一张发货单都没生成")
+    void auditPass_interleavedWrite_409AndNoDelivery() {
+        Long orderId = newOrderWithItem(7, 2);
+
+        // 造窗口：别人在读之后、写之前改了这张订单（把 version 顶掉），不提交 → 被测请求卡在 UPDATE 上
+        Connection hold = holdRow("UPDATE `order` SET version = version + 1 WHERE id = ?", orderId);
+        Future<ResponseEntity<JsonNode>> f;
+        try {
+            f = async(() -> post("/admin/orders/" + orderId + "/audit-pass", null));
+            awaitRowLockWait();
+        } finally {
+            commitAndClose(hold);                          // 别人提交 → 被测请求的 UPDATE 影响 0 行
+        }
+
+        JsonNode body = bodyOf(f);
+        failBody(body, 409);
+        System.out.printf("⑧ audit-pass 交错窗口 → code=409 message=%s；发货单数=%d，订单状态=%d%n",
+                body.path("message").asText(), deliveryCount(orderId), orderStatus(orderId));
+
+        assertThat(body.path("message").asText()).isEqualTo(MSG_CONFLICT);
+        // 这两条才是修复的意义：修复前 409 根本不会出现，而 split 照样跑 → 「订单待审核 + 发货单已生成」
+        assertThat(deliveryCount(orderId)).as("**关键：冲突的请求不许生成发货单**").isZero();
+        assertThat(orderStatus(orderId)).as("订单必须还停在待审核（没有任何半截改动被提交）").isEqualTo(7);
+
+        // 刷新后重试就成功（409 是「请刷新重试」，不是永久失败）
+        ok(post("/admin/orders/" + orderId + "/audit-pass", null));
+        assertThat(deliveryCount(orderId)).as("重试成功后应有 1 张发货单").isEqualTo(1);
+        assertThat(orderStatus(orderId)).isEqualTo(8);
+        System.out.printf("⑧ 刷新后重试 → 成功：发货单数=%d，订单状态=%d%n",
+                deliveryCount(orderId), orderStatus(orderId));
+    }
+
+    // ================================================================== ⑨ dispatch
+
+    @Test
+    @org.junit.jupiter.api.Order(9)
+    @DisplayName("⑨ dispatch 并发：第二个 409，状态不动，且**没有重复外呼 WMS**")
+    void dispatch_interleavedWrite_409AndNoWmsCall() {
+        Long orderId = newOrder(8);
+        Long deliveryId = newDelivery(orderId, warehouseA, 2);
+        int wmsBefore = mockWms.dispatchCount();
+
+        Connection hold = holdRow("UPDATE delivery_order SET version = version + 1 WHERE id = ?", deliveryId);
+        Future<ResponseEntity<JsonNode>> f;
+        try {
+            f = async(() -> post("/admin/deliveries/" + deliveryId + "/dispatch", null));
+            awaitRowLockWait();
+        } finally {
+            commitAndClose(hold);
+        }
+
+        JsonNode body = bodyOf(f);
+        failBody(body, 409);
+        int wmsAfterConflict = mockWms.dispatchCount();
+        System.out.printf("⑨ dispatch 冲突 → code=409 message=%s；发货单状态=%d，WMS 外呼增量=%d%n",
+                body.path("message").asText(), deliveryStatus(deliveryId), wmsAfterConflict - wmsBefore);
+
+        assertThat(body.path("message").asText()).isEqualTo(MSG_CONFLICT);
+        assertThat(deliveryStatus(deliveryId)).as("状态必须还是待下发").isZero();
+        assertThat(wmsAfterConflict - wmsBefore)
+                .as("**关键：冲突的请求一次都不许外呼 WMS（落库在前、外呼在后）**").isZero();
+
+        // 刷新后重试 → 正常下发，且 WMS 只被呼了这一次
+        ok(post("/admin/deliveries/" + deliveryId + "/dispatch", null));
+        assertThat(deliveryStatus(deliveryId)).isEqualTo(1);
+        assertThat(mockWms.dispatchCount() - wmsBefore)
+                .as("重试成功只应产生 1 次外呼").isEqualTo(1);
+        System.out.printf("⑨ 重试 → 成功：状态=%d，WMS 外呼增量=%d%n",
+                deliveryStatus(deliveryId), mockWms.dispatchCount() - wmsBefore);
+    }
+
+    // ================================================================== ⑩ cancel
+
+    @Test
+    @org.junit.jupiter.api.Order(10)
+    @DisplayName("⑩ cancel 并发：第二个 409，状态不动，库存**一次都没回补**")
+    void cancel_interleavedWrite_409AndNoStockRestore() {
+        Long orderId = newOrder(8);
+        Long deliveryId = newDelivery(orderId, warehouseA, 3);
+        Long skuId = jdbc.queryForObject(
+                "SELECT product_sku_id FROM delivery_item WHERE delivery_id = ? LIMIT 1", Long.class, deliveryId);
+        int stockBefore = stockOf(skuId);
+
+        Connection hold = holdRow("UPDATE delivery_order SET version = version + 1 WHERE id = ?", deliveryId);
+        Future<ResponseEntity<JsonNode>> f;
+        try {
+            f = async(() -> post("/admin/deliveries/" + deliveryId + "/cancel", null));
+            awaitRowLockWait();
+        } finally {
+            commitAndClose(hold);
+        }
+
+        JsonNode body = bodyOf(f);
+        failBody(body, 409);
+        System.out.printf("⑩ cancel 冲突 → code=409 message=%s；状态=%d，sku %d 库存 %d→%d%n",
+                body.path("message").asText(), deliveryStatus(deliveryId), skuId, stockBefore, stockOf(skuId));
+
+        assertThat(body.path("message").asText()).isEqualTo(MSG_CONFLICT);
+        assertThat(deliveryStatus(deliveryId)).as("状态必须还是待下发").isZero();
+        assertThat(stockOf(skuId)).as("**关键：冲突的请求不许回补库存（否则就是多退了货）**")
+                .isEqualTo(stockBefore);
+        assertThat(deliveryItemCount(deliveryId)).as("明细一条都不能少").isEqualTo(1);
+
+        // 刷新后重试 → 真的取消，库存只回补这一次
+        ok(post("/admin/deliveries/" + deliveryId + "/cancel", null));
+        assertThat(deliveryStatus(deliveryId)).isEqualTo(9);
+        assertThat(stockOf(skuId)).as("取消成功应回补 3 件").isEqualTo(stockBefore + 3);
+        System.out.printf("⑩ 重试 → 已取消：状态=%d，库存 %d→%d%n",
+                deliveryStatus(deliveryId), stockBefore, stockOf(skuId));
+
+        // 这条用例往种子 SKU 上加了 3 件，跑完还原，别污染别的用例
+        jdbc.update("UPDATE sku SET stock = ? WHERE id = ?", stockBefore, skuId);
+    }
+
+    // ================================================================== ⑪ wms-callback
+
+    @Test
+    @org.junit.jupiter.api.Order(11)
+    @DisplayName("⑪ wms-callback：重复回传幂等 + 并发回传 409，状态**绝不回退**")
+    void wmsCallback_duplicateAndInterleaved_noRegression() {
+        Long orderId = newOrder(8);
+        Long deliveryId = newDelivery(orderId, warehouseA, 1);
+        ok(post("/admin/deliveries/" + deliveryId + "/dispatch", null));         // 0 → 1 已下发
+        assertThat(deliveryStatus(deliveryId)).isEqualTo(1);
+
+        // ① 第一次回传拣货：1 → 2
+        ok(post("/admin/deliveries/" + deliveryId + "/wms-callback?event=pick", null));
+        assertThat(deliveryStatus(deliveryId)).as("拣货回传应把状态推到 2").isEqualTo(2);
+
+        // ② 同一事件重复回传：幂等（code=0、状态不动、不回退）
+        ok(post("/admin/deliveries/" + deliveryId + "/wms-callback?event=pick", null));
+        assertThat(deliveryStatus(deliveryId)).as("重复回传必须幂等，状态既不推进也不回退").isEqualTo(2);
+        System.out.printf("⑪ 重复回传 pick → 幂等，状态仍为 %d%n", deliveryStatus(deliveryId));
+
+        // ③ 并发窗口：读到 status=2 之后被别人改过 → 409，状态不许回退
+        Connection hold = holdRow("UPDATE delivery_order SET version = version + 1 WHERE id = ?", deliveryId);
+        Future<ResponseEntity<JsonNode>> f;
+        try {
+            f = async(() -> post("/admin/deliveries/" + deliveryId + "/wms-callback?event=outbound", null));
+            awaitRowLockWait();
+        } finally {
+            commitAndClose(hold);
+        }
+        JsonNode body = bodyOf(f);
+        failBody(body, 409);
+        System.out.printf("⑪ 交错窗口 outbound → code=409 message=%s；状态=%d（未回退）%n",
+                body.path("message").asText(), deliveryStatus(deliveryId));
+
+        assertThat(body.path("message").asText()).isEqualTo(MSG_CONFLICT);
+        assertThat(deliveryStatus(deliveryId)).as("**关键：冲突不能说成「已回退」，状态必须还是 2**").isEqualTo(2);
+
+        // ④ 重试 outbound → 3 已出库，且写了一条运单
+        ok(post("/admin/deliveries/" + deliveryId + "/wms-callback?event=outbound", null));
+        assertThat(deliveryStatus(deliveryId)).isEqualTo(3);
+        assertThat(logisticsCount(deliveryId)).as("出库回传应写 1 条运单").isEqualTo(1);
+        System.out.printf("⑪ 重试 outbound → 状态=%d，运单数=%d%n",
+                deliveryStatus(deliveryId), logisticsCount(deliveryId));
+    }
+
+    // ================================================================== ⑫ 父订单重算
+
+    @Test
+    @org.junit.jupiter.api.Order(12)
+    @DisplayName("⑫ 父订单重算静默失败：改包裹时父单被别人改过 → 409，整笔回滚（包裹也没改）")
+    void parentOrderRecompute_interleavedWrite_409() {
+        Long orderId = newOrder(8);
+        Long deliveryId = newDelivery(orderId, warehouseA, 2);
+        int deliveryVersionBefore = versionOf("delivery_order", deliveryId);
+
+        // 别人先改了父订单（version 顶掉），不提交
+        Connection hold = holdRow("UPDATE `order` SET version = version + 1 WHERE id = ?", orderId);
+        int orderVersionHeld;
+        Future<ResponseEntity<JsonNode>> f;
+        try {
+            orderVersionHeld = versionOf("`order`", orderId) + 1;    // 提交后就是它
+            // 换仓：markManual 写 delivery_order（版本对得上）→ recomputeSplitStatus 写父订单 → 卡住
+            f = async(() -> put("/admin/deliveries/" + deliveryId,
+                    "{\"warehouseId\":" + warehouseB + ",\"version\":" + deliveryVersionBefore + "}"));
+            awaitRowLockWait();
+        } finally {
+            commitAndClose(hold);
+        }
+
+        JsonNode body = bodyOf(f);
+        failBody(body, 409);
+        System.out.printf("⑫ 父单重算冲突 → code=409 message=%s；包裹仓=%d（回滚），包裹 version=%d，父单 version=%d%n",
+                body.path("message").asText(), warehouseOf(deliveryId), versionOf("delivery_order", deliveryId),
+                versionOf("`order`", orderId));
+
+        assertThat(body.path("message").asText()).isEqualTo(MSG_CONFLICT);
+        assertThat(warehouseOf(deliveryId)).as("**关键：整笔回滚，包裹的仓不能被改动**").isEqualTo(warehouseA);
+        assertThat(versionOf("delivery_order", deliveryId))
+                .as("包裹 version 也不能被推进（事务回滚了）").isEqualTo(deliveryVersionBefore);
+        assertThat(versionOf("`order`", orderId))
+                .as("父单 version 只应有「别人那一次」的 +1").isEqualTo(orderVersionHeld);
+
+        // 刷新后重试 → 改仓成功，父单 split_status 被重算
+        ok(put("/admin/deliveries/" + deliveryId,
+                "{\"warehouseId\":" + warehouseB + ",\"version\":" + deliveryVersionBefore + "}"));
+        assertThat(warehouseOf(deliveryId)).isEqualTo(warehouseB);
+        assertThat(orderSplitStatus(orderId)).as("重算应当跑成功：还有未取消子单 → 1").isEqualTo(1);
+        System.out.printf("⑫ 重试 → 改仓成功：仓=%d，父单 split_status=%d%n",
+                warehouseOf(deliveryId), orderSplitStatus(orderId));
+    }
+
+    // ================================================================== ⑬ 明细被删（无 version 表）
+
+    @Test
+    @org.junit.jupiter.api.Order(13)
+    @DisplayName("⑬ delivery_item 无 version：明细被别人删了 → 409「发货明细已被删除」，不静默继续")
+    void deliveryItemDeleted_interleavedWrite_409() {
+        Long orderId = newOrder(8);
+        Long deliveryId = newDelivery(orderId, warehouseA, 2);
+        Long itemId = jdbc.queryForObject(
+                "SELECT id FROM delivery_item WHERE delivery_id = ? LIMIT 1", Long.class, deliveryId);
+        int deliveryVersion = versionOf("delivery_order", deliveryId);
+
+        // 别人把这条明细删了（不提交）→ 被测请求的 UPDATE delivery_item 会卡住，提交后影响 0 行
+        Connection hold = holdRow("DELETE FROM delivery_item WHERE id = ?", itemId);
+        Future<ResponseEntity<JsonNode>> f;
+        try {
+            f = async(() -> put("/admin/deliveries/" + deliveryId,
+                    "{\"version\":" + deliveryVersion + ",\"items\":[{\"deliveryItemId\":" + itemId
+                            + ",\"quantity\":1}]}"));
+            awaitRowLockWait();
+        } finally {
+            commitAndClose(hold);
+        }
+
+        JsonNode body = bodyOf(f);
+        failBody(body, 409);
+        System.out.printf("⑬ 明细被并发删除 → code=409 message=%s；剩余明细=%d，包裹 version=%d%n",
+                body.path("message").asText(), deliveryItemCount(deliveryId), versionOf("delivery_order", deliveryId));
+
+        assertThat(body.path("message").asText())
+                .as("delivery_item 没有 version 列，0 行的原因只能是「行被删了」，文案必须说准")
+                .isEqualTo(MSG_ITEM_DELETED);
+        assertThat(deliveryItemCount(deliveryId)).as("明细确实已经被删掉了（别人那次是真的）").isZero();
+        assertThat(versionOf("delivery_order", deliveryId))
+                .as("失败的事务不能推进包裹 version").isEqualTo(deliveryVersion);
+    }
+
+    // ================================================================== ⑭ HTTP 状态码
+
+    @Test
+    @org.junit.jupiter.api.Order(14)
+    @DisplayName("⑭ 409/400 是真 HTTP 状态码（不是 HTTP 200 + body.code），成功仍是 200")
+    void lockRejections_areRealHttpStatus() {
+        Long productId = newProduct("乐观锁商品-HTTP 状态码");
+        int v = versionOf("product", productId);
+
+        // 成功 → HTTP 200
+        ResponseEntity<JsonNode> success = put("/admin/products/" + productId, productBody("HTTP 成功", v));
+        assertThat(success.getStatusCode().value()).as("成功必须是 HTTP 200").isEqualTo(200);
+        assertThat(success.getBody().path("code").asInt()).isZero();
+
+        // 冲突（旧版本号）→ 真 HTTP 409（fail() 内部已断言状态码）
+        ResponseEntity<JsonNode> conflict = put("/admin/products/" + productId, productBody("冲突", v));
+        fail(conflict, 409);
+        System.out.printf("⑭ 商品冲突 → HTTP %d，body.code=%d，message=%s%n",
+                conflict.getStatusCode().value(), conflict.getBody().path("code").asInt(),
+                conflict.getBody().path("message").asText());
+
+        // 缺版本号 → 真 HTTP 400
+        ResponseEntity<JsonNode> missing = put("/admin/products/" + productId, productBody("没版本", null));
+        fail(missing, 400);
+        System.out.printf("⑭ 商品缺 version → HTTP %d，body.code=%d，message=%s%n",
+                missing.getStatusCode().value(), missing.getBody().path("code").asInt(),
+                missing.getBody().path("message").asText());
+
+        // 发货单编辑走的是 service 抛异常那条路，同样要是真 409
+        Long orderId = newOrder(8);
+        Long deliveryId = newDelivery(orderId, warehouseA, 1);
+        int deliveryVersion = versionOf("delivery_order", deliveryId);
+        ResponseEntity<JsonNode> deliveryConflict = put("/admin/deliveries/" + deliveryId,
+                deliveryBody(warehouseB, deliveryVersion + 99));
+        fail(deliveryConflict, 409);
+        System.out.printf("⑭ 发货单冲突 → HTTP %d，body.code=%d%n",
+                deliveryConflict.getStatusCode().value(), deliveryConflict.getBody().path("code").asInt());
+    }
+
     // ================================================================== 数据构造
 
     private Long newProduct(String name) {
@@ -368,6 +709,19 @@ class OptimisticLockIntegrationTest {
                 memberId, status, "乐观锁测试-原始收货人", "13700000000", "自动化测试地址（跑完即删）",
                 status == 8 ? 1 : 0);
         createdOrders.add(id);
+        return id;
+    }
+
+    /** 插一张带 1 条明细的订单（audit-pass 拆单的前提：订单要有明细，SKU 要有分仓库存） */
+    private Long newOrderWithItem(int status, int quantity) {
+        Long id = newOrder(status);
+        Long skuId = jdbc.queryForObject(
+                "SELECT sku_id FROM inventory GROUP BY sku_id HAVING MAX(stock) > 0 ORDER BY sku_id LIMIT 1",
+                Long.class);
+        jdbc.update("INSERT INTO order_item (order_id, product_id, product_sku_id, product_name, product_price, "
+                        + "product_quantity) VALUES (?, (SELECT product_id FROM sku WHERE id = ?), ?, "
+                        + "'并发窗口用例明细', 10.00, ?)",
+                id, skuId, skuId, quantity);
         return id;
     }
 
@@ -462,12 +816,114 @@ class OptimisticLockIntegrationTest {
         return jdbc.queryForObject("SELECT warehouse_id FROM delivery_order WHERE id = ?", Long.class, deliveryId);
     }
 
+    private int orderStatus(Long orderId) {
+        return jdbc.queryForObject("SELECT status FROM `order` WHERE id = ?", Integer.class, orderId);
+    }
+
+    private int orderSplitStatus(Long orderId) {
+        return jdbc.queryForObject("SELECT split_status FROM `order` WHERE id = ?", Integer.class, orderId);
+    }
+
+    private int deliveryStatus(Long deliveryId) {
+        return jdbc.queryForObject("SELECT status FROM delivery_order WHERE id = ?", Integer.class, deliveryId);
+    }
+
+    /** 该订单下有几张发货单 —— 「有没有多生成发货单」就靠它 */
+    private int deliveryCount(Long orderId) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM delivery_order WHERE order_id = ?", Integer.class, orderId);
+    }
+
+    private int deliveryItemCount(Long deliveryId) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM delivery_item WHERE delivery_id = ?", Integer.class, deliveryId);
+    }
+
+    private int logisticsCount(Long deliveryId) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM delivery_logistics WHERE delivery_id = ?",
+                Integer.class, deliveryId);
+    }
+
     private static JsonNode findById(JsonNode array, Long id) {
         assertThat(array.isArray()).as("期望数组，实际：%s", array).isTrue();
         for (JsonNode node : array) {
             if (node.path("id").asLong() == id) return node;
         }
         throw new AssertionError("列表里找不到 id=" + id + "： " + array);
+    }
+
+    // ------------------------------------------------------------------ 造并发窗口（确定性）
+
+    /*
+     * 「读 →（别人写）→ 写」这个窗口怎么**确定性**地造出来：
+     *
+     *   ① holdRow(...)：在一条独立连接上开事务，改掉目标行（version + 1 / 删一行）但**不提交** ——
+     *      行锁攥在手里。
+     *   ② 被测 HTTP 请求在另一个线程里发出：它读的时候用的是 MVCC 快照（看不到未提交的改动），
+     *      所以守卫、状态判断全部按「旧数据」通过；接着它自己的 UPDATE 要向这一行申请锁 → 卡住。
+     *   ③ awaitRowLockWait()：在 performance_schema.data_lock_waits 里确认「真的有人在等锁」，
+     *      说明被测请求已经读完、卡在 UPDATE 上了（这一步是关键 —— 有了它就不需要 sleep 赌时序）。
+     *   ④ commitAndClose()：别人提交。被测请求的 UPDATE 随即执行，
+     *      但 version 已经变了（或行已经没了）→ **影响 0 行** → 我们新加的检查抛 409。
+     */
+
+    /** 改掉一行并攥住行锁（不提交）。跑完必须 {@link #commitAndClose(Connection)} */
+    private Connection holdRow(String sql, Object... args) {
+        try {
+            Connection conn = dataSource.getConnection();
+            conn.setAutoCommit(false);
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                for (int i = 0; i < args.length; i++) ps.setObject(i + 1, args[i]);
+                assertThat(ps.executeUpdate()).as("造并发：这条 SQL 必须改到 1 行：%s", sql).isEqualTo(1);
+            }
+            return conn;
+        } catch (SQLException e) {
+            throw new IllegalStateException("造并发窗口失败：" + sql, e);
+        }
+    }
+
+    private static void commitAndClose(Connection conn) {
+        if (conn == null) return;
+        try {
+            conn.commit();
+        } catch (SQLException e) {
+            throw new IllegalStateException("提交「别人抢先的写」失败", e);
+        } finally {
+            try {
+                conn.close();
+            } catch (SQLException ignored) {
+                // 关连接失败不影响断言
+            }
+        }
+    }
+
+    /** 等到被测请求真的卡在行锁上（20s 内没等到就判定「窗口没造出来」，免得静默通过） */
+    private void awaitRowLockWait() {
+        long deadline = System.currentTimeMillis() + 20_000;
+        while (System.currentTimeMillis() < deadline) {
+            Integer waiting = jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM performance_schema.data_lock_waits", Integer.class);
+            if (waiting != null && waiting > 0) return;
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        throw new AssertionError("并发窗口没造出来：20s 内没观察到行锁等待（被测请求没进来，或者根本没写库）");
+    }
+
+    private <T> Future<T> async(Callable<T> task) {
+        return pool.submit(task);
+    }
+
+    private static JsonNode bodyOf(Future<ResponseEntity<JsonNode>> future) {
+        try {
+            ResponseEntity<JsonNode> resp = future.get(60, TimeUnit.SECONDS);
+            assertThat(resp.getBody()).as("并发请求必须有响应").isNotNull();
+            return resp.getBody();
+        } catch (Exception e) {
+            throw new IllegalStateException("等异步请求结果失败", e);
+        }
     }
 
     // ------------------------------------------------------------------ HTTP 辅助
@@ -480,9 +936,23 @@ class OptimisticLockIntegrationTest {
         return node.path("data");
     }
 
-    /** 指定 code 的失败断言，返回整个 body（含 message） */
+    /**
+     * 指定 code 的失败断言（**同时校验真实 HTTP 状态码**），返回整个 body（含 message）。
+     *
+     * <p>为什么 HTTP 状态码也要断言：如果只写 {@code return Result.fail(409, …)}，Spring 会包成
+     * HTTP 200 + body.code=409 —— 只看 HTTP 的调用方（curl 脚本/监控/网关日志/第三方）会把冲突记成成功。
+     * 所以这里要求两者一致。
+     */
     private JsonNode fail(ResponseEntity<JsonNode> resp, int expectedCode) {
-        JsonNode node = resp.getBody();
+        assertThat(resp.getStatusCode().value())
+                .as("必须是真 HTTP %d（不是 HTTP 200 + body.code=%d）：%s",
+                        expectedCode, expectedCode, resp.getBody())
+                .isEqualTo(expectedCode);
+        return failBody(resp.getBody(), expectedCode);
+    }
+
+    /** 同上，但直接给 body（并发用例里拿到的就是 body） */
+    private JsonNode failBody(JsonNode node, int expectedCode) {
         assertThat(node).isNotNull();
         assertThat(node.path("code").asInt()).as("期望 code=%d，实际：%s", expectedCode, node).isEqualTo(expectedCode);
         assertThat(node.path("message").asText()).as("被拒时必须有中文原因").isNotBlank();

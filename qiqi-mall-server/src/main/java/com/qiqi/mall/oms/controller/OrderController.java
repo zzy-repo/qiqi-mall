@@ -125,11 +125,10 @@ public class OrderController {
     public Result<Void> update(@PathVariable Long id, @RequestBody Order body) {
         body.setId(id);
         body.setStatus(null);
-        OptimisticLockGuard.LockError lockError = OptimisticLockGuard.checkVersion(body.getVersion());
-        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
+        // 缺版本号 → 真 HTTP 400；影响行数 0 → 真 HTTP 409（见 GlobalExceptionHandler）
+        OptimisticLockGuard.requireVersion(body.getVersion());
         int rows = orderService.getBaseMapper().updateById(body);
-        lockError = OptimisticLockGuard.checkAffected(rows);
-        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
+        OptimisticLockGuard.requireAffected(rows);
         return Result.ok();
     }
 
@@ -140,8 +139,12 @@ public class OrderController {
      * **① 订单存在 → ② 业务守卫（status==7）→ ③ 执行**；{@code ?dryRun=true} 时同样先过 ①②，
      * 再把「将要发生什么」用中文说清楚（{@code {willDo}}），不落库、不发凭证。
      *
-     * <p>并发：本接口不带客户端 {@code version}（改的是订单状态，走的是状态守卫这层闸门）；
-     * 通用编辑接口 {@code PUT /admin/orders/{id}} 才有 version 乐观锁。
+     * <p>并发：本接口不带客户端 {@code version}（改的是订单状态，走的是状态守卫这层闸门），
+     * 但**写回时校验影响行数**（{@code @Version} → {@code WHERE version = ?}）：0 行说明「读到 status=7
+     * 之后、写回之前」被别人改过（另一个审核员抢先审了 / 别的实例改了收货地址），
+     * 直接抛 {@code code=409「数据已被他人修改（可能其他人在编辑），请刷新后重试」}，
+     * 整个事务回滚 —— **不会出现「订单还是待审核、发货单却已经生成」**。
+     * 通用编辑接口 {@code PUT /admin/orders/{id}} 另有客户端 version 乐观锁。
      */
     @Operation(summary = "审核通过订单（自动拆单）：?dryRun=true 只预演，返回将要发生什么")
     @PostMapping("/{id}/audit-pass")
@@ -156,7 +159,11 @@ public class OrderController {
             return Result.ok(PreviewResult.of(auditPassWillDo(order, splitOrderService.preview(id))));
         }
         order.setStatus(8);
-        orderService.updateById(order);
+        // fail-closed：0 行说明「读到 status=7 之后、写回之前」别人改过这张订单
+        // （典型：另一个审核员已经审过并发货单已生成）。必须抛 409 让事务回滚，
+        // 绝不能往下走 split() —— 否则订单停在待审核、发货单却已生成，只能人工对账。
+        int rows = orderService.getBaseMapper().updateById(order);
+        OptimisticLockGuard.requireAffected(rows);
         return Result.ok(splitOrderService.split(id));
     }
 
@@ -212,7 +219,9 @@ public class OrderController {
             return Result.ok(PreviewResult.of(auditRejectWillDo(order, items)));
         }
         order.setStatus(4);
-        orderService.updateById(order);
+        // fail-closed：0 行 = 读到 status=7 之后别人改过 → 409 回滚，绝不回补库存
+        int rows = orderService.getBaseMapper().updateById(order);
+        OptimisticLockGuard.requireAffected(rows);
         items.forEach(item -> skuService.restoreStock(item.getProductSkuId(), item.getProductQuantity()));
         return Result.ok();
     }
@@ -243,7 +252,9 @@ public class OrderController {
             return Result.ok(PreviewResult.of(shipWillDo(order)));
         }
         order.setStatus(2);
-        orderService.updateById(order);
+        // fail-closed：0 行 = 读到 status=1 之后别人改过（另一个按钮/另一个实例已经发过货）→ 409 回滚
+        int rows = orderService.getBaseMapper().updateById(order);
+        OptimisticLockGuard.requireAffected(rows);
         return Result.ok(order);
     }
 

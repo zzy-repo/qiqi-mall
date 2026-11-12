@@ -8,6 +8,7 @@ import com.qiqi.mall.oms.entity.DeliveryOrder;
 import com.qiqi.mall.oms.entity.Warehouse;
 import com.qiqi.mall.oms.wms.MockWmsService;
 import com.qiqi.mall.order.entity.Order;
+import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -48,7 +49,11 @@ public class DeliveryFlowService {
 
     /**
      * 下发：守卫 仅待下发。
-     * 事务：WMS 调用 + 状态落库必须在同一个事务里 —— 否则状态改了、外呼失败就会留下「已下发但 WMS 不知道」的包裹。
+     * 事务：状态落库 + WMS 调用必须在同一个事务里 —— 否则状态改了、外呼失败就会留下「已下发但 WMS 不知道」的包裹。
+     *
+     * <p>**顺序：先落库（验影响行数）再外呼**。0 行 = 读到「待下发」之后别人改过这张包裹
+     * （另一个实例已经下发 / 有人把它取消了）→ 抛 409 回滚，而且**这次一次外呼都没发出去**。
+     * 反过来的顺序（先外呼再落库）在冲突回滚时 WMS 已经收到货单，那才是真的不一致。
      */
     @Transactional(rollbackFor = Exception.class)
     public DeliveryOrder dispatch(Long deliveryId) {
@@ -56,9 +61,10 @@ public class DeliveryFlowService {
         if (delivery.getStatus() != DeliveryOrder.PENDING) {
             throw new IllegalStateException("只有待下发发货单可以下发");
         }
-        wms.dispatch(delivery.getDeliverySn());
         delivery.setStatus(DeliveryOrder.DISPATCHED);
-        deliveryOrderService.updateById(delivery);
+        int rows = deliveryOrderService.getBaseMapper().updateById(delivery);
+        OptimisticLockGuard.requireAffected(rows);
+        wms.dispatch(delivery.getDeliverySn());
         return delivery;
     }
 
@@ -73,7 +79,9 @@ public class DeliveryFlowService {
             throw new IllegalStateException("只有待下发发货单可以取消");
         }
         delivery.setStatus(DeliveryOrder.CANCELLED);
-        deliveryOrderService.updateById(delivery);
+        // fail-closed：0 行 = 读到「待下发」之后别人改过 → 409 回滚，库存一次都不会被回补
+        int rows = deliveryOrderService.getBaseMapper().updateById(delivery);
+        OptimisticLockGuard.requireAffected(rows);
 
         deliveryItemService.list(new LambdaQueryWrapper<DeliveryItem>()
                         .eq(DeliveryItem::getDeliveryId, deliveryId))
@@ -119,7 +127,10 @@ public class DeliveryFlowService {
             }
             default -> throw new IllegalStateException("未知回传事件：" + event + "（支持 pick/outbound/transit/signed）");
         }
-        deliveryOrderService.updateById(delivery);
+        // fail-closed：0 行 = 读到当前状态之后别人改过（同一事件重复回传的另一路并发）→ 409 回滚，
+        // 状态机不会因为「后写的把先写的盖掉」而回退
+        int rows = deliveryOrderService.getBaseMapper().updateById(delivery);
+        OptimisticLockGuard.requireAffected(rows);
         recomputeOrderStatus(delivery.getOrderId());
         return delivery;
     }
@@ -283,7 +294,10 @@ public class DeliveryFlowService {
         } else {
             return;                        // 仍停留在待发货
         }
-        orderService.updateById(order);
+        // 父订单聚合也是写：0 行 = 读完之后别人改过这张订单 → 409 回滚整笔（子单状态一起回滚），
+        // 不允许「子单已出库、父单状态没跟上」这种半截状态悄悄提交
+        int rows = orderService.getBaseMapper().updateById(order);
+        OptimisticLockGuard.requireAffected(rows);
     }
 
     private void saveLogisticsIfAbsent(DeliveryOrder delivery) {

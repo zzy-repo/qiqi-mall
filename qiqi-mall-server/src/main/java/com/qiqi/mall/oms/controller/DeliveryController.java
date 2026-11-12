@@ -106,8 +106,10 @@ public class DeliveryController {
      *
      * <p>**校验顺序（严格，业务守卫绝不抢跑）**：
      * ① 存在性（发货单不存在 → code=1）
-     * → ② **version 乐观锁**：缺版本号 → {@code 400「缺少版本号，请刷新页面后重试」}；
-     *    与库里当前版本不一致（读之后被别人改过）→ {@code 409「数据已被他人修改（可能其他人在编辑），请刷新后重试」}
+     * → ② **version 乐观锁**：缺版本号 → {@code HTTP 400 + code=400「缺少版本号，请刷新页面后重试」}；
+     *    与库里当前版本不一致（读之后被别人改过）→
+     *    {@code HTTP 409 + code=409「数据已被他人修改（可能其他人在编辑），请刷新后重试」}
+     *    （HTTP 状态码与 body.code 一致，见 {@code GlobalExceptionHandler}）
      * → ③ 业务守卫（status=0，service 层）。
      *
      * <p>为什么 version 必须排在业务守卫之前：两者说的是不同的事 —— 409 是「期间被别人改过」，
@@ -127,10 +129,9 @@ public class DeliveryController {
         DeliveryOrder current = deliveryOrderService.getById(id);
         if (current == null) return Result.fail("发货单不存在：" + id);
         // ② 乐观锁：缺版本号 → 400；版本对不上 → 409（都必须在业务守卫之前）
-        OptimisticLockGuard.LockError lockError = OptimisticLockGuard.checkVersion(body.getVersion());
-        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
-        lockError = OptimisticLockGuard.checkSameVersion(body.getVersion(), current.getVersion());
-        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
+        // 缺版本号 → 真 HTTP 400；与库里版本不一致 → 真 HTTP 409（见 GlobalExceptionHandler）
+        OptimisticLockGuard.requireVersion(body.getVersion());
+        OptimisticLockGuard.requireSameVersion(body.getVersion(), current.getVersion());
         // ③ 业务守卫（service 里的 requirePending）+ 落库
         return Result.ok(deliveryEditService.update(id, body.getWarehouseId(), body.getItems()));
     }

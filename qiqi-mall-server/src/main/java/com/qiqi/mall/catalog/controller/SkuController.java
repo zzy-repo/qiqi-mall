@@ -107,11 +107,10 @@ public class SkuController {
         Sku sku = request.getSku();
         if (sku == null) return Result.fail("缺少 SKU 数据");
         sku.setId(id);
-        OptimisticLockGuard.LockError lockError = OptimisticLockGuard.checkVersion(sku.getVersion());
-        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
+        // 缺版本号 → 真 HTTP 400；影响行数 0 → 真 HTTP 409（见 GlobalExceptionHandler）
+        OptimisticLockGuard.requireVersion(sku.getVersion());
         int rows = skuService.getBaseMapper().updateById(sku);
-        lockError = OptimisticLockGuard.checkAffected(rows);
-        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
+        OptimisticLockGuard.requireAffected(rows);
         if (request.getSpecs() != null) {
             // 整组替换规格值
             skuSpecService.remove(new LambdaQueryWrapper<SkuSpec>().eq(SkuSpec::getSkuId, id));

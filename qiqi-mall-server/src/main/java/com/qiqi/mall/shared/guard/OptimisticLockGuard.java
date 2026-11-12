@@ -17,19 +17,17 @@ package com.qiqi.mall.shared.guard;
  * </ul>
  * 409 是项目里唯一非 0/1 的业务 code（沿用 HTTP 语义），前端据此弹「刷新」对话框。
  *
- * <p>两种用法：
+ * <p>**统一用法：抛异常**（`requireXxx`）。异常带 code，由
+ * {@code GlobalExceptionHandler} 映射成**真 HTTP 400 / 409**，body 里同时带 {@code code}：
  * <pre>
- * // ① 显式返回（controller 里最直观）
- * OptimisticLockGuard.LockError err = OptimisticLockGuard.checkVersion(body.getVersion());
- * if (err != null) return Result.fail(err.code(), err.message());
- * int rows = service.getBaseMapper().updateById(entity);
- * err = OptimisticLockGuard.checkAffected(rows);
- * if (err != null) return Result.fail(err.code(), err.message());
- *
- * // ② 抛异常（在 service 内部、拿不到返回值的分支用；由 GlobalExceptionHandler 统一映射成 400/409）
- * OptimisticLockGuard.requireVersion(version);
- * OptimisticLockGuard.requireAffected(rows);
+ * OptimisticLockGuard.requireVersion(body.getVersion());                  // 缺 → HTTP 400
+ * int rows = service.getBaseMapper().updateById(entity);                  // 必须用 baseMapper 拿行数
+ * OptimisticLockGuard.requireAffected(rows);                              // 0 行 → HTTP 409
  * </pre>
+ *
+ * <p>不要写成 {@code return Result.fail(err.code(), msg)}：那样 Spring 会包成 <b>HTTP 200</b>，
+ * 只有 body 里说失败 —— mcp-server 之外的调用方（curl 脚本、监控、网关日志、第三方）会把冲突记成成功。
+ * 所以 {@code checkXxx}（返回 {@code LockError}、不抛）只保留给确实需要自己拼响应体的场景。
  */
 public final class OptimisticLockGuard {
 
@@ -40,6 +38,15 @@ public final class OptimisticLockGuard {
 
     public static final String MSG_MISSING_VERSION = "缺少版本号，请刷新页面后重试";
     public static final String MSG_VERSION_CONFLICT = "数据已被他人修改（可能其他人在编辑），请刷新后重试";
+
+    /**
+     * 「记录已经没了」：给**没有 version 列**的表用（delivery_item 等 5 张热表之外的子表）。
+     *
+     * <p>这些表 {@code updateById} 不会带 {@code AND version = ?}，影响行数 0 不可能是
+     * 「版本冲突」，只可能是「这条记录在我们读取之后被别人删了」—— 同样必须 fail-closed
+     * （继续往下执行等于往一条不存在的明细上记账），只是原因和文案不同。
+     */
+    public static final String MSG_DELIVERY_ITEM_DELETED = "发货明细已被删除，请刷新后重试";
 
     private OptimisticLockGuard() {
     }
@@ -52,6 +59,16 @@ public final class OptimisticLockGuard {
     /** 校验 UPDATE 影响行数：0 → 409 错误；>0 → null（可以继续） */
     public static LockError checkAffected(int rows) {
         return rows == 0 ? new LockError(CODE_VERSION_CONFLICT, MSG_VERSION_CONFLICT) : null;
+    }
+
+    /**
+     * 校验 UPDATE 影响行数（自定义文案）：0 → 409 + {@code message}；>0 → null。
+     *
+     * <p>用在哪：**没有 version 列**的表（如 {@code delivery_item}）或影响行数 0 的原因不是版本冲突时
+     * —— 错误码仍是 409（前端据此弹「刷新」对话框），只是把原因说准：「记录被删了」而不是「被人改了」。
+     */
+    public static LockError checkAffected(int rows, String message) {
+        return rows == 0 ? new LockError(CODE_VERSION_CONFLICT, message) : null;
     }
 
     /** 直接比对「读到的版本 vs 客户端版本」（服务层在跑 updateById 之前先拦一道） */
@@ -69,6 +86,12 @@ public final class OptimisticLockGuard {
     /** 抛异常版：影响行数 0 → 409 */
     public static void requireAffected(int rows) {
         LockError error = checkAffected(rows);
+        if (error != null) throw new LockException(error.code(), error.message());
+    }
+
+    /** 抛异常版：影响行数 0 → 409 + 自定义文案（无 version 列的表用，见 {@link #MSG_DELIVERY_ITEM_DELETED}） */
+    public static void requireAffected(int rows, String message) {
+        LockError error = checkAffected(rows, message);
         if (error != null) throw new LockException(error.code(), error.message());
     }
 

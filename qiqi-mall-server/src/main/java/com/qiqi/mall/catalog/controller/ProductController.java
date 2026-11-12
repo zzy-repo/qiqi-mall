@@ -80,13 +80,12 @@ public class ProductController {
         Product product = request.getProduct();
         if (product == null) return Result.fail("缺少商品数据");
         product.setId(id);
-        // ① 缺版本号直接拒（绝不静默降级成「无版本校验」）
-        OptimisticLockGuard.LockError lockError = OptimisticLockGuard.checkVersion(product.getVersion());
-        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
+        // ① 缺版本号直接拒（绝不静默降级成「无版本校验」）—— 抛 LockException，由
+        //    GlobalExceptionHandler 变成**真 HTTP 400** + body.code=400（只写 return Result.fail 会是 HTTP 200）
+        OptimisticLockGuard.requireVersion(product.getVersion());
         // ② 走 baseMapper 拿**影响行数**（service.updateById 只回 boolean，区分不了 0 行）
         int rows = productService.getBaseMapper().updateById(product);
-        lockError = OptimisticLockGuard.checkAffected(rows);
-        if (lockError != null) return Result.fail(lockError.code(), lockError.message());
+        OptimisticLockGuard.requireAffected(rows);        // 0 行 → 真 HTTP 409 + body.code=409
         if (request.getGallery() != null) {
             // 整组替换相册
             productGalleryService.remove(new LambdaQueryWrapper<ProductGallery>()

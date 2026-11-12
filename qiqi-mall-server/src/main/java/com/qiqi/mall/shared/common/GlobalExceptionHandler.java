@@ -27,16 +27,28 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * 乐观锁校验失败：**原样透出 400 / 409 业务码**（缺版本号 / 版本冲突）。
+     * 乐观锁校验失败：**透出 400 / 409 业务码，并且是真 HTTP 状态码**（不是 200 + body 里的 code）。
      *
-     * <p>为什么单列一条：{@link #handle(Exception)} 会把一切压成 code=1，
-     * 而前端要靠 409 识别「别人改过了，弹刷新对话框」，压成 1 就退化成普通报错了。
-     * 日志按 warn 打（这是正常的并发结果，不是故障），不打印堆栈免得刷屏。
+     * <p>两道都要有，缺一不可：
+     * <ul>
+     *   <li>body 里带 {@code code=400/409} —— 前端 admin-web 读的是 body.code，据此弹「刷新后重试」对话框；</li>
+     *   <li>**HTTP 状态码也是 400/409** —— 只看 HTTP 的调用方（mcp-server 之外的 curl 脚本、监控、网关/nginx 日志、
+     *       将来接入的第三方）才不会被「200 但 body 说失败」骗过去，把冲突记成成功。</li>
+     * </ul>
+     * 之前这里返回的是裸 {@code Result}，Spring 会包成 HTTP 200 —— 冲突在传输层和成功长得一模一样，属于同一类
+     * 「静默失败」。改成 {@link ResponseEntity} 后就对得上了：HTTP 语义与 body 语义一致。
+     *
+     * <p>日志按 warn 打（这是正常的并发结果，不是故障），不打印堆栈免得刷屏。
      */
     @ExceptionHandler(OptimisticLockGuard.LockException.class)
-    public Result<Void> handleOptimisticLock(OptimisticLockGuard.LockException e) {
+    public ResponseEntity<Result<Void>> handleOptimisticLock(OptimisticLockGuard.LockException e) {
         log.warn("乐观锁校验未通过 code={} message={}", e.getCode(), e.getMessage());
-        return Result.fail(e.getCode(), e.getMessage());
+        HttpStatus status = HttpStatus.resolve(e.getCode());
+        if (status == null || !status.isError()) {
+            // 约定只有 400/409 走这里；拿到别的码就当普通失败（不猜 HTTP 语义）
+            status = HttpStatus.BAD_REQUEST;
+        }
+        return ResponseEntity.status(status).body(Result.fail(e.getCode(), e.getMessage()));
     }
 
     /**
