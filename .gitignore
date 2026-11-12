@@ -13,3 +13,11 @@ docs/面试准备.md
 
 # docs 整体不入库（本地维护）
 docs/
+
+# CDN 证书签发工具（只保留脚本本体，venv/证书/私钥/日志一律不入库）
+scripts/cdn-converge/*
+!scripts/cdn-converge/ali.py
+!scripts/cdn-converge/deploy_cdn.py
+!scripts/cdn-converge/dns_hook.py
+!scripts/cdn-converge/renew.sh
+!scripts/cdn-converge/RUNBOOK.txt

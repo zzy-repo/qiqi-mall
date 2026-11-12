@@ -1,0 +1,141 @@
+阿里云 CDN 收敛工具 RUNBOOK（cdn.rose7.cn / docs.rose7.cn）
+================================================================
+纯运维说明，无外部依赖文档。最后更新：2026-11-12
+
+一、这一堆文件是干什么的
+----------------------------------------------------------------
+ali.py         阿里云 SDK 客户端封装（读 /root/.aliyun-qiqi/credentials.env 的
+               ALI_AK / ALI_SK，内置 redact，保证 AK/SK 不会打印到 stdout/日志）
+dns_hook.py    certbot 的 DNS-01 钩子。用阿里云 DNS API 自动增删
+               _acme-challenge.<domain> 的 TXT 记录，验证完自动清理。
+               校验传播时优先查权威 NS（dns9/dns10.hichina.com），因为 223.5.5.5
+               会缓存上一次的 negative 应答，导致重复验证时白等几分钟。
+deploy_cdn.py  把 letsencrypt/live/cdn.rose7.cn/ 下的证书推到两个 CDN 域名
+               （SetCdnDomainSSLCertificate，CertType=upload，SSLProtocol=on）
+renew.sh       cron 入口，certbot renew + deploy hook，只在续期窗口内动作
+
+目录里其余内容（不入库，也不要在迁移时丢）：
+.venv/         装了 certbot 5.10.0 的虚拟环境（系统 pip 受 PEP668 限制装不了）
+letsencrypt/   证书、ACME 账号私钥、续期配置（renewal/cdn.rose7.cn.conf）
+le-work/       certbot 工作目录
+le-logs/       certbot 日志
+
+迁移/重建本机时必须一起带走的：上面四项 + 本目录 4 个 .py/.sh。
+只带脚本不带 letsencrypt/ 也行，但会重新注册 ACME 账号并重签证书。
+
+二、证书现状
+----------------------------------------------------------------
+签发方式：ACME DNS-01（Let's Encrypt），非阿里云 CAS。原因见第三节。
+证书内容：一张双 SAN 证书，CN=cdn.rose7.cn，
+          SAN = cdn.rose7.cn, docs.rose7.cn
+有效期：  2026-11-12 -> 2027-02-10（ECDSA，中间证书 YE1）
+绑定情况：cdn.rose7.cn 和 docs.rose7.cn 两个 CDN 域名共用这一张。
+
+为什么不用阿里云免费证书：本 RAM 用户 dsh 对 CAS 整个产品 403
+（ListUserCertificateOrder / DescribeCertificateState / ListCloudResources
+全返回 NoPermission）。这不是"免费额度不足"，是 RAM 策略里根本没给 cas。
+API 路径在申请环节之前就断了，任何 CAS 调用都会 403。
+
+要改用阿里云品牌证书时的控制台路径（三步，需主线决策后再做）：
+1) 授权：RAM 控制台 -> 身份管理 -> 用户 -> 点 dsh -> 权限管理 -> 新增授权
+   -> 搜 AliyunYundunCertFullAccess -> 确定
+2) 申请：数字证书管理服务控制台（yundun.console.aliyun.com/?p=cas）
+   -> 左侧「证书管理 -> 免费证书」页签 -> 创建证书 -> 填 cdn.rose7.cn
+   -> 选 DNS 验证 -> 提交审核
+3) 绑定：CDN 控制台（cdn.console.aliyun.com）-> 域名管理 -> 点域名
+   -> HTTPS 配置 -> 证书 -> 修改配置 -> 选该证书 -> 开启 HTTPS
+
+三、续期（90 天有效期，必须保证 cron 活着）
+----------------------------------------------------------------
+cron 行（root crontab，已安装）：
+    17 3 * * * /root/qiqi-mall/scripts/cdn-converge/renew.sh >> /root/qiqi-mall/scripts/cdn-converge/renew.log 2>&1
+
+certbot 只在到期前 30 天内真正续期，每天跑一次是廉价的 no-op。
+演练命令（不会真签，会走一遍 staging 全流程）：
+    cd /root/qiqi-mall/scripts/cdn-converge
+    .venv/bin/certbot renew --dry-run --config-dir ./letsencrypt \
+        --work-dir ./le-work --logs-dir ./le-logs
+2026-11-12 实测输出：all simulated renewals succeeded
+手动补推证书（换了 DNS 供应商、或怀疑 CDN 上证书旧了）：
+    python3 /root/qiqi-mall/scripts/cdn-converge/deploy_cdn.py
+单点风险：续期依赖本机 cron。本机迁移/重建后必须补回 cron 行，
+并跑一次 deploy_cdn.py 自检。
+
+四、私有 Bucket 回源（最容易踩的坑，务必按原样保留）
+----------------------------------------------------------------
+三个 bucket 全是 private。CDN 取私有 bucket 内容必须带签名，开关是
+CDN 域名配置函数 l2_oss_key，缺了它 OSS 会报
+    AccessDenied / Anonymous user has no right to access this bucket
+注意此时响应头里 x-oss-cdn-auth 仍然是 success，很容易误判成"鉴权没问题"。
+
+正确配置（两个域名都要有）：
+    functionName = l2_oss_key
+    private_oss_auth = on
+    aliyun_id        = 1667553312751136
+    （不要传 private_oss_ram_unauthorized，API 会报
+      InvalidArgName.ValueNotSupported，那是只读字段）
+
+排查用的判据：curl -I 之后看 x-oss-cdn-auth 与 HTTP 码
+    x-oss-cdn-auth: success + 200  -> 回源鉴权正常
+    x-oss-cdn-auth: success + 403 且 body 说 Anonymous user ->
+        就是缺 l2_oss_key（或该域名被单独关掉了 private_oss_auth）
+
+RAM 服务关联角色 AliyunCDNAccessingOSSRole 已经存在且账号级生效，
+不需要任何人工授权。判断依据：cdn.rose7.cn 在本轮改动之前就能以
+x-oss-cdn-auth: success 从 private bucket qiqi-mall-static 取到 200。
+（顺带：ram:GetRole / ram:ListRoles 对 dsh 是 403，所以只能从行为反证。）
+
+五、两条 URL 改写，只留 docs 那条（别搞反）
+----------------------------------------------------------------
+docs.rose7.cn 的 ^/$ -> /index.html  【必须保留】
+    qiqi-mall-docs bucket 根目录有 index.html，但 CDN 请求 / 时 OSS 会当成
+    ListObjects，对私有 bucket 直接 403。这条改写让它落到真实对象上。
+    删掉这条，https://docs.rose7.cn/ 立刻变 403。
+
+cdn.rose7.cn 的 ^/$ -> /docs/index.html  【已于 2026-11-12 删除】
+    cdn.rose7.cn 的定位是商品图 + 静态资源，根路径不需要页面。
+    原先那条改写会让根路径返回文档站的 "Project Notes" 页，与定位矛盾，已删。
+    删除后根路径实测返回 403 Forbidden（Tengine 直接回，因为回源到私有 bucket
+    根等于 ListObjects，OSS 拒绝）。属预期，不是故障——cdn.rose7.cn 不需要首页。
+
+六、缓存规则（两个域名一致）
+----------------------------------------------------------------
+html, htm, md                                   -> TTL 0（不缓存）
+svg png jpg jpeg webp gif css js woff2 mp4      -> TTL 2592000（30 天）
+gzip / brotli                                   -> 均开启
+
+重要：不要给 "/" 加 path_based_ttl_set 目录规则！
+    目录规则是前缀匹配，path="/" 会命中所有 URL，把上面图片/JS/CSS 的
+    30 天缓存全部打成 0，等于把 CDN 缓存废掉。这是本轮刻意没做的事，
+    不是漏配。
+    "/" 现在本来就是 Cache-Control: no-cache（无后缀路径 + 源站无缓存头，
+    CDN 默认不缓存），已经满足"根路径不缓存"的要求，无需任何额外规则。
+
+实测判据（改动后自检）：
+    curl -sSI https://cdn.rose7.cn/qiqi-mall/products/2026/11/xxx.webp
+        -> Cache-Control: public, max-age=2592000，二次请求 X-Cache: HIT
+    curl -sSI https://cdn.rose7.cn/docs/index.html
+        -> Cache-Control: no-cache
+    curl -sS -H "Accept-Encoding: gzip" -D - -o /dev/null \
+        https://docs.rose7.cn/_vendor/theme-simple.css
+        -> Content-Encoding: gzip（换 br 头则返回 Content-Encoding: br）
+
+七、DNS 现状（rose7.cn 托管在阿里云）
+----------------------------------------------------------------
+cdn.rose7.cn    CNAME  cdn.rose7.cn.w.kunlunaq.com
+docs.rose7.cn   CNAME  docs.rose7.cn.w.kunlunaq.com   （显式记录，优先于泛解析）
+*               A      182.92.157.214                  【绝对不许删】
+verification    TXT    （域名归属校验）
+* 这条 A 承载 mall.rose7.cn / admin.rose7.cn 等 ECS 站点，删了这两个站就没了。
+img.rose7.cn 没有独立 DNS 记录（CDN 域名已删除，现在回落 * 泛解析到 ECS），
+也不需要补记录——它的 CDN 加速域名已经删掉，没有别名残留。
+
+八、边界（改之前先看这节）
+----------------------------------------------------------------
+- OSS bucket 内容与 ACL 不归本工具管。qiqi-mall-img 是按决策保留的回滚副本
+  （内容已逐字节复制到 qiqi-mall-static/qiqi-mall/），不要清空、不要删。
+- ECS（182.92.157.214）上的 Caddyfile 不归本工具管。docs.rose7.cn 上还留着
+  一个占位 handle，DNS 指向 CDN 后它收不到流量；Caddy 若用 HTTP-01 为该主机名
+  续期会失败，需由 Caddy 负责人删掉该 site block，并确认 *.rose7.cn 通配证书
+  走的是 DNS-01。
+- 本工具只碰 CDN / DNS / 证书，不碰 OSS 对象、不碰 ECS 配置。
