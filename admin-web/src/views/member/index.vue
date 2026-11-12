@@ -17,11 +17,18 @@
         </template>
       </el-table-column>
       <el-table-column prop="createTime" label="注册时间" width="180" />
-      <el-table-column label="操作" width="180" fixed="right">
+      <el-table-column label="操作" width="250" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" data-testid="member-row-addresses" @click="openAddresses(row)">收货地址</el-button>
           <el-button link type="primary" size="small" data-testid="member-row-carts" @click="openCarts(row)">购物车</el-button>
           <el-button link type="primary" size="small" data-testid="member-row-edit" @click="openForm(row)">编辑</el-button>
+          <el-button
+            link
+            type="danger"
+            size="small"
+            :data-testid="`member-row-delete-${row.id}`"
+            @click="remove(row)"
+          >删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -54,9 +61,12 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { listMembers, createMember, updateMember } from '../../api/member'
+import { listMembers, createMember, updateMember, deleteMember } from '../../api/member'
+import { useDangerConfirm } from '../../composables/useDangerConfirm'
 
 const router = useRouter()
+/** 删除会员（高危）：预演 → 确认 → 执行（弹窗全站单例，见 layout/index.vue） */
+const danger = useDangerConfirm()
 
 const list = ref([])
 const loading = ref(false)
@@ -105,6 +115,84 @@ const submit = async () => {
   } finally {
     saving.value = false
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * 删除会员（高危）
+ *
+ * 背景：后端 `DELETE /admin/members/{id}` 一直存在，MCP 的 member(action) 也早就有
+ * delete —— 也就是说「AI 能删会员，人在界面上却不能」，这是反向的权限不对称
+ * （人应该是这个系统的主体，至少不能比 AI 少一项能力）。这里把这个缺口补齐。
+ *
+ * 危险确认接法：`useDangerConfirm().run({ dryRun, exec, onSuccess, onError, ... })`，
+ * 与全站另外 13 个高危操作完全同一套（弹窗渲染在 layout 里的单例 DangerConfirmDialog）。
+ * 但会员删除**后端没有 dryRun 预演接口**（纯 DELETE，没有 ?dryRun=true 分支），
+ * 而 run() 只要求 dryRun 是「返回 Promise<{ willDo, details? }> 的函数」，并不要求它真发请求，
+ * 所以这里传一个**本地构造**的预演：用行数据 + 已知的级联/拒绝规则拼出「将要发生什么」。
+ * 不硬套一个不存在的后端预演，也不因此绕开确认 —— 该说清的后果一样说清。
+ * ------------------------------------------------------------------ */
+
+/** 会员在界面上的称呼：昵称优先，其次登录名，最后退化成 id（都不会是空白） */
+const memberLabel = (row) => row.nickname || row.username || `#${row.id}`
+
+/**
+ * 后端「数据层拒绝」的通用兜底文案（GlobalExceptionHandler 的 DataAccessException 分支）。
+ *
+ * 会员删除唯一常见的触发原因就是名下有订单：`member_address` / `cart` 的外键是
+ * ON DELETE CASCADE（会一并删掉），但 `fk_order_member` **没有**级联，
+ * 于是 DELETE 被数据库拒绝，异常处理器回一句「数据处理失败，请稍后重试」。
+ * 这句话对用户等于什么都没说，必须翻成能照着做的动作。
+ */
+const DB_GENERIC_FAILURE =
+  /数据处理失败|IntegrityConstraintViolation|Cannot delete or update a parent row|foreign key constraint/i
+
+/** 把删除失败的原因翻成人话（非通用兜底文案原样透出，不加工） */
+const humanizeDeleteError = (e) => {
+  const raw = typeof e?.message === 'string' ? e.message.trim() : ''
+  if (!raw) return '删除失败，请稍后重试；也可以改为禁用（status=0）'
+  if (DB_GENERIC_FAILURE.test(raw)) return '该会员名下有订单，无法删除；可改为禁用（status=0）'
+  return raw
+}
+
+/** 本地构造的「预演」：没有后端 dryRun，就把这条记录上确定的信息与后果说清楚 */
+const localDryRun = (row) => async () => ({
+  willDo:
+    `确认删除会员「${memberLabel(row)}」？该会员的收货地址与购物车会一并删除；` +
+    '若其名下有订单则会被拒绝。删除后不可恢复。'
+})
+
+/**
+ * 弹窗「明细」区：把「要删的是哪一个」摊开（登录名 / 状态 / 注册时间），全部取自行数据。
+ * 注意 run() 的 details 是**函数选项**（(preview) => [{label,value}]），不是 dryRun 返回值里的字段 ——
+ * 早先把它塞进 dryRun 的返回对象里，弹窗明细区就直接空了。
+ */
+const memberDetails = (row) => () => [
+  { label: '登录名', value: row.username || '（空）' },
+  { label: '当前状态', value: row.status ? '启用' : '禁用' },
+  { label: '注册时间', value: row.createTime || '（未知）' }
+]
+
+/**
+ * 删除会员：危险确认 → 执行 → 成功则刷新列表（成功提示由 run() 按 successText 弹出）。
+ *
+ * onError 返回 false = **不收起弹窗**：把翻好的人话留在弹窗里（dangerState.error），
+ * 用户能看着原因决定下一步（改成禁用 / 先去处理订单），而不是被一条 2 秒就消失的 toast 打发。
+ */
+const remove = async (row) => {
+  await danger.run({
+    title: `⚠️ 确认删除会员「${memberLabel(row)}」`,
+    confirmText: '确认删除',
+    successText: '已删除',
+    dryRun: localDryRun(row),
+    details: memberDetails(row),
+    exec: () => deleteMember(row.id),
+    onSuccess: () => load(),
+    onError: (e) => {
+      const human = humanizeDeleteError(e)
+      if (human !== (typeof e?.message === 'string' ? e.message.trim() : '')) e.message = human
+      return false
+    }
+  })
 }
 
 onMounted(load)
