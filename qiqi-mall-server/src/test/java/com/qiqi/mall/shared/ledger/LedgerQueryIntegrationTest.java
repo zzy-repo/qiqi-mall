@@ -257,21 +257,34 @@ class LedgerQueryIntegrationTest {
     // ------------------------------------------------------------------ ⑤ AI 密钥访问
 
     @Test
-    @DisplayName("⑤ 新前缀没有登记进 ApiKeyAuthFilter → 带全权限 API Key 也只能拿到 403（fail-closed）")
-    void apiKey_isDeniedByDefault() {
-        String scopes = "[\"order:read\",\"order:write\",\"catalog:read\",\"catalog:write\","
+    @DisplayName("⑤ 台账只读域登记后：老 key（无 ledger:read）仍 403；补上 ledger:read 才可读")
+    void apiKey_needsLedgerReadScope() {
+        // ① 老 key（只有 order/catalog/member/config/dashboard 的老 scope）：/admin/ledgers 仍然 403
+        String legacyScopes = "[\"order:read\",\"order:write\",\"catalog:read\",\"catalog:write\","
                 + "\"member:read\",\"member:write\",\"config:read\",\"config:write\",\"dashboard:read\"]";
         ResponseEntity<JsonNode> created = call(HttpMethod.POST, "/admin/api-keys",
-                "{\"name\":\"台账越权测试\",\"scopes\":" + scopes + "}", null, adminJwt);
+                "{\"name\":\"台账越权测试\",\"scopes\":" + legacyScopes + "}", null, adminJwt);
         JsonNode keyData = created.getBody().path("data");
         createdApiKeyIds.add(keyData.path("id").asLong());
         String plaintext = keyData.path("key").asText();
 
         ResponseEntity<JsonNode> denied = call(HttpMethod.GET, "/admin/ledgers?page=1&size=1", null, plaintext, null);
-        System.out.println("⑤ 带全权限 key 调 /admin/ledgers → HTTP " + denied.getStatusCode().value()
+        System.out.println("⑤-a 老 key 调 /admin/ledgers → HTTP " + denied.getStatusCode().value()
                 + "，body.message=" + denied.getBody().path("message").asText());
-        assertThat(denied.getStatusCode().value()).as("未登记的 admin 前缀对 AI 一律 403").isEqualTo(403);
-        assertThat(denied.getBody().path("message").asText()).contains("无权访问");
+        assertThat(denied.getStatusCode().value())
+                .as("台账是独立只读域：没有 ledger:read 的 key 一律 403").isEqualTo(403);
+        assertThat(denied.getBody().path("message").asText()).contains("ledger:read");
+
+        // ② 显式授予 ledger:read 的 key 才能读（只读域，且台账没有任何写接口）
+        ResponseEntity<JsonNode> created2 = call(HttpMethod.POST, "/admin/api-keys",
+                "{\"name\":\"台账只读\",\"scopes\":[\"ledger:read\"]}", null, adminJwt);
+        JsonNode keyData2 = created2.getBody().path("data");
+        createdApiKeyIds.add(keyData2.path("id").asLong());
+        String plaintext2 = keyData2.path("key").asText();
+        ResponseEntity<JsonNode> allowed = call(HttpMethod.GET, "/admin/ledgers?page=1&size=1", null, plaintext2, null);
+        System.out.println("⑤-b 只带 ledger:read 的 key 调 /admin/ledgers → HTTP " + allowed.getStatusCode().value());
+        assertThat(allowed.getStatusCode().value()).isEqualTo(200);
+        assertThat(allowed.getBody().path("code").asInt()).isZero();
     }
 
     // ------------------------------------------------------------------ ⑥ 删包裹后仍能按订单反查

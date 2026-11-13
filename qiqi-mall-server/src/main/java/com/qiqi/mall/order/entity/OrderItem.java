@@ -29,4 +29,7 @@ public class OrderItem {
     private BigDecimal productPrice;
 
     private Integer productQuantity;
+
+    /** 下单时成本价快照；0/null = 未维护成本（→ COST_MISSING） */
+    private BigDecimal costPrice;
 }

@@ -52,6 +52,31 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
     /** 前缀 → 读权限 / 写权限（GET、HEAD 视为读，其余视为写） */
     private record Rule(String prefix, String readScope, String writeScope) {}
 
+    /**
+     * 「永不授予」的写 scope：<b>刻意不放进</b> {@link AiApiKeyService#ALL_SCOPES}。
+     *
+     * <p>为什么需要它：过滤器只能按**路径前缀**匹配，不能按方法区分；而
+     * {@code /admin/order-audit/**} 下同时有读（queue / runs / trail）与写（run / freeze / unfreeze）。
+     * 若整段登记成 {@code audit:read}，一个只读 key 发 POST 也会通过 —— 那就等于
+     * 「AI 能触发审核、能解冻订单」，直接违反「AI 只能读不能改」。
+     *
+     * <p>解法：读方法要 {@code audit:read}（可授予），写方法要 {@code audit:write}（**任何 key 都拿不到**，
+     * 因为它不在 ALL_SCOPES 里）⇒ 写操作对 API Key 天然 fail-closed，人工 JWT 完全不受影响。
+     * 这条不需要改过滤器、也不需要把路径再拆一层。
+     *
+     * <p>{@link #unGrantableWriteScopes()} 供单测把「这些 scope 一旦被加进 ALL_SCOPES 就立刻红」
+     * 钉死 —— 因为那一步会把「AI 不能解冻」悄悄打开。
+     */
+    private static final String NO_WRITE_LEDGER = "ledger:write";
+    private static final String NO_WRITE_STOCK = "stock:write";
+    private static final String NO_WRITE_AUDIT = "audit:write";
+    private static final String NO_WRITE_CHANNEL = "channel:write";
+
+    /** 只读规则用的写 scope（单测据此断言它们永不可授予） */
+    public static List<String> unGrantableWriteScopes() {
+        return List.of(NO_WRITE_LEDGER, NO_WRITE_STOCK, NO_WRITE_AUDIT, NO_WRITE_CHANNEL);
+    }
+
     /** 管理端映射（严格按需求单，不按接口细化） */
     private static final List<Rule> ADMIN_RULES = sortByLongestPrefix(List.of(
             // 订单域：订单 / 发货单 / 退货（退货申请接口实际路径是 /admin/return-applies，"returns" 一并兜住）
@@ -72,6 +97,20 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
             new Rule("/admin/members", "member:read", "member:write"),
             new Rule("/admin/carts", "member:read", "member:write"),
             new Rule("/admin/member-addresses", "member:read", "member:write"),
+            // 自动审核域（三档全部**只读**，写 scope 见 NO_WRITE_* 说明）
+            new Rule("/admin/audit-policies", "audit:read", NO_WRITE_AUDIT),
+            new Rule("/admin/order-audit", "audit:read", NO_WRITE_AUDIT),
+            new Rule("/admin/audit-runs", "audit:read", NO_WRITE_AUDIT),
+            // 证据与库存：只读域（台账只追加、库存是扣减裁决，都不该由 AI 改）
+            new Rule("/admin/ledgers", "ledger:read", NO_WRITE_LEDGER),
+            new Rule("/admin/inventory", "stock:read", NO_WRITE_STOCK),
+            // 多平台接入域：店铺与同步日志**只读**（AI 能读「今天拉了几单、失败原因是什么」），
+            // 拉单（建订单）与回传发货（不可撤回的外呼）要 channel:write —— 它不在 ALL_SCOPES 里，
+            // 所以对任何 API Key 都是 403，只能人工 JWT 点按钮。
+            // 两条都要登记：match() 是「等于前缀或前缀 + /」，/admin/channel 兜不住 /admin/channel-shops。
+            new Rule("/admin/channel-shops", "channel:read", NO_WRITE_CHANNEL),
+            new Rule("/admin/channel-sync-logs", "channel:read", NO_WRITE_CHANNEL),
+            new Rule("/admin/channel", "channel:read", NO_WRITE_CHANNEL),
             // 配置域：仓库 / 订单设置 / 退货原因
             new Rule("/admin/warehouses", "config:read", "config:write"),
             new Rule("/admin/order-setting", "config:read", "config:write"),
@@ -150,6 +189,12 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
         Set<String> scopes = new LinkedHashSet<>(AiApiKeyService.splitScopes(key.getScopes()));
         if (!scopes.contains(decision.scope())) {
             log.warn("API Key 缺少权限: key={} 需要={} 实际={}", key.getKeyPrefix(), decision.scope(), scopes);
+            // 需要的是「永不授予的写 scope」⇒ 说明这个接口对 API Key 就是只读的，
+            // 直接说清楚，别让人去权限列表里找一个根本不存在的 audit:write
+            if (unGrantableWriteScopes().contains(decision.scope())) {
+                writeError(response, 403, "该接口对 API Key 只读（写操作只能人工 JWT 操作）：" + pathOf(request));
+                return;
+            }
             writeError(response, 403, "API Key 缺少权限：" + decision.scope());
             return;
         }
@@ -197,6 +242,16 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
 
         // 兜底：未登记路径一律拒绝（fail-closed，新接口忘了配映射不会「意外开放给 AI」）
         return Decision.deny(403, "API Key 无权访问该接口：" + path);
+    }
+
+    /** 仅用于错误文案：去掉 contextPath 的请求路径 */
+    private static String pathOf(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        if (contextPath != null && !contextPath.isEmpty() && path.startsWith(contextPath)) {
+            path = path.substring(contextPath.length());
+        }
+        return path;
     }
 
     private static boolean underAny(String path, List<String> prefixes) {

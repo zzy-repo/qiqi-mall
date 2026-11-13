@@ -33,6 +33,14 @@ public final class ReasonCodes {
     public static final String ORDER_PAY = "ORDER_PAY";
     /** 7 待审核 → 8 待发货（审核通过） */
     public static final String AUDIT_PASS = "AUDIT_PASS";
+    /**
+     * 7 待审核 → 8 待发货（**自动审核引擎**过审）。
+     *
+     * <p>与人工审核的 {@link #AUDIT_PASS} 分开记：台账按 reason 统计时，
+     * 「自动审了 8000 单」和「人工审了 200 单」必须是两个数 —— 合成一个就再也回答不了
+     * 「自动化到底覆盖了多少」这个自动审核模块存在意义的唯一问题。
+     */
+    public static final String AUDIT_AUTO_PASS = "AUDIT_AUTO_PASS";
     /** 7 待审核 → 4 已关闭（审核不通过） */
     public static final String AUDIT_REJECT = "AUDIT_REJECT";
     /** 8/1 → 2 已发货（直发） */
@@ -105,6 +113,19 @@ public final class ReasonCodes {
     public static final String ACTION_APIKEY_UPDATE = "APIKEY_UPDATE";
     public static final String ACTION_APIKEY_DELETE = "APIKEY_DELETE";
 
+    // ---- 自动审核（策略配置 / 一次 run / 冻结解冻）----
+    /** 触发了一次自动审核 run（summary 里带 runId 与五类计数） */
+    public static final String ACTION_AUDIT_RUN = "AUDIT_RUN";
+    /** 人工冻结订单（决策 J1：不是状态流转，只写标 + 这条审计） */
+    public static final String ACTION_AUDIT_FREEZE = "AUDIT_FREEZE";
+    /** 人工解冻订单 */
+    public static final String ACTION_AUDIT_UNFREEZE = "AUDIT_UNFREEZE";
+    public static final String ACTION_POLICY_CREATE = "POLICY_CREATE";
+    public static final String ACTION_POLICY_UPDATE = "POLICY_UPDATE";
+    public static final String ACTION_POLICY_DELETE = "POLICY_DELETE";
+    /** 策略上移/下移（改的是判定顺序，属于会影响结论的配置变更，必须留证） */
+    public static final String ACTION_POLICY_PRIORITY = "POLICY_PRIORITY";
+
     // ================================================================ 目标类型 / 触发单据类型
 
     public static final String TARGET_ORDER = "ORDER";
@@ -113,6 +134,8 @@ public final class ReasonCodes {
     public static final String TARGET_SKU = "SKU";
     public static final String TARGET_WAREHOUSE = "WAREHOUSE";
     public static final String TARGET_APIKEY = "APIKEY";
+    /** 审计目标：审核策略（strategy 配置本身也是被审计对象） */
+    public static final String TARGET_POLICY = "POLICY";
 
     /** 状态台账的触发单据类型（ref_type）：发货单 */
     public static final String REF_DELIVERY = "DELIVERY";
@@ -120,6 +143,8 @@ public final class ReasonCodes {
     public static final String REF_RETURN_APPLY = "RETURN_APPLY";
     /** 状态台账的触发单据类型（ref_type）：支付流水 */
     public static final String REF_PAYMENT = "PAYMENT";
+    /** 状态台账的触发单据类型（ref_type）：一次自动审核 run（自动过审的 7→8 由它触发） */
+    public static final String REF_AUDIT_RUN = "AUDIT_RUN";
 
     private ReasonCodes() {
     }

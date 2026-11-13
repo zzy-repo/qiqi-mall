@@ -97,6 +97,11 @@ app:
 #   TPS 上限 = 单行行锁吞吐。把同一份库存物理拆成 N 行（sku_bucket），并发就分散到 N 把锁。
 #   sku.stock 降级为展示缓存（由 SUM(桶) 周期回写），扣减/回补都不再写它。
 qiqi:
+  # 自动审核调度开关：true=按 order_setting.audit_run_interval_min 定时跑（默认 30 分钟）
+  #   出故障时第一动作是把它设成 false 并重启，而不是去改库里的开关
+  #   集成测试在自己的上下文里关掉它，避免后台线程在断言之间偷偷跑一轮
+  audit:
+    schedule-enabled: ${AUDIT_SCHEDULE_ENABLED:true}
   # 台账写入开关（P2 第二步）：总闸 + 分项。总闸关掉 = 精确回到「只有状态写入、没有台账」的旧行为。
   # 默认全开（见 shared/ledger/LedgerProperties）；显式写在这里是为了出事时改一行就能回退，不用翻代码找默认值。
   # 启动日志会打印生效值：ledger.enabled=true status=true audit=true wms=true payment-trace=true

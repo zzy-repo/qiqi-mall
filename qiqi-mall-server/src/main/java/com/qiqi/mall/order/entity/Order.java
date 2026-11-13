@@ -71,4 +71,32 @@ public class Order {
     @TableField(value = "status_seq", insertStrategy = FieldStrategy.NEVER, updateStrategy = FieldStrategy.NEVER)
     @JsonIgnore
     private Integer statusSeq;
+
+    // ================================================================ 自动审核的判定上下文（P4）
+    // 这些列是策略条件的输入（渠道/店铺/毛利/备注/多地址），全部可空：
+    // 历史订单没有这些信息，字段取值函数对 NULL 返回「无值」，由 EXISTS/NOT_EXISTS 表达。
+
+    /** 销售渠道（直营 / 分销 …）：CHANNEL 字段来源 */
+    private String channel;
+
+    /** 店铺名：SHOP_NAME 字段来源 */
+    private String shopName;
+
+    /** 毛利（下单时算好落库）：GROSS_PROFIT 字段来源；null = 没算过 */
+    private BigDecimal grossProfit;
+
+    /** 客服备注：CS_REMARK 字段来源（含「改」= 全局排除） */
+    private String csRemark;
+
+    /** 平台备注（买家留言同步）：证据用 */
+    private String platformRemark;
+
+    /** 平台备注最后更新时间：PLATFORM_REMARK_UPDATED 字段来源；null = 从未更新 */
+    private LocalDateTime platformRemarkUpdatedAt;
+
+    /** 备注被审核消费的时间（防止同一条备注反复触发排除） */
+    private LocalDateTime remarkConsumedAt;
+
+    /** 多地址订单标记：ADDRESS_MULTI 字段来源 */
+    private Integer auditAddrMulti;
 }

@@ -44,10 +44,19 @@ DROP TABLE IF EXISTS delivery_status_ledger;
 DROP TABLE IF EXISTS order_status_ledger;
 DROP TABLE IF EXISTS stock_ledger;
 -- 旧版本残留表（多租户方案已废弃）
+DROP TABLE IF EXISTS order_audit_decision;
+DROP TABLE IF EXISTS order_audit_tag;
+DROP TABLE IF EXISTS audit_run;
+DROP TABLE IF EXISTS audit_policy_version;
+DROP TABLE IF EXISTS audit_policy_condition;
+DROP TABLE IF EXISTS audit_policy;
 DROP TABLE IF EXISTS tenant_plan;
 DROP TABLE IF EXISTS tenant_user;
 DROP TABLE IF EXISTS plan;
 DROP TABLE IF EXISTS tenant;
+DROP TABLE IF EXISTS channel_sync_log;
+DROP TABLE IF EXISTS channel_order_map;
+DROP TABLE IF EXISTS channel_shop;
 
 SET FOREIGN_KEY_CHECKS = 1;
 
@@ -63,6 +72,7 @@ CREATE TABLE `member` (
   `status` TINYINT NOT NULL DEFAULT 1 COMMENT '1启用 0禁用',
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+  `customer_tag` VARCHAR(32) DEFAULT NULL COMMENT '客户标签：CUSTOMER_TAG 字段来源',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_member_username` (`username`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='会员';
@@ -163,6 +173,7 @@ CREATE TABLE `sku` (
   `stock` INT NOT NULL DEFAULT 0 COMMENT '总库存——展示缓存：由 SUM(sku_bucket.stock) 周期回写，扣减/回补不写它、也不拿它裁决',
   `pic` VARCHAR(500) DEFAULT NULL COMMENT 'SKU图URL（指向 MinIO）',
   `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+  `cost_price` DECIMAL(12,2) DEFAULT NULL COMMENT '成本价（当前值）；0/NULL=未维护成本',
   PRIMARY KEY (`id`),
   KEY `idx_product` (`product_id`),
   CONSTRAINT `fk_sku_product` FOREIGN KEY (`product_id`) REFERENCES `product` (`id`) ON DELETE CASCADE
@@ -234,6 +245,14 @@ CREATE TABLE `order` (
   `split_status` TINYINT NOT NULL DEFAULT 0 COMMENT '0未拆(单仓直发) 1已拆',
   `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
   `status_seq` INT NOT NULL DEFAULT 0 COMMENT '状态流转序号，与 status 在同一条 UPDATE 里自增；幂等键来源',
+  `channel` VARCHAR(16) DEFAULT NULL COMMENT '销售渠道（直营/分销/…）：CHANNEL 字段来源',
+  `shop_name` VARCHAR(64) DEFAULT NULL COMMENT '店铺名：SHOP_NAME 字段来源',
+  `gross_profit` DECIMAL(12,2) DEFAULT NULL COMMENT '毛利：GROSS_PROFIT 字段来源；NULL=没算过',
+  `cs_remark` VARCHAR(255) DEFAULT NULL COMMENT '客服备注：CS_REMARK 字段来源（含「改」= 全局排除）',
+  `platform_remark` VARCHAR(255) DEFAULT NULL COMMENT '平台备注（买家留言同步）',
+  `platform_remark_updated_at` DATETIME DEFAULT NULL COMMENT '平台备注最后更新时间；NULL=从未更新',
+  `remark_consumed_at` DATETIME DEFAULT NULL COMMENT '备注被审核消费的时间',
+  `audit_addr_multi` TINYINT NOT NULL DEFAULT 0 COMMENT '多地址订单标记：ADDRESS_MULTI 字段来源',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_order_sn` (`order_sn`),
   KEY `idx_member` (`member_id`),
@@ -252,6 +271,7 @@ CREATE TABLE `order_item` (
   `product_name` VARCHAR(100) NOT NULL COMMENT '下单时商品名（快照）',
   `product_price` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '成交价（快照）',
   `product_quantity` INT NOT NULL DEFAULT 1 COMMENT '购买数量',
+  `cost_price` DECIMAL(12,2) DEFAULT NULL COMMENT '下单时成本价快照；0/NULL=未维护成本',
   PRIMARY KEY (`id`),
   KEY `idx_order` (`order_id`),
   CONSTRAINT `fk_item_order` FOREIGN KEY (`order_id`) REFERENCES `order` (`id`) ON DELETE CASCADE,
@@ -375,6 +395,9 @@ CREATE TABLE `order_setting` (
   `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
   `auto_confirm_days` INT NOT NULL DEFAULT 7 COMMENT '自动收货天数',
   `auto_close_minutes` INT NOT NULL DEFAULT 30 COMMENT '未付款自动关单分钟数',
+  `auto_audit_enabled` TINYINT NOT NULL DEFAULT 1 COMMENT '自动审核总开关：0=定时任务不跑',
+  `audit_stock_guard` VARCHAR(8) NOT NULL DEFAULT 'STRICT' COMMENT '库存判据档位：STRICT / LENIENT',
+  `audit_run_interval_min` INT NOT NULL DEFAULT 30 COMMENT '定时审核间隔（分钟）',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单设置';
 
@@ -554,6 +577,148 @@ CREATE TABLE `wms_exchange_ledger` (
   COMMENT='WMS 下发/回传台账（REQ/ACK 两阶段 write-ahead）';
 
 -- ============================================================================
+-- 自动审核模块（sql/migrate-order-audit.sql 的等价 DDL）
+--   策略 → 判定 → 决策落库 → 过审；冻结用标（order_audit_tag）不用状态码。
+-- ============================================================================
+
+CREATE TABLE `audit_policy` (
+  `id`          BIGINT      NOT NULL AUTO_INCREMENT          COMMENT '主键',
+  `type`        ENUM('AUTO','BLOCK','EXCEPTION') NOT NULL     COMMENT 'AUTO=自动过审候选 / BLOCK=前置拦截 / EXCEPTION=异常冻结',
+  `priority`    INT         NOT NULL DEFAULT 100             COMMENT '同类型内升序执行：数字小的先跑',
+  `name`        VARCHAR(64) NOT NULL                         COMMENT '策略名（决策行会快照它，改名不影响历史决策）',
+  `enabled`     TINYINT     NOT NULL DEFAULT 1               COMMENT '1启用 0停用（停用不删，历史决策仍指得到）',
+  `version_no`  INT         NOT NULL DEFAULT 1               COMMENT '策略版本号：每次改条件 +1，决策行记当时版本',
+  `action_json` JSON        DEFAULT NULL                     COMMENT 'EXCEPTION 专属冻结动作：{"tag":"FROZEN","reason":"..."}；AUTO/BLOCK 必须 NULL（见 CHECK）',
+  `created_at`  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at`  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '最后修改时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_type_name` (`type`, `name`),
+  KEY `idx_type_priority` (`type`, `priority`, `enabled`),
+  -- type ↔ 专属列：EXCEPTION 必须有冻结动作；AUTO/BLOCK 不许带动作（带了就说明有人在配一个不会被执行的动作）
+  CONSTRAINT `ck_audit_policy_type_action`
+    CHECK ((`type` = 'EXCEPTION' AND `action_json` IS NOT NULL)
+        OR (`type` IN ('AUTO','BLOCK') AND `action_json` IS NULL))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  COMMENT='审核策略主体（AUTO/BLOCK/EXCEPTION）';
+
+-- 2. 策略条件（行模型）----------
+CREATE TABLE `audit_policy_condition` (
+  `id`          BIGINT      NOT NULL AUTO_INCREMENT          COMMENT '主键',
+  `policy_id`   BIGINT      DEFAULT NULL                     COMMENT '所属策略；scope=ALL_AUTO 时必须 NULL（全局排除不属于任何策略）',
+  `seq`         INT         NOT NULL DEFAULT 0                COMMENT '展示/求值顺序（升序）',
+  `kind`        ENUM('MATCH','EXCLUDE') NOT NULL              COMMENT 'MATCH=必须满足 / EXCLUDE=命中即排除',
+  `scope`       ENUM('POLICY','ALL_AUTO') NOT NULL DEFAULT 'POLICY' COMMENT 'POLICY=本策略级 / ALL_AUTO=全部 AUTO 策略共用（全局排除）',
+  `field_code`  VARCHAR(48) NOT NULL                          COMMENT '字段码；**不做 DDL CHECK 闭集**，由 FieldRegistry 校验',
+  `op_code`     VARCHAR(24) NOT NULL                          COMMENT '操作符码；由 OperationRegistry 校验',
+  `value_type`  ENUM('NUM','TEXT','BOOL','JSON') NOT NULL     COMMENT '值的类型（决定读哪个 value_* 列）',
+  `value_num`   DECIMAL(20,4) DEFAULT NULL                    COMMENT 'NUM/BOOL 值（BOOL 用 1/0）',
+  `value_text`  VARCHAR(255) DEFAULT NULL                     COMMENT 'TEXT 值',
+  `value_json`  JSON        DEFAULT NULL                      COMMENT 'JSON 值（预留：IN 列表 / 区间等）',
+  PRIMARY KEY (`id`),
+  KEY `idx_policy_seq` (`policy_id`, `seq`),
+  KEY `idx_scope_kind` (`scope`, `kind`),
+  CONSTRAINT `fk_audit_policy_condition_policy`
+    FOREIGN KEY (`policy_id`) REFERENCES `audit_policy` (`id`) ON DELETE CASCADE,
+  -- 全局排除只能是 EXCLUDE（ALL_AUTO 的 MATCH 没有语义：没有 owner 就没有「它的策略」可满足）
+  CONSTRAINT `ck_audit_policy_condition_scope_kind`
+    CHECK (`scope` = 'POLICY' OR `kind` = 'EXCLUDE'),
+  -- 归属：POLICY 级必须挂策略，ALL_AUTO 级必须不挂（否则删策略会顺手删掉全局排除）
+  CONSTRAINT `ck_audit_policy_condition_owner`
+    CHECK ((`scope` = 'POLICY' AND `policy_id` IS NOT NULL)
+        OR (`scope` = 'ALL_AUTO' AND `policy_id` IS NULL)),
+  -- value_type ↔ value_* 列对应；一元操作符（EXISTS / NOT_EXISTS）允许三列全 NULL
+  CONSTRAINT `ck_audit_policy_condition_value`
+    CHECK ((`value_num` IS NULL AND `value_text` IS NULL AND `value_json` IS NULL)
+        OR (`value_type` = 'NUM'  AND `value_num`  IS NOT NULL AND `value_text` IS NULL     AND `value_json` IS NULL)
+        OR (`value_type` = 'BOOL' AND `value_num`  IS NOT NULL AND `value_text` IS NULL     AND `value_json` IS NULL)
+        OR (`value_type` = 'TEXT' AND `value_text` IS NOT NULL AND `value_num`  IS NULL     AND `value_json` IS NULL)
+        OR (`value_type` = 'JSON' AND `value_json` IS NOT NULL AND `value_num`  IS NULL     AND `value_text` IS NULL))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  COMMENT='审核策略条件（行模型：一条条件一行，不用 JSON 列）';
+
+CREATE TABLE `audit_policy_version` (
+  `id`            BIGINT      NOT NULL AUTO_INCREMENT        COMMENT '主键',
+  `policy_id`     BIGINT      NOT NULL                       COMMENT '所属策略（随策略级联删除）',
+  `version_no`    INT         NOT NULL                       COMMENT '版本号（与 audit_policy.version_no 对齐）',
+  `snapshot_json` JSON        NOT NULL                       COMMENT '策略 + 全部条件的快照（改完再看历史决策能还原当时配置）',
+  `created_at`    DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '快照时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_policy_version` (`policy_id`, `version_no`),
+  CONSTRAINT `fk_audit_policy_version_policy`
+    FOREIGN KEY (`policy_id`) REFERENCES `audit_policy` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  COMMENT='审核策略版本快照（append-only）';
+
+CREATE TABLE `audit_run` (
+  `id`           BIGINT      NOT NULL AUTO_INCREMENT         COMMENT '主键',
+  `trigger_type` ENUM('MANUAL','SCHEDULE') NOT NULL           COMMENT 'MANUAL=人工触发 / SCHEDULE=定时任务',
+  `idem_key`     VARCHAR(96) DEFAULT NULL                     COMMENT '⚠️仅 SCHEDULE 填 {trigger}:{yyyyMMddHHmm}；严禁业务键派生，MANUAL 一律 NULL',
+  `total`        INT         NOT NULL DEFAULT 0               COMMENT '本轮产出决策的单数（含 SKIPPED：五类之和可能小于 total）',
+  `auto_pass`    INT         NOT NULL DEFAULT 0               COMMENT '自动过审数',
+  `manual`       INT         NOT NULL DEFAULT 0               COMMENT '转人工数（含降级）',
+  `blocked`      INT         NOT NULL DEFAULT 0               COMMENT '被 BLOCK 策略拦截数',
+  `frozen`       INT         NOT NULL DEFAULT 0               COMMENT '异常冻结数',
+  `no_match`     INT         NOT NULL DEFAULT 0               COMMENT '没有任何 AUTO 策略命中数',
+  `created_at`   DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '开始时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_idem` (`idem_key`),
+  KEY `idx_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  COMMENT='一次自动审核 run（计数在建 run 时写 0、跑完回写一次）';
+
+-- 5. 决策台账（每单每轮一行）----------
+CREATE TABLE `order_audit_decision` (
+  `id`                        BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `order_id`                  BIGINT      NOT NULL                COMMENT '订单ID（业务主键·无外键：证据不随订单级联删除）',
+  `run_id`                    BIGINT      NOT NULL                COMMENT '所属 run（audit_run.id，无外键同理）',
+  `round_no`                  INT         NOT NULL                COMMENT '该订单的第几轮审核（1 起，按 MAX+1）',
+  `result`                    ENUM('AUTO_PASS','MANUAL','BLOCKED','FROZEN','NO_MATCH','SKIPPED') NOT NULL COMMENT '本轮判定结论',
+  `matched_policy_id`         BIGINT      DEFAULT NULL            COMMENT '命中的策略（AUTO_PASS/BLOCKED/FROZEN）',
+  `matched_policy_name`       VARCHAR(64) DEFAULT NULL            COMMENT '命中策略名快照',
+  `matched_policy_version_no` INT         DEFAULT NULL            COMMENT '命中策略当时的版本号',
+  `matched_condition_json`    JSON        DEFAULT NULL            COMMENT '命中/满足的条件明细（含 expected vs actual）',
+  `excluded_by_json`          JSON        DEFAULT NULL            COMMENT '排除条件命中明细（POLICY ∪ ALL_AUTO）',
+  `miss_reason_json`          JSON        DEFAULT NULL            COMMENT '逐条策略「差在哪」（NO_MATCH / 未命中时）',
+  `would_be_auto_policy_id`   BIGINT      DEFAULT NULL            COMMENT '只读回填：若没被拦截/冻结，会命中哪条 AUTO 策略',
+  `would_be_auto_policy_name` VARCHAR(64) DEFAULT NULL            COMMENT '只读回填的策略名快照',
+  `downgrade_reason`          VARCHAR(32) DEFAULT NULL            COMMENT 'AUTO_PASS 后预检降级原因：STOCK_SHORT / COST_MISSING',
+  `evidence_json`             JSON        DEFAULT NULL            COMMENT '证据：人话原因（含具体数值差）+ 库存/成本/冻结动作细节',
+  `order_status_seq`          INT         DEFAULT NULL            COMMENT '本轮订单状态流转后的 status_seq（对得上 order_status_ledger）',
+  `operator_type`             VARCHAR(16) NOT NULL                COMMENT 'ADMIN / MEMBER / APIKEY / SYSTEM',
+  `operator_id`               BIGINT      DEFAULT NULL            COMMENT '操作者ID（系统/调度为 NULL）',
+  `operator_name`             VARCHAR(64) DEFAULT NULL            COMMENT '操作者名快照',
+  `idem_key`                  VARCHAR(96) NOT NULL                COMMENT '幂等键 {orderId}:{roundNo}',
+  `created_at`                DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '判定时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_idem` (`idem_key`),
+  UNIQUE KEY `uk_order_round` (`order_id`, `round_no`),
+  KEY `idx_run_result` (`run_id`, `result`),
+  KEY `idx_order` (`order_id`, `created_at`),
+  CONSTRAINT `ck_order_audit_decision_operator_type`
+    CHECK (`operator_type` IN ('ADMIN','MEMBER','APIKEY','SYSTEM'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  COMMENT='订单审核决策台账（每单每轮一行，只追加）';
+
+-- 6. 订单审核标记（冻结/挂起不是状态码）----------
+CREATE TABLE `order_audit_tag` (
+  `id`          BIGINT      NOT NULL AUTO_INCREMENT          COMMENT '主键',
+  `order_id`    BIGINT      NOT NULL                         COMMENT '订单ID',
+  `tag_code`    VARCHAR(32) NOT NULL                         COMMENT 'FROZEN / STOCK_SHORT / COST_MISSING …',
+  `active_tag`  VARCHAR(48) GENERATED ALWAYS AS (IF(`active` = 1, CONCAT(`order_id`, ':', `tag_code`), NULL)) VIRTUAL
+                                                            COMMENT '仅 active 时非空的唯一键载体：{orderId}:{tagCode}',
+  `active`      TINYINT     NOT NULL DEFAULT 1               COMMENT '1生效 0已解除',
+  `reason`      VARCHAR(255) DEFAULT NULL                    COMMENT '为什么打这个标',
+  `created_at`  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '打标时间',
+  `released_at` DATETIME(3) DEFAULT NULL                     COMMENT '解除时间（解冻/恢复）',
+  `released_by` VARCHAR(64) DEFAULT NULL                     COMMENT '解除人（ADMIN 用户名 / APIKEY 名 / system）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_active` (`active_tag`),
+  KEY `idx_order` (`order_id`, `tag_code`),
+  CONSTRAINT `ck_order_audit_tag_active` CHECK (`active` IN (0, 1))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  COMMENT='订单审核标记（冻结/挂起用标表达，不动 order.status）';
+
+-- ============================================================================
 -- 业务状态时间线只读视图（P3 UI 用；派生自三张状态台账，UNION ALL 带 biz_type）
 -- 完整注释见 sql/migrate-ledger-view.sql（含查询示例与口径说明）。
 -- ============================================================================
@@ -636,3 +801,57 @@ SELECT
     l.`created_at`,
     CAST(l.`id` AS SIGNED)
 FROM `return_status_ledger` l;
+
+
+-- ============================================================================
+-- 多平台接入（channel_*）：只做接入闭环，详见 sql/migrate-channel.sql
+--   三张表都不带外键（台账/日志表一律无外键）；uk_map 是重复拉单的幂等闸门。
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS `channel_shop` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `platform_type` ENUM('MALL','TAOBAO_MOCK','DOUYIN_MOCK') NOT NULL COMMENT '平台类型：MALL=商城自营开放接口；后两个=本地 mock 平台',
+  `shop_code` VARCHAR(64) NOT NULL COMMENT '平台侧店铺编码（调接口时带上）',
+  `shop_name` VARCHAR(64) NOT NULL COMMENT '店铺名（后台卡片标题）',
+  `enabled` TINYINT NOT NULL DEFAULT 1 COMMENT '1启用 0停用（停用后不允许拉单/回传）',
+  `watermark_at` DATETIME DEFAULT NULL COMMENT '拉单水位：上次成功拉单的开始时刻，下次 since 传它',
+  `last_pull_at` DATETIME DEFAULT NULL COMMENT '上次拉单结束时刻（含失败），卡片上展示',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_shop` (`platform_type`, `shop_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='渠道店铺';
+
+CREATE TABLE IF NOT EXISTS `channel_order_map` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `shop_id` BIGINT NOT NULL COMMENT 'channel_shop.id（无外键）',
+  `platform_sn` VARCHAR(64) NOT NULL COMMENT '平台单号（MALL 直接用商城 order_sn）',
+  `order_id` BIGINT NOT NULL COMMENT '内部订单 order.id',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '入库时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_map` (`shop_id`, `platform_sn`),
+  KEY `idx_order` (`order_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='平台单号→内部订单映射（幂等闸门）';
+
+CREATE TABLE IF NOT EXISTS `channel_sync_log` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `shop_id` BIGINT NOT NULL COMMENT 'channel_shop.id（无外键）',
+  `action` ENUM('PULL','SHIP_PUSH') NOT NULL COMMENT '动作：PULL=拉单 SHIP_PUSH=回传发货',
+  `ref_type` VARCHAR(32) DEFAULT NULL COMMENT '关联对象类型：ORDER / PLATFORM_ORDER / DELIVERY',
+  `ref_id` BIGINT DEFAULT NULL COMMENT '关联对象 id',
+  `request_payload` TEXT COMMENT '请求报文（截断）',
+  `response_payload` TEXT COMMENT '响应报文（截断）',
+  `result` ENUM('OK','FAIL','SKIP') NOT NULL COMMENT 'OK=成功 FAIL=失败 SKIP=幂等跳过',
+  `reason` VARCHAR(255) DEFAULT NULL COMMENT '结果原因：IDEMPOTENT / SKU_NOT_MATCHED / 异常信息',
+  `attempt` INT NOT NULL DEFAULT 1 COMMENT '第几次尝试（回传重试时第 2 次记 attempt=2）',
+  `latency_ms` INT DEFAULT NULL COMMENT '外呼耗时（毫秒）',
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '记录时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_shop_time` (`shop_id`, `created_at`),
+  KEY `idx_action_result` (`action`, `result`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='渠道同步日志（只追加）';
+
+INSERT INTO `channel_shop` (`platform_type`, `shop_code`, `shop_name`) VALUES
+  ('MALL', 'MALL-001', '七七商城自营'),
+  ('TAOBAO_MOCK', 'TB-001', '淘宝旗舰店（模拟）'),
+  ('DOUYIN_MOCK', 'DY-001', '抖音小店（模拟）')
+ON DUPLICATE KEY UPDATE `id` = `id`;

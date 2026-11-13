@@ -25,6 +25,9 @@ public class Sku {
     /** SKU图URL（指向 MinIO） */
     private String pic;
 
+    /** 成本价（当前值）；0/null = 未维护成本 —— 自动审核会因此标 COST_MISSING 转人工 */
+    private BigDecimal costPrice;
+
     /**
      * 乐观锁版本号（MyBatis-Plus @Version）。
      * updateById 时会生成 {@code SET version = version + 1 WHERE id = ? AND version = ?}；

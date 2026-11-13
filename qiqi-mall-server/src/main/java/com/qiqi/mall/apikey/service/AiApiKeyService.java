@@ -52,7 +52,18 @@ public class AiApiKeyService {
             "catalog:read", "catalog:write",
             "member:read", "member:write",
             "config:read", "config:write",
-            "dashboard:read");
+            "dashboard:read",
+            // 证据/库存/审核三个**只读**域（MCP 排障与巡检用）。
+            // 刻意**没有** ledger:write / stock:write / audit:write：
+            //   台账是只追加的证据链，库存与审核是「会改变订单命运」的动作 ——
+            //   权限系统里不该存在一把没人应该拿的钥匙（存在就一定会被谁勾上）。
+            "ledger:read",
+            "stock:read",
+            "audit:read",
+            // 多平台接入：只有**读**（店铺 + 同步日志）。
+            // 刻意**没有** channel:write —— 拉单会建订单、回传发货是一次不可撤回的外呼，
+            // 这两件事只能人工在后台点（理由同 audit:write，见 ApiKeyAuthFilter#unGrantableWriteScopes）。
+            "channel:read");
 
     private static final String KEY_ALGO_PREFIX = "ak_";
     private static final int KEY_RANDOM_BYTES = 32;      // 32 字节 = 64 位十六进制

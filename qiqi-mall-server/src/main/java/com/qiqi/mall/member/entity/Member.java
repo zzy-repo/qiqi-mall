@@ -33,6 +33,9 @@ public class Member {
 
     private LocalDateTime createTime;
 
+    /** 客户标签（新客/老客/黑名单…）：CUSTOMER_TAG 字段来源 */
+    private String customerTag;
+
     /**
      * 乐观锁版本号（MyBatis-Plus @Version）。
      * updateById 时会生成 {@code SET version = version + 1 WHERE id = ? AND version = ?}；
