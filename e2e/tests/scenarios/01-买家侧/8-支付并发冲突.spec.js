@@ -97,8 +97,9 @@ const payRespOf = (page, orderId) =>
   )
 
 /** 管理员令牌（仅用于跑完删掉本用例自造的订单，不参与任何断言） */
+// admin 口令必须走 ADMIN_PASSWORD，否则在容器栈上清理会静默失败、把订单留在演示库
 const adminTokenForCleanup = async (request) => {
-  const res = await request.post(`${API}/admin/auth/login`, { data: { username: 'admin', password: '123456' } })
+  const res = await request.post(`${API}/admin/auth/login`, { data: { username: 'admin', password: process.env.ADMIN_PASSWORD || '123456' } })
   return (await res.json()).data.accessToken
 }
 

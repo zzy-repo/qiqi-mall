@@ -110,7 +110,7 @@ export const apiCaptchaRequired = async (request, username = 'admin') => {
  * 每个用例前后都要用「正确密码 +（必要时）正确验证码」成功登录一次 —— 成功即 clearFail。
  * 返回 accessToken 备用。
  */
-export const resetLoginState = async (request, username = 'admin', password = '123456') => {
+export const resetLoginState = async (request, username = 'admin', password = process.env.ADMIN_PASSWORD || '123456') => {
   for (let i = 0; i < 3; i++) {
     if (!(await apiCaptchaRequired(request, username))) {
       const { status, body } = await apiLogin(request, { username, password })
@@ -150,7 +150,7 @@ export const openLoginPage = async (page) => {
  * captchaCode 传 undefined 且页面上出现验证码行时，自动从服务端日志读明文填入。
  * 不断言结果（由用例自己断言成功/失败）。
  */
-export const uiLogin = async (page, { username = 'admin', password = '123456', captchaCode } = {}) => {
+export const uiLogin = async (page, { username = 'admin', password = process.env.ADMIN_PASSWORD || '123456', captchaCode } = {}) => {
   // 日志水位要在打开页面之前记：页面自己会先取一次验证码（loadCaptcha），那份才是表单里展示的
   const size = logSize()
   await openLoginPage(page)
