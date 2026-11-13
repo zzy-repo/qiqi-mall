@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../../support/test.js'
 import { expectToastSuccess } from '../../support/admin-ui.js'
 import {
   gotoOrderSetting,

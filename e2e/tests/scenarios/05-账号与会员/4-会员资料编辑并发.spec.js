@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../../support/test.js'
 import { API } from '../../support/env.js'
 import { adminLoginHardened } from '../../support/admin-ui.js'
 import {

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../../support/test.js'
 import { PORTAL, stamp } from '../../support/env.js'
 import { addressOf, memberNickOf, pick } from '../../support/fixtures.js'
 import { memberRegisterAndLogin, addSpecToCart } from '../../support/ui.js'

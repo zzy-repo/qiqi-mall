@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../support/test.js'
 import { readFileSync } from 'node:fs'
 import { PORTAL, ADMIN, stamp } from '../support/env.js'
 import { adminLogin, pickSelect, pickTreeSelect, dismissPoppers } from '../support/ui.js'

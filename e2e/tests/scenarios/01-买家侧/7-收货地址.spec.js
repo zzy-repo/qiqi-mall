@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../../support/test.js'
 import { stamp } from '../../support/env.js'
 import { memberRegisterAndLogin } from '../../support/ui.js'
 import {

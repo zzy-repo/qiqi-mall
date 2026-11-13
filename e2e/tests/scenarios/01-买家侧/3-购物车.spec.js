@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../../support/test.js'
 import { PORTAL, API, stamp } from '../../support/env.js'
 import { addSpecToCart, adminLogin, adminSetSkuStock, memberRegisterAndLogin } from '../../support/ui.js'
 import { openHome, searchProduct, productCards } from '../../support/portal-ui.js'
