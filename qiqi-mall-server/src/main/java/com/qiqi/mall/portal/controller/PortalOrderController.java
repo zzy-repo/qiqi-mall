@@ -14,6 +14,7 @@ import com.qiqi.mall.oms.service.DeliveryFlowService;
 import com.qiqi.mall.oms.service.OrderCreateService;
 import com.qiqi.mall.oms.service.OrderItemService;
 import com.qiqi.mall.oms.service.OrderService;
+import com.qiqi.mall.oms.service.OrderStatusService;
 import com.qiqi.mall.oms.service.OrderTransactionalCreator;
 import com.qiqi.mall.oms.service.PaymentRecordService;
 import com.qiqi.mall.member.entity.Cart;
@@ -38,6 +39,8 @@ import java.util.Map;
 public class PortalOrderController {
 
     private final OrderService orderService;
+    /** 订单状态写入的唯一入口（P2 第一步收敛：支付/确认收货的状态都不再就地 setStatus） */
+    private final OrderStatusService orderStatusService;
     private final OrderItemService orderItemService;
     private final PaymentRecordService paymentRecordService;
     private final OrderCreateService orderCreateService;
@@ -45,13 +48,15 @@ public class PortalOrderController {
     private final CartService cartService;
     private final DeliveryFlowService deliveryFlowService;
 
-    public PortalOrderController(OrderService orderService, OrderItemService orderItemService,
+    public PortalOrderController(OrderService orderService, OrderStatusService orderStatusService,
+                                 OrderItemService orderItemService,
                                  PaymentRecordService paymentRecordService,
                                  OrderCreateService orderCreateService,
                                  IdempotentTokenStore idempotentTokenStore,
                                  CartService cartService,
                                  DeliveryFlowService deliveryFlowService) {
         this.orderService = orderService;
+        this.orderStatusService = orderStatusService;
         this.orderItemService = orderItemService;
         this.paymentRecordService = paymentRecordService;
         this.orderCreateService = orderCreateService;
@@ -140,15 +145,18 @@ public class PortalOrderController {
         if (order.getStatus() != 0) return Result.fail("当前订单状态不可支付");
         // 口径②：支付成功后自动进入「待审核」，无需管理员手动提交
         // 状态流转：0待付款 →（支付）1已付款 →（OMS 自动交付）7待审核
-        order.setStatus(7);
+        // 状态统一走 OrderStatusService：payType / paymentTime 与 status 在**同一条** UPDATE 里
+        // （拆成两条会多涨一次 version，买家的乐观锁语义就变了）
+        java.time.LocalDateTime paidAt = LocalDateTime.now();
         order.setPayType(payType);
-        order.setPaymentTime(LocalDateTime.now());
+        order.setPaymentTime(paidAt);
         // **并发支付的唯一闸门**（order 表有 @Version）：0 行 = 读出来之后订单已经被改过
         // （最常见就是「同一张单被并发付了两次」）。这时绝不能当成功返回：
         // 用户会以为付了两笔、实际只记一笔，或者状态根本没变还说支付成功。
         // 抛 409 → 事务回滚（支付流水也不会落库），前端提示买家刷新。
         // 文案用买家视角的说法（不用「数据被他人修改」）：见 OptimisticLockGuard.MSG_ORDER_STATE_CHANGED
-        int rows = orderService.getBaseMapper().updateById(order);
+        int rows = orderStatusService.change(order, 7, OrderStatusService.REASON_PAY, null,
+                update -> update.set(Order::getPayType, payType).set(Order::getPaymentTime, paidAt));
         OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_ORDER_STATE_CHANGED);
         // 支付流水（对账键 = 订单号）：与上面的状态推进在同一个事务里，要么都成、要么都不记
         paymentRecordService.record(order.getOrderSn(), order.getTotalAmount(),
@@ -189,9 +197,9 @@ public class PortalOrderController {
             deliveryFlowService.recomputeOrderStatus(id);
         } else {
             // 直发路径：没有子单事实可依，只能由买家这一步推进（唯一写者）
-            order.setStatus(3);
+            // 状态写入统一走 OrderStatusService（同一条 UPDATE 里带 status_seq 自增与 version 自增）
             // 0 行 = 读出来之后订单被别人改过（例如另一边已经在确认收货）→ 409，买家视角文案
-            int rows = orderService.getBaseMapper().updateById(order);
+            int rows = orderStatusService.change(order, 3, OrderStatusService.REASON_CONFIRM, null);
             OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_ORDER_STATE_CHANGED);
         }
         // 回读：返回的状态必须是库里真实的那个（聚合算出来的 3，而不是我们以为的 3）

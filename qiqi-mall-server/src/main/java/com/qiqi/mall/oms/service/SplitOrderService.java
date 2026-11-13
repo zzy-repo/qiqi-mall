@@ -47,16 +47,20 @@ public class SplitOrderService {
     private final DeliveryOrderService deliveryOrderService;
     private final DeliveryItemService deliveryItemService;
     private final WarehouseService warehouseService;
+    /** 包裹状态写入的唯一入口（出生：拆出来的包裹 = 待下发(0)） */
+    private final DeliveryStatusService deliveryStatusService;
 
     public SplitOrderService(OrderService orderService, OrderItemService orderItemService,
                              InventoryService inventoryService, DeliveryOrderService deliveryOrderService,
-                             DeliveryItemService deliveryItemService, WarehouseService warehouseService) {
+                             DeliveryItemService deliveryItemService, WarehouseService warehouseService,
+                             DeliveryStatusService deliveryStatusService) {
         this.orderService = orderService;
         this.orderItemService = orderItemService;
         this.inventoryService = inventoryService;
         this.deliveryOrderService = deliveryOrderService;
         this.deliveryItemService = deliveryItemService;
         this.warehouseService = warehouseService;
+        this.deliveryStatusService = deliveryStatusService;
     }
 
     /**
@@ -170,7 +174,8 @@ public class SplitOrderService {
             delivery.setDeliverySn(DeliverySnGenerator.next());
             delivery.setOrderId(order.getId());
             delivery.setWarehouseId(entry.getKey());
-            delivery.setStatus(DeliveryOrder.PENDING);
+            // 出生：新包裹初始状态「待下发(0)」走唯一入口（save 之前定初值，不产生 UPDATE）
+            deliveryStatusService.init(delivery, DeliveryOrder.PENDING);
             delivery.setSource(DeliveryOrder.SOURCE_AUTO);   // 自动拆单
             // 收货三件套快照：多包各自贴单
             delivery.setReceiverName(order.getReceiverName());

@@ -35,6 +35,11 @@ DROP TABLE IF EXISTS category;
 DROP TABLE IF EXISTS member;
 DROP TABLE IF EXISTS admin;
 DROP TABLE IF EXISTS ai_api_key;
+DROP TABLE IF EXISTS wms_exchange_ledger;
+DROP TABLE IF EXISTS admin_audit_log;
+DROP TABLE IF EXISTS return_status_ledger;
+DROP TABLE IF EXISTS delivery_status_ledger;
+DROP TABLE IF EXISTS order_status_ledger;
 -- 旧版本残留表（多租户方案已废弃）
 DROP TABLE IF EXISTS tenant_plan;
 DROP TABLE IF EXISTS tenant_user;
@@ -219,11 +224,13 @@ CREATE TABLE `order` (
   `status` TINYINT NOT NULL DEFAULT 0 COMMENT '0待付款 1已付款 2已发货 3已完成 4已关闭 5退款中 6已退款',
   `pay_type` TINYINT NOT NULL DEFAULT 0 COMMENT '0未支付 1支付宝 2微信',
   `payment_time` DATETIME DEFAULT NULL COMMENT '支付时间',
+  `created_at` DATETIME DEFAULT NULL COMMENT '下单时间（历史行可能为 NULL）',
   `receiver_name` VARCHAR(50) NOT NULL COMMENT '收货人快照',
   `receiver_phone` VARCHAR(20) DEFAULT NULL COMMENT '收货电话快照',
   `receiver_address` VARCHAR(255) DEFAULT NULL COMMENT '收货地址快照',
   `split_status` TINYINT NOT NULL DEFAULT 0 COMMENT '0未拆(单仓直发) 1已拆',
   `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+  `status_seq` INT NOT NULL DEFAULT 0 COMMENT '状态流转序号，与 status 在同一条 UPDATE 里自增；幂等键来源',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_order_sn` (`order_sn`),
   KEY `idx_member` (`member_id`),
@@ -258,6 +265,8 @@ CREATE TABLE `return_apply` (
   `description` VARCHAR(500) DEFAULT NULL COMMENT '详细说明',
   `status` TINYINT NOT NULL DEFAULT 0 COMMENT '0待处理 1通过 2拒绝',
   `reason_id` BIGINT NOT NULL COMMENT '退货原因字典ID',
+  `status_seq` INT NOT NULL DEFAULT 0 COMMENT '状态流转序号，与 status 在同一条 UPDATE 里自增；幂等键来源',
+  `pending_order_id` BIGINT GENERATED ALWAYS AS (IF(`status` = 0, `order_id`, NULL)) VIRTUAL COMMENT '待处理请求的订单ID：仅 status=0 时非空（预留列，本轮不建唯一键，见头部【已知问题·待办】）',
   PRIMARY KEY (`id`),
   KEY `idx_order` (`order_id`),
   CONSTRAINT `fk_return_order` FOREIGN KEY (`order_id`) REFERENCES `order` (`id`) ON DELETE CASCADE,
@@ -302,6 +311,7 @@ CREATE TABLE `delivery_order` (
   `split_rule_id` BIGINT NULL COMMENT '预留：命中的拆单规则ID，层次二规则引擎启用',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+  `status_seq` INT NOT NULL DEFAULT 0 COMMENT '状态流转序号，与 status 在同一条 UPDATE 里自增；幂等键来源',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_delivery_sn` (`delivery_sn`),
   KEY `idx_order` (`order_id`),
@@ -338,12 +348,22 @@ CREATE TABLE `delivery_logistics` (
 CREATE TABLE `payment_record` (
   `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
   `order_sn` VARCHAR(50) NOT NULL COMMENT '关联订单号（对账键）',
+  `order_id` BIGINT DEFAULT NULL COMMENT '关联订单ID（回填自 order_sn；order 被物理删后可能悬空）',
   `amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '金额',
   `type` TINYINT NOT NULL DEFAULT 1 COMMENT '1支付 2退款',
   `channel` TINYINT NOT NULL DEFAULT 0 COMMENT '0模拟 1支付宝 2微信',
   `trade_no` VARCHAR(64) DEFAULT NULL COMMENT '第三方流水号（模拟为本地生成）',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发生时间',
+  `ref_type` VARCHAR(24) DEFAULT NULL COMMENT '触发单据类型',
+  `ref_id` BIGINT DEFAULT NULL COMMENT '触发单据ID',
+  `origin_flow_id` BIGINT DEFAULT NULL COMMENT '退款指向的原支付流水ID（type=2 时必填）',
+  `operator_type` VARCHAR(16) DEFAULT NULL COMMENT 'ADMIN / MEMBER / APIKEY / SYSTEM',
+  `operator_id` BIGINT DEFAULT NULL COMMENT '操作者ID',
+  `operator_name` VARCHAR(64) DEFAULT NULL COMMENT '操作者名快照',
+  `idem_key` VARCHAR(96) DEFAULT NULL COMMENT '幂等键（历史行为 NULL，新写入必填）',
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_idem` (`idem_key`),
+  UNIQUE KEY `uk_channel_trade` (`channel`, `trade_no`),
   KEY `idx_order_sn` (`order_sn`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付流水';
 
@@ -392,3 +412,138 @@ CREATE TABLE `stock_ledger` (
   KEY `idx_order_sku` (`order_id`, `sku_id`),
   KEY `idx_sku` (`sku_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='SKU 库存台账（扣/补全量记账 + 幂等去重）';
+
+-- ============ 台账体系（sql/migrate-ledger.sql 的等价 DDL；P2 状态台账） ============
+-- 这 5 张表是**只追加**证据表：只 insert，不 update、不软删、不加 updated_at。
+-- 与 migrate-ledger.sql 逐字同构（列/索引/CHECK/排序规则）；两处改动必须同步。
+-- ⚠️ return_apply.pending_order_id 的 UNIQUE KEY `uk_pending_order` 本轮**刻意不建**
+--    （见 migrate-ledger.sql 头部【已知问题·待办】），所以这里也不要加。
+
+-- 订单状态台账（只追加证据链）
+CREATE TABLE `order_status_ledger` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `order_id` BIGINT NOT NULL COMMENT '订单ID（业务主键·无外键：证据不随订单级联删除）',
+  `from_status` TINYINT DEFAULT NULL COMMENT '变更前状态；NULL=出生事件（建单时无前态）',
+  `to_status` TINYINT NOT NULL COMMENT '变更后状态',
+  `reason` VARCHAR(32) NOT NULL COMMENT '流转原因码',
+  `reason_detail` VARCHAR(255) DEFAULT NULL COMMENT '原因补充说明',
+  `operator_type` VARCHAR(16) NOT NULL COMMENT 'ADMIN / MEMBER / APIKEY / SYSTEM',
+  `operator_id` BIGINT DEFAULT NULL COMMENT '操作者ID（系统事件可空）',
+  `operator_name` VARCHAR(64) DEFAULT NULL COMMENT '操作者名快照（密钥名 / 登录名）',
+  `ref_type` VARCHAR(24) DEFAULT NULL COMMENT '触发单据类型：DELIVERY / RETURN_APPLY / PAYMENT …',
+  `ref_id` BIGINT DEFAULT NULL COMMENT '触发单据ID',
+  `event_key` VARCHAR(96) DEFAULT NULL COMMENT '外部事件号（重投只留一条；允许多 NULL）',
+  `idem_key` VARCHAR(96) NOT NULL COMMENT '幂等键 [shard:]{orderId}:{statusSeq}',
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '记账时间（只追加，无 updated_at）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_idem` (`idem_key`),
+  UNIQUE KEY `uk_event` (`event_key`),
+  KEY `idx_biz` (`order_id`, `created_at`),
+  CONSTRAINT `ck_order_status_ledger_operator_type`
+    CHECK (`operator_type` IN ('ADMIN','MEMBER','APIKEY','SYSTEM'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  COMMENT='订单状态台账（只追加证据链）';
+
+-- 包裹状态台账（带单号快照：OrderPurgeService 会物理删包裹行，单号必须留快照）
+CREATE TABLE `delivery_status_ledger` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `delivery_id` BIGINT NOT NULL COMMENT '包裹ID（业务主键·无外键：证据不随包裹级联删除）',
+  `delivery_sn` VARCHAR(50) NOT NULL COMMENT '【已登记冗余列】发货单号快照（包裹被物理删除后仍可读）',
+  `from_status` TINYINT DEFAULT NULL COMMENT '变更前状态；NULL=出生事件（建包裹）',
+  `to_status` TINYINT NOT NULL COMMENT '变更后状态',
+  `reason` VARCHAR(32) NOT NULL COMMENT '流转原因码',
+  `reason_detail` VARCHAR(255) DEFAULT NULL COMMENT '原因补充说明',
+  `operator_type` VARCHAR(16) NOT NULL COMMENT 'ADMIN / MEMBER / APIKEY / SYSTEM',
+  `operator_id` BIGINT DEFAULT NULL COMMENT '操作者ID（系统事件可空）',
+  `operator_name` VARCHAR(64) DEFAULT NULL COMMENT '操作者名快照（密钥名 / 登录名）',
+  `ref_type` VARCHAR(24) DEFAULT NULL COMMENT '触发单据类型',
+  `ref_id` BIGINT DEFAULT NULL COMMENT '触发单据ID',
+  `event_key` VARCHAR(96) DEFAULT NULL COMMENT '仓侧事件号（重投只留一条；允许多 NULL）',
+  `idem_key` VARCHAR(96) NOT NULL COMMENT '幂等键 [shard:]{deliveryId}:{statusSeq}',
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '记账时间（只追加，无 updated_at）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_idem` (`idem_key`),
+  UNIQUE KEY `uk_event` (`event_key`),
+  KEY `idx_biz` (`delivery_id`, `created_at`),
+  CONSTRAINT `ck_delivery_status_ledger_operator_type`
+    CHECK (`operator_type` IN ('ADMIN','MEMBER','APIKEY','SYSTEM'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  COMMENT='包裹状态台账（只追加证据链；带单号快照）';
+
+-- 售后状态台账（冗余 order_id：return_apply 随订单级联删除/物理删单后仍能反查）
+CREATE TABLE `return_status_ledger` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `return_apply_id` BIGINT NOT NULL COMMENT '退货申请ID（业务主键·无外键：证据不随申请级联删除）',
+  `order_id` BIGINT DEFAULT NULL COMMENT '【已登记冗余列】冗余订单ID：return_apply 随订单级联删除/物理删单后，仍能从订单反查售后流水',
+  `from_status` TINYINT DEFAULT NULL COMMENT '变更前状态；NULL=出生事件（提交申请）',
+  `to_status` TINYINT NOT NULL COMMENT '变更后状态',
+  `reason` VARCHAR(32) NOT NULL COMMENT '流转原因码',
+  `reason_detail` VARCHAR(255) DEFAULT NULL COMMENT '原因补充说明',
+  `operator_type` VARCHAR(16) NOT NULL COMMENT 'ADMIN / MEMBER / APIKEY / SYSTEM',
+  `operator_id` BIGINT DEFAULT NULL COMMENT '操作者ID（系统事件可空）',
+  `operator_name` VARCHAR(64) DEFAULT NULL COMMENT '操作者名快照（密钥名 / 登录名）',
+  `ref_type` VARCHAR(24) DEFAULT NULL COMMENT '触发单据类型',
+  `ref_id` BIGINT DEFAULT NULL COMMENT '触发单据ID',
+  `event_key` VARCHAR(96) DEFAULT NULL COMMENT '外部事件号（重投只留一条；允许多 NULL）',
+  `idem_key` VARCHAR(96) NOT NULL COMMENT '幂等键 [shard:]{returnApplyId}:{statusSeq}',
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '记账时间（只追加，无 updated_at）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_idem` (`idem_key`),
+  UNIQUE KEY `uk_event` (`event_key`),
+  KEY `idx_biz` (`return_apply_id`, `created_at`),
+  CONSTRAINT `ck_return_status_ledger_operator_type`
+    CHECK (`operator_type` IN ('ADMIN','MEMBER','APIKEY','SYSTEM'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  COMMENT='售后状态台账（只追加证据链）';
+
+-- 后台操作审计（⚠️ idem_key 必须由 request_id 派生，严禁业务键派生：见 migrate-ledger.sql 列注释红线）
+CREATE TABLE `admin_audit_log` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `operator_type` VARCHAR(16) NOT NULL COMMENT 'ADMIN / MEMBER / APIKEY / SYSTEM',
+  `operator_id` BIGINT DEFAULT NULL COMMENT '操作者ID',
+  `operator_name` VARCHAR(64) DEFAULT NULL COMMENT '操作者名快照',
+  `action` VARCHAR(48) NOT NULL COMMENT '动作码：改价/删单/拆单/合并/发货/退货审核…',
+  `target_type` VARCHAR(24) NOT NULL COMMENT '目标类型（多态）：ORDER/PACKAGE/RETURN/SKU/MEMBER/APIKEY',
+  `target_id` BIGINT DEFAULT NULL COMMENT '目标ID（可空：目标可能已被物理删除）',
+  `target_sn` VARCHAR(64) DEFAULT NULL COMMENT '目标单号或名称快照（目标被删后仍可读）',
+  `summary` VARCHAR(255) DEFAULT NULL COMMENT '一句人话摘要，列表页直接展示',
+  `reason` VARCHAR(32) DEFAULT NULL COMMENT '管理员填写的原因，敏感动作必填',
+  `order_id` BIGINT DEFAULT NULL COMMENT '落在哪张订单上（冗余，便于按订单检索）',
+  `before_json` JSON DEFAULT NULL COMMENT '变更前快照',
+  `after_json` JSON DEFAULT NULL COMMENT '变更后快照',
+  `request_id` VARCHAR(64) DEFAULT NULL COMMENT '请求追踪号，一次请求一条',
+  `idem_key` VARCHAR(96) NOT NULL COMMENT '⚠️红线：必须由 request_id 派生（如 request_id 或 request_id:seq），严禁由业务键派生。业务键派生会让"连点两次"的第二次撞 uk_idem → INSERT 失败 → 事务回滚 → 本该留下的失败证据被抹掉，与"一次请求一条、连点留两条"的审计语义直接冲突',
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '发生时间（只追加，无 updated_at）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_idem` (`idem_key`),
+  KEY `idx_operator` (`operator_id`, `created_at`),
+  KEY `idx_target` (`target_type`, `target_id`),
+  KEY `idx_order` (`order_id`),
+  CONSTRAINT `ck_admin_audit_log_operator_type`
+    CHECK (`operator_type` IN ('ADMIN','MEMBER','APIKEY','SYSTEM'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  COMMENT='后台操作审计日志（只追加，不修改不软删）';
+
+-- WMS 下发/回传（REQ/ACK 两阶段 write-ahead）
+CREATE TABLE `wms_exchange_ledger` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `delivery_id` BIGINT NOT NULL COMMENT '包裹ID（无外键：证据不随包裹级联删除）',
+  `direction` VARCHAR(8) NOT NULL COMMENT 'REQ=下发 / ACK=回传',
+  `attempt_no` INT NOT NULL DEFAULT 1 COMMENT '第几次尝试（重试用，从 1 开始）',
+  `request_payload` JSON DEFAULT NULL COMMENT '下发报文',
+  `response_payload` JSON DEFAULT NULL COMMENT '回传报文（REQ 行落库时为 NULL）',
+  `result` VARCHAR(16) DEFAULT NULL COMMENT 'SUCCESS / FAIL / TIMEOUT（REQ 行未定论时为 NULL）',
+  `latency_ms` INT DEFAULT NULL COMMENT '往返耗时（毫秒）',
+  `operator_type` VARCHAR(16) NOT NULL COMMENT 'ADMIN / MEMBER / APIKEY / SYSTEM',
+  `operator_id` BIGINT DEFAULT NULL COMMENT '操作者ID（系统重试可空）',
+  `operator_name` VARCHAR(64) DEFAULT NULL COMMENT '操作者名快照（密钥名 / 登录名）',
+  `idem_key` VARCHAR(96) NOT NULL COMMENT '幂等键 {deliveryId}:WMS:{attemptNo}:{REQ|ACK}',
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '记账时间（只追加，无 updated_at）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_idem` (`idem_key`),
+  KEY `idx_delivery` (`delivery_id`, `created_at`),
+  CONSTRAINT `ck_wms_exchange_ledger_direction` CHECK (`direction` IN ('REQ','ACK')),
+  CONSTRAINT `ck_wms_exchange_ledger_operator_type`
+    CHECK (`operator_type` IN ('ADMIN','MEMBER','APIKEY','SYSTEM'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  COMMENT='WMS 下发/回传台账（REQ/ACK 两阶段 write-ahead）';

@@ -1,7 +1,6 @@
 package com.qiqi.mall.oms.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.qiqi.mall.shared.common.PreviewResult;
 import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.shared.guard.OptimisticLockGuard;
@@ -12,8 +11,10 @@ import com.qiqi.mall.oms.entity.ReturnApply;
 import com.qiqi.mall.oms.service.DeliveryFlowService;
 import com.qiqi.mall.oms.service.OrderItemService;
 import com.qiqi.mall.oms.service.OrderService;
+import com.qiqi.mall.oms.service.OrderStatusService;
 import com.qiqi.mall.oms.service.PaymentRecordService;
 import com.qiqi.mall.oms.service.ReturnApplyService;
+import com.qiqi.mall.oms.service.ReturnStatusService;
 import com.qiqi.mall.catalog.service.SkuService;
 import com.qiqi.mall.stock.StockLedgerContext;
 import com.qiqi.mall.stock.entity.StockLedger;
@@ -48,17 +49,25 @@ public class ReturnApplyController {
     private final SkuService skuService;
     private final PaymentRecordService paymentRecordService;
     private final DeliveryFlowService deliveryFlowService;
+    /** 订单状态写入的唯一入口（P2 第一步收敛：申请退货 5 退款中 / 审核通过 6 已退款 / 拒绝回 1 已付款） */
+    private final OrderStatusService orderStatusService;
+    /** 退货申请状态写入的唯一入口（含原来那句手写 UPDATE ... WHERE status=0 的原子守卫） */
+    private final ReturnStatusService returnStatusService;
 
     public ReturnApplyController(ReturnApplyService returnApplyService, OrderService orderService,
                                  OrderItemService orderItemService, SkuService skuService,
                                  PaymentRecordService paymentRecordService,
-                                 DeliveryFlowService deliveryFlowService) {
+                                 DeliveryFlowService deliveryFlowService,
+                                 OrderStatusService orderStatusService,
+                                 ReturnStatusService returnStatusService) {
         this.returnApplyService = returnApplyService;
         this.orderService = orderService;
         this.orderItemService = orderItemService;
         this.skuService = skuService;
         this.paymentRecordService = paymentRecordService;
         this.deliveryFlowService = deliveryFlowService;
+        this.orderStatusService = orderStatusService;
+        this.returnStatusService = returnStatusService;
     }
 
     /** 列表：附带订单号，方便后台直接辨认（原本只能看到 orderId） */
@@ -109,7 +118,9 @@ public class ReturnApplyController {
     @Transactional(rollbackFor = Exception.class)
     public Result<ReturnApply> create(@RequestBody ReturnApply body) {
         body.setId(null);
-        if (body.getStatus() == null) body.setStatus(0);
+        // 出生：不传状态 = 「待处理(0)」，走唯一入口（save 之前定初值，不产生 UPDATE）。
+        // 传了 1 通过 / 2 拒绝 是「历史结论直接写入」，原样保留、不联动订单（保持原语义）。
+        if (body.getStatus() == null) returnStatusService.init(body, 0);
         Order order = body.getOrderId() == null ? null : orderService.getById(body.getOrderId());
         if (order == null) return Result.fail("退货申请必须指向一张存在的订单");
         if (body.getStatus() == 0) {
@@ -118,9 +129,9 @@ public class ReturnApplyController {
                         + "；只有已付款/已发货/待审核/待发货/部分发货的订单可以）");
             }
             if (order.getStatus() != 5) {          // 已经在退款中：状态不动（不白涨一次 version）
-                order.setStatus(5);
+                // 状态写入统一走 OrderStatusService（同一条 UPDATE 里带 status_seq 自增与 version 自增）
                 // 0 行 = 读到状态之后订单被别人改过 → 409 整笔回滚，申请也不会落库
-                int rows = orderService.getBaseMapper().updateById(order);
+                int rows = orderStatusService.change(order, 5, OrderStatusService.REASON_RETURN_APPLY, null);
                 OptimisticLockGuard.requireAffected(rows);
             }
         }
@@ -200,23 +211,22 @@ public class ReturnApplyController {
         //    如果只用上面那句 if (exist.getStatus() != 0) 判断，两个请求都能通过（读到的都是 0），
         //    随后就会各退一次款、各回补一次库存 —— 那是真金白银的重复。
         //    0 行还有第二种原因：这条申请被并发删了 —— 同样不能继续（往不存在的申请上记账），一样 fail-closed。
-        LambdaUpdateWrapper<ReturnApply> applyGuard = new LambdaUpdateWrapper<ReturnApply>()
-                .eq(ReturnApply::getId, exist.getId())
-                .eq(ReturnApply::getStatus, 0)
-                .set(ReturnApply::getStatus, target);
-        if (body.getDescription() != null) {
-            applyGuard.set(ReturnApply::getDescription, body.getDescription());
-        }
-        int applyRows = returnApplyService.getBaseMapper().update(null, applyGuard);
+        //    现在这句 SQL 收敛进 ReturnStatusService#change：入口里同样是
+        //    `SET status=?, status_seq=status_seq+1 WHERE id=? AND status=<读到的状态>` ——
+        //    「待处理」这条守卫仍然写在 WHERE 里（不是只做一次 Java if），原子性一点没丢。
+        String description = body.getDescription();
+        int applyRows = returnStatusService.change(exist, target,
+                target == 1 ? ReturnStatusService.REASON_APPROVE : ReturnStatusService.REASON_REJECT,
+                description,
+                description == null ? null : w -> w.set(ReturnApply::getDescription, description));
         OptimisticLockGuard.requireAffected(applyRows);
 
         if (order == null) return Result.ok();
         if (target == 1) {
             // 通过：退款 + 回补库存
-            order.setStatus(6);
             // ② 订单（有 version）：0 行 = 另一个管理员同时审了同一张单 / 订单被别的流程改过 →
             //    抛 409 **整笔回滚**（申请状态一起退回去）。绝不能「申请已通过、订单没退款」只回滚一半。
-            int rows = orderService.getBaseMapper().updateById(order);
+            int rows = orderStatusService.change(order, 6, OrderStatusService.REASON_RETURN_APPROVE, null);
             OptimisticLockGuard.requireAffected(rows);
             paymentRecordService.record(order.getOrderSn(), order.getTotalAmount(),
                     PaymentRecord.TYPE_REFUND, order.getPayType() == null ? 0 : order.getPayType());
@@ -242,8 +252,7 @@ public class ReturnApplyController {
                 deliveryFlowService.recomputeOrderStatusAfterReturnReject(order.getId());
             } else {
                 // 直发单（没有任何未取消的包裹）：没有子单事实可依，订单回到已付款 1（保持原行为）
-                order.setStatus(1);
-                int rows = orderService.getBaseMapper().updateById(order);
+                int rows = orderStatusService.change(order, 1, OrderStatusService.REASON_RETURN_REJECT, null);
                 OptimisticLockGuard.requireAffected(rows);
             }
         }

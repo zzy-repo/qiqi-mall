@@ -38,10 +38,14 @@ public class DeliveryFlowService {
     private final SkuService skuService;
     private final MockWmsService wms;
     private final WarehouseService warehouseService;
+    /** 包裹状态写入的唯一入口（P2 第一步收敛）；父订单状态写入走 {@link OrderStatusService} */
+    private final DeliveryStatusService deliveryStatusService;
+    private final OrderStatusService orderStatusService;
 
     public DeliveryFlowService(DeliveryOrderService deliveryOrderService, DeliveryItemService deliveryItemService,
                                DeliveryLogisticsService deliveryLogisticsService, OrderService orderService,
-                               SkuService skuService, MockWmsService wms, WarehouseService warehouseService) {
+                               SkuService skuService, MockWmsService wms, WarehouseService warehouseService,
+                               DeliveryStatusService deliveryStatusService, OrderStatusService orderStatusService) {
         this.deliveryOrderService = deliveryOrderService;
         this.deliveryItemService = deliveryItemService;
         this.deliveryLogisticsService = deliveryLogisticsService;
@@ -49,6 +53,8 @@ public class DeliveryFlowService {
         this.skuService = skuService;
         this.wms = wms;
         this.warehouseService = warehouseService;
+        this.deliveryStatusService = deliveryStatusService;
+        this.orderStatusService = orderStatusService;
     }
 
     /**
@@ -65,8 +71,9 @@ public class DeliveryFlowService {
         if (delivery.getStatus() != DeliveryOrder.PENDING) {
             throw new IllegalStateException("只有待下发发货单可以下发");
         }
-        delivery.setStatus(DeliveryOrder.DISPATCHED);
-        int rows = deliveryOrderService.getBaseMapper().updateById(delivery);
+        // 状态写入统一走 DeliveryStatusService（同一条 UPDATE 里带 status_seq 自增与 version 自增）
+        int rows = deliveryStatusService.change(delivery, DeliveryOrder.DISPATCHED,
+                DeliveryStatusService.REASON_DISPATCH, null);
         OptimisticLockGuard.requireAffected(rows);
         wms.dispatch(delivery.getDeliverySn());
         return delivery;
@@ -82,9 +89,9 @@ public class DeliveryFlowService {
         if (delivery.getStatus() != DeliveryOrder.PENDING) {
             throw new IllegalStateException("只有待下发发货单可以取消");
         }
-        delivery.setStatus(DeliveryOrder.CANCELLED);
         // fail-closed：0 行 = 读到「待下发」之后别人改过 → 409 回滚，库存一次都不会被回补
-        int rows = deliveryOrderService.getBaseMapper().updateById(delivery);
+        int rows = deliveryStatusService.change(delivery, DeliveryOrder.CANCELLED,
+                DeliveryStatusService.REASON_CANCEL, null);
         OptimisticLockGuard.requireAffected(rows);
 
         deliveryItemService.list(new LambdaQueryWrapper<DeliveryItem>()
@@ -105,35 +112,43 @@ public class DeliveryFlowService {
         int current = delivery.getStatus();
         if (current == DeliveryOrder.CANCELLED) throw new IllegalStateException("已取消的发货单不能回传");
 
+        // 幂等判断与守卫仍在各自 case 里（那是业务语义）；这里只算出「目标状态 + 事件原因」，
+        // 落库统一走 switch 之后的那一条 UPDATE（与旧结构一致：一次回传只写一次状态）
+        final int target;
+        final String reason;
         switch (event == null ? "" : event.toLowerCase()) {
             case "pick" -> {
                 if (current >= DeliveryOrder.PICKED) return delivery;           // 幂等
                 requireState(delivery, DeliveryOrder.DISPATCHED, "只有已下发发货单可以回传拣货");
-                delivery.setStatus(DeliveryOrder.PICKED);
+                target = DeliveryOrder.PICKED;
+                reason = DeliveryStatusService.REASON_PICK;
             }
             case "outbound" -> {
                 if (current >= DeliveryOrder.OUTBOUND) return delivery;         // 幂等
                 if (current != DeliveryOrder.DISPATCHED && current != DeliveryOrder.PICKED) {
                     throw new IllegalStateException("只有已下发/已拣货发货单可以回传出库");
                 }
-                delivery.setStatus(DeliveryOrder.OUTBOUND);
+                target = DeliveryOrder.OUTBOUND;
+                reason = DeliveryStatusService.REASON_OUTBOUND;
                 saveLogisticsIfAbsent(delivery);                                // 出库写运单号
             }
             case "transit" -> {
                 if (current >= DeliveryOrder.IN_TRANSIT) return delivery;
                 requireState(delivery, DeliveryOrder.OUTBOUND, "只有已出库发货单可以回传揽收");
-                delivery.setStatus(DeliveryOrder.IN_TRANSIT);
+                target = DeliveryOrder.IN_TRANSIT;
+                reason = DeliveryStatusService.REASON_TRANSIT;
             }
             case "signed" -> {
                 if (current >= DeliveryOrder.SIGNED) return delivery;
                 if (current < DeliveryOrder.OUTBOUND) throw new IllegalStateException("只有已出库之后的发货单可以回传签收");
-                delivery.setStatus(DeliveryOrder.SIGNED);
+                target = DeliveryOrder.SIGNED;
+                reason = DeliveryStatusService.REASON_SIGNED;
             }
             default -> throw new IllegalStateException("未知回传事件：" + event + "（支持 pick/outbound/transit/signed）");
         }
         // fail-closed：0 行 = 读到当前状态之后别人改过（同一事件重复回传的另一路并发）→ 409 回滚，
         // 状态机不会因为「后写的把先写的盖掉」而回退
-        int rows = deliveryOrderService.getBaseMapper().updateById(delivery);
+        int rows = deliveryStatusService.change(delivery, target, reason, null);
         OptimisticLockGuard.requireAffected(rows);
         recomputeOrderStatus(delivery.getOrderId());
         return delivery;
@@ -341,8 +356,9 @@ public class DeliveryFlowService {
         int signed = 0;
         for (DeliveryOrder delivery : active) {
             if (delivery.getStatus() >= DeliveryOrder.SIGNED) continue;       // 已签收：幂等跳过
-            delivery.setStatus(DeliveryOrder.SIGNED);
-            int rows = deliveryOrderService.getBaseMapper().updateById(delivery);
+            // 状态写入统一走 DeliveryStatusService（买家视角的 409 文案留在调用方，一个字不改）
+            int rows = deliveryStatusService.change(delivery, DeliveryOrder.SIGNED,
+                    DeliveryStatusService.REASON_CONFIRM_SIGN, null);
             OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_ORDER_STATE_CHANGED);
             saveLogisticsIfAbsent(delivery);                                  // 已出库的包裹该有运单（缺了才补）
             signed++;
@@ -458,11 +474,12 @@ public class DeliveryFlowService {
             if (current != null && current == 7 && (order.getSplitStatus() == null || order.getSplitStatus() == 0)) {
                 return;                                   // 已经是待审核且未拆：不必再写一次
             }
-            order.setStatus(7);
-            order.setSplitStatus(0);
             log.info("订单 {} 的待处理退货申请已删除，且该订单没有任何包裹（直发单）→ 回「待审核(7)」并清空拆单标记",
                     orderId);
-            int rows = orderService.getBaseMapper().updateById(order);
+            // 状态与 split_status 必须在**同一条** UPDATE 里（拆两条会多涨一次 version）
+            int rows = orderStatusService.change(order, 7, OrderStatusService.REASON_AGGREGATE,
+                    "删除待处理退货申请：无包裹的直发单回待审核并清空拆单标记",
+                    update -> update.set(Order::getSplitStatus, 0));
             OptimisticLockGuard.requireAffected(rows);
             return;
         }
@@ -475,13 +492,14 @@ public class DeliveryFlowService {
             boolean needStatus = current == null || current != 7;
             boolean needSplitFlag = order.getSplitStatus() == null || order.getSplitStatus() != 0;
             if (!needStatus && !needSplitFlag) return;            // 已经是待审核且未拆：不必再写一次
-            order.setStatus(7);
             // split_status 必须一起归零：它还是 1 的话，重新审核时 split() 会走「已拆过」的幂等分支
             // 直接返回那几张**已取消**的包裹，一张新包裹都不会生成 —— 状态退回 7 了却还是拆不了单。
-            order.setSplitStatus(0);
+            // 状态与 split_status 必须在**同一条** UPDATE 里（拆两条会多涨一次 version）
             log.info("订单 {} 的 {} 张包裹已全部取消（无在途包裹），退回「待审核(7)」并清空拆单标记，以便重新审核拆单",
                     orderId, children.size());
-            int rows = orderService.getBaseMapper().updateById(order);
+            int rows = orderStatusService.change(order, 7, OrderStatusService.REASON_AGGREGATE,
+                    "包裹全部取消：退回待审核并清空拆单标记",
+                    update -> update.set(Order::getSplitStatus, 0));
             OptimisticLockGuard.requireAffected(rows);
             return;
         }
@@ -490,22 +508,23 @@ public class DeliveryFlowService {
         boolean allSigned = active.stream().allMatch(d -> d.getStatus() >= DeliveryOrder.SIGNED);
         boolean anyOutbound = active.stream().anyMatch(d -> d.getStatus() >= DeliveryOrder.OUTBOUND);
 
+        final int target;
         if (allSigned) {
-            order.setStatus(3);            // 已完成
+            target = 3;            // 已完成
         } else if (allOutbound) {
-            order.setStatus(2);            // 已发货（全部子单出库）
+            target = 2;            // 已发货（全部子单出库）
         } else if (anyOutbound) {
-            order.setStatus(9);            // 部分发货（中间态）
+            target = 9;            // 部分发货（中间态）
         } else {
             // 一张都没出库：包裹侧推不出「更早」的结论，正常在途订单本来就停在 8 待发货 —— 不写。
             // 唯一例外是退货审核拒绝把订单从 5 交回来时：必须落回 8 待发货，否则会永远卡在「退款中」。
             if (!leaveReturnInProgress) return;
-            order.setStatus(8);
+            target = 8;
             log.info("订单 {} 的退货申请被拒，且包裹都还没出库 → 由子单推导回「待发货(8)」", orderId);
         }
-        // 父订单聚合也是写：0 行 = 读完之后别人改过这张订单 → 409 回滚整笔（子单状态一起回滚），
-        // 不允许「子单已出库、父单状态没跟上」这种半截状态悄悄提交
-        int rows = orderService.getBaseMapper().updateById(order);
+        // 父订单聚合也是写（统一走 OrderStatusService）：0 行 = 读完之后别人改过这张订单 →
+        // 409 回滚整笔（子单状态一起回滚），不允许「子单已出库、父单状态没跟上」这种半截状态悄悄提交
+        int rows = orderStatusService.change(order, target, OrderStatusService.REASON_AGGREGATE, null);
         OptimisticLockGuard.requireAffected(rows);
     }
 

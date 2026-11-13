@@ -8,8 +8,10 @@ import com.qiqi.mall.oms.entity.ReturnApply;
 import com.qiqi.mall.oms.entity.ReturnReason;
 import com.qiqi.mall.shared.security.CurrentUser;
 import com.qiqi.mall.oms.service.OrderService;
+import com.qiqi.mall.oms.service.OrderStatusService;
 import com.qiqi.mall.oms.service.ReturnApplyService;
 import com.qiqi.mall.oms.service.ReturnReasonService;
+import com.qiqi.mall.oms.service.ReturnStatusService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,12 +28,19 @@ public class PortalReturnController {
     private final ReturnApplyService returnApplyService;
     private final ReturnReasonService returnReasonService;
     private final OrderService orderService;
+    /** 订单状态写入的唯一入口（P2 第一步收敛：申请退货把订单写成 5 退款中） */
+    private final OrderStatusService orderStatusService;
+    /** 退货申请状态写入的唯一入口（出生：新建申请 = 待处理(0)） */
+    private final ReturnStatusService returnStatusService;
 
     public PortalReturnController(ReturnApplyService returnApplyService, ReturnReasonService returnReasonService,
-                                  OrderService orderService) {
+                                  OrderService orderService, OrderStatusService orderStatusService,
+                                  ReturnStatusService returnStatusService) {
         this.returnApplyService = returnApplyService;
         this.returnReasonService = returnReasonService;
         this.orderService = orderService;
+        this.orderStatusService = orderStatusService;
+        this.returnStatusService = returnStatusService;
     }
 
     /** 退货原因字典 */
@@ -70,15 +79,15 @@ public class PortalReturnController {
         apply.setReasonId(reason.getId());
         apply.setReturnReason(reason.getName());
         apply.setDescription(request.getDescription());
-        apply.setStatus(0);
+        // 出生：申请初始状态「待处理(0)」也走唯一入口（save 之前定初值，不产生 UPDATE）
+        returnStatusService.init(apply, 0);
         returnApplyService.save(apply);
 
-        // 联动：订单进入「退款中」
-        order.setStatus(5);
+        // 联动：订单进入「退款中」（状态写入统一走 OrderStatusService）
         // 0 行 = 读出来之后订单被别人改过（管理员刚好发货/关闭、或另一次并发退货）→ 409 整笔回滚，
         // 连刚插入的退货申请一起撤回 —— 否则会留下一条「申请已建、订单没进退款中」的待处理单，
         // 反而把买家自己卡在「该订单已有待处理的退货申请」上，再也不能申请。
-        int rows = orderService.getBaseMapper().updateById(order);
+        int rows = orderStatusService.change(order, 5, OrderStatusService.REASON_RETURN_APPLY, null);
         OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_ORDER_STATE_CHANGED);
         return Result.ok(apply);
     }

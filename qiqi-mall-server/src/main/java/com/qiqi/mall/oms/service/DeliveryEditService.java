@@ -49,17 +49,21 @@ public class DeliveryEditService {
     private final OrderService orderService;
     private final WarehouseService warehouseService;
     private final DeliveryLogisticsService deliveryLogisticsService;
+    /** 包裹状态写入的唯一入口（出生：人工拆出来的包裹 = 待下发(0)） */
+    private final DeliveryStatusService deliveryStatusService;
 
     public DeliveryEditService(DeliveryOrderService deliveryOrderService, DeliveryItemService deliveryItemService,
                                OrderItemService orderItemService, OrderService orderService,
                                WarehouseService warehouseService,
-                               DeliveryLogisticsService deliveryLogisticsService) {
+                               DeliveryLogisticsService deliveryLogisticsService,
+                               DeliveryStatusService deliveryStatusService) {
         this.deliveryOrderService = deliveryOrderService;
         this.deliveryItemService = deliveryItemService;
         this.orderItemService = orderItemService;
         this.orderService = orderService;
         this.warehouseService = warehouseService;
         this.deliveryLogisticsService = deliveryLogisticsService;
+        this.deliveryStatusService = deliveryStatusService;
     }
 
     // ------------------------------------------------------------------
@@ -107,7 +111,8 @@ public class DeliveryEditService {
         created.setDeliverySn(DeliverySnGenerator.next());
         created.setOrderId(source.getOrderId());
         created.setWarehouseId(targetWarehouseId);
-        created.setStatus(DeliveryOrder.PENDING);
+        // 出生：新包裹初始状态「待下发(0)」走唯一入口（save 之前定初值，不产生 UPDATE）
+        deliveryStatusService.init(created, DeliveryOrder.PENDING);
         created.setSource(DeliveryOrder.SOURCE_MANUAL);       // 拆出来的包是人拆的
         created.setReceiverName(source.getReceiverName());
         created.setReceiverPhone(source.getReceiverPhone());

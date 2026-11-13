@@ -30,13 +30,17 @@ public class OrderTransactionalCreator {
     private final OrderItemService orderItemService;
     private final ProductService productService;
     private final SkuService skuService;
+    /** 订单状态写入的唯一入口（出生：新建订单 = 待付款(0)） */
+    private final OrderStatusService orderStatusService;
 
     public OrderTransactionalCreator(OrderService orderService, OrderItemService orderItemService,
-                                     ProductService productService, SkuService skuService) {
+                                     ProductService productService, SkuService skuService,
+                                     OrderStatusService orderStatusService) {
         this.orderService = orderService;
         this.orderItemService = orderItemService;
         this.productService = productService;
         this.skuService = skuService;
+        this.orderStatusService = orderStatusService;
     }
 
     public record ItemInput(Long skuId, Integer quantity) {}
@@ -48,7 +52,8 @@ public class OrderTransactionalCreator {
         Order order = new Order();
         order.setOrderSn(OrderSnGenerator.next());
         order.setMemberId(memberId);
-        order.setStatus(0);
+        // 出生：新订单初始状态「待付款(0)」走唯一入口（save 之前定初值，不产生 UPDATE）
+        orderStatusService.init(order, 0);
         order.setPayType(0);
         order.setReceiverName(receiverName);
         order.setReceiverPhone(receiverPhone);

@@ -15,6 +15,7 @@ import com.qiqi.mall.oms.service.DeliveryOrderService;
 import com.qiqi.mall.oms.service.OrderItemService;
 import com.qiqi.mall.oms.service.OrderPurgeService;
 import com.qiqi.mall.oms.service.OrderService;
+import com.qiqi.mall.oms.service.OrderStatusService;
 import com.qiqi.mall.oms.service.ReturnApplyService;
 import com.qiqi.mall.oms.service.SplitOrderService;
 import com.qiqi.mall.catalog.entity.Product;
@@ -40,6 +41,8 @@ import java.util.Map;
 public class OrderController {
 
     private final OrderService orderService;
+    /** 订单状态写入的唯一入口（P2 第一步收敛：状态只在 OrderStatusService 里写） */
+    private final OrderStatusService orderStatusService;
     private final OrderItemService orderItemService;
     private final ReturnApplyService returnApplyService;
     private final SplitOrderService splitOrderService;
@@ -51,7 +54,8 @@ public class OrderController {
     /** 库存落点：「只剩 N 件」这类必须说准的地方走它（legacy 读 sku.stock，bucket 读 SUM(桶)） */
     private final StockStore stockStore;
 
-    public OrderController(OrderService orderService, OrderItemService orderItemService,
+    public OrderController(OrderService orderService, OrderStatusService orderStatusService,
+                           OrderItemService orderItemService,
                            ReturnApplyService returnApplyService, SplitOrderService splitOrderService,
                            SkuService skuService, ProductService productService,
                            DeliveryOrderService deliveryOrderService,
@@ -59,6 +63,7 @@ public class OrderController {
                            MemberService memberService,
                            StockStore stockStore) {
         this.orderService = orderService;
+        this.orderStatusService = orderStatusService;
         this.orderItemService = orderItemService;
         this.returnApplyService = returnApplyService;
         this.splitOrderService = splitOrderService;
@@ -297,11 +302,11 @@ public class OrderController {
         if (PreviewResult.isDryRun(dryRun)) {
             return Result.ok(PreviewResult.of(auditPassWillDo(order, splitOrderService.preview(id))));
         }
-        order.setStatus(8);
+        // 状态写入统一走 OrderStatusService（同一条 UPDATE 里带 status_seq 自增与 version 自增）
         // fail-closed：0 行说明「读到 status=7 之后、写回之前」别人改过这张订单
         // （典型：另一个审核员已经审过并发货单已生成）。必须抛 409 让事务回滚，
         // 绝不能往下走 split() —— 否则订单停在待审核、发货单却已生成，只能人工对账。
-        int rows = orderService.getBaseMapper().updateById(order);
+        int rows = orderStatusService.change(order, 8, OrderStatusService.REASON_AUDIT_PASS, null);
         OptimisticLockGuard.requireAffected(rows);
         return Result.ok(splitOrderService.split(id));
     }
@@ -367,9 +372,9 @@ public class OrderController {
         if (PreviewResult.isDryRun(dryRun)) {
             return Result.ok(PreviewResult.of(auditRejectWillDo(order, items)));
         }
-        order.setStatus(4);
+        // 状态写入统一走 OrderStatusService（同一条 UPDATE 里带 status_seq 自增与 version 自增）
         // fail-closed：0 行 = 读到 status=7 之后别人改过 → 409 回滚，绝不回补库存
-        int rows = orderService.getBaseMapper().updateById(order);
+        int rows = orderStatusService.change(order, 4, OrderStatusService.REASON_AUDIT_REJECT, null);
         OptimisticLockGuard.requireAffected(rows);
 
         // 回补必须记台账（缺陷：这条入口原来是裸的 stock = stock + N，和「取消包裹」叠加会补两次）。
@@ -430,9 +435,9 @@ public class OrderController {
         if (PreviewResult.isDryRun(dryRun)) {
             return Result.ok(PreviewResult.of(shipWillDo(order)));
         }
-        order.setStatus(2);
+        // 状态写入统一走 OrderStatusService（同一条 UPDATE 里带 status_seq 自增与 version 自增）
         // fail-closed：0 行 = 读到状态之后别人改过（另一个按钮/另一个实例已经发过货）→ 409 回滚
-        int rows = orderService.getBaseMapper().updateById(order);
+        int rows = orderStatusService.change(order, 2, OrderStatusService.REASON_SHIP, null);
         OptimisticLockGuard.requireAffected(rows);
         return Result.ok(order);
     }
@@ -611,11 +616,12 @@ public class OrderController {
      *         否则返回**给用户看的中文原因** —— 说清收到的是哪个状态、允许哪三个、
      *         以及「其它状态只能由流程产生」和具体流转箭头，不许调用方自己猜。
      */
-    private static String initialStatusProblem(Order order) {
+    private String initialStatusProblem(Order order) {
         Integer status = order.getStatus();
         if (status == null) {
-            // 不传 = 待付款：这是「还没发生任何事」的默认口径，不是调用方漏填
-            order.setStatus(INITIAL_UNPAID);
+            // 不传 = 待付款：这是「还没发生任何事」的默认口径，不是调用方漏填。
+            // 初始状态的写入也走唯一入口 OrderStatusService#init（出生 = save 之前定初值，不产生 UPDATE）
+            orderStatusService.init(order, INITIAL_UNPAID);
             return null;
         }
         if (status == INITIAL_UNPAID || status == INITIAL_PAID || status == INITIAL_PENDING_AUDIT) {
