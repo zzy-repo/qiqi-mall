@@ -30,7 +30,7 @@ import org.springframework.stereotype.Service;
  *
  * <p>为什么值得这样改：{@code UPDATE sku SET stock = stock - N WHERE id=? AND stock>=N} 虽然
  * 原子且不超卖，但同一 SKU 的所有并发都排在同一把行锁上，热点 SKU 的 TPS 上限 = 单行行锁吞吐。
- * 拆成 N 行后并发分散到 N 把互不相干的行锁（口径见 {@code sql/migrate-sku-bucket.sql}）。
+ * 拆成 N 行后并发分散到 N 把互不相干的行锁（口径见 {@code sql/_rollback/migrate-sku-bucket.sql}）。
  */
 @Service
 public class SkuServiceImpl extends ServiceImpl<SkuMapper, Sku> implements SkuService {

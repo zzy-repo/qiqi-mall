@@ -28,7 +28,7 @@ public class ChannelShopService {
 
     private static final Logger log = LoggerFactory.getLogger(ChannelShopService.class);
 
-    /** 店铺种子：platform_type / shop_code / shop_name（与 sql/migrate-channel.sql 同口径） */
+    /** 店铺种子：platform_type / shop_code / shop_name（与 sql/_rollback/migrate-channel.sql 同口径） */
     private static final List<String[]> SEEDS = List.of(
             new String[]{"MALL", "MALL-001", "七七商城自营"},
             new String[]{"TAOBAO_MOCK", "TB-001", "淘宝旗舰店（模拟）"},

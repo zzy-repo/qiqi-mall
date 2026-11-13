@@ -24,7 +24,7 @@ import java.time.LocalDateTime;
  *       （数量守恒，见 {@code StockLedgerService}）—— 不同触发、不同 reason 也不会补第二次。</li>
  * </ul>
  *
- * <p>表结构见 {@code sql/migrate-stock-ledger.sql}；**没有外键**：台账是审计证据，
+ * <p>表结构见 {@code sql/_rollback/migrate-stock-ledger.sql}；**没有外键**：台账是审计证据，
  * 不允许随订单/规格被级联删除。
  */
 @Data

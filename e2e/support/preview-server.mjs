@@ -7,7 +7,7 @@
  * 单次导航实测 778ms/500 请求 → 525ms/50 请求。spec 与断言一个字不用改。
  *
  * 它替代 vite 的两件事，缺一不可：
- *   ① 静态：servedist 里的文件；找不到且不是资源文件 → 回 index.html（vue-router history 模式）
+ *   ① 静态：serve dist 里的文件；找不到且不是资源文件 → 回 index.html（vue-router history 模式）
  *   ② 代理：/portal、/admin → 该 shard 的后端（8091/8092）；/qiqi-mall → MinIO（商品图片）。
  *      dev 的 vite.config.js 里就是这两条 proxy（server.proxy），这里 1:1 复刻，
  *      唯一区别是压缩/缓存头按静态产物来设。
@@ -23,8 +23,8 @@
  *        [--minio=http://127.0.0.1:9000] [--label=a-portal] [--quiet]
  *
  * 约定（故意做得「响」一点）：
- *   · 启动成功必须打这一行，scripts/e2e-preview.sh 靠它判断就绪：
- *       ▶ preview ready <label> port=<n> dist=<dir> api=<api>
+ *   · 启动成功会打这一行（排查用；scripts/e2e-preview.sh 的就绪判断是 HTTP 健康探测，不解析这一行）：
+ *       ▶ preview ready <label> port=<n> dist=<dir> api=<api> minio=<url>
  *   · dist 里没有 index.html → 直接退出码 2（没构建就别说自己 ready，避免打空气跑出一片假红）
  *   · 任何代理错误都回 502 并在 stderr 记一行，不静默吞
  */

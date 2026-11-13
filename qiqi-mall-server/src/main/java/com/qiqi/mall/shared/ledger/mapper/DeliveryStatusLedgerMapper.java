@@ -7,7 +7,7 @@ import org.apache.ibatis.annotations.Select;
 /**
  * 包裹状态台账的写入语句（只追加）。
  *
- * <p>比订单台账多**两列已登记冗余**（见 {@code sql/migrate-ledger.sql} 的冗余列登记表）：
+ * <p>比订单台账多**两列已登记冗余**（见 {@code sql/_rollback/migrate-ledger.sql} 的冗余列登记表）：
  * <ul>
  *   <li>{@code delivery_sn} 快照 —— {@code OrderPurgeService} 会**物理删除**包裹行，单号不留快照则删除后证据链断裂；</li>
  *   <li>{@code order_id} —— 同理：包裹行被物理删除后 {@code delivery_order} 这座「台账 → 订单」的桥就断了，

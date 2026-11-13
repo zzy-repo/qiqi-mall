@@ -173,7 +173,7 @@ public class StatusLedgerWriter {
     // ================================================================ 内部
 
     /**
-     * 幂等键：{@code {业务ID}:{statusSeq}}（与 {@code sql/migrate-ledger.sql} 的注释逐字一致）。
+     * 幂等键：{@code {业务ID}:{statusSeq}}（与 {@code sql/_rollback/migrate-ledger.sql} 的注释逐字一致）。
      *
      * <p>为什么不加 shard 前缀：{@code stock_ledger} 的 {@code idem_key} 以单调递增的 orderId 开头，
      * 所有插入都落在 uk_idem 最右端同一个 gap，成了全局串行点（压测实证）。同样形状的键理论上

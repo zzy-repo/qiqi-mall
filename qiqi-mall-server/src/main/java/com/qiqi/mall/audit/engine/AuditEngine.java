@@ -23,7 +23,7 @@ import java.util.Map;
  *     5a MATCH 条件没全满足 → 记 miss_reason（哪条、expected vs actual）
  *     5b 排除条件（本策略 POLICY 级 ∪ 全部 ALL_AUTO 级）任一成立 → 记 excluded_by
  *     5c 无排除 → AUTO_PASS
- * [6] 全都不中 → NO_MATCH（逐条「差在哪」）
+ * [6] 全都不中 → 若曾有策略「条件全满足、只被排除挡掉」→ MANUAL（被排除）；否则 NO_MATCH（逐条「差在哪」）
  * [7] 库存预检（仅 AUTO_PASS）：SUM(sku_bucket.stock) &gt;= 需求，不足 → MANUAL + STOCK_SHORT
  *     成本预检：毛利 ≤ 0 而成本价缺失 → MANUAL + COST_MISSING（风险③：不许沉默放行）
  * </pre>

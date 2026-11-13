@@ -23,7 +23,7 @@ import java.time.LocalDateTime;
  * {@code sku.stock} 降级为**展示缓存**（由 {@code SkuBucketService#refreshSkuStockCache} 按
  * {@code SUM(stock)} 回写），扣减/回补都不写它，也不拿它裁决。
  *
- * <p>表结构见 {@code sql/migrate-sku-bucket.sql}；{@code CHECK (stock >= 0)} 保证
+ * <p>表结构见 {@code sql/_rollback/migrate-sku-bucket.sql}；{@code CHECK (stock >= 0)} 保证
  * 单桶永远非负 ⇒ 任何时刻 {@code SUM(stock) >= 0}，「SUM 为负 / 超卖」在库层面就写不进去。
  */
 @Data

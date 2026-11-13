@@ -9,7 +9,7 @@ import org.apache.ibatis.annotations.Select;
  *
  * <p>比订单台账多一列 {@code order_id} 冗余：{@code return_apply} 对 {@code order} 是
  * {@code ON DELETE CASCADE}，且删单会物理删除申请 —— 没有这列，删单后从订单反查售后流水彻底断链
- * （见 {@code sql/migrate-ledger.sql} 的冗余列登记表）。
+ * （见 {@code sql/_rollback/migrate-ledger.sql} 的冗余列登记表）。
  *
  * <p>写法口径同 {@link OrderStatusLedgerMapper}：{@code ON DUPLICATE KEY UPDATE id = id} + {@code VALUES}。
  */

@@ -4,7 +4,7 @@ package com.qiqi.mall.audit.engine;
  * 条件值的类型：决定读 {@code audit_policy_condition} 的哪个 value_* 列。
  *
  * <p>DDL 上这个枚举是 {@code ENUM('NUM','TEXT','BOOL','JSON')}，且有一条 CHECK 钉住
- * 「value_type ↔ 值列」的对应关系（见 {@code sql/migrate-order-audit.sql}）。
+ * 「value_type ↔ 值列」的对应关系（见 {@code sql/_rollback/migrate-order-audit.sql}）。
  * 这里保持同名同序 —— 名字一旦漂移，读出来的条件就会和配置的不是同一条。
  */
 public enum ValueType {

@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
  * 热点 SKU 越多、并发越高就越值得多拆几行；桶越多，单桶余量越小（见 {@code SkuBucketService}
  * 的跨桶拼单），运维成本（SUM 汇总的行数）也越高。压测时要能不改代码就调。
  *
- * <p><b>必须与 SQL 保持一致</b>：{@code sql/migrate-sku-bucket.sql} 的回填把
+ * <p><b>必须与 SQL 保持一致</b>：{@code sql/_rollback/migrate-sku-bucket.sql} 的回填把
  * N 写死成 8（SQL 里读不到应用配置）。改 {@code bucket-count} 就要同步改那份回填，
  * 否则已有 SKU 只有 0..7 号桶、而应用会去找 8、9 号桶（多出来的尝试全部落空，不会算错库存，
  * 但白跑几次 UPDATE）。
