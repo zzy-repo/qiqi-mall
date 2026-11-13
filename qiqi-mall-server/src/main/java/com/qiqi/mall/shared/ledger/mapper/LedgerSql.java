@@ -38,11 +38,12 @@ package com.qiqi.mall.shared.ledger.mapper;
  *   <li><b>{@code stock_ledger} 没有 operator 列</b>：这里如实写 {@code 'SYSTEM'}（记账动作由系统完成），
  *       并且**按 operatorType 过滤时 STOCK 分支不参与**（{@code 1 = 0}）——
  *       否则「筛管理员」会混进一堆没人手工碰过的系统记账行。</li>
- *   <li><b>支付流水分支按 operatorType 过滤时同样整支不参与</b>（{@code 1 = 0}，与 STOCK 同一口径）：
- *       钱是被渠道回调/系统记账写进来的，`payment_record.operator_*` 只是「当时是谁点的这个动作」
- *       的上下文快照（买家点支付记 MEMBER、管理员点退货审核记 ADMIN），它**不是**「谁改了这笔钱的归属」。
- *       所以「筛管理员」不该把支付/退款流水混进来 —— 要查钱就选类型「支付流水」再按订单ID 收敛。
- *       （代价如实记在这里：按 operatorType 筛选时支付流水一行都不出现，这是有意的窄口径。）</li>
+ *   <li><b>支付流水分支按 operatorType 筛选时照实过滤</b>（{@code p.operator_type = #{operatorType}}），
+ *       <b>与 STOCK 的 {@code 1 = 0} 故意不同</b>：STOCK 那张表没有 operator 列（{@code 'SYSTEM'} 是本 SQL
+ *       编的常量），拿假身份去匹配筛选条件就是撒谎，所以整支不参与；而 {@code payment_record}
+ *       有 operator 三列且填了真值（ActorResolver 落的：买家付记 MEMBER、管理员点「退货审核通过」
+ *       触发退款记 ADMIN）。照抄 {@code 1 = 0} 会让「筛管理员」把管理员亲手批过的退款滤掉 ——
+ *       看起来像数据丢了。差异的理由写在 {@link #PAYMENT_FILTER} 与 {@link #STOCK_FILTER} 各自的注释里。</li>
  *   <li><b>bizId 在每个分支里就是该台账自己的业务主键</b>（订单 id / 包裹 id / 售后 id /
  *       target_id / delivery_id / order_id）。跨分支的「这行属于哪张订单」两个状态分支<b>都读视图的
  *       {@code order_id} 真实列</b>：包裹分支读的是已登记冗余列
@@ -314,14 +315,26 @@ final class LedgerSql {
     /**
      * 支付流水：{@code bizId} = 订单 id（{@code payment_record.order_id}）。
      *
-     * <p><b>按 operatorType 筛选时整支不参与</b>（{@code 1 = 0}，与 {@link #STOCK_FILTER} 同一口径）：
-     * {@code payment_record.operator_*} 是「谁点的这个动作」的上下文快照，不是「谁改动了这笔钱」——
-     * 退款是管理员点「退货审核通过」触发的，若照实过滤会让「筛管理员」里混进一堆资金流水，
-     * 而那些钱并不是管理员记的账。要查钱：类型选「支付流水」+ 业务ID（订单ID），两个条件足够收敛。
+     * <p><b>按 operatorType 筛选时照实过滤</b>（{@code p.operator_type = #{operatorType}}）——
+     * 这里<b>故意和 {@link #STOCK_FILTER} 不一样</b>，别「顺手统一」：
+     * <ul>
+     *   <li>{@code stock_ledger} <b>没有</b> operator 列。它在 {@link #STOCK_BRANCH} 里的
+     *       {@code 'SYSTEM'} 是本 SQL 自己编出来的常量（记账动作确实由系统完成），拿这个假身份去匹配
+     *       「筛管理员」等于给筛选器撒谎 —— 所以那一支只能整支不参与（{@code 1 = 0}）；</li>
+     *   <li>{@code payment_record} <b>有</b> {@code operator_type / operator_id / operator_name} 三列，
+     *       而且写入时落的是<b>真实值</b>（{@code ActorResolver} 记的是「谁点的这个动作」：
+     *       买家点支付记 {@code MEMBER}，管理员点「退货审核通过」触发退款记 {@code ADMIN}）。</li>
+     * </ul>
+     * 所以这一支必须照实过滤。照抄 STOCK 的 {@code 1 = 0} 的后果不是「窄口径」，而是<b>数据看起来丢了</b>：
+     * 按「管理员」筛台账时，管理员亲手批过的那笔退款会被一起滤掉。
+     *
+     * <p>历史行的 {@code operator_*} 可能为 {@code NULL}（这个字段是后加的）—— 那类行只在
+     * <b>不传</b> operatorType 时出现。这里<b>不</b>补 {@code OR p.operator_type IS NULL}：
+     * 补了就等于让「筛管理员」混进操作人不明的行，那是另一种撒谎。
      */
     private static final String PAYMENT_FILTER =
             "<if test='bizId != null'> AND p.order_id = #{bizId} </if>"
-                    + "<if test='operatorType != null'> AND 1 = 0 </if>"
+                    + "<if test='operatorType != null'> AND p.operator_type = #{operatorType} </if>"
                     + "<if test='from != null'> AND p.created_at &gt;= #{from} </if>"
                     + "<if test='to != null'> AND p.created_at &lt;= #{to} </if>";
 

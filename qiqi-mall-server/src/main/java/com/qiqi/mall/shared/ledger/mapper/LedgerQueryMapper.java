@@ -55,7 +55,7 @@ public interface LedgerQueryMapper {
      * @param page         分页参数（current/size 已由 controller 夹在 1..50）
      * @param branches     要查的分支：全部类型传 {@link #ALL_TYPES}，单类型传一个元素
      * @param bizId        业务对象 id（可空；语义见类注释）
-     * @param operatorType 操作人类型过滤（可空；STOCK 与 PAYMENT 两支不参与，见 {@link LedgerSql}）
+     * @param operatorType 操作人类型过滤（可空；仅 STOCK 支不参与——它没有 operator 列；PAYMENT 按真实 operator_type 参与，见 {@link LedgerSql}）
      * @param from         起始时间（含，可空）
      * @param to           截止时间（含，可空）
      */

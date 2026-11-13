@@ -60,6 +60,7 @@ class LedgerQueryIntegrationTest {
     private JdbcTemplate jdbc;
 
     private String adminJwt;
+    private Long memberId;
     private Long orderId;
     private Long deliveryId;
     private Long returnApplyId;
@@ -73,7 +74,7 @@ class LedgerQueryIntegrationTest {
     void prepareData() {
         adminJwt = loginAsAdmin();
 
-        Long memberId = jdbc.queryForObject("SELECT id FROM member ORDER BY id LIMIT 1", Long.class);
+        memberId = jdbc.queryForObject("SELECT id FROM member ORDER BY id LIMIT 1", Long.class);
         Long warehouseId = jdbc.queryForObject("SELECT id FROM warehouse ORDER BY id LIMIT 1", Long.class);
         assertThat(memberId).as("库里至少要有一个会员（订单表有外键 fk_order_member）").isNotNull();
         assertThat(warehouseId).as("库里至少要有一个仓库（发货单表有外键）").isNotNull();
@@ -254,6 +255,74 @@ class LedgerQueryIntegrationTest {
         }
     }
 
+    // ------------------------------------------------------------------ ⑦ PAYMENT 参与 operatorType 筛选
+
+    @Test
+    @DisplayName("⑦ PAYMENT 有真 operator 列 → 参与 operatorType 筛选（筛管理员要能看见他批的退款）；STOCK 仍不参与")
+    void operatorTypeFilter_includesPaymentBranch_butStillExcludesStock() {
+        // 两笔钱，都落在同一个订单上：
+        //  type=1 支付入账 —— 买家点的，ActorResolver 记 MEMBER
+        //  type=2 退款入账 —— 管理员点「退货审核通过」触发的，ActorResolver 记 ADMIN
+        String payTradeNo = "TPAY" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+        String refundTradeNo = "TRFD" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+        jdbc.update("INSERT INTO payment_record (order_sn, order_id, amount, type, channel, trade_no, created_at, "
+                        + "operator_type, operator_id, operator_name, idem_key) "
+                        + "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                orderSn, orderId, new BigDecimal("12.34"), 1, 0, payTradeNo, LEDGER_TIME,
+                "MEMBER", memberId, "台账测试会员", uniqueKey());
+        Long payId = jdbc.queryForObject("SELECT id FROM payment_record WHERE trade_no = ?", Long.class, payTradeNo);
+        jdbc.update("INSERT INTO payment_record (order_sn, order_id, amount, type, channel, trade_no, created_at, "
+                        + "ref_type, ref_id, origin_flow_id, operator_type, operator_id, operator_name, idem_key) "
+                        + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                orderSn, orderId, new BigDecimal("12.34"), 2, 0, refundTradeNo, LEDGER_TIME,
+                "RETURN_APPLY", returnApplyId, payId, "ADMIN", 1L, "admin", uniqueKey());
+        Long refundId = jdbc.queryForObject("SELECT id FROM payment_record WHERE trade_no = ?", Long.class, refundTradeNo);
+
+        try {
+            // ① 筛管理员 → 只出管理员亲手批的那笔退款（改之前这里是 0 行：正是「看起来像数据丢了」的那个 bug）
+            JsonNode adminOnly = get("/admin/ledgers?page=1&size=50&type=PAYMENT&operatorType=ADMIN&bizId=" + orderId)
+                    .path("data");
+            System.out.println("⑦ type=PAYMENT&operatorType=ADMIN → ids=" + idsOf(adminOnly.path("records"))
+                    + "（期望只含退款 " + refundId + "）");
+            assertThat(idsOf(adminOnly.path("records")))
+                    .as("管理员点的退款审核必须出现在「筛管理员」的结果里")
+                    .containsExactly(refundId);
+            assertThat(adminOnly.path("records").get(0).path("operatorType").asText()).isEqualTo("ADMIN");
+            assertThat(adminOnly.path("records").get(0).path("reason").asText()).isEqualTo("退款入账");
+
+            // ② 筛会员 → 只出买家自己点的那笔支付
+            JsonNode memberOnly = get("/admin/ledgers?page=1&size=50&type=PAYMENT&operatorType=MEMBER&bizId=" + orderId)
+                    .path("data");
+            System.out.println("⑦ type=PAYMENT&operatorType=MEMBER → ids=" + idsOf(memberOnly.path("records"))
+                    + "（期望只含支付 " + payId + "）");
+            assertThat(idsOf(memberOnly.path("records")))
+                    .as("买家点的支付入账必须出现在「筛会员」的结果里")
+                    .containsExactly(payId);
+            assertThat(memberOnly.path("records").get(0).path("reason").asText()).isEqualTo("支付入账");
+
+            // ③ 不传 operatorType → 两笔都在（没被误伤）
+            JsonNode noFilter = get("/admin/ledgers?page=1&size=50&type=PAYMENT&bizId=" + orderId).path("data");
+            System.out.println("⑦ type=PAYMENT（不传 operatorType）→ ids=" + idsOf(noFilter.path("records")));
+            assertThat(idsOf(noFilter.path("records")))
+                    .as("不筛操作人时两笔资金流水都要在")
+                    .containsExactlyInAnyOrder(payId, refundId);
+
+            // ④ 反向守卫：STOCK 支依旧整支不参与 operatorType 筛选 —— 别以后有人看到 PAYMENT 改了
+            //    「顺手统一」，把 stock_ledger（真的没有 operator 列）也改回来，那才是把假 SYSTEM 当真
+            JsonNode stockAsAdmin = get("/admin/ledgers?page=1&size=50&type=STOCK&operatorType=ADMIN&bizId=" + orderId)
+                    .path("data");
+            System.out.println("⑦ 反向 type=STOCK&operatorType=ADMIN → total=" + stockAsAdmin.path("total").asLong());
+            assertThat(stockAsAdmin.path("total").asLong())
+                    .as("stock_ledger 没有 operator 列：筛管理员时这一支必须仍然一行不出")
+                    .isZero();
+            assertThat(adminOnly.path("total").asLong())
+                    .as("同一时刻 PAYMENT 支必须出数 —— 两支口径就是故意不同的")
+                    .isNotZero();
+        } finally {
+            jdbc.update("DELETE FROM payment_record WHERE id IN (?,?)", payId, refundId);
+        }
+    }
+
     // ------------------------------------------------------------------ ⑤ AI 密钥访问
 
     @Test
@@ -371,6 +440,15 @@ class LedgerQueryIntegrationTest {
             counts.merge(row.path("type").asText(), 1, Integer::sum);
         }
         return counts;
+    }
+
+    /** 取一批返回行的 {@code id}（断言「只出这几行」时比 total 更精确） */
+    private static List<Long> idsOf(JsonNode records) {
+        List<Long> ids = new ArrayList<>();
+        for (JsonNode row : records) {
+            ids.add(row.path("id").asLong());
+        }
+        return ids;
     }
 
     /** 三张台账的 uk_idem 是全局唯一索引：测试行必须用不会撞的键 */

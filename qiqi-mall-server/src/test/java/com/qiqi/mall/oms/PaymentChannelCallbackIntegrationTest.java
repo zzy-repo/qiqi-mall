@@ -187,14 +187,21 @@ class PaymentChannelCallbackIntegrationTest {
             assertThat(refundRow.path("summary").asText())
                     .as("退款行的摘要要能读到原支付流水号（溯源看得见）").contains("原流水 #" + payId);
 
-            // ② 按 operatorType 筛选时 PAYMENT 支整支不参与（与 STOCK 支同一口径）
+            // ② 按 operatorType 筛选时 PAYMENT 支**照实参与**（payment_record 有真 operator 列：
+            //    支付行 MEMBER、退款行 ADMIN）—— 这一点故意与 STOCK 支不同：stock_ledger 没有 operator 列，
+            //    它的 'SYSTEM' 是 SQL 里编的常量，所以那支才整支不参与（1 = 0）。
+            //    旧口径「整支不参与」会让管理员点「筛管理员」时看不到他亲手批过的这笔退款 —— 像数据丢了。
             JsonNode withAdmin = get("/admin/ledgers?page=1&size=50&type=PAYMENT&operatorType=ADMIN&bizId=" + orderId)
                     .path("data");
-            System.out.printf("① type=PAYMENT&operatorType=ADMIN → total=%d（应为 0：支付支不参与操作人筛选）%n",
+            System.out.printf("① type=PAYMENT&operatorType=ADMIN → total=%d（应为 1：只出管理员点的退款行）%n",
                     withAdmin.path("total").asInt());
             assertThat(withAdmin.path("total").asInt())
-                    .as("支付流水不参与 operatorType 筛选：退款行虽然是管理员点的，但它不是「管理员改的钱」")
-                    .isZero();
+                    .as("退款行是管理员点「退货审核通过」写的，必须能被「筛管理员」查到")
+                    .isEqualTo(1);
+            assertThat(findRow(withAdmin.path("records"), refundId))
+                    .as("筛管理员 → 必须出退款行 %s", refundId).isNotNull();
+            assertThat(findRow(withAdmin.path("records"), payId))
+                    .as("筛管理员 → 不能出买家点的支付行 %s", payId).isNull();
 
             // ③ 不带 type 的「全链路」查询里也能看到这两行（页面默认视图）
             JsonNode allTypes = get("/admin/ledgers?page=1&size=50&bizId=" + orderId).path("data");
