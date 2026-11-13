@@ -51,6 +51,31 @@ def pct(sorted_vals, p):
     return sorted_vals[lo] if lo == hi else sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * (idx - lo)
 
 
+MYSQL_COLS = ["epoch", "threads_run", "threads_conn", "row_lock_waits", "row_lock_time_ms", "queries"]
+
+
+def load_mysql(path):
+    """读 mysql.csv；容忍**缺表头**的历史文件（第一版采样器把表头 echo 到了 stdout）。
+
+    另外做一次「计数器回绕/重置」防护：MySQL 重启过时这些全局计数器会归零，
+    于是 Δ 变负 —— 那样这一档的「行锁/s、SQL/s」就是假的，宁可报 0 也不要报负数。
+    """
+    if not os.path.exists(path):
+        return []
+    rows = []
+    with open(path) as f:
+        for i, line in enumerate(f):
+            parts = [x.strip() for x in line.rstrip("\n").split(",")]
+            if not parts or not parts[0]:
+                continue
+            if i == 0 and not parts[0].isdigit():
+                continue                      # 真表头，跳过
+            if len(parts) < len(MYSQL_COLS):
+                continue
+            rows.append(dict(zip(MYSQL_COLS, parts)))
+    return rows
+
+
 def load_run(d):
     """读一次运行的全部原料，返回 (steps, per_step 计算所需的各组数据)"""
     steps = []
@@ -63,10 +88,11 @@ def load_run(d):
     per_sec = rd(os.path.join(d, "persecond.csv"))
     cg = rd(os.path.join(d, "cg.csv"))
     gc_ps = rd(os.path.join(d, "gc_persecond.csv"))
-    return steps, samples, per_sec, cg, gc_ps
+    my = load_mysql(os.path.join(d, "mysql.csv"))
+    return steps, samples, per_sec, cg, gc_ps, my
 
 
-def step_stats(st, samples, per_sec, cg, gc_ps):
+def step_stats(st, samples, per_sec, cg, gc_ps, my=None):
     """单档窗口内的全部统计量"""
     lo, hi = st["start_ms"], st["end_ms"]
     lat, ok_n, fail_n = [], 0, 0
@@ -161,15 +187,44 @@ def step_stats(st, samples, per_sec, cg, gc_ps):
     o.update(gc_ratio_pct=gc_ratio, heap_after_peak_MB=heap_peak,
              heap_after_last_MB=heap_last, gc_count=gc_cnt, full_gc=full_cnt,
              gc_detail=" ".join(detail))
+
+    # ---- MySQL 侧：判断瓶颈有没有搬到 DB
+    t_run = t_conn = 0.0
+    lw_rate = q_rate = 0.0
+    pts = []
+    for r in (my or []):
+        t = int(fnum(r.get("epoch", 0))) * 1000   # mysql.csv 的 epoch 是秒，档窗口是毫秒
+        if not (st["ep0"] <= t <= st["ep1"]):
+            continue
+        pts.append(r)
+        t_run = max(t_run, fnum(r.get("threads_run")))
+        t_conn = max(t_conn, fnum(r.get("threads_conn")))
+    if len(pts) >= 2 and st["dur_s"]:
+        a, b = pts[0], pts[-1]
+        span = max(1.0, fnum(b["epoch"]) - fnum(a["epoch"]))
+        lw_rate = (fnum(b.get("row_lock_waits")) - fnum(a.get("row_lock_waits"))) / span
+        q_rate = (fnum(b.get("queries")) - fnum(a.get("queries"))) / span
+    o.update(my_run_max=t_run, my_conn_max=t_conn, row_lock_waits_s=lw_rate, queries_s=q_rate)
+
+    # ---- Little's law：N = λ × W
+    #   λ 用**入站速率**（offered/s，即生成器按计划发出的速率，不是完成速率）
+    #   W 用**样本均值**（latency_ms 的平均；开环下已含排队时间，因为延迟起点=计划时刻）
+    lat_all = lat  # 已排序的全体样本延迟（含失败），直接用
+    o["w_avg_ms"] = (sum(lat_all) / len(lat_all)) if lat_all else 0.0
+    # λ 必须用**计划的入站速率**（= 我们对系统施加的负载），不能用「实际发出数/时长」：
+    # 开环下实际发出数本身就等于 ok+fail，拿它算弹性恒等于 1，判据永远不会触发（这个坑实测踩过）。
+    o["lambda_in"] = st["target"]
+    o["offered_s"] = offered / st["dur_s"] if st["dur_s"] else 0.0
+    o["inflight_n"] = o["lambda_in"] * o["w_avg_ms"] / 1000.0
     return o
 
 
 def build(d):
-    steps, samples, per_sec, cg, gc_ps = load_run(d)
+    steps, samples, per_sec, cg, gc_ps, my = load_run(d)
     rows = []
     for st in steps:
         r = dict(step=st["i"], target_rps=st["target"])
-        r.update(step_stats(st, samples, per_sec, cg, gc_ps))
+        r.update(step_stats(st, samples, per_sec, cg, gc_ps, my))
         rows.append(r)
     return rows
 
@@ -177,14 +232,17 @@ def build(d):
 COLS = ["step", "target_rps", "ok_s", "p50", "p95", "p99", "pmax", "err_pct", "dropped",
         "sat_secs", "heap_after_peak_MB", "heap_after_last_MB", "gc_ratio_pct", "gc_count",
         "full_gc", "mem_current_peak_MB", "cpu_pct_max", "thr_http_max", "thr_total_max",
-        "load1_max", "swap_used_max_MB", "psi_mem_max", "gc_detail"]
+        "load1_max", "swap_used_max_MB", "psi_mem_max", "my_run_max", "my_conn_max",
+        "row_lock_waits_s", "queries_s", "w_avg_ms", "lambda_in", "offered_s", "inflight_n", "gc_detail"]
 
 
 def fmt_rows(rows):
     out = []
     hdr = (f"{'档':>2} {'目标rps':>7} {'ok/s':>7} {'p50':>7} {'p95':>7} {'p99':>8} {'max':>8} "
            f"{'错%':>5} {'丢':>5} {'堆峰M':>6} {'堆末M':>6} {'GC%':>5} {'GC次':>4} "
-           f"{'mem峰M':>7} {'CPU%':>6} {'线程':>4} {'load1':>5} {'swapM':>6}")
+           f"{'mem峰M':>7} {'CPU%':>6} {'线程':>4} {'load1':>5} {'swapM':>6} "
+           f"{'DBrun':>6} {'DBconn':>6} {'行锁/s':>7} {'SQL/s':>6} "
+           f"{'W均ms':>7} {'λ计/s':>7} {'实发/s':>7} {'在途N':>8}")
     out.append(hdr)
     out.append("-" * len(hdr))
     for r in rows:
@@ -193,12 +251,127 @@ def fmt_rows(rows):
                    f"{r['dropped']:>5d} {r['heap_after_peak_MB']:>6.0f} {r['heap_after_last_MB']:>6.0f} "
                    f"{r['gc_ratio_pct']:>5.1f} {r['gc_count']:>4d} {r['mem_current_peak_MB']:>7.0f} "
                    f"{r['cpu_pct_max']:>6.0f} {r['thr_http_max']:>4.0f} {r['load1_max']:>5.2f} "
-                   f"{r['swap_used_max_MB']:>6.0f}")
+                   f"{r['swap_used_max_MB']:>6.0f} {r['my_run_max']:>6.0f} {r['my_conn_max']:>6.0f} "
+                   f"{r['row_lock_waits_s']:>7.1f} {r['queries_s']:>6.0f} "
+                   f"{r['w_avg_ms']:>7.1f} {r['lambda_in']:>7.1f} {r['offered_s']:>7.1f} "
+                   f"{r['inflight_n']:>8.1f}")
+    return "\n".join(out)
+
+
+def elasticity(prev, cur):
+    """弹性 = (ok/s 相对涨幅) / (λ 相对涨幅)。<0.5 表示「负载涨了、吞吐没跟上」。"""
+    dl = (cur["lambda_in"] - prev["lambda_in"]) / prev["lambda_in"] if prev["lambda_in"] else 0.0
+    dt = (cur["ok_s"] - prev["ok_s"]) / prev["ok_s"] if prev["ok_s"] else 0.0
+    return (dt / dl) if dl > 1e-9 else None, dt, dl
+
+
+def verdict_v3(rows):
+    """最终判据（三层）：
+         ① 主判据：λ 再涨一档，ok/s 的**相对涨幅 < 该档 λ 相对涨幅的 50%**（弹性 < 0.5）→ 饱和信号
+         ② 佐证：在途 N = λ×W 单调爬升（Little's law）
+         ③ 自证伪：被判档的下一档若弹性 ≥ 0.5（即重新跟着涨），本档判定作废
+       另外单独列出「拐区起点」= 延迟开始非线性的那一档（p99>200ms 且 ≥2×上一档 且下一档不回落）。
+       两个概念分开报，不混。"""
+    out = ["== 饱和点判定（新判据：吞吐弹性）==",
+           "   弹性 = (ok/s 相对涨幅) ÷ (λ 入站相对涨幅)；弹性 < 0.5 ⇒ 吞吐不再跟着负载涨",
+           ""]
+    sat = None
+    detail = []
+    for i, r in enumerate(rows):
+        if i == 0:
+            detail.append(f"  档{r['step']}（λ={r['lambda_in']:.0f}/s, ok/s={r['ok_s']:.1f}）：基准档")
+            continue
+        prev = rows[i - 1]
+        e, dt, dl = elasticity(prev, r)
+        nxt = rows[i + 1] if i + 1 < len(rows) else None
+        flag = e is not None and e < 0.5
+        # 自证伪
+        invalidated = False
+        reason = ""
+        if flag and nxt is not None:
+            e_next, _, _ = elasticity(r, nxt)
+            if e_next is not None and e_next >= 0.5:
+                invalidated = True
+                reason = f"下一档({nxt['target_rps']:.0f}) 弹性={e_next:.2f} 仍跟着涨"
+        detail.append(
+            f"  档{r['step']}（λ={r['lambda_in']:.0f}/s, ok/s={r['ok_s']:.1f}）："
+            f"Δλ=+{dl*100:.1f}% Δok/s=+{dt*100:.1f}% 弹性={e:.2f}"
+            + ("  ← 弹性<0.5 **饱和信号**" if flag else "")
+            + (f"  ⇒ 本档判据**作废**（{reason}）" if invalidated else ""))
+        if flag and not invalidated and sat is None:
+            sat = r
+    out += detail
+    out.append("")
+
+    # ② Little 佐证
+    ns = [r["inflight_n"] for r in rows]
+    mono = all(ns[i] <= ns[i + 1] * 1.05 for i in range(len(ns) - 1))
+    out.append(f"② Little 佐证：在途 N=λ×W（W=样本均值）逐档 = "
+               + " → ".join(f"{n:.0f}" for n in ns)
+               + ("  **单调爬升 ✓**" if mono else "  **非单调 ✗**"))
+    out.append("")
+
+    # 拐区起点（延迟视角）
+    knee = None
+    for i, r in enumerate(rows):
+        if i == 0:
+            continue
+        prev = rows[i - 1]
+        nxt = rows[i + 1] if i + 1 < len(rows) else None
+        c = r["p99"] > 200 and prev["p99"] > 0 and r["p99"] >= 2 * prev["p99"] and (
+            nxt is None or nxt["p99"] >= 0.5 * r["p99"])
+        if c:
+            knee = r
+            break
+
+    if knee:
+        out.append(f"★ 拐区起点 = 档 {knee['step']}（λ={knee['lambda_in']:.0f}/s, ok/s={knee['ok_s']:.1f}）："
+                   f"p99 {rows[knee['step']-1]['p99']:.0f}→{knee['p99']:.0f}ms 起崩，此后不回落")
+    else:
+        out.append("★ 拐区起点：本阶梯内没有档位满足（p99>200 且 ≥2×上一档 且下一档不回落）")
+    if sat:
+        out.append(f"★ 饱和点   = 档 {sat['step']}（λ={sat['lambda_in']:.0f}/s, ok/s={sat['ok_s']:.1f}）："
+                   f"λ 还涨但 ok/s 只涨 {(sat['ok_s']-rows[sat['step']-1]['ok_s'])/rows[sat['step']-1]['ok_s']*100:.1f}%")
+    else:
+        out.append("★ 饱和点   = 本阶梯内没有档位触发（吞吐全程跟着涨 ⇒ 还没压到天花板）")
+    if knee and sat and knee["step"] != sat["step"]:
+        out.append(f"   （两者不是一回事：拐区从 {knee['lambda_in']:.0f}/s 开始延迟崩，"
+                   f"但吞吐要拖到 {sat['lambda_in']:.0f}/s 才真正封顶）")
+    return "\n".join(out)
+
+def verdict_v2(rows):
+    """改进版判据（避免低基线伪触发）：
+       雪崩点 = p99 > 200ms  且  p99 >= 2×上一档 且 下一档不回落（下一档 p99 >= 本档 0.5×）
+       三个条件都满足才算；逐档打印每个条件是否成立，不搞"看情况"。"""
+    out = ["== 改进版判据（p99>200ms 且 ≥2×上一档 且 下一档不回落）=="]
+    hit = None
+    for i, r in enumerate(rows):
+        prev = rows[i - 1] if i else None
+        nxt = rows[i + 1] if i + 1 < len(rows) else None
+        c_abs = r["p99"] > 200.0
+        c_dbl = prev is not None and prev["p99"] > 0 and r["p99"] >= 2.0 * prev["p99"]
+        c_keep = True if nxt is None else nxt["p99"] >= 0.5 * r["p99"]
+        ok = c_abs and c_dbl and c_keep
+        out.append(f"  档{r['step']}（{r['target_rps']:.0f} rps, ok/s={r['ok_s']:.1f}）: "
+                   f"p99={r['p99']:.0f}ms  >200?{'✓' if c_abs else '✗'}  "
+                   f"≥2×上一档?{'✓' if c_dbl else '✗'}"
+                   + (f"  下一档不回落?{'✓' if c_keep else '✗'}({nxt['p99']:.0f}ms)" if nxt else "  末档(无下一档)")
+                   + ("  ★雪崩" if ok else ""))
+        if ok and hit is None:
+            hit = r
+    out.append("")
+    if hit:
+        out.append(f"★ 雪崩点 = 第 {hit['step']} 档（目标 {hit['target_rps']:.0f} rps，实测 ok/s={hit['ok_s']:.1f}）")
+        out.append(f"   当时：after-GC 堆 {hit['heap_after_peak_MB']:.0f}MB / GC {hit['gc_ratio_pct']:.1f}% / "
+                   f"Tomcat 线程 {hit['thr_http_max']:.0f} / MySQL Threads_running {hit['my_run_max']:.0f} / "
+                   f"行锁等待 {hit['row_lock_waits_s']:.0f}/s")
+    else:
+        out.append("★ 没有档位同时满足三个条件 —— 拐点不在本轮阶梯覆盖范围内（要么还没到，要么已经越过）")
     return "\n".join(out)
 
 
 def verdict(rows):
-    """三条判据按档顺序扫，返回最先触发的那一档 + 判据名"""
+    """旧判据（三条按档顺序扫，谁先触发算谁）—— 保留用于和历史数据对照"""
     lines = []
     hit = None
     for i, r in enumerate(rows):
@@ -267,7 +440,9 @@ def main():
             w.writerow(r)
     table = fmt_rows(rows)
     v = verdict(rows)
-    text = table + "\n\n" + v
+    v3 = verdict_v3(rows)
+    v2 = verdict_v2(rows)
+    text = table + "\n\n" + v3 + "\n\n" + v2 + "\n\n" + v
     print(text)
     with open(os.path.join(d, "ladder.txt"), "w") as f:
         f.write(text + "\n")

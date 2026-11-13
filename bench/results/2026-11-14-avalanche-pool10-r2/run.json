@@ -1,0 +1,32 @@
+{
+  "label": "pool10-r2",
+  "url": "http://127.0.0.1:18080/portal/orders",
+  "method": "POST",
+  "mode": "open-loop-fixed-rate",
+  "steps": [
+    320,
+    350,
+    380,
+    400,
+    420,
+    450
+  ],
+  "step_duration_s": 75,
+  "warmup_s": 60,
+  "warmup_rps": 100,
+  "start_iso": "2026-11-13T19:24:08.503Z",
+  "end_iso": "2026-11-13T19:32:49.637Z",
+  "measure_wall_s": 461.133,
+  "fired": 173546,
+  "completed": 173546,
+  "dropped": 6454,
+  "ok": 167509,
+  "fail": 37,
+  "token_pool": 488174,
+  "token_exhausted": false,
+  "client_cpu_pct": 19.54,
+  "loadavg_1m": 30.86,
+  "errors": {
+    "HTTP200 code=1 msg=已存在相同记录，请检查唯一字段": 37
+  }
+}

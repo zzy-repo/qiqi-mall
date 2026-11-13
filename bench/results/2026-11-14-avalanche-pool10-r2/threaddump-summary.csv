@@ -1,0 +1,3 @@
+container,http_threads,wait_connection,running_sql,pct_waiting,other
+qiqi-server-1,202,190,10,94.1,2
+qiqi-server-2,202,189,8,93.6,5

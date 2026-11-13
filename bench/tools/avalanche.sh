@@ -27,6 +27,7 @@ STEPS=${STEPS:-"50,100,150,200,250,300,350,400,450,500"}
 STEP_DURATION=${STEP_DURATION:-75}
 WARMUP=${WARMUP:-60}
 WARMUP_RPS=${WARMUP_RPS:-100}
+SKU_RATIO=${SKU_RATIO:-0.8}      # 热点 SKU 占比：0.8=压测标准口径；0=全冷门（用来隔离「热点行锁」这个变量）
 LABEL=${LABEL:-ladder}
 MEMBERS=${MEMBERS:-200}
 MEMBER_PASS=${MEMBER_PASS:-}
@@ -49,9 +50,9 @@ need_tokens() {
 sql_db() { docker exec -i -e MYSQL_PWD="$MYSQL_PASSWORD" qiqi-mysql mysql --default-character-set=utf8mb4 -uroot -N -e "use qiqi_mall_test; $1" 2>/dev/null; }
 
 # ---------------------------------------------------------------- 采样器/锁的收尾
-CG_PID=""; ENV_PID=""; DS_PID=""; GEN_PID=""; WD_PID=""
+CG_PID=""; ENV_PID=""; DS_PID=""; GEN_PID=""; WD_PID=""; MY_PID=""; DUMP_PID=""
 cleanup() {
-  for p in "$CG_PID" "$ENV_PID" "$DS_PID" "$WD_PID"; do [ -n "$p" ] && kill "$p" 2>/dev/null; done
+  for p in "$CG_PID" "$ENV_PID" "$DS_PID" "$WD_PID" "$MY_PID" "$DUMP_PID"; do [ -n "$p" ] && kill "$p" 2>/dev/null; done
   if [ -n "$GEN_PID" ] && kill -0 "$GEN_PID" 2>/dev/null; then kill "$GEN_PID" 2>/dev/null; fi
   [ -x "$LOCK" ] && "$LOCK" release >>"$LOG" 2>&1 || true
 }
@@ -135,7 +136,41 @@ ENV_PID=$!
     sleep 5
   done ) > "$OUT/docker-stats.csv" 2>/dev/null &
 DS_PID=$!
-log "  cgwatch(200ms)=$CG_PID envsample(5s)=$ENV_PID dockerstats(5s)=$DS_PID"
+# MySQL 侧计数器（2s）：用来判断「瓶颈有没有搬到 DB」——Threads_running 上去 = DB 侧成了新瓶颈
+MY_PID=""
+if [ "${SAMPLE_MYSQL:-1}" = "1" ]; then
+  ( echo "epoch,threads_run,threads_conn,row_lock_waits,row_lock_time_ms,queries" > "$OUT/mysql.csv";
+    while :; do
+      k=$(date +%s)
+      docker exec -i -e MYSQL_PWD="$MYSQL_PASSWORD" qiqi-mysql mysql -uroot -N -e "
+        select concat(
+          (select VARIABLE_VALUE from performance_schema.global_status where VARIABLE_NAME='Threads_running'),',',
+          (select VARIABLE_VALUE from performance_schema.global_status where VARIABLE_NAME='Threads_connected'),',',
+          (select VARIABLE_VALUE from performance_schema.global_status where VARIABLE_NAME='Innodb_row_lock_waits'),',',
+          (select VARIABLE_VALUE from performance_schema.global_status where VARIABLE_NAME='Innodb_row_lock_time'),',',
+          (select VARIABLE_VALUE from performance_schema.global_status where VARIABLE_NAME='Queries'))" 2>/dev/null \
+        | sed "s/^/$k,/" >> "$OUT/mysql.csv"
+      sleep 2
+    done ) &
+  MY_PID=$!
+fi
+# 连接池实际生效值的硬证据：MySQL 侧每个容器 IP 各自挂了几条连接（pool 10 → 10/实例，pool 30 → 30/实例）
+{
+  echo "== provenance（本次运行）=="
+  echo "started_at=$(date '+%F %T')"
+  echo "git_HEAD=$(git -C "$REPO" rev-parse HEAD 2>/dev/null || cat "$REPO/.git/HEAD")"
+  echo "server_image=$(docker inspect qiqi-mall-server:test --format '{{.Id}}' 2>/dev/null)"
+  for c in $CONTAINERS; do
+    echo "$c java_opts=$(docker inspect $c --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^JAVA_OPTS=' | tr -d '\n')"
+    echo "$c hikari_env=$(docker inspect $c --format '{{range .Config.Env}}{{println .}}{{end}}' | grep MAXIMUM_POOL || echo '(未设=默认10)')"
+    echo "$c ip=$(docker inspect $c --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')"
+  done
+  echo "mysql_conns_per_client（连接池是否真的生效的硬证据：pool N → 每实例 N 条）:"
+  docker exec -i -e MYSQL_PWD="$MYSQL_PASSWORD" qiqi-mysql mysql -uroot -N -e \
+    "select concat('  ',ip,' -> ',n,' 条') from (select substring_index(host,':',1) ip, count(*) n from information_schema.processlist group by substring_index(host,':',1)) t" 2>&1
+  echo "steps=$STEPS step_duration=${STEP_DURATION}s warmup=${WARMUP}s@${WARMUP_RPS}rps dump_at=${DUMP_AT_RPS:-无}"
+} | tee "$OUT/provenance.txt" | sed 's/^/  /' >> "$LOG"
+log "  cgwatch(200ms)=$CG_PID envsample(5s)=$ENV_PID dockerstats(5s)=$DS_PID mysql(2s)=${MY_PID:-off}"
 
 # 宿主机内存看门狗：可用内存掉到 GUARD_MIN_MB 以下就掐掉压测（按 pid 精确 kill，不做宽匹配）
 ( while :; do
@@ -150,16 +185,42 @@ log "  cgwatch(200ms)=$CG_PID envsample(5s)=$ENV_PID dockerstats(5s)=$DS_PID"
 WD_PID=$!
 
 # ================================================================ 3. 压测
-log "=== 3. 开环阶梯开始（steps=$STEPS × ${STEP_DURATION}s，预热 ${WARMUP}s@${WARMUP_RPS}rps）==="
+log "=== 3. 开环阶梯开始（steps=$STEPS × ${STEP_DURATION}s，预热 ${WARMUP}s@${WARMUP_RPS}rps，热点占比 $SKU_RATIO）==="
 node "$BENCH/gen.mjs" --url http://127.0.0.1:18080/portal/orders --method POST \
   --steps "$STEPS" --step-duration "$STEP_DURATION" \
   --warmup "$WARMUP" --warmup-rps "$WARMUP_RPS" \
   --token-file "$LG/tokens.txt" --auth-file "$LG/jwts.txt" --body-file "$LG/order.json" \
-  --sku-hot 1 --sku-ratio 0.8 --sku-cold-file "$LG/skus_cold.txt" \
+  --sku-hot 1 --sku-ratio "$SKU_RATIO" --sku-cold-file "$LG/skus_cold.txt" \
   --outdir "$OUT" --label "$LABEL" --max-lag-ms 3000 >>"$LOG" 2>&1 &
 GEN_PID=$!
+# 代理指标：在指定档的中段对两个 JVM 各发一次 SIGQUIT，把 thread dump 落到文件，
+# 用来量化「有多少线程停在 HikariPool.getConnection」（JRE 没有 jstack，这是唯一手段）
+if [ -n "${DUMP_AT_RPS:-}" ]; then
+  IDX=0; i=0
+  for r in $(echo "$STEPS" | tr ',' ' '); do
+    [ "$r" = "$DUMP_AT_RPS" ] && IDX=$i
+    i=$((i+1))
+  done
+  log "  thread dump 计划：在 ${DUMP_AT_RPS} rps 档中段（t+$((WARMUP + IDX*STEP_DURATION + 30))s）"
+  ( sleep $((WARMUP + IDX*STEP_DURATION + 30)) || exit 0
+    for c in $CONTAINERS; do
+      cid=$(docker inspect "$c" --format '{{.Id}}')
+      for p in $(ls /proc | grep -E '^[0-9]+$'); do
+        if [ "$(cat /proc/$p/comm 2>/dev/null)" = java ] && grep -q "${cid:0:12}" /proc/$p/cgroup 2>/dev/null; then
+          T=$(date +%s); kill -3 "$p" 2>/dev/null; sleep 2
+          docker logs --since "$T" "$c" > "$OUT/threaddump-$c.txt" 2>&1
+          break
+        fi
+      done
+    done
+    echo "[$(date '+%F %T')] thread dump 已采集（${DUMP_AT_RPS} rps 档）" >> "$LOG"
+  ) &
+  DUMP_PID=$!
+fi
+
 wait "$GEN_PID"; GEN_RC=$?
 GEN_PID=""
+[ -n "${DUMP_PID:-}" ] && wait "$DUMP_PID" 2>/dev/null
 log "gen.mjs 退出码=$GEN_RC"
 
 # ================================================================ 4. 收尾分析
@@ -175,6 +236,10 @@ python3 "$SELF/gcwatch.py" "$OUT" \
 
 log "=== 5. 出阶梯表 + 雪崩点判定 ==="
 python3 "$SELF/avalanche.py" "$OUT" 2>&1 | tee -a "$LOG"
+
+if ls "$OUT"/threaddump-*.txt >/dev/null 2>&1; then
+  python3 "$SELF/tdcount.py" "$OUT" 2>&1 | tee -a "$LOG"
+fi
 
 log "=== 6. 清场（reset 掉本轮造的数据，别把库留给下一个人）==="
 MEMBER_PASS="$MEMBER_PASS" MYSQL_PASSWORD="$MYSQL_PASSWORD" BENCH_WORKDIR="$LG" \
