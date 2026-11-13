@@ -245,6 +245,9 @@
       size="960px"
       data-testid="order-detail-drawer"
     >
+      <!-- 详情分两个 tab：原有的一段内容收到「订单明细」里，新增「审核轨迹」tab（决策 / 状态台账 / 操作审计三段按时间拼） -->
+      <el-tabs v-model="detailTab" data-testid="order-detail-tabs">
+        <el-tab-pane label="订单明细" name="detail">
       <template v-if="detail">
         <h4>发货单</h4>
         <el-table
@@ -369,6 +372,12 @@
         </el-table>
         <el-empty v-if="!detail.returnApplies.length" description="无退货申请" :image-size="60" />
       </template>
+        </el-tab-pane>
+        <!-- 审核轨迹：一件单「为什么是现在这个样子」的三段证据（决策怎么判的 / 状态怎么变的 / 谁点的） -->
+        <el-tab-pane label="审核轨迹" name="audit-trail" data-testid="order-detail-audit-trail-tab">
+          <AuditTrail :order-id="detail?.order?.id" />
+        </el-tab-pane>
+      </el-tabs>
     </el-drawer>
 
     <!-- 编辑 / 拆分待下发包裹 -->
@@ -498,6 +507,8 @@ import { Search } from '@element-plus/icons-vue'
 import { listMembers } from '../../api/member'
 import { listProducts } from '../../api/product'
 import { listSkus } from '../../api/sku'
+// 详情抽屉的「审核轨迹」tab：三段证据时间线（复用队列页同一个组件，避免两套渲染口径）
+import AuditTrail from '../../components/AuditTrail.vue'
 
 /** 14 个高危写操作共用的一套「预演 → 展示 → 确认 → 执行」流程（本页占 11 个） */
 const danger = useDangerConfirm()
@@ -983,7 +994,10 @@ const callback = async (d, event) => {
 
 const detail = ref(null)
 const detailVisible = ref(false)
+/** 详情抽屉当前的 tab：默认还是看订单明细，点「审核轨迹」才拉时间线 */
+const detailTab = ref('detail')
 const openDetail = async (row) => {
+  detailTab.value = 'detail'
   detail.value = await getOrder(row.id)
   // 打开抽屉即加载发货单：此前 deliveries 只在 dispatch/cancel/callback 之后刷新，
   // 首次打开「发货单」区块永远为空，下发/回传入口不可达

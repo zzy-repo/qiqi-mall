@@ -121,6 +121,22 @@ const routes = [
         meta: { title: '台账查询' }
       },
       {
+        // 销售单自动审核队列（chip 筛选 + 判定徽标 + 「差在哪」抽屉）
+        // 路由段**不能**叫 admin：nginx 的 location /admin/ 会把 /admin/** 全代理给后端，
+        // 前端路由占用同名段会让 F5 直接吃到 401 白屏（见 /admins 那条注释）。
+        path: 'order-audit',
+        name: 'OrderAudit',
+        component: () => import('../views/order-audit/index.vue'),
+        meta: { title: '审核队列' }
+      },
+      {
+        // 自动审核策略配置（AUTO / BLOCK / EXCEPTION 三 tab + 条件编辑器 + 影响预演）
+        path: 'audit-policy',
+        name: 'AuditPolicy',
+        component: () => import('../views/audit-policy/index.vue'),
+        meta: { title: '审核策略' }
+      },
+      {
         // 库存对账（SUM 库存桶 vs sku.stock 缓存，偏差排查）
         // 同样不能以 admin 开头，理由见上面 /admins 那条注释
         path: 'inventory-reconcile',

@@ -163,3 +163,100 @@ export const ledgerStatusTag = (type, raw) => {
     default: return 'info'
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * 订单自动审核（audit 模块）
+ * ---------------------------------------------------------------------------
+ * 判定的六种结局**不是**「通过/不通过」二分：人工队列要按处理人拆开分别派活，
+ * 所以 BLOCKED（阻止 = 拦截下单，运营要先谈单）与 FROZEN（冻结 = 已打标等处理，客服跟进）
+ * 必须分开统计、分开筛选、分开上色 —— 合并成一个「被拦」会让人派错工单。
+ *
+ * 颜色口径（一句话记：绿=系统自己过了 / 黄=等人 / 红=拦死 / 紫=冻住 / 灰=没命中）：
+ *   AUTO_PASS 绿 success · MANUAL 黄 warning · BLOCKED 红 danger
+ *   FROZEN    紫（el-tag 没有紫档，用 AUDIT_RESULT_CLASS 里带的自定义 class 覆盖成紫色）
+ *   NO_MATCH  灰 info      · SKIPPED 灰 info（未参与本轮，不属于五类计数）
+ * 三重冗余：颜色 + 文案 + data-result（e2e 与色盲用户都不靠颜色识别）。
+ * ------------------------------------------------------------------------- */
+export const AUDIT_RESULT_TEXT = {
+  AUTO_PASS: '自动过审',
+  MANUAL: '留人工',
+  BLOCKED: '阻止',
+  FROZEN: '冻结',
+  NO_MATCH: '不命中',
+  SKIPPED: '未参与'
+}
+/** el-tag 的 type 档位（紫色没有档位，见 AUDIT_RESULT_CLASS） */
+export const AUDIT_RESULT_TAG = {
+  AUTO_PASS: 'success',
+  MANUAL: 'warning',
+  BLOCKED: 'danger',
+  FROZEN: 'primary',
+  NO_MATCH: 'info',
+  SKIPPED: 'info'
+}
+/** 需要额外 class 才能出效果的两档：FROZEN 紫色、SKIPPED 更淡的灰 */
+export const AUDIT_RESULT_CLASS = {
+  AUTO_PASS: 'badge-auto-pass',
+  MANUAL: 'badge-manual',
+  BLOCKED: 'badge-blocked',
+  FROZEN: 'badge-frozen',
+  NO_MATCH: 'badge-no-match',
+  SKIPPED: 'badge-skipped'
+}
+/** 「被拦」= 阻止 + 冻结：只用于分组标题与合计，**不能**当成 queue 的筛选值（后端只收单值） */
+export const AUDIT_BLOCKED_GROUP = ['BLOCKED', 'FROZEN']
+
+/** 徽标色一句话（抽屉/跑马灯里的补充说明用） */
+export const AUDIT_RESULT_HINT = {
+  AUTO_PASS: '策略全部条件满足，已自动推进到待发货',
+  MANUAL: '条件满足但被排除 / 库存或成本预检降级，需要人看一眼',
+  BLOCKED: '被阻止策略前置拦截，不推进状态，需人工联系客户确认',
+  FROZEN: '被异常策略命中并打上冻结标，客服处理前不会再参与自动审核',
+  NO_MATCH: '没有任何自动策略命中，需要人工判断或补策略',
+  SKIPPED: '状态不是待审核或已冻结，本轮没有参与判定'
+}
+
+/* 策略类型：AUTO 自动过审 / BLOCK 阻止 / EXCEPTION 异常冻结（判定链顺序固定，与 priority 无关） */
+export const AUDIT_POLICY_TYPE_TEXT = { AUTO: '自动', BLOCK: '阻止', EXCEPTION: '异常' }
+export const AUDIT_POLICY_TYPE_TAG = { AUTO: 'success', BLOCK: 'danger', EXCEPTION: 'warning' }
+export const AUDIT_POLICY_TYPE_TIP = {
+  AUTO: '条件全部满足 → 自动过审（7 → 8）',
+  BLOCK: '命中即前置拦截，不推进任何状态',
+  EXCEPTION: '命中即打冻结标，等客服处理'
+}
+export const AUDIT_POLICY_TYPE_OPTIONS = Object.keys(AUDIT_POLICY_TYPE_TEXT).map((value) => ({
+  value,
+  label: AUDIT_POLICY_TYPE_TEXT[value]
+}))
+
+/* 条件行：kind 匹配/排除 · scope 策略级/全局 */
+export const AUDIT_CONDITION_KIND_TEXT = { MATCH: '匹配', EXCLUDE: '排除' }
+export const AUDIT_CONDITION_SCOPE_TEXT = { POLICY: '策略级', ALL_AUTO: '全局（所有自动策略）' }
+
+/* 触发方式 */
+export const AUDIT_TRIGGER_TEXT = { MANUAL: '人工触发', SCHEDULE: '定时调度' }
+
+/* 时间线三段（trail） */
+export const AUDIT_SEGMENT_TEXT = { DECISION: '决策', STATUS: '状态台账', AUDIT: '操作审计' }
+export const AUDIT_SEGMENT_TAG = { DECISION: 'primary', STATUS: 'success', AUDIT: 'warning' }
+
+/* 操作符：与后端 OpCode 的 symbol 一致（10 个；EXISTS/NOT_EXISTS 不带值） */
+export const AUDIT_OP_TEXT = {
+  EQ: '=', NE: '≠', LT: '<', LTE: '≤', GT: '>', GTE: '≥',
+  CONTAINS: '含', NOT_CONTAINS: '不含', EXISTS: '有值', NOT_EXISTS: '无值'
+}
+/** 不带配置值的操作符（值控件要跟着隐藏） */
+export const AUDIT_OP_NO_VALUE = ['EXISTS', 'NOT_EXISTS']
+
+export const auditResultText = (raw) => statusText(AUDIT_RESULT_TEXT, raw)
+export const auditResultTag = (raw) => statusTag(AUDIT_RESULT_TAG, raw)
+export const auditResultClass = (raw) => AUDIT_RESULT_CLASS[String(raw)] || 'badge-no-match'
+export const auditResultHint = (raw) => AUDIT_RESULT_HINT[String(raw)] || ''
+export const auditPolicyTypeText = (raw) => statusText(AUDIT_POLICY_TYPE_TEXT, raw)
+export const auditPolicyTypeTag = (raw) => statusTag(AUDIT_POLICY_TYPE_TAG, raw)
+export const auditConditionKindText = (raw) => statusText(AUDIT_CONDITION_KIND_TEXT, raw)
+export const auditTriggerText = (raw) => statusText(AUDIT_TRIGGER_TEXT, raw)
+export const auditSegmentText = (raw) => statusText(AUDIT_SEGMENT_TEXT, raw)
+export const auditSegmentTag = (raw) => statusTag(AUDIT_SEGMENT_TAG, raw)
+export const auditOpText = (raw) => statusText(AUDIT_OP_TEXT, raw)
+export const auditOpNeedsValue = (raw) => !AUDIT_OP_NO_VALUE.includes(String(raw))
