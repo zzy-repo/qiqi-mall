@@ -1,5 +1,9 @@
 -- 七七商城 示例数据（开发调试用，可重复执行）
-USE qiqi_mall;
+-- ⚠️ 库名不写在本文件里（无 USE 语句、无建库语句），必须由调用方指定：
+--       mysql --default-character-set=utf8mb4 -uroot -p <目标库> < sql/data.sql
+--    docker-compose 的 mysql 首次初始化会自动按 MYSQL_DATABASE 选库，不需要 USE。
+--    写死库名会让"重置某个库"变成"重置它写死的那个库"（2026-11-13 两次事故的根因，
+--    详见 sql/_rollback/README.txt「库名不许写进 SQL」一节）。
 
 SET FOREIGN_KEY_CHECKS = 0;
 TRUNCATE TABLE cart;

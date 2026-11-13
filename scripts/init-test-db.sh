@@ -4,17 +4,24 @@
 #
 #   ./scripts/init-test-db.sh
 #
-# 幂等策略（可反复重跑）：
-#   - 01-schema.sql 自带 CREATE DATABASE IF NOT EXISTS + 逐表 DROP TABLE IF EXISTS → 每次全新建表
-#   - 02-seed.sql 是 fetch-seed-data.mjs 生成的，内部 SET FOREIGN_KEY_CHECKS=0 + 逐表 TRUNCATE →
-#     每次清空重灌，固定 id 插入（不含自增漂移）
-#   所以重跑的语义是「测试库整体重置」，dev 库 qiqi_mall 完全不受影响。
-#   - 最后一步调用 scripts/set-admin-password.sh 覆盖 admin 口令：种子里的 admin 哈希是演示
-#     弱口令，不覆盖就等于把后台口令打回弱口令（安全回退）。口令只从 ADMIN_PASSWORD 或
-#     /root/.qiqi-secrets/admin.txt 读，脚本里没有任何默认值；该步骤失败会让本脚本失败。
+# 结构从哪来：Flyway（qiqi-mall-server/src/main/resources/db/migration/V*.sql）
+#   以前是 `mysql < sql/testdb/01-schema.sql` —— 那份 DDL 是手抄的第二份副本，新加表忘同步
+#   就会缺表（今晚 qiqi_mall_test 缺 3 张 channel 表即此类）。01-schema.sql 已下线到
+#   sql/_rollback/。
 #
-# 依赖：qiqi-mysql 容器在跑（docker compose up -d mysql），本地有 docker CLI。
-# 种子文件缺失时会提示先生成：node scripts/fetch-seed-data.mjs
+# 幂等策略（可反复重跑）：
+#   1) DROP DATABASE + CREATE DATABASE ⇒ 空库（注意是整库删：只删表会留下
+#      flyway_schema_history，Flyway 就认为 V1 已应用、什么都不做，库是空的）
+#   2) flyway migrate ⇒ 空库上全量执行 V1（39 表 + 1 视图 + channel_shop 3 行参考数据）
+#   3) 02-seed.sql 由 fetch-seed-data.mjs 生成，内部 SET FOREIGN_KEY_CHECKS=0 + 逐表 TRUNCATE
+#      + 固定 id 重灌（不含自增漂移）⇒ 每次清空重灌
+#   4) 收尾调用 scripts/set-admin-password.sh 覆盖 admin 口令：种子里的 admin 哈希是演示
+#      弱口令，不覆盖就等于把后台口令打回弱口令（安全回退）。口令只从 ADMIN_PASSWORD 或
+#      /root/.qiqi-secrets/admin.txt 读，脚本里没有任何默认值；该步骤失败会让本脚本失败。
+#   所以重跑的语义是「测试库整体重置」，dev 库 qiqi_mall 完全不受影响。
+#
+# 依赖：qiqi-mysql 容器在跑（docker compose up -d mysql），本地有 docker CLI + mvn。
+#       种子文件缺失时会提示先生成：node scripts/fetch-seed-data.mjs
 #
 set -euo pipefail
 
@@ -22,9 +29,11 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONTAINER="${MYSQL_CONTAINER:-qiqi-mysql}"
 DB_USER="${MYSQL_USER:-root}"
 DB_PASS="${MYSQL_PASSWORD:-qiqi123456}"
+MYSQL_HOST="${MYSQL_HOST:-127.0.0.1}"
+MYSQL_PORT="${MYSQL_PORT:-3306}"
 DB_NAME="qiqi_mall_test"
-SCHEMA="$REPO_DIR/sql/testdb/01-schema.sql"
 SEED="$REPO_DIR/sql/testdb/02-seed.sql"
+SERVER_POM="$REPO_DIR/qiqi-mall-server/pom.xml"
 
 if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
   echo "✗ 容器 $CONTAINER 没在运行，先 docker compose up -d mysql" >&2
@@ -49,12 +58,38 @@ mysql_exec() {
     mysql --default-character-set=utf8mb4 -u"$DB_USER" "$@"
 }
 
-echo "▶ 建表：sql/testdb/01-schema.sql → $DB_NAME"
-mysql_exec < "$SCHEMA"
+echo "▶ 重建 $DB_NAME：DROP DATABASE → CREATE DATABASE（整库删，含 flyway_schema_history）"
+mysql_exec -e "DROP DATABASE IF EXISTS \`$DB_NAME\`;
+               CREATE DATABASE \`$DB_NAME\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
+
+echo "▶ 建表：Flyway（db/migration/V*.sql）→ $DB_NAME"
+mvn -B -q -f "$SERVER_POM" flyway:migrate \
+  -Dflyway.url="jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/${DB_NAME}?characterEncoding=utf8&serverTimezone=Asia/Shanghai" \
+  -Dflyway.user="$DB_USER" \
+  -Dflyway.password="$DB_PASS" \
+  || { echo "✗ flyway migrate 失败" >&2; exit 1; }
+
+# 结构断言：缺表要在这里炸，别等 e2e/演示跑到一半
+verdict="$(mysql_exec -N -e "
+  SELECT CONCAT(
+    (SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='$DB_NAME' AND TABLE_TYPE='BASE TABLE' AND TABLE_NAME<>'flyway_schema_history'), ',',
+    (SELECT COUNT(*) FROM information_schema.VIEWS WHERE TABLE_SCHEMA='$DB_NAME'), ',',
+    (SELECT COUNT(*) FROM \`$DB_NAME\`.flyway_schema_history WHERE version='1' AND success=1), ',',
+    (SELECT COUNT(*) FROM \`$DB_NAME\`.channel_shop));")"
+IFS=',' read -r n_tab n_view n_hist n_shop <<< "$verdict"
+if [[ "$n_tab" != "39" || "$n_view" != "1" || "$n_hist" != "1" || "$n_shop" != "3" ]]; then
+  echo "✗ 结构校验失败：业务表=$n_tab（应 39）视图=$n_view（应 1）V1记录=$n_hist（应 1）channel_shop=$n_shop（应 3）" >&2
+  exit 1
+fi
+echo "  ✓ 结构就绪：39 表 + 1 视图（V1 全量执行），channel_shop 3 行"
 
 if [[ -f "$SEED" ]]; then
-  echo "▶ 灌种子：sql/testdb/02-seed.sql"
-  mysql_exec < "$SEED"
+  echo "▶ 灌种子：sql/testdb/02-seed.sql → $DB_NAME"
+  # 库名一律由本脚本显式传给 mysql（`mysql <库名> < 文件`）。
+  # 02-seed.sql 里**不再有任何 USE / 建库语句** —— 2026-11-13 有人用改了库名的副本去重置别的库，
+  # seed 里写死的 `USE qiqi_mall_test` 把种子灌进了真库、还 TRUNCATE 了它。所以规矩是：
+  # 文件里不写库名，调用方必须传库名。（同一条规矩见 sql/_rollback/README.txt）
+  mysql_exec "$DB_NAME" < "$SEED"
 else
   echo "! 没找到 $SEED"
   echo "  先跑：node scripts/fetch-seed-data.mjs （会拉 DummyJSON 数据并把图片传进 MinIO）"

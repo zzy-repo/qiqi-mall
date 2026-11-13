@@ -31,7 +31,6 @@ import { fileURLToPath } from 'node:url'
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url))
 const REPO_DIR = resolve(SCRIPTS_DIR, '..')
-const DB = 'qiqi_mall_test'
 const OUT_FILE = join(REPO_DIR, 'sql/testdb/02-seed.sql')
 const I18N_FILE = join(REPO_DIR, 'sql/testdb/seed-i18n.json')
 const API_BASE = process.env.UPLOAD_API_BASE || 'http://127.0.0.1:18080'
@@ -355,23 +354,31 @@ async function main() {
   }
 
   // ---- 拼 SQL ----
+  // ⚠️ 本文件里**不许出现任何 `USE <库名>;` / `CREATE DATABASE`**：库名必须由调用方给
+  //    （`mysql <库名> < sql/testdb/02-seed.sql`）。曾经这里写死 `USE qiqi_mall_test;`，
+  //    结果 2026-11-13 有两次事故就是这么来的：
+  //      ① 调用方以为"传了库名就安全"，实际 seed 里的 USE 覆盖了它 → 种子灌进了 qiqi_mall_test
+  //         而不是目标库，目标库留空、真库被 TRUNCATE 重灌；
+  //      ② 脚本以为自己换库名成功了（sed 只是补救），下一个读者根本看不出危险在哪。
+  //    写死库名等于给"重置库"这类操作埋一颗只会响一次的雷，必须在源头拆掉。
   const tables = [
     'cart', 'member_address', 'return_apply', 'order_item', '`order`', 'stock_ledger', 'return_reason',
     'order_setting', 'payment_record', 'delivery_logistics', 'delivery_item', 'delivery_order',
     'inventory', 'warehouse', 'sku_bucket', 'sku_spec', 'product_gallery', 'sku', 'product', 'attribute',
     'product_type', 'category', 'member', 'admin'
   ]
-  const sql = `-- 七七商城 测试库种子数据（qiqi_mall_test）
+  const sql = `-- 七七商城 测试库种子数据（可用库：qiqi_mall_test / qiqi_mall_e2e_*）
 -- 由 scripts/fetch-seed-data.mjs 自动生成，不要手改：改脚本或 sql/testdb/seed-i18n.json 后重跑
 --   商品数据来源：DummyJSON（https://dummyjson.com），图片经 POST /admin/upload/image 落 MinIO
 --   生成时间：${new Date().toISOString()}
 -- 幂等策略：SET FOREIGN_KEY_CHECKS=0 → 逐表 TRUNCATE → 按固定 id 插入 → 恢复外键检查（可反复重跑）
+-- ⚠️ 库名不写在本文件里（没有 USE / CREATE DATABASE），必须由调用方指定：
+--       mysql --default-character-set=utf8mb4 -uroot -p <目标库> < sql/testdb/02-seed.sql
+--    写死库名会让"重置某个库"变成"重置它写死的那个库"（2026-11-13 两次事故的根因）。
 -- 口令说明：本文件里 admin 的哈希是「演示弱口令」占位，只为让种子自己能登录，不含真实口令。
 --   → 测试库复位后由 scripts/set-admin-password.sh 从 /root/.qiqi-secrets/admin.txt 覆盖；
 --   → e2e 独立库走 scripts/reset-e2e-db.sh，不跑那一步，仍用本行的占位哈希。
 --   换口令请改密钥文件（chmod 600），不要把真实哈希写进本文件（它被 git 跟踪、且会被重生成覆盖）。
-
-USE ${DB};
 
 SET FOREIGN_KEY_CHECKS = 0;
 ${tables.map((x) => `TRUNCATE TABLE ${x};`).join('\n')}

@@ -36,6 +36,20 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- 数据库结构版本管理：Flyway 取代 sql/migrate-*.sql 那套手写幂等脚本
+             （11 个脚本 × 4 个库靠人工同步，每加一列还要复制一遍 zz_xxx_add_col 存储过程）。
+             版本不写死：由 spring-boot-dependencies:3.3.5 管理（10.10.0），避免与 starter 冲突。
+             ⚠️ flyway-core 从 v10 起把 MySQL 方言拆成独立模块 flyway-mysql，缺了会在启动时
+                抛 "No database found to handle jdbc:mysql://…"。两者必须成对出现。 -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
+        </dependency>
+
         <!-- 热重启：改代码后自动重启（仅开发时生效） -->
         <!-- 鉴权：完整 Spring Security -->
         <dependency>
@@ -107,6 +121,36 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <!-- Flyway 命令行入口：scripts/reset-e2e-db.sh / init-test-db.sh 用它把空库
+                 从 V1 全量建起来（不让脚本自己去拼 mysql < schema.sql）。
+                 用法：mvn -q -f qiqi-mall-server/pom.xml flyway:migrate \
+                         -Dflyway.url=jdbc:mysql://127.0.0.1:3306/<db> \
+                         -Dflyway.user=root -Dflyway.password=...
+                 locations 用绝对路径（脚本可能从仓库根目录调用，相对路径会解析错）。
+                 ⚠️ 插件有自己的类加载器：不加下面两个 <dependencies> 会抛
+                    "No database found to handle jdbc:mysql://…"（实测踩过）。 -->
+            <plugin>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-maven-plugin</artifactId>
+                <version>${flyway.version}</version>
+                <configuration>
+                    <locations>
+                        <location>filesystem:${project.basedir}/src/main/resources/db/migration</location>
+                    </locations>
+                </configuration>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.flywaydb</groupId>
+                        <artifactId>flyway-mysql</artifactId>
+                        <version>${flyway.version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>com.mysql</groupId>
+                        <artifactId>mysql-connector-j</artifactId>
+                        <version>${mysql.version}</version>
+                    </dependency>
+                </dependencies>
             </plugin>
         </plugins>
     </build>

@@ -3,13 +3,26 @@
 # 重置 e2e 专用库（每个 Playwright shard 一套），可反复重跑。
 #
 #   ./scripts/reset-e2e-db.sh qiqi_mall_e2e_a     # 重置单个库
-#   ./scripts/reset-e2e-db.sh --all               # 重置 qiqi_mall_e2e_a / _b
+#   ./scripts/reset-e2e-db.sh --all               # 重置 qiqi_mall_e2e_a / _b（按 E2E_SHARD_N）
 #
-# 为什么不复制一份 DDL：sql/testdb/01-schema.sql 与 02-seed.sql 是唯一事实来源，
-# 这里只把库名 qiqi_mall_test 替换成目标库名再灌（下面的 sed）。改表结构只改那份。
+# 结构从哪来：Flyway（qiqi-mall-server/src/main/resources/db/migration/V*.sql）。
+#   · 以前是 `sed 库名 < sql/testdb/01-schema.sql | mysql` —— 那份 DDL 是手抄的第二份副本，
+#     新加表忘了同步进去，库就少表（今晚 qiqi_mall_test 缺 3 张 channel 表就是这么来的）。
+#     01-schema.sql 已下线到 sql/_rollback/。
+#   · 现在：DROP DATABASE → CREATE DATABASE → flyway migrate（空库 ⇒ 全量执行 V1）
+#     → 断言 39 表 + 1 视图 + flyway_schema_history 有 V1 → 再灌 seed。
 #
-# 幂等：schema 自带 CREATE DATABASE IF NOT EXISTS + 逐表 DROP TABLE IF EXISTS，
-#       seed 自带 SET FOREIGN_KEY_CHECKS=0 + 逐表 TRUNCATE → 重跑 = 整库重置。
+# 为什么必须 DROP **DATABASE** 而不是逐表 DROP TABLE（最容易埋雷的地方）
+#   ------------------------------------------------------------------
+#   flyway_schema_history 也是库里的表。只删业务表、留下历史表，Flyway 会认为
+#   "V1 已经应用过了"，于是**什么都不做** —— 库是空的，seed 灌不进去，报错还很难懂。
+#   整库删掉，历史表跟着消失，Flyway 才会把 V1 当"空库初始化"从头执行。
+#
+# 为什么 seed 还需要（结构归 Flyway，数据归 seed）
+#   02-seed.sql 是 fetch-seed-data.mjs 生成的固定 id 种子；它自带 TRUNCATE + 逐表重灌，
+#   可反复执行。注意它**不含 channel_shop**（那 3 行店铺是结构的一部分，由 V1 提供）。
+#
+# 幂等：DROP/CREATE DATABASE + Flyway 空库初始化 + seed 的 TRUNCATE 重灌 → 重跑 = 整库重置。
 #       跑完打印关键表行数，两次跑出来的数字必须一致。
 #
 # 踩坑：容器里的 mysql 客户端默认字符集是 latin1，必须显式 --default-character-set=utf8mb4，
@@ -21,9 +34,11 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONTAINER="${MYSQL_CONTAINER:-qiqi-mysql}"
 DB_USER="${MYSQL_USER:-root}"
 DB_PASS="${MYSQL_PASSWORD:-qiqi123456}"
-SCHEMA="$REPO_DIR/sql/testdb/01-schema.sql"
+# Flyway 走 JDBC（宿主机 → 容器发布的端口），与上面的 mysql 客户端不是一条路
+MYSQL_HOST="${MYSQL_HOST:-127.0.0.1}"
+MYSQL_PORT="${MYSQL_PORT:-3306}"
 SEED="$REPO_DIR/sql/testdb/02-seed.sql"
-SOURCE_DB="qiqi_mall_test"
+SERVER_POM="$REPO_DIR/qiqi-mall-server/pom.xml"
 ALL_SHARDS=("qiqi_mall_e2e_a" "qiqi_mall_e2e_b" "qiqi_mall_e2e_c" "qiqi_mall_e2e_d")
 SHARD_N="${E2E_SHARD_N:-2}"
 SHARDS=("${ALL_SHARDS[@]:0:$SHARD_N}")
@@ -50,12 +65,12 @@ if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
   echo "✗ 容器 $CONTAINER 没在运行，先 docker compose up -d mysql" >&2
   exit 1
 fi
-if [[ ! -f "$SCHEMA" ]]; then
-  echo "✗ 找不到 $SCHEMA" >&2
-  exit 1
-fi
 if [[ ! -f "$SEED" ]]; then
   echo "✗ 找不到 $SEED（先跑 node scripts/fetch-seed-data.mjs 生成测试种子）" >&2
+  exit 1
+fi
+if [[ ! -f "$SERVER_POM" ]]; then
+  echo "✗ 找不到 $SERVER_POM" >&2
   exit 1
 fi
 
@@ -65,10 +80,37 @@ mysql_exec() {
 }
 
 for DB in "${TARGETS[@]}"; do
-  echo "▶ 重置 $DB"
-  # 库名替换：schema/seed 里写的是 qiqi_mall_test，换成目标库
-  sed "s/\b${SOURCE_DB}\b/${DB}/g" "$SCHEMA" | mysql_exec
-  sed "s/\b${SOURCE_DB}\b/${DB}/g" "$SEED" | mysql_exec
+  echo "▶ 重置 $DB（DROP DATABASE → Flyway 全量建库 → seed）"
+
+  # 1) 整库删掉：连 flyway_schema_history 一起没，Flyway 才会把 V1 当空库初始化
+  mysql_exec -e "DROP DATABASE IF EXISTS \`$DB\`;
+                 CREATE DATABASE \`$DB\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
+
+  # 2) 空库 ⇒ Flyway 不会 baseline，直接全量执行 V1（39 表 + 1 视图 + channel_shop 3 行）
+  mvn -B -q -f "$SERVER_POM" flyway:migrate \
+    -Dflyway.url="jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/${DB}?characterEncoding=utf8&serverTimezone=Asia/Shanghai" \
+    -Dflyway.user="$DB_USER" \
+    -Dflyway.password="$DB_PASS" \
+    || { echo "✗ $DB：flyway migrate 失败" >&2; exit 1; }
+
+  # 3) 断言结构真的建出来了（缺表要在这里就炸，而不是等 e2e 跑到一半）
+  verdict="$(mysql_exec -N -e "
+    SELECT CONCAT(
+      (SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='$DB' AND TABLE_TYPE='BASE TABLE' AND TABLE_NAME<>'flyway_schema_history'), ',',
+      (SELECT COUNT(*) FROM information_schema.VIEWS WHERE TABLE_SCHEMA='$DB'), ',',
+      (SELECT COUNT(*) FROM \`$DB\`.flyway_schema_history WHERE version='1' AND success=1), ',',
+      (SELECT COUNT(*) FROM \`$DB\`.channel_shop));")"
+  IFS=',' read -r n_tab n_view n_hist n_shop <<< "$verdict"
+  if [[ "$n_tab" != "39" || "$n_view" != "1" || "$n_hist" != "1" || "$n_shop" != "3" ]]; then
+    echo "✗ $DB 结构校验失败：业务表=$n_tab（应 39）视图=$n_view（应 1）V1记录=$n_hist（应 1）channel_shop=$n_shop（应 3）" >&2
+    exit 1
+  fi
+  echo "  ✓ 结构就绪：39 表 + 1 视图（V1 全量执行），channel_shop 3 行"
+
+  # 4) 灌种子：库名由本脚本显式传给 mysql（`mysql <库名> < 文件`）。
+  #    seed 文件里不再写 `USE <库名>`（2026-11-13 两次事故的根因：文件写死库名 = 谁 source 它
+  #    就重置谁，调用方的库名被静默覆盖）。规矩见 sql/_rollback/README.txt。
+  mysql_exec "$DB" < "$SEED"
 
   echo "▶ $DB 行数摘要"
   mysql_exec -t -e "USE ${DB};
@@ -101,3 +143,4 @@ for DB in "${TARGETS[@]}"; do
 done
 
 echo "✅ 完成：${TARGETS[*]}"
+echo "   结构来源：db/migration/V1__baseline.sql（Flyway）；数据来源：sql/testdb/02-seed.sql"

@@ -17,8 +17,9 @@
 #
 # 复用什么：
 #   - 重置逻辑不重复实现，直接交给 scripts/init-test-db.sh（它本身就是幂等重置：
-#     sql/testdb/01-schema.sql 里逐表 DROP TABLE IF EXISTS，02-seed.sql 里逐表 TRUNCATE
+#     DROP DATABASE + CREATE DATABASE → Flyway 从 V1 全量建结构 → 02-seed.sql 逐表 TRUNCATE
 #     再固定 id 重灌，所以重跑 = 整体复位，不会漂移）。
+#     ⚠️ 结构已经不在 sql/ 里手抄了：唯一来源是 qiqi-mall-server/…/db/migration/V*.sql。
 #   - 字符集坑同样交给 init-test-db.sh 处理：容器里的 mysql 客户端默认 latin1，
 #     必须显式 --default-character-set=utf8mb4，否则中文会被二次编码成乱码。
 #   - admin 口令也交给 init-test-db.sh 的收尾步骤（scripts/set-admin-password.sh）：

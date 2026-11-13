@@ -1,4 +1,4 @@
--- 七七商城 测试库种子数据（qiqi_mall_test）
+-- 七七商城 测试库种子数据（可用库：qiqi_mall_test / qiqi_mall_e2e_*）
 -- 由 scripts/fetch-seed-data.mjs 自动生成，不要手改：改脚本或 sql/testdb/seed-i18n.json 后重跑
 --   商品数据来源：DummyJSON（https://dummyjson.com），图片经 POST /admin/upload/image 落 MinIO
 --   生成时间：2026-11-11T14:19:07.903Z
@@ -8,7 +8,10 @@
 --   → e2e 独立库走 scripts/reset-e2e-db.sh，不跑那一步，仍用本行的占位哈希。
 --   换口令请改密钥文件（chmod 600），不要把真实哈希写进本文件（它被 git 跟踪、且会被重生成覆盖）。
 
-USE qiqi_mall_test;
+-- ⚠️ 库名不写在本文件里（无 USE 语句、无建库语句），必须由调用方指定：
+--       mysql --default-character-set=utf8mb4 -uroot -p <目标库> < sql/testdb/02-seed.sql
+--    写死库名会让"重置某个库"变成"重置它写死的那个库"——2026-11-13 两次事故的根因，
+--    详见 sql/_rollback/README.txt「库名不许写进 SQL」一节。
 
 SET FOREIGN_KEY_CHECKS = 0;
 TRUNCATE TABLE cart;
