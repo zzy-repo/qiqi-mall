@@ -1,0 +1,11 @@
+== timings (date +%s 真实打点) ==
+T0_start              = 1794532112   2026-11-13 09:08:32
+T_reset_done          = 1794532115  (+3s)
+T_seed_done           = 1794532115   (+0s)
+T_bench_start         = 1794532115   (+0s)
+T_bench_end           = 1794532496
+  压测段（含预热）     = 381s = 6min21s
+  其中预热 60 s（不计入统计）/ 阶梯 315s
+T_cleanup_done        = 1794532503  (+7s)
+T_total_wall          = 391s = 6min31s   (reset+seed+压测+清理+分析)
+  新法纯测量段(不含预热) = 321s

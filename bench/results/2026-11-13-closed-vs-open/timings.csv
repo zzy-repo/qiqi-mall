@@ -1,0 +1,9 @@
+tier,concurrency,attempt,t_start,t_end,wall_s,reset_s,seed_s,jvm_start_s,measure_s,requests,ok,fail,ok_rps,req_rps,p50_ms,p95_ms,p99_ms,biz_idem_fail,load1_min,load1_med,load1_max,mem_min_MB,verdict,csv
+c1,1,1,1794531116,1794531239,123,0,1,122,60.003,9107,9107,0,151.8,151.8,5.997,9.133,15.760,0,nan,nan,nan,nan,OK,/tmp/bench2/oldout/tier-old-c1.csv
+c2,2,1,1794531244,1794531368,124,1,1,122,60.001,13987,13986,1,233.1,233.1,8.022,11.575,18.066,0,nan,nan,nan,nan,OK,/tmp/bench2/oldout/tier-old-c2.csv
+c4,4,1,1794531373,1794531498,125,2,1,122,60.002,19432,19428,4,323.8,323.9,11.660,18.227,24.864,0,nan,nan,nan,nan,OK,/tmp/bench2/oldout/tier-old-c4.csv
+c8,8,1,1794531503,1794531629,126,2,1,123,60.001,21003,21000,3,350.0,350.0,20.586,41.978,53.073,0,nan,nan,nan,nan,OK,/tmp/bench2/oldout/tier-old-c8.csv
+c16,16,1,1794531634,1794531759,125,2,1,122,60.001,22067,22065,2,367.7,367.8,38.610,87.444,114.018,0,nan,nan,nan,nan,OK,/tmp/bench2/oldout/tier-old-c16.csv
+c32,32,1,1794531764,1794531890,126,3,1,122,60.001,23278,23272,6,387.9,388.0,72.066,176.011,244.348,0,nan,nan,nan,nan,OK,/tmp/bench2/oldout/tier-old-c32.csv
+c64,64,1,1794531895,1794532021,126,2,2,122,60.002,23428,23422,6,390.4,390.5,128.200,422.204,735.594,0,nan,nan,nan,nan,OK,/tmp/bench2/oldout/tier-old-c64.csv
+TOTAL_WALL_S,995

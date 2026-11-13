@@ -1,0 +1,15 @@
+== provenance ==
+collected_at=2026-11-13 09:08:31 +0800 epoch=1794532111
+host=zzy-EQ.localdomain cores=4 loadavg=10.23 19.95 13.95 2/2097 792056
+git_HEAD=9dae17e47d355c0904afbe2b347089289ebbbf9e (refs/heads/main)
+server_image=sha256:d00b265b2db454953d0427e86839f39d1e29ad39d05c14b8a957af37b55f6595
+server_container_image=sha256:d00b265b2db454953d0427e86839f39d1e29ad39d05c14b8a957af37b55f6595
+server_started_at=2026-11-12T23:30:34.963255464Z
+cgroup qiqi-server-1: cpu_quota=0  nano_cpus=0  cpu_shares=0  mem_limit=0
+cgroup qiqi-server-2: cpu_quota=0  nano_cpus=0  cpu_shares=0  mem_limit=0
+cgroup qiqi-mysql: cpu_quota=0  nano_cpus=0  cpu_shares=0  mem_limit=0
+cgroup qiqi-gateway: cpu_quota=0  nano_cpus=0  cpu_shares=0  mem_limit=0
+script_md5 /tmp/bench2/gen.mjs=2d50cab124ca4a857ce13cc4a3e039c7 /tmp/bench2/bench.sh=0f6a296e7e10166e40676039dc14febd /tmp/bench2/analyze.py=bf4f8ff68d4a595d4f1310105d19e042 /tmp/bench2/oldmethod.sh=1251c5c9f3e2b21b12a2898040d3c9c6 
+loadgen_reused /tmp/loadgen/LoadGen.java=d65569b79bdf4e65e4efe98c47b7b27a /tmp/loadgen/prepare.sh=5f5febaf49f2a4d6f84f82ad2bffc05a 
+steps=152,233,324,350,368,388,530 step_duration=45s warmup=60s@200rps
+tokens=200000 jwts=200 redis_dbsize=153991

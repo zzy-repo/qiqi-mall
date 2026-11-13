@@ -1,0 +1,16 @@
+# 运行时产物不入库 —— 每次跑都会覆盖；要留证据请按 results/<日期>-<标签>/ 归档
+/out/
+/oldout/
+/*.log
+/load1.csv
+/lock-window.csv
+/compare.txt
+/smoke/
+/_selftest/
+samples.csv          # 逐请求明细（10 万行级），只在 results/ 里留前 1000 行样例
+
+# 凭据类，永远不入库（由 tools/prepare.sh 生成）
+tokens.txt
+jwts.txt
+members.tsv
+*.jwt
