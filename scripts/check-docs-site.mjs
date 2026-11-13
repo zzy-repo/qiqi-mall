@@ -2,11 +2,12 @@
 /**
  * check-docs-site.mjs —— 文档站重建后的「一次体检」（零依赖：node 内置 + 全局 fetch）
  *
- * 为什么要有它：站点每次重建要验 11 项（页面数、图/视频能否取到、图与 mermaid 源码是否配对、
+ * 为什么要有它：站点每次重建要验 12 项（页面数、图/视频能否取到、图与 mermaid 源码是否配对、
  * 业务场景是否「图+视频」齐全（无界面场景仅查图，见 NO_UI_SCENES）、内网信息有没有混进产物、
  * SVG 硬指标、图内禁词、侧边栏死链、**私人文稿零泄漏**（口语稿 + build-material.mjs 的 PRIVATE_DOCS
  * 那 12 篇私人笔记，产物里一个字节都不许有，见第 ⑩ 项）、**产物洁净度**（私密文件名/原始录屏/
- * 绝对路径与主机名，见第 ⑪ 项）），
+ * 绝对路径与主机名，见第 ⑪ 项）、**侧边栏编号连续性**（显示名不带编号，少一个场景肉眼看不出，
+ * 但 URL 会露馅 7→9，见第 ⑫ 项）），
  * 人工 curl + 数数必漏，所以要一条命令给出 PASS/FAIL + 具体数字 + 可行动的失败清单。
  *
  * 用法：
@@ -39,7 +40,7 @@
  *     ✅ ⑨  侧边栏一致性  链接 0 个，死链 0
  *     结论：PASS      EXIT=0
  *   也就是**什么都没检查就放行**（fail-open）。publish.sh 用退出码当门禁，这种「空跑即通过」等于没有门禁。
- *   所以十一项检查之后加一节「下限断言」：每个维度的实测数量必须 ≥ FLOOR 里的下限，
+ *   所以十二项检查之后加一节「下限断言」：每个维度的实测数量必须 ≥ FLOOR 里的下限，
  *   不达标就整条 FAIL、退出码 1 —— 宁可因为「扫到的东西太少」拦下来，也不要因为「问题数为 0」放过去。
  *   第 ⑩⑪ 项同理：产物里连一个 .md/.html 都没扫到（--root 指错/产物被清空）时不许判 ✅，
  *   所以它们也有 privacyScanned / privateDocs / cleanScanned 三条下限。
@@ -48,6 +49,7 @@
 import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs'
 import { join, dirname, resolve, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parseSidebar, checkContinuity } from './check-sidebar-continuity.mjs'
 
 /* ============================================================== 参数与路径 */
 
@@ -718,9 +720,40 @@ push('⑪',
     ? ['⚠ dev 站豁免：dev 站的 _deploy/_evidence 是内网材料（nginx deny），prod 产物里出现即泄漏']
     : cleanHits)
 
+/* ============================================================== ⑫ 侧边栏编号连续性 */
+
+// 为什么单列一项（而不塞进 ⑨）：⑨ 判的是「链接指向的文件在不在」，断档时那些链接**全都在**，
+// ⑨ 一定是绿的。而侧边栏显示名不带编号（见 build-material.mjs 顶部约定），少一个场景肉眼也看不出，
+// 只有 URL 里的编号会露馅：……/7-收货地址.md 后面直接跟 ……/9-确认收货并发.md。
+// 2026-11-14 就断过这么一次（「8-支付并发冲突」测过、素材落盘，但 SCENE_GROUPS 没登记 →
+// 不生成页面 → 侧边栏 7→9），当时 ①页面数/⑤缺件/⑨死链 全绿，因为缺的那项压根不在清单里。
+// 既不并进 ⑨ 的 detail 字符串（那会改动 ⑨ 的既有口径），也放在 ⑪ 之后输出，前 11 项的
+// 判定口径与显示顺序完全不变。解析逻辑与门禁脚本共用一份（parseSidebar），不在这里另抄。
+const CONTINUITY_MIN_GROUPS = 10   // 分组数下限：目前 14 组。扫到 0 组 = _sidebar.md 指错/产物空，不许判通过
+const CONTINUITY_MIN_LINKS = 30    // 带编号条目下限：目前 74 条（场景 50 + 图页 24）
+const numbering = (() => {
+  if (!existsSync(sidebarPath)) return { groups: [], numbered: 0, lines: ['_sidebar.md 不存在，无法校验编号连续性'] }
+  const { groups, numbered } = parseSidebar(readText(sidebarPath))
+  const { lines } = checkContinuity(groups)
+  return { groups, numbered, lines }
+})()
+const numberingBad = numbering.groups.length
+  ? numbering.lines.filter((l) => l.startsWith('❌'))
+  : []
+const numberingVacuous = numbering.groups.length < CONTINUITY_MIN_GROUPS || numbering.numbered < CONTINUITY_MIN_LINKS
+push('⑫',
+  '侧边栏编号连续性',
+  numberingBad.length === 0 && !numberingVacuous,
+  numberingVacuous
+    ? `分组 ${numbering.groups.length} 个（下限 ${CONTINUITY_MIN_GROUPS}）/ 编号条目 ${numbering.numbered} 条（下限 ${CONTINUITY_MIN_LINKS}）—— 扫到的太少，不能判通过`
+    : `分组 ${numbering.groups.length} 个，编号条目 ${numbering.numbered} 条，不连续 ${numberingBad.length} 个`,
+  numberingVacuous
+    ? [`❌ 不是「全连续」而是「根本没扫到东西」：检查 _sidebar.md 是否指对、产物是否为空`]
+    : numberingBad.map((l) => l.replace(/^❌ /, '断档 ')))
+
 /* ============================================================== 下限断言（防止「扫不到东西 → 判通过」） */
 
-// 十一项检查各自只看「扫到的东西对不对」，扫到 0 个就是 0 个问题 = 0 个失败 → 空跑即通过（fail-open）。
+// 十二项检查各自只看「扫到的东西对不对」，扫到 0 个就是 0 个问题 = 0 个失败 → 空跑即通过（fail-open）。
 // 这一节只看数量：每个维度的实测值必须 ≥ FLOOR 里的下限，否则整体 FAIL、退出码 1。
 const floorActual = {
   scenes: sceneList.length,
