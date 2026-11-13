@@ -112,6 +112,21 @@ const routes = [
         name: 'ProductSkus',
         component: () => import('../views/product/skus.vue'),
         meta: { title: 'SKU 管理', parent: '商品列表' }
+      },
+      {
+        // 台账查询（订单/包裹/售后/审计/WMS/库存 的全链路状态流水，只读）
+        path: 'ledger',
+        name: 'Ledger',
+        component: () => import('../views/ledger/index.vue'),
+        meta: { title: '台账查询' }
+      },
+      {
+        // 库存对账（SUM 库存桶 vs sku.stock 缓存，偏差排查）
+        // 同样不能以 admin 开头，理由见上面 /admins 那条注释
+        path: 'inventory-reconcile',
+        name: 'InventoryReconcile',
+        component: () => import('../views/inventory-reconcile/index.vue'),
+        meta: { title: '库存对账' }
       }
     ]
   },

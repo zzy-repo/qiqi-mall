@@ -52,6 +52,14 @@
           <el-menu-item index="/category" data-testid="nav-category">商品分类</el-menu-item>
           <el-menu-item index="/product-type" data-testid="nav-product-type">商品类型</el-menu-item>
         </el-sub-menu>
+        <el-sub-menu index="ledger">
+          <template #title>
+            <el-icon><Tickets /></el-icon>
+            <span>台账与对账</span>
+          </template>
+          <el-menu-item index="/ledger" data-testid="nav-ledger">台账查询</el-menu-item>
+          <el-menu-item index="/inventory-reconcile" data-testid="nav-inventory-reconcile">库存对账</el-menu-item>
+        </el-sub-menu>
       </el-menu>
     </el-aside>
 
@@ -114,6 +122,10 @@
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+// 菜单图标：main.js 只全局注册了 8 个图标（Goods/Shop/User/List/...），
+// 新加的「台账与对账」用 Tickets，按各 view 的惯例在这里局部 import，
+// 不改 main.js 的全局注册表（那是别的页面共享的）。
+import { Tickets } from '@element-plus/icons-vue'
 import { getUser, clearAuth } from '../utils/auth'
 import DangerConfirmDialog from '../components/DangerConfirmDialog.vue'
 import ConflictDialog from '../components/ConflictDialog.vue'
