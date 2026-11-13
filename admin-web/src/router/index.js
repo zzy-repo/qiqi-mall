@@ -143,6 +143,14 @@ const routes = [
         name: 'InventoryReconcile',
         component: () => import('../views/inventory-reconcile/index.vue'),
         meta: { title: '库存对账' }
+      },
+      {
+        // 多平台接入（三个渠道店铺的拉单 + 同步日志；回传发货在订单明细抽屉里）
+        // 同样不能以 admin 开头（nginx 把 /admin/** 全部代理给后端 API，SPA 路由占用会白屏）
+        path: 'channel',
+        name: 'Channel',
+        component: () => import('../views/channel/index.vue'),
+        meta: { title: '多平台接入' }
       }
     ]
   },

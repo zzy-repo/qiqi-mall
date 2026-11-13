@@ -81,6 +81,7 @@
     </div>
 
     <el-table
+      ref="tableRef"
       v-loading="loading"
       :data="rows"
       :row-key="rowKey"
@@ -91,7 +92,9 @@
     >
       <el-table-column label="单号" min-width="170">
         <template #default="{ row }">
-          <!-- el-table 无法给 <tr> 加 data-testid，所以每行的 testid 挂在单号格上（同台账页做法） -->
+          <!-- el-table 的 <tr> 无法在模板上挂属性（没有 row-attributes API），
+               所以这里保留「单号格锚点」audit-queue-row-<单号>，
+               整行的 audit-row-<单号> 由 stampRowTestids() 在渲染后盖到 <tr> 上（见脚本区注释） -->
           <el-link
             type="primary"
             :data-testid="`audit-queue-row-${row.orderSn}`"
@@ -140,13 +143,18 @@
         </template>
       </el-table-column>
 
-      <!-- 原因：第一行说「命中了哪条」，第二行灰字是后端的人话原因（含具体数值差） -->
+      <!-- 原因：第一行说「命中了哪条」，第二行灰字是后端的人话原因（含具体数值差），
+           第三行（可选）是「假如没被拦本来会怎样」—— 只有被拦/冻结的行才有 -->
       <el-table-column label="原因" min-width="320">
         <template #default="{ row }">
           <div class="reason-main" data-testid="audit-row-reason">
             {{ reasonHead(row) }}
           </div>
           <div class="reason-sub">{{ row.reason || '—' }}</div>
+          <!-- QT-1004 的核心叙事：策略条件其实满足了，只是被前一条策略先拦下 —— 必须看得见 -->
+          <div v-if="wouldBeText(row)" class="reason-would-be" data-testid="audit-row-would-be">
+            {{ wouldBeText(row) }}
+          </div>
         </template>
       </el-table-column>
 
@@ -222,7 +230,11 @@
             data-testid="audit-why-badge"
             :data-result="whyRow.result"
           >{{ auditResultText(whyRow.result) }}</el-tag>
-          <span class="why-hint">{{ auditResultHint(whyRow.result) }}</span>
+          <span class="why-hint" data-testid="audit-why-hint">{{ auditResultHint(whyRow.result) }}</span>
+        </div>
+        <!-- 与队列行同一句：被拦/冻结时才有的「本来会怎样」（放在判定徽标 / hint 行正下方） -->
+        <div v-if="wouldBeText(whyRow)" class="why-would-be" data-testid="audit-why-would-be">
+          {{ wouldBeText(whyRow) }}
         </div>
         <div class="why-reason">{{ whyRow.reason || '后端没有给出原因' }}</div>
 
@@ -240,7 +252,7 @@
 
         <div v-for="g in whyGroups" :key="`${g.policyId}`" class="why-group" :data-testid="`audit-why-policy-${g.policyId}`">
           <div class="why-group-head">
-            <span class="why-policy-name">「{{ g.policyName }}」</span>
+            <span class="why-policy-name" :data-testid="`audit-why-policy-name-${g.policyId ?? 'unknown'}`">「{{ g.policyName }}」</span>
             <el-tag size="small" effect="plain">优先级 {{ g.priority ?? '—' }}</el-tag>
             <el-tag size="small" effect="plain">第 {{ g.versionNo ?? '—' }} 版</el-tag>
             <el-tag v-if="g.allSatisfied" size="small" type="success" effect="plain">条件全部满足</el-tag>
@@ -382,7 +394,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Tickets, VideoPlay } from '@element-plus/icons-vue'
@@ -402,6 +414,31 @@ import {
 
 const router = useRouter()
 const danger = useDangerConfirm()
+
+/**
+ * ElMessageBox 的确认 / 取消按钮补 data-testid。
+ *
+ * Element Plus 的 MessageBox **不支持**往按钮上挂属性（没有按钮插槽，按钮由组件内部模板渲染），
+ * 官方能影响的只有整框的 customClass。所以：每次弹框给一个专属 customClass → 挂载后按它找到
+ * 这两个按钮，把 testid 盖上去。纯增量：找不到就静默放弃，e2e 仍可按文案点（不会更糟）。
+ */
+const stampMessageBoxButtons = (customClass, { confirm, cancel } = {}) => {
+  let tries = 0
+  const tryStamp = () => {
+    const box = document.querySelector(`.el-message-box.${customClass}`)
+    if (box) {
+      const btns = Array.from(box.querySelectorAll('.el-message-box__btns .el-button'))
+      // 确认键是 primary 那个；取不到就退化为「最后一个」（EP 的按钮顺序是 取消 → 确认）
+      const confirmBtn = btns.find((b) => b.classList.contains('el-button--primary')) || btns[btns.length - 1]
+      const cancelBtn = btns.find((b) => b !== confirmBtn)
+      if (confirmBtn && confirm) confirmBtn.setAttribute('data-testid', confirm)
+      if (cancelBtn && cancel) cancelBtn.setAttribute('data-testid', cancel)
+      return
+    }
+    if (tries++ < 20) setTimeout(tryStamp, 16)
+  }
+  tryStamp()
+}
 
 /** 四类结局（被拦拆成 阻止 / 冻结两支，所以共 5 个可筛选 chip） */
 const headChips = [
@@ -451,6 +488,22 @@ const reasonHead = (row) => {
   }
 }
 
+/**
+ * 「假如没被拦，本来会命中哪条自动策略」那一行。
+ *
+ * 后端判定链顺序固定：[3] BLOCK / [4] EXCEPTION 命中后**仍继续跑 [5] AUTO，只看不执行**，
+ * 把「本来会命中的那条自动策略」回填成 would_be_auto_policy_name。
+ * 也就是说：被阻止 ≠ 策略不满足，而是「满足但排在后面」—— 这句话是 QT-1004 的全部叙事，
+ * 所以只在 BLOCKED / FROZEN 且后端真的回了策略名时才渲染（其它结局渲染出来就是谎话）。
+ */
+const WOULD_BE_RESULTS = ['BLOCKED', 'FROZEN']
+const wouldBeText = (row) => {
+  const name = row?.wouldBeAutoPolicyName
+  if (!name) return ''
+  if (!WOULD_BE_RESULTS.includes(String(row.result || '').toUpperCase())) return ''
+  return `本可自动过审：命中「${name}」（被上面那条策略先拦下）`
+}
+
 /** 一条条件的可读文案（全局排除块用；EXISTS/NOT_EXISTS 不显示值） */
 const condText = (c) => {
   const label = c.fieldLabel || c.fieldCode
@@ -459,7 +512,47 @@ const condText = (c) => {
   return `${label} ${auditOpText(op)} ${expectedText(c)}`
 }
 
-const rowClass = ({ row }) => (row.result === 'SKIPPED' ? 'row-skipped' : '')
+/**
+ * 行 class：跳过本轮的行整体降透明度；同时带一个 `audit-row-<单号>` 的类名，
+ * 作为「行锚点」的**声明式兜底**（tr 挂不了属性时，e2e 也可以 `tr.audit-row-QT-1004` 定位）。
+ */
+const rowClass = ({ row }) => [
+  row.result === 'SKIPPED' ? 'row-skipped' : '',
+  row.orderSn ? `audit-row-${row.orderSn}` : ''
+].filter(Boolean).join(' ')
+
+// ---------------------------------------------------------------- 行锚点
+
+const tableRef = ref(null)
+
+/**
+ * 给每行 <tr> 盖 `data-testid="audit-row-<单号>"`。
+ *
+ * 为什么要在渲染后动 DOM：el-table 2.x **没有** row-attributes 之类的 API，<tr> 由组件内部
+ * render 出来（table-body/render-helper 里写死），模板只够得着单元格内容。行锚点过去只能挂在
+ * 单号格里，于是 e2e 想断言「这一行里有什么」都得先 `tr.filter({has: 单号锚点})` 绕一圈。
+ * 这里在数据落到 DOM 之后按行序把 testid 盖到 tr 上，e2e 直接 `getByTestId('audit-row-QT-1004')`
+ * 就是整行，行内断言不必再碰结构选择器。
+ *
+ * 与 rows 一一对应是安全的：本表无 tree / 无虚拟滚动 / 固定列是 sticky（不是另render一张表），
+ * 所以 tbody 里一行一个 tr，顺序 == rows 顺序。
+ */
+const stampRowTestids = async () => {
+  await nextTick()
+  const root = tableRef.value?.$el
+  if (!root) return
+  const trs = root.querySelectorAll('.el-table__body tbody > tr')
+  trs.forEach((tr, i) => {
+    const sn = rows.value[i]?.orderSn
+    if (sn) tr.setAttribute('data-testid', `audit-row-${sn}`)
+    else tr.removeAttribute('data-testid')
+  })
+}
+
+// 保险：loading 盖层撤掉后表体若重渲染，属性会跟着 tr 一起没 → 再盖一遍（幂等）
+watch(loading, (v) => {
+  if (!v) stampRowTestids()
+})
 
 const loadQueue = async () => {
   loading.value = true
@@ -469,6 +562,8 @@ const loadQueue = async () => {
     )
     rows.value = page.rows
     total.value = page.total
+    // 行锚点依赖「数据已经渲染成 tr」这一步，所以放在赋值之后
+    await stampRowTestids()
   } catch (e) {
     rows.value = []
     total.value = 0
@@ -528,12 +623,14 @@ const refreshAll = () => {
 }
 
 const runNow = async () => {
+  const box = ElMessageBox.confirm(
+    '将立即对待审核（状态 7）的订单跑一轮自动审核：命中的会推进状态、拦截的会留痕。是否继续？',
+    '立即审核一轮',
+    { type: 'warning', confirmButtonText: '开始执行', cancelButtonText: '取消', customClass: 'audit-confirm-run' }
+  )
+  stampMessageBoxButtons('audit-confirm-run', { confirm: 'audit-confirm-run-ok', cancel: 'audit-confirm-run-cancel' })
   try {
-    await ElMessageBox.confirm(
-      '将立即对待审核（状态 7）的订单跑一轮自动审核：命中的会推进状态、拦截的会留痕。是否继续？',
-      '立即审核一轮',
-      { type: 'warning', confirmButtonText: '开始执行', cancelButtonText: '取消' }
-    )
+    await box
   } catch {
     return
   }
@@ -625,17 +722,20 @@ const manualPass = async () => {
 
 const freeze = async (row) => {
   let reason = ''
+  const box = ElMessageBox.prompt(
+    '冻结只会打标，**不会**改订单状态；本轮之后这张单不再参与自动审核，需人工解冻。',
+    `冻结订单 ${row.orderSn}`,
+    {
+      confirmButtonText: '确认冻结',
+      cancelButtonText: '取消',
+      customClass: 'audit-confirm-freeze',
+      inputPlaceholder: '冻结原因（例如：疑似刷单，等风控确认）',
+      inputValidator: (v) => (v && v.trim() ? true : '请填写冻结原因')
+    }
+  )
+  stampMessageBoxButtons('audit-confirm-freeze', { confirm: 'audit-confirm-freeze-ok', cancel: 'audit-confirm-freeze-cancel' })
   try {
-    const res = await ElMessageBox.prompt(
-      '冻结只会打标，**不会**改订单状态；本轮之后这张单不再参与自动审核，需人工解冻。',
-      `冻结订单 ${row.orderSn}`,
-      {
-        confirmButtonText: '确认冻结',
-        cancelButtonText: '取消',
-        inputPlaceholder: '冻结原因（例如：疑似刷单，等风控确认）',
-        inputValidator: (v) => (v && v.trim() ? true : '请填写冻结原因')
-      }
-    )
+    const res = await box
     reason = res.value
   } catch {
     return
@@ -650,12 +750,14 @@ const freeze = async (row) => {
 }
 
 const unfreeze = async (row) => {
+  const box = ElMessageBox.confirm(
+    '解冻会解除这张单上所有冻结类标；下一轮 run 才会重新判定。',
+    `解冻订单 ${row.orderSn}`,
+    { type: 'warning', confirmButtonText: '确认解冻', cancelButtonText: '取消', customClass: 'audit-confirm-unfreeze' }
+  )
+  stampMessageBoxButtons('audit-confirm-unfreeze', { confirm: 'audit-confirm-unfreeze-ok', cancel: 'audit-confirm-unfreeze-cancel' })
   try {
-    await ElMessageBox.confirm(
-      '解冻会解除这张单上所有冻结类标；下一轮 run 才会重新判定。',
-      `解冻订单 ${row.orderSn}`,
-      { type: 'warning', confirmButtonText: '确认解冻', cancelButtonText: '取消' }
-    )
+    await box
   } catch {
     return
   }
@@ -759,6 +861,11 @@ onMounted(() => {
 .mono { font-family: Consolas, Monaco, monospace; }
 .reason-main { font-size: 13px; color: #303133; }
 .reason-sub { font-size: 12px; color: #909399; margin-top: 2px; word-break: break-all; }
+/* 「本可自动过审」：与 reason-sub 同为灰字，但斜体 + 左侧细线，避免被当成第二行原因 */
+.reason-would-be {
+  font-size: 12px; color: #909399; margin-top: 2px; word-break: break-all;
+  font-style: italic; border-left: 2px solid #dcdfe6; padding-left: 6px;
+}
 .row-skipped { opacity: .6; }
 .pager { display: flex; justify-content: flex-end; margin-top: 12px; }
 
@@ -772,6 +879,11 @@ onMounted(() => {
 /* ---- 「差在哪」抽屉 ---- */
 .why-head { display: flex; align-items: center; gap: 10px; }
 .why-hint { font-size: 12px; color: #909399; }
+/* 抽屉里的同一句 would_be：紧跟徽标行，灰字斜体，与队列行同款视觉 */
+.why-would-be {
+  margin-top: 6px; font-size: 12px; color: #909399; font-style: italic;
+  border-left: 2px solid #dcdfe6; padding-left: 6px;
+}
 .why-reason { margin-top: 8px; padding: 8px 10px; background: #fafafa; border-left: 3px solid #dcdfe6; font-size: 13px; color: #303133; }
 .why-meta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 12px 0; font-size: 13px; color: #606266; }
 .why-group { margin-bottom: 20px; }

@@ -94,6 +94,12 @@ export const mapQueueRow = (r) => ({
   matchedPolicyId: num(pick(r, 'matchedPolicyId', 'matched_policy_id')),
   matchedPolicyName: pick(r, 'matchedPolicyName', 'matched_policy_name') ?? null,
   matchedPolicyVersionNo: num(pick(r, 'matchedPolicyVersionNo', 'matched_policy_version_no')),
+  /**
+   * 「假如没被拦，本来会命中哪条自动策略」——后端 selectQueue 直接回 d.would_be_auto_policy_name。
+   * 只有 BLOCKED / FROZEN 才有值（判定链跑到 [3][4] 命中后仍会继续跑 [5]，只看不执行）。
+   * 之前这一列没被映射，于是「策略其实满足、只是被前面的策略先拦下」这个故事在页面上完全看不见。
+   */
+  wouldBeAutoPolicyName: pick(r, 'wouldBeAutoPolicyName', 'would_be_auto_policy_name') ?? null,
   downgradeReason: pick(r, 'downgradeReason', 'downgrade_reason') ?? null,
   // 人话原因（含具体数值差），后端来自 evidence_json.reason
   reason: pick(r, 'reason', 'reason_text') ?? null,
@@ -147,6 +153,15 @@ export const mapTrailEntry = (e) => ({
   at: pick(e, 'at', 'created_at', 'createdAt') ?? null,
   title: pick(e, 'title') ?? '',
   detail: pick(e, 'detail') ?? '',
+  /**
+   * 决策 ↔ 台账的配对结论，后端已经算好并放在条目顶层，**整对象透传**别拆：
+   *   { matchedBy: 'RUN_REF'|'STATUS_SEQ'|null, strong, ledgerRowId, decisionId, roundNo, statusSeq, aligned }
+   * 语义：strong=true 表示台账行就是这一轮 run 写下的（ref_type=AUDIT_RUN 同一条因果）；
+   *       matchedBy=STATUS_SEQ 只是「序号恰好相同」（本轮没推进状态）；
+   *       null 表示压根没配上，页面如实说「无法精确对齐」，绝不按时间最近硬猜一条。
+   * AUDIT（操作审计）段不参与状态对齐，后端给 null —— 别把 null 读成「没对齐」。
+   */
+  aligned: pick(e, 'aligned') ?? null,
   raw: pick(e, 'raw') || e || {}
 })
 

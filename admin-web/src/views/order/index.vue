@@ -249,7 +249,18 @@
       <el-tabs v-model="detailTab" data-testid="order-detail-tabs">
         <el-tab-pane label="订单明细" name="detail">
       <template v-if="detail">
-        <h4>发货单</h4>
+        <div class="drawer-toolbar">
+          <h4>发货单</h4>
+          <!-- 回传发货：把该订单已出库的包裹逐个推回平台（失败自动重试一次，全程写 channel_sync_log）。
+               只有渠道订（有 platform_sn 映射）才有意义，后端会明确报「不是渠道订单」。 -->
+          <el-button
+            type="primary"
+            size="small"
+            :loading="pushing"
+            data-testid="order-push-shipment-btn"
+            @click="pushShipmentToPlatform"
+          >回传发货</el-button>
+        </div>
         <el-table
           :data="deliveries"
           border
@@ -503,6 +514,8 @@ import {
 import { useDangerConfirm } from '../../composables/useDangerConfirm'
 import { handleSaveError } from '../../composables/useConflictHandler'
 import { listWarehouses } from '../../api/warehouse'
+// 多平台接入：回传发货（已出库包裹 → 平台）
+import { pushShipment } from '../../api/channel'
 import { Search } from '@element-plus/icons-vue'
 import { listMembers } from '../../api/member'
 import { listProducts } from '../../api/product'
@@ -992,6 +1005,31 @@ const callback = async (d, event) => {
   })
 }
 
+/**
+ * 回传发货（多平台接入）：取该订单已出库的包裹，逐个回传平台。
+ *
+ * 结果里把 成功/跳过/失败 三个数一起报出来 —— 「跳过」是平台侧已有（幂等命中），
+ * 和「失败」完全是两回事，混成一句「回传完成」会掩盖问题。
+ */
+const pushing = ref(false)
+const pushShipmentToPlatform = async () => {
+  const order = detail.value?.order
+  if (!order) return
+  pushing.value = true
+  try {
+    const r = await pushShipment(order.id)
+    ElMessage.success(
+      `回传发货：${r.packages} 个包裹 → 成功 ${r.ok} / 跳过 ${r.skipped} / 失败 ${r.failed}`
+    )
+    await loadDeliveries(order.id)
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message || '回传发货失败')
+  } finally {
+    pushing.value = false
+  }
+}
+
 const detail = ref(null)
 const detailVisible = ref(false)
 /** 详情抽屉当前的 tab：默认还是看订单明细，点「审核轨迹」才拉时间线 */
@@ -1026,6 +1064,8 @@ onMounted(async () => {
 .add-item { margin-top: 10px; width: 100%; }
 .snapshot { color: #606266; }
 /* 编辑态只读状态 / 明细提示：正文明说「不能改」，别让人以为是自己没点上 */
+.drawer-toolbar { display: flex; justify-content: space-between; align-items: center; }
+.drawer-toolbar h4 { margin: 8px 0; }
 .readonly-block { display: flex; flex-direction: column; gap: 2px; }
 .readonly-value { color: #303133; }
 .form-hint { color: #e6a23c; font-size: 12px; line-height: 1.6; }

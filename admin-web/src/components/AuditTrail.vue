@@ -54,23 +54,14 @@
                 <span class="value">{{ downgradeText(rawOf(e).downgrade_reason || rawOf(e).downgradeReason) }}</span>
               </div>
               <div v-if="e.detail" class="trail-detail">{{ e.detail }}</div>
-              <!-- 决策 ↔ 台账：靠 decision.order_status_seq 对齐（后端没回传时如实说明，不假装对齐） -->
+              <!-- 决策 ↔ 台账：直接读后端每段的 aligned（旧载荷没有时退回按 raw 算，见 alignTag） -->
               <div class="trail-align">
-                <template v-if="alignOf(e).aligned">
-                  <el-tag size="small" type="success" effect="plain" data-testid="audit-trail-aligned">
-                    已对齐状态台账 seq={{ alignOf(e).seq }}
-                  </el-tag>
-                </template>
-                <template v-else-if="alignOf(e).seq !== null">
-                  <el-tag size="small" type="info" effect="plain" data-testid="audit-trail-align-pending">
-                    本轮状态序号 seq={{ alignOf(e).seq }}（台账未回传 seq，无法精确对齐）
-                  </el-tag>
-                </template>
-                <template v-else>
-                  <el-tag size="small" type="info" effect="plain" data-testid="audit-trail-align-missing">
-                    未推进状态（无 order_status_seq）
-                  </el-tag>
-                </template>
+                <el-tag
+                  size="small"
+                  :type="alignTag(e).type"
+                  effect="plain"
+                  :data-testid="alignTag(e).testid"
+                >{{ alignTag(e).text }}</el-tag>
               </div>
             </template>
 
@@ -184,18 +175,31 @@ const trailTestid = (segment) => {
 }
 
 /**
- * 决策 ↔ 台账对齐。
+ * 决策 ↔ 台账对齐（读后端 entry.aligned，不再自己重算）。
  *
- * 口径：决策行的 order_status_seq 指的是「这一轮推进出的那条状态台账的序号」，
- * 台账侧的 idem_key 形如 {orderId}:{statusSeq}（见 order_status_ledger.uk_idem）。
- * 所以对齐 = 决策 seq 与台账 idem_key 尾巴（或台账自带的 status_seq）相等。
- * 后端当前这两列都没在 trail 里回传 → 返回 {aligned:false, seq}，界面上如实标注「无法精确对齐」，
- * 绝不按「时间最接近」去猜一条 —— 猜错的对齐比没有对齐更糟。
+ * 后端给每段都算了 aligned：
+ *   { matchedBy: 'RUN_REF'|'STATUS_SEQ'|null, strong, ledgerRowId, decisionId, roundNo, statusSeq, aligned }
+ * 口径（见 AuditQueryService#trail）：
+ *   · RUN_REF   ＝ 强对齐：台账行 ref_type='AUDIT_RUN' 且 ref_id=本轮 run_id，**同一条因果**；
+ *   · STATUS_SEQ＝ 弱对齐：order_status_seq 与台账 status_seq 相等，但台账不是本轮写的
+ *                 （典型：这一轮没推进状态，seq 还是上一个值）；
+ *   · null      ＝ 没配上 → 如实说「无法精确对齐」。绝不按时间最接近硬猜一条：
+ *                 猜错的对齐比没有对齐更糟。
+ * aligned 缺失时（老后端）退回按 raw 里的 order_status_seq / status_seq / idem_key 本地判一遍。
  */
 const alignOf = (e) => {
+  const a = e?.aligned
+  if (a && typeof a === 'object') {
+    return {
+      strong: a.strong === true,
+      matchedBy: a.matchedBy || null,
+      ledgerRowId: a.ledgerRowId ?? null,
+      seq: a.statusSeq ?? null
+    }
+  }
   const raw = rawOf(e)
   const seq = raw.order_status_seq ?? raw.orderStatusSeq ?? null
-  if (seq === null || seq === undefined) return { aligned: false, seq: null }
+  if (seq === null || seq === undefined) return { strong: false, matchedBy: null, ledgerRowId: null, seq: null }
   const hit = entries.value.find((x) => {
     if (x.segment !== 'STATUS') return false
     const r = rawOf(x)
@@ -204,7 +208,49 @@ const alignOf = (e) => {
     const idem = r.idem_key ?? r.idemKey
     return typeof idem === 'string' && idem.endsWith(`:${seq}`)
   })
-  return { aligned: Boolean(hit), seq }
+  return {
+    strong: false,
+    matchedBy: hit ? 'STATUS_SEQ' : null,
+    ledgerRowId: hit ? (rawOf(hit).id ?? null) : null,
+    seq
+  }
+}
+
+/**
+ * 对齐标签的三态文案（testid 与文案一一对应，e2e 直接读 testid 就知道是哪一态）：
+ *   强对齐 → audit-trail-aligned       「已对齐状态台账 #<台账行id>（同一因果：ref_type=AUDIT_RUN）」
+ *   弱对齐 → audit-trail-align-pending 「按 status_seq=<n> 对应（本轮未推进状态）」
+ *   没配上 → audit-trail-align-pending 「…无法精确对齐」（保持原来的如实说明）
+ * 强对齐那句里额外写了 seq=<n>：序号是运营核对时唯一能同时指到两边的数字，去掉会看不懂。
+ */
+const alignTag = (e) => {
+  const a = alignOf(e)
+  if (a.strong) {
+    return {
+      testid: 'audit-trail-aligned',
+      type: 'success',
+      text: `已对齐状态台账 #${a.ledgerRowId}（同一因果：ref_type=AUDIT_RUN，seq=${a.seq}）`
+    }
+  }
+  if (a.matchedBy === 'STATUS_SEQ') {
+    return {
+      testid: 'audit-trail-align-pending',
+      type: 'warning',
+      text: `按 status_seq=${a.seq} 对应（本轮未推进状态）`
+    }
+  }
+  if (a.seq !== null && a.seq !== undefined) {
+    return {
+      testid: 'audit-trail-align-pending',
+      type: 'info',
+      text: `本轮状态序号 seq=${a.seq}（台账里没有对应的一行，无法精确对齐）`
+    }
+  }
+  return {
+    testid: 'audit-trail-align-missing',
+    type: 'info',
+    text: '未推进状态（无 order_status_seq）'
+  }
 }
 
 const load = async () => {

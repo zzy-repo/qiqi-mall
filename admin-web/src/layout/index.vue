@@ -67,6 +67,7 @@
           </template>
           <el-menu-item index="/ledger" data-testid="nav-ledger">台账查询</el-menu-item>
           <el-menu-item index="/inventory-reconcile" data-testid="nav-inventory-reconcile">库存对账</el-menu-item>
+          <el-menu-item index="/channel" data-testid="nav-channel">多平台接入</el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>
