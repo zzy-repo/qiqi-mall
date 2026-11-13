@@ -242,6 +242,12 @@ bench/
     mkreport.py                 ← 把一轮产物拼成纯文本 report.txt
     envsample2.sh               ← 环境采样器（load1/load5/MemAvailable，5s 一次）
     prepare.sh                  ← DB reset + sku/冷门 SKU + 会员/JWT + 幂等令牌灌 Redis
+    avalanche.sh                ← 雪崩实验一键：reset+三自检 → 令牌 → 三采样器 → 阶梯 → GC 解析 → 判定（见 §11）
+    cgwatch.sh                  ← 200ms 水位采样：cgroup v2(mem/peak/events/cpu/PSI) + /proc 线程数 + load/swap
+    gcwatch.py                  ← -Xlog:gc* 日志 → 每次 STW + 每秒 GC 占比 / after-GC 堆
+    avalanche.py                ← 档窗口对齐（压测+persecond+水位+GC）→ ladder.csv/.txt + 雪崩点判定
+    jvm-gc-on.sh / jvm-gc-off.sh ← 开/关 GC 日志（追加 -Xlog:gc*，重启容器、不重建镜像）
+  jvm-gc.override.yml           ← GC 日志用的 compose override（**只在显式 -f 时生效**，不叫 override.yml 是为了不被自动叠加）
   legacy/
     LoadGen.java                ← 旧闭环压测器（历史对照，单文件 Java 21 虚拟线程实现）
   results/
@@ -346,3 +352,161 @@ N 的档位：**N=20 属严格口径**（发版前跑满）；日常**N=3 做烟
 3 遍 + 第 4 遍 4 条共 85 条 test，`e2e-run.sh` 总墙钟 16m13s（含 preflight + 建库重置），
 即**一遍 27 条约 4.5 分钟** → N=20 约 90~95 分钟。`runs.jsonl` 的历史中位数偏慢（空载前的老前端），
 估时按实测一类值上浮 30% 留余量，别照抄中位数。
+
+---
+
+## 11. 雪崩实验（A 型：内存 / 线程耗尽）—— 观测能力 + 基线雪崩点
+
+目标：找「雪崩点」—— 一个可复现的到达率阈值，越过它响应时间非线性恶化。
+**本轮结论先行**：雪崩点在 **400 ok/s 档**（350→400 之间），触发判据是 **① p99 翻倍**；
+但**根因不是内存**（堆只用了 89MB / 上限 11.5GB，GC 占比 ≤1.2%，0 次 Full GC），
+而是**「Tomcat 200 工作线程抢 HikariCP 10 个数据库连接」的应用侧排队**（线程池打满，有线程栈实证）。
+
+### 11.1 一条命令复现
+
+```bash
+# 观测开关（会重启 server-1/-2，~15s，**不重建镜像**）：给 JAVA_OPTS 追加 -Xlog:gc*
+bench/tools/jvm-gc-on.sh
+
+# 跑基线阶梯（50→500，每档 75s，预热 60s；自动 reset/三自检/灌令牌/采样/判定）
+MEMBER_PASS='<自选>' bench/tools/avalanche.sh
+
+# 还原发布值（-XX:MaxRAMPercentage=75）
+bench/tools/jvm-gc-off.sh
+```
+
+自定义阶梯 / 重复某几档：
+
+```bash
+MEMBER_PASS='<自选>' STEPS=300,350,400 STEP_DURATION=75 LABEL=repeat bench/tools/avalanche.sh
+```
+
+产物落在 `results/<日期>-avalanche-<LABEL>/`：`ladder.csv`（每档一行全字段）、`ladder.txt`（人读表 + 判定）、
+`cg.csv`（200ms 水位）、`gc_<容器>.log` + `gc_events.csv` / `gc_persecond.csv`、`steps.csv` /
+`samples.csv` / `persecond.csv`（gen.mjs 原生）、`env.csv` / `docker-stats.csv`、`run.log`（逐阶段打点）。
+
+### 11.2 观测能力：怎么采、采到哪、要不要重启
+
+| 指标 | 手段 | 要不要重启 | 为什么这么做 |
+| --- | --- | --- | --- |
+| 容器 mem.current / mem.peak / mem.events(high,max,oom_kill) / cpu.stat / PSI | `tools/cgwatch.sh`：**宿主机直接读 cgroup v2**（`/sys/fs/cgroup/system.slice/docker-<id>.scope/`），200ms 一次 | 否 | 走 `docker exec` 每 200ms 起进程会把采样成本变成干扰；宿主机直读只有几十次小文件读 |
+| JVM GC 次数 / STW 暂停 / **after-GC 堆** | JAVA_OPTS 追加 `-Xlog:gc*:file=/tmp/gc.log:time,uptimemillis,level,tags:filecount=0`，跑完 `docker exec cat` 出来离线解析（`tools/gcwatch.py`） | **是**（仅重启容器，不重建镜像） | **镜像里是 JRE**：`/opt/java/openjdk/bin` 只有 `java/jfr/keytool`，**没有 jcmd / jstat / jps**，jcmd 那条路走不通。`-Xlog` 是 JVM 官方的低开销手段（每事件 <0.1%） |
+| Tomcat 线程池占用 | 宿主机读 `/proc/<java-pid>/task/*/comm` 按前缀 `http-nio` 计数 | 否 | 内核对 comm 截断 15 字符（`http-nio-0.0.0.`），但按前缀计数够用，且**不需要任何工具**。实测口径：空闲 12 = 10(min-spare) + 1 acceptor + 1 poller；满载 202 = 200(max-threads) + 1 + 1 |
+| load1 / swap / MemAvailable | `/proc/loadavg`、`/proc/meminfo` | 否 | 同 `envsample2.sh` 口径 |
+| 容器 CPU（核） | cgroup `cpu.stat usage_usec` 增量 ÷ 档窗口 | 否 | 不用 `docker stats`（它自己每 5s 起一次进程）；这一列单位是「占满 1 核的百分比」 |
+| 下游 MySQL 是否被打爆 | 压测同时采 `Threads_running/Threads_connected/Innodb_row_lock_waits/deadlocks/Queries` | 否 | 用来区分「应用侧排队」还是「DB 被打爆」 |
+| **线程栈**（线程到底卡在哪） | `kill -3 <java-pid>`（SIGQUIT）：JVM 自己把 thread dump 打到容器 stdout，`docker logs --since <epoch>` 取回 | 否 | JRE 没有 jstack，SIGQUIT 是唯一不改代码的取栈办法。**注意 `docker logs --since` 只吃 epoch 或 RFC3339，传 `'%F %T'` 会报 `invalid value for since`** |
+
+一条真实采样（`cg.csv` 与 `gc_persecond.csv` 原样，取自 400 rps 档）：
+
+```
+epoch_ms,ts,container,mem_current_B,mem_peak_B,mem_high_events,mem_max_events,oom_kill,cpu_usage_usec,psi_mem_some_avg10,psi_cpu_some_avg10,thr_total,thr_http,host_load1,host_load5,host_memavail_kB,host_swapused_kB,host_runnable
+# 400 rps 档窗口内的一对真实采样（2026-11-14 02:43:42）：线程 202/200 打满、mem.current 640/560MB、CPU 排队(psi_cpu 51)
+1794595422235,2026-11-14 02:43:42.235,qiqi-server-1,671252480,677560320,0,0,0,358018376,0.00,51.22,234,202,27.75,15.15,6996840,3243344,39/2373
+1794595422235,2026-11-14 02:43:42.235,qiqi-server-2,577593344,587943936,0,0,0,356841026,0.00,51.95,234,202,27.75,15.15,6996840,3243344,39/2373
+```
+
+（字段顺序见 11.2 表；`psi_mem_some_avg10=0.00` 而 `psi_cpu_some_avg10=51.2` —— 内存无压力、CPU 有排队，
+这一行本身就是「不是内存型」的第一手证据。）
+
+```
+epoch_s,jvm,gc_count,pause_ms_sum,heap_after_max_MB,full_gc
+1794595411,qiqi-server-1,1,23.113,81.0,0
+1794595411,qiqi-server-2,1,13.225,79.0,0
+```
+
+### 11.3 口径与判据（**开跑前写定，不是事后挑的**）
+
+* 雪崩类型 A；开环定速阶梯，**延迟起点 = 计划到达时刻**（gen.mjs 已实现，修 coordinated omission）；
+  TPS 一律报 **ok/s**；每档 75s（在要求的 60~90s 内）；每档必带版本锚（HEAD + 镜像 digest）。
+* 判据（三者任一**先**出现即判该档为雪崩点）：
+  ① p99 相对上一档翻倍 ② 错误率 > 1% ③ GC 时间占比 > 20%。
+* 每档前：`prepare.sh reset` + **`sql/reset-sku-bucket.sql`（必须写进桶）** + 三自检 + 预热 60s。
+  ⚠️ **不能只 `UPDATE sku.stock`**：`bucket-enabled=true` 下 `sku_bucket` 才是唯一权威，`sku.stock` 只是
+  展示缓存 —— 只改它会「一件库存都没变，还立刻被 250ms 回写覆盖」，压测的库存前提就是假的。
+
+三自检（`avalanche.sh` 里任一不过就退，不许带病开跑）：桶行数 = SKU 数 × N（21×8=168）、
+每 SKU 桶数 = N（坏 SKU 数 = 0）、缓存与桶偏差 = 0。
+
+### 11.4 基线阶梯数据（2026-11-14 02:33–02:47，4 核共享机，独占窗口）
+
+版本锚：`git HEAD=41c1682f94ca6453764ea3d9650ab92cb2d613b2` ｜
+镜像 `sha256:935feb000f5d356515c6d3d29197e34f928a6e0844ef7c873a8a24996d9b39d9`（未重建）｜
+参考配置 `stock.mode=bucket(N=8) ledger=ignore idem-shards=1 cache-refresh-ms=250`、
+Tomcat `max-threads=200`（默认）、Hikari `maximumPoolSize=10`（默认）、容器无 cpu/mem 限额。
+
+| 档 | 目标 rps | **ok/s** | p50 | p95 | p99 | max | 错% | 丢 | after-GC 堆峰 | GC% | mem.current 峰 | CPU(核%) | 线程 | load1 | swap |
+| --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: |
+| 0 | 50 | 50.0 | 8.5 | 13.8 | 19.1 | 51.1 | 0.00 | 0 | 50MB | 0.1 | 446MB | 20 | 19 | 5.19 | 3.1GB |
+| 1 | 100 | 100.0 | 8.3 | 16.4 | 27.8 | 87.0 | 0.00 | 0 | 48MB | 0.1 | 441MB | 25 | 19 | 4.95 | 3.1GB |
+| 2 | 150 | 150.0 | 10.2 | 27.8 | 62.5 | 325.1 | 0.01 | 0 | 50MB | 0.1 | 452MB | 36 | 23 | 5.97 | 3.1GB |
+| 3 | 200 | 200.0 | 12.8 | 35.8 | 62.6 | 157.1 | 0.00 | 0 | 58MB | 0.3 | 450MB | 41 | 23 | 7.31 | 3.1GB |
+| 4 | 250 | 250.0 | 18.6 | 72.3 | 123.3 | 328.9 | 0.01 | 0 | 63MB | 0.4 | 445MB | 51 | 26 | 12.13 | 3.1GB |
+| 5 | 300 | 300.0 | 40.8 | 479.0 | 1540.4 | 4577.9 | 0.01 | 0 | 127MB | 0.9 | 557MB | 69 | **202** | 16.78 | 3.1GB |
+| 6 | 350 | 349.9 | 66.9 | 216.9 | 322.6 | 737.5 | 0.03 | 0 | 104MB | 0.7 | 551MB | 69 | **202** | 22.08 | 3.1GB |
+| 7 | **400** | 399.9 | **1697.2** | **3638.9** | **4477.1** | 6869.7 | 0.02 | 0 | 86MB | 1.2 | 754MB | 72 | **202** | 29.93 | 3.1GB |
+| 8 | 450 | 404.6 | 4937.1 | 6369.8 | 7084.4 | 9524.3 | 0.02 | **3292** | 88MB | 0.7 | 803MB | 73 | **202** | 28.96 | 3.1GB |
+| 9 | 500 | 410.7 | 5255.0 | 7040.5 | 7751.1 | 10018.9 | 0.01 | **6796** | 89MB | 0.7 | 909MB | 74 | **202** | 29.38 | 3.1GB |
+
+重复性（同参数再跑一遍 300/350/400 三档，ok/s 噪声带 ±2.8%）：**300.0/300.0、349.9/349.9、399.9/399.9（差 ≤0.01%）**。
+但 p99 只在 400 档复现（下表），说明「拐点」是 400 档、而**单档尾部会有瞬态**：
+
+| 目标 rps | 第一轮 p99 | 第二轮 p99 | 判读 |
+| --: | --: | --: | --- |
+| 300 | 1540.4ms | 197.7ms | **不一致**：单档尾部瞬态，不是拐点（第一轮该档 p99 的秒级中位数只有 133ms） |
+| 350 | 322.6ms | 283.2ms | 一致，健康 |
+| 400 | 4477.1ms | 3130.3ms | 一致崩溃（第三次独立验证 3960ms） |
+
+### 11.5 雪崩点与机制
+
+**判据扫描结果（照口径机械执行）**：判据 ① 在第 2 档（150 rps）就触发（p99 27.8→62.5ms，×2.25）；
+判据 ② 与 ③ **全程一次都没触发**（错误率峰值 0.03%，GC 占比峰值 1.2%）。
+
+**但 150 那一档是伪触发**，理由三条，都在数据里：
+① 绝对量健康（p99 62.5ms、0 错误、0 丢弃）；② 下一档没有继续恶化（200 档 p99 62.6ms，持平）；
+③ 根本没有任何资源被压到（堆 50MB、线程 23、CPU 0.36 核）。
+⇒ 「×2」这条判据在低基线（28ms）上会自己误报，**它就是本轮暴露出来的口径缺陷**（见 11.7）。
+
+**真正的雪崩点 = 400 rps 档**：p50 从 67ms 跳到 1697ms（×25），p99 322.6→4477.1ms（×13.9），
+且此后**不再恢复**（450/500 档 p99 7.0–7.8s），下一档开始出现调度丢弃（450 档丢 3292、500 档丢 6796）。
+吞吐天花板 ≈ **405–415 ok/s**（450/500 档实测只有 404.6/410.7 ok/s）。
+
+**当时的状态**：after-GC 堆 86MB（**上限 11.5GB 的 0.75%**）、GC 占比 1.2%、GC 次数 67 次 **0 次 Full GC**、
+容器 memory.current 峰 754MB、`memory.events` high/max/oom_kill **全 0**（注意：容器没有内存上限，
+所以 max/high 事件**在物理上不可能触发**，这一列只能当「没 OOM」的证据，不能当「没内存压力」的证据）、
+CPU 0.72 核、Tomcat 线程 **202/200 已打满**、load1 29.9。
+
+**根因（线程栈实证，不是推测）**：400 rps 档对两个容器各发一次 `kill -3`，栈里
+**190/202（server-1）与 186/202（server-2）个 http-nio 线程都停在**：
+
+```
+"http-nio-0.0.0.0-8082-exec-67" ... TIMED_WAITING (parking)
+  at java.util.concurrent.SynchronousQueue.poll
+  at com.zaxxer.hikari.util.ConcurrentBag.borrow(ConcurrentBag.java:151)
+  at com.zaxxer.hikari.pool.HikariPool.getConnection(HikariPool.java:162)
+  at org.springframework.jdbc.datasource.DataSourceTransactionManager.doBegin(...)
+```
+
+只有 **8 个**线程真的在跑 SQL（`socketRead0` 等 MySQL 回包）。即：**200 个 Tomcat 工作线程在抢 10 个
+数据库连接**（Hikari 默认 `maximumPoolSize=10`，每单约 11 条 SQL）。旁证：同一时刻 MySQL 侧
+`Threads_running` 只有 10~14、`Innodb_deadlocks` 无、行锁等待约 180/s（中等），**DB 没被打爆**；
+服务器 CPU 0.7 核/容器（4 核机器上远未饱和）。所以雪崩既不是内存也不是 CPU，也不是 MySQL，
+而是**应用侧的连接池排队**——线程池打满这一层（属 A 型口径里的「线程池打满」），闸门在 DB 连接池。
+
+### 11.6 已知缺陷（诚实写）
+
+1. **判据 ① 太松**：「相对上一档翻倍」在低基线上必然误报（150 档 ×2.25 = 62ms 被判雪崩）。
+   下一轮应改成「×2 **且** p99 > 200ms **且** 下一档不回落」——本轮为了不事后挪靶子，**没有**改判据，
+   而是把机械结果与人工判读分开写清。
+2. **档内状态累积**：一轮阶梯里第 k 档面对的是前 k−1 档留下的数据（本轮跑到 400 档时 `order` 表已
+   20 万行）。300 档 p99 在两轮里差 8 倍（1540 vs 198ms）就是这种累积/瞬态的体现。
+   要把 350~400 之间定位到 ±25 rps，得**每档独立 reset + 各自预热**（更慢，但可比）。
+3. **`-Xlog:gc*` 本身有开销**（每事件 <0.1%，且只写容器内 /tmp），但严格说本轮的绝对延迟包含了它；
+   拿这组数和没有 GC 日志的历史轮比，要记住这一点。
+4. **容器无 cpu/mem 限额**，所以「内存打满 → OOM」这条路在物理上不可达；本轮关于「不是内存」的结论
+   建立在「堆 89MB vs 上限 11.5GB + 0 次 Full GC」上，而不是建立在「没触发 memcg max 事件」上。
+5. **线程栈只有瞬时快照**（SIGQUIT 一次），不是时间序列；但 190/202 vs 8 的对比足够定性。
+6. **重建 server 后必须重启 gateway**（实测踩过，已写进 jvm-gc-on/off.sh）：nginx 在启动时解析
+   upstream 容器 IP 并缓存，重建 server-1/-2 后 IP 会变（实测两个实例的 8082/8083 还对调了），
+   不重启 gateway 就是「容器 healthy 但网关 502 / no live upstreams」。
+   排查特征：`docker logs qiqi-gateway` 里出现 `upstream: "http://172.21.0.4:8083"`（端口和 IP 对不上号）。

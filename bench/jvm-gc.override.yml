@@ -1,0 +1,28 @@
+# 雪崩实验的 JVM 观测注入口（compose override，**只在显式 -f 时生效**）
+#
+#   为什么要它：镜像里是 JRE（/opt/java/openjdk/bin 只有 java/jfr/keytool，
+#   没有 jcmd/jstat/jps），所以「GC 次数 / GC 时间占比 / after-GC 堆占用」拿不到。
+#   唯一不改业务代码、不重建镜像、不加 agent 的办法：给 JVM 追加 -Xlog:gc*，让它自己写日志。
+#
+#   怎么用（见 tools/jvm-gc-on.sh / jvm-gc-off.sh）：
+#     docker compose -f docker-compose.yml -f bench/jvm-gc.override.yml up -d --no-deps server-1 server-2
+#     docker compose -f docker-compose.yml up -d --no-deps server-1 server-2      # 关掉，回到原值
+#
+#   ⚠️ 覆盖的只是 JAVA_OPTS 一行：原值 "-XX:MaxRAMPercentage=75" **原样保留**，
+#      追加的东西**全部是观测**（-Xlog 系列），不改堆大小、不改 GC 算法、不改任何业务参数。
+#      所以压出来的数字仍然代表「发布配置」而不是「实验特调配置」。
+#
+#   ⚠️ 这个文件名叫 jvm-gc.override.yml 而不是 docker-compose.override.yml ——
+#      后者会被同目录下任何人的 `docker compose up -d` **自动叠加**，那会把观测参数
+#      偷偷带进别人的构建/发布。必须显式 -f 才能生效。
+services:
+  server-1:
+    environment:
+      JAVA_OPTS: >-
+        -XX:MaxRAMPercentage=75
+        -Xlog:gc*:file=/tmp/gc.log:time,uptimemillis,level,tags:filecount=0
+  server-2:
+    environment:
+      JAVA_OPTS: >-
+        -XX:MaxRAMPercentage=75
+        -Xlog:gc*:file=/tmp/gc.log:time,uptimemillis,level,tags:filecount=0

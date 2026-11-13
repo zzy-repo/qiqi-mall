@@ -1,0 +1,100 @@
+================================================================================
+雪崩实验（A 型：内存 / 线程耗尽）—— 第一步：观测能力 + 基线雪崩点
+================================================================================
+版本锚（每档都带）：
+  git HEAD    = 41c1682f94ca6453764ea3d9650ab92cb2d613b2
+  server 镜像 = sha256:935feb000f5d356515c6d3d29197e34f928a6e0844ef7c873a8a24996d9b39d9（**未重建**）
+  参考配置    = stock.mode=bucket(N=8) ledger=ignore idem-shards=1 cache-refresh-ms=250
+                Tomcat max-threads=200（默认）/ Hikari maximumPoolSize=10（默认）/ 容器无 cpu·mem 限额
+  测量窗口    = 2026-11-14 02:33:26 – 02:47:07（宿主机 4 核 / 15.7GB，独占锁内，无 e2e 并行）
+  压测口径    = 开环定速阶梯（延迟起点=计划到达时刻），TPS 一律报 ok/s，每档 75s，预热 60s
+
+【1】观测能力（用了什么参数 / 要不要重启 / 采到哪些指标）
+  ① 容器内存水位：tools/cgwatch.sh 在**宿主机**直读 cgroup v2
+     /sys/fs/cgroup/system.slice/docker-<id>.scope/
+       memory.current / memory.peak / memory.events(high,max,oom_kill) / cpu.stat / *.pressure
+     200ms 一次，零 docker exec（起进程本身会成为干扰），**只读、不改容器配置**。
+  ② JVM GC 与堆：镜像里是 JRE（/opt/java/openjdk/bin 只有 java/jfr/keytool，**无 jcmd/jstat/jps**），
+     jcmd 路线走不通 → 改走 JAVA_OPTS 注入 -Xlog:gc*，**重启容器但不重建镜像**：
+       -XX:MaxRAMPercentage=75                       ← 原值原样保留
+       -Xlog:gc*:file=/tmp/gc.log:time,uptimemillis,level,tags:filecount=0   ← 只加观测
+     落地方式：bench/jvm-gc.override.yml（临时 -f 叠加，**不改仓库里的 docker-compose.yml**）
+       docker compose -f docker-compose.yml -f bench/jvm-gc.override.yml up -d --no-deps server-1 server-2
+     跑完 tools/gcwatch.py 离线解析 → 每次 STW + 每秒 GC 时间占比 + **after-GC 堆**。
+  ③ 线程池：宿主机读 /proc/<java-pid>/task/*/comm 按前缀 http-nio 计数（内核截断 15 字符，
+     前缀计数够用）。实测口径：空闲 12 = 10(min-spare)+1 acceptor+1 poller；
+     满载 202 = 200(max-threads)+1+1。同时采 load1 / swap / MemAvailable / 容器 CPU（cpu.stat 增量）。
+  ④ 线程卡在哪：kill -3（SIGQUIT）让 JVM 自己把 thread dump 打到容器 stdout，
+     docker logs --since <epoch>（**注意只吃 epoch/RFC3339，传 '%F %T' 会报 invalid value for since**）。
+  一条真实采样（400 rps 档，2026-11-14 02:43:42）：
+   epoch_ms,ts,container,mem_current_B,mem_peak_B,high,max,oom_kill,cpu_usec,psi_mem10,psi_cpu10,thr_tot,thr_http,load1,load5,MemAvail_kB,swapUsed_kB,runnable
+   1794595422235,2026-11-14 02:43:42.235,qiqi-server-1,671252480,677560320,0,0,0,358018376,0.00,51.22,234,202,27.75,15.15,6996840,3243344,39/2373
+  1794595411,qiqi-server-1,1,23.113,81.0,0        ← gc_persecond：1 次 STW / 23.1ms / after-GC 堆 81MB / Full GC 0
+
+【2】阶梯数据（每档一行；ok/s 由 samples.csv 原始样本按档窗口切片统计）
+ 档 目标rps   ok/s     p50     p95      p99      max   错%     丢  after-GC堆峰  GC%  mem.current峰  CPU核%  线程  load1  swap
+  0     50    50.0     8.5    13.8     19.1     51.1  0.00     0      50MB  0.1     446MB    20    19   5.19  3.1GB
+  1    100   100.0     8.3    16.4     27.8     87.0  0.00     0      48MB  0.1     441MB    25    19   4.95  3.1GB
+  2    150   150.0    10.2    27.8     62.5    325.1  0.01     0      50MB  0.1     452MB    36    23   5.97  3.1GB
+  3    200   200.0    12.8    35.8     62.6    157.1  0.00     0      58MB  0.3     450MB    41    23   7.31  3.1GB
+  4    250   250.0    18.6    72.3    123.3    328.9  0.01     0      63MB  0.4     445MB    51    26  12.13  3.1GB
+  5    300   300.0    40.8   479.0   1540.4   4577.9  0.01     0     127MB  0.9     557MB    69   202  16.78  3.1GB
+  6    350   349.9    66.9   216.9    322.6    737.5  0.03     0     104MB  0.7     551MB    69   202  22.08  3.1GB
+  7    400   399.9  1697.2  3638.9   4477.1   6869.7  0.02     0      86MB  1.2     754MB    72   202  29.93  3.1GB
+  8    450   404.6  4937.1  6369.8   7084.4   9524.3  0.02  3292      88MB  0.7     803MB    73   202  28.96  3.1GB
+  9    500   410.7  5255.0  7040.5   7751.1  10018.9  0.01  6796      89MB  0.7     909MB    74   202  29.38  3.1GB
+  重复性（±2.8% 带）：300/350/400 三档 ok/s = 300.0/300.0、349.9/349.9、399.9/399.9（差 ≤0.01%，全部在带内）
+  第二轮 p99：300=197.7ms（首轮 1540.4 —— **不复现**）、350=283.2ms（首轮 322.6，一致）、
+              400=3130.3ms（首轮 4477.1，一致崩溃）；第三次独立跑 400 档 p99 中位 3960ms。
+  错误全轮 26 条、错误率峰值 0.03%，且**全部是同一类业务拒绝**：
+              HTTP200 code=1 「已存在相同记录，请检查唯一字段」（order_sn 随机号碰撞，非过载）
+
+【3】雪崩点在第几档、哪个判据先触发
+  判据（事前写定）：① p99 相对上一档翻倍 ② 错误率 >1% ③ GC 时间占比 >20%
+  → 判据 ② 与 ③ **全程一次都没触发**（错误率峰 0.03%、GC 峰 1.2%）。
+  → 判据 ① 机械扫描第一次命中 = 第 2 档（150 rps，27.8→62.5ms，×2.25）。
+  → **但 150 档是伪触发**：绝对量健康（p99 62.5ms、0 错、0 丢），下一档没继续恶化（200 档 62.6ms 持平），
+     且当时无任何资源被压（堆 50MB / 线程 23 / CPU 0.36 核）。
+  ★ 真正的雪崩点 = **400 rps 档**（拐点在 350→400 之间），触发判据仍是 **① p99 翻倍**，
+    但这次是 ×13.9 且**不再恢复**：p99 322.6→4477.1ms（第二轮 283.2→3130.3，×11.1，复现），
+    p50 67ms→1697ms；再往上（450/500 档）开始丢请求 3292/6796，**吞吐天花板 ≈405–415 ok/s**。
+  ★ 当时状态：after-GC 堆 86MB（上限 11.5GB 的 0.75%）/ GC 占比 1.2% / GC 67 次 **0 次 Full GC** /
+    容器 memory.current 峰 754MB / memory.events(high,max,oom_kill) 全 0 / CPU 0.72 核 / **Tomcat 线程 202（=200 满）**
+
+【4】雪崩时的现象
+  · 响应时间形态：p50 也从 67ms 跳到 1697ms —— 不是「少数慢请求」，是**整条分布一起塌**（典型排队饱和）；
+    p99 4.5s、max 6.9s；到 450/500 档 p50 已达 5s 量级，p99 7-10s。
+  · 错误类型：**没有 5xx、没有超时、没有限流**。全轮仅 26 条业务拒绝（code=1 唯一键碰撞），
+    错误率 0.03% —— 也就是说「雪崩」表现为**延迟塌陷**，而不是报错。
+  · 无 OOM：memory.events 的 oom_kill=/max=/high= 全 0；0 次 Full GC；GC 占比 ≤1.2%。
+  · 有丢弃：450 档 3292、500 档 6796（开环生成器调度落后 >3s 的请求被丢弃并标 saturated），
+    450/500 档 saturated 秒数分别 49/74（各 75s）—— 即**供不上货**，不是服务器拒绝。
+
+【5】复现命令（一条）
+  MEMBER_PASS='<自选>' bench/tools/avalanche.sh          # 需先 bench/tools/jvm-gc-on.sh 开 GC 日志
+  或分两步： bench/tools/jvm-gc-on.sh && MEMBER_PASS='<自选>' bench/tools/avalanche.sh
+  还原发布值： bench/tools/jvm-gc-off.sh
+
+【6】「雪崩其实不是内存」——是，如实说
+  不是内存，也不是 CPU，也不是 MySQL 被打爆。证据链（全部可复核）：
+  · 内存：after-GC 堆 86–89MB / 上限 11.5GB；堆容量只长到 600MB（G1 根本没扩）；0 次 Full GC；
+    PSI memory some avg10 = 0.00（内存侧零 stall）。
+  · CPU：服务器只用了 0.7 核/容器（4 核机器），客户端 node 17–22%。CPU 不是约束。
+  · MySQL：同时段 Threads_running 10–14、无死锁、行锁等待 ~180/s（中等），DB 没有被压爆。
+  · 线程栈（400 rps 档 SIGQUIT 实证）：server-1 **190/202**、server-2 **186/202** 个 http-nio 线程
+    全部停在 com.zaxxer.hikari.pool.HikariPool.getConnection（SynchronousQueue.poll 等连接），
+    只有 8 个线程真的在跑 SQL（socketRead 等回包）。
+  ⇒ 根因是**应用侧排队：200 个 Tomcat 工作线程抢 10 个 HikariCP 连接**（默认 maximumPoolSize=10，
+    每单约 11 条 SQL）。按 A 型口径这仍属「线程池打满」，但**闸门在数据库连接池，不在堆**。
+  ⇒ 直接可用的推论（未在本轮验证，别当结论）：把连接池 10→30 或把每单 SQL 数压下来，
+    拐点应显著右移；而调大 -Xmx / 换 GC **不会**改善这个拐点。
+
+【7】本轮暴露的口径缺陷（下一轮要改，但本轮没改口径）
+  1. 判据①「p99 翻倍」在低基线上必然误报（150 档 ×2.25=62ms 被判雪崩）。建议改成
+     「×2 且 p99>200ms 且下一档不回落」。
+  2. 档内状态累积：第 k 档面对前 k−1 档留下的数据（400 档时 order 表 20 万行）；300 档 p99 两轮差 8 倍
+     就是累积/瞬态的表现。要把 350~400 精确定位到 ±25 rps，需每档独立 reset + 各自预热。
+  3. 容器**没有内存上限** ⇒ memcg 的 max/high 事件物理上不可能触发，这一列只能证明「没 OOM」，
+     不能证明「没内存压力」；「不是内存」的判断建立在堆 89MB vs 11.5GB 这个量级差上。
+  4. -Xlog:gc* 本身有 <0.1%/事件的观测开销，本轮绝对延迟含它。
+================================================================================
