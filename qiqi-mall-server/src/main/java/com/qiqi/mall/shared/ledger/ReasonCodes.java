@@ -76,8 +76,18 @@ public final class ReasonCodes {
 
     // ================================================================ 后台审计动作（action）
 
+    /**
+     * 只改了售价。
+     *
+     * <p>动作码必须按「**哪个字段真的变了**」选，不能按「请求体里带了哪个字段」选：
+     * 管理端的 SKU 编辑弹窗是整份表单提交（price 一定在请求里），按请求体选码会把「只改库存」
+     * 记成「改价」—— 证据表里就多了一条「售价 ¥1999.99 → ¥1999.99」这种没发生的改动。
+     */
     public static final String ACTION_SKU_PRICE_CHANGE = "SKU_PRICE_CHANGE";
+    /** 只改了库存（见 {@link #ACTION_SKU_PRICE_CHANGE} 的选码口径） */
     public static final String ACTION_SKU_STOCK_CHANGE = "SKU_STOCK_CHANGE";
+    /** 售价与库存同一次都变了：一条审计记两处改动，比发两条更好读（同一次点击是一件事） */
+    public static final String ACTION_SKU_PRICE_STOCK_CHANGE = "SKU_PRICE_STOCK_CHANGE";
     public static final String ACTION_ORDER_DELETE = "ORDER_DELETE";
     public static final String ACTION_ORDER_SPLIT = "ORDER_SPLIT";
     public static final String ACTION_ORDER_SHIP = "ORDER_SHIP";
