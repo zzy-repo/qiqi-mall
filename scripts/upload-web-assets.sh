@@ -14,8 +14,10 @@
 #
 #   环境变量
 #     CDN_HOST=https://cdn.rose7.cn     CDN 域名（verify 用）
+#     CDN_ORIGIN=https://admin.rose7.cn 预热/自检时带的 Origin 头（★别改成不带）
 #     CRED_FILE=/root/.aliyun-qiqi/credentials.env
 #     OSS_BUCKET=qiqi-mall-static  OSS_PREFIX=qiqi-mall  OSS_ENDPOINT=oss-cn-beijing.aliyuncs.com
+#     （换前缀发版：OSS_PREFIX=qiqi-mall-v111 + 构建时 CDN_BASE=https://cdn.rose7.cn/qiqi-mall-v111/<app>/）
 #
 # -----------------------------------------------------------------------------
 # 为什么默认是 plan 而不是 --apply
@@ -71,6 +73,8 @@ OSS_PREFIX="${OSS_PREFIX:-qiqi-mall}"
 OSS_ENDPOINT="${OSS_ENDPOINT:-oss-cn-beijing.aliyuncs.com}"
 OSS_REGION="${OSS_REGION:-cn-beijing}"
 CDN_HOST="${CDN_HOST:-https://cdn.rose7.cn}"
+# 预热/自检时一律带这个 Origin 头。★不要改成本机 curl 默认（= 不带 Origin），原因见【CORS 事故】节
+CDN_ORIGIN="${CDN_ORIGIN:-https://admin.rose7.cn}"
 
 APPLY=0; PRUNE=0; VERIFY=0; DIST_OVERRIDE=""
 APPS=()
@@ -326,37 +330,82 @@ print("\n合计：上传/覆盖 %d 个（%.2f MB），未变跳过 %d 个%s"
 PY
 fi
 
-# ------------------------------------------------------------------ CDN 侧自检
+# ------------------------------------------------------------------ CDN 侧自检 + 预热
+#
+# 【CORS 事故】2026-11-14 00:35 —— 为什么这里必须「带 Origin 遍历全部」而不是「HEAD 两个样本」
+#
+#   事实链（当次已实测，可复现）：
+#     · 桶的 CORS 规则返回 Access-Control-Allow-Origin: *，但**只在请求带 Origin 头时**才带；
+#     · CDN 边缘不看请求头做缓存键，于是「不带 Origin 的首次请求（MISS）」会把
+#       **无 ACAO 的响应**写进边缘缓存，assets 又是 immutable + max-age=31536000，
+#       这份坏副本就跟着挂一年；
+#     · 之前的老对象之所以没事，只是因为它们首次填充恰好来自浏览器（带 Origin）。
+#   事故经过：v1.1.1 首轮验证时用裸 curl 巡检线上 CDN 资源（脚本当时只 HEAD 预热了 2 个样本），
+#     52 个 .js 里 50 个被写成无 ACAO → module script 被浏览器按 CORS 拦掉 → 页面白屏 → 当次回滚。
+#   所以：**上传后必须先用带 Origin 的 HEAD 把每个 js/css 都填一遍（本段既是预热也是自检）**，
+#     之后即使有人裸 curl，命中的也是已缓存的好副本，不会把坏副本写回去。
+#
+#   .js 缺 ACAO = 必然白屏（module script 是 CORS 请求）；.css 缺 ACAO 仅告警（<link> 不走 CORS）。
 if [ "$VERIFY" -eq 1 ] || [ "$APPLY" -eq 1 ]; then
   echo
-  echo "=== CDN 侧自检（HEAD $CDN_HOST，带 Origin 头看 CORS） ==="
-  # 取每个 app 的入口 js + 一个 css 做样本；不存在的对象给 404，正常
+  echo "=== CDN 侧自检 + 预热（HEAD $CDN_HOST，全部 assets，一律带 Origin: $CDN_ORIGIN） ==="
+  GRAND_JS=0; GRAND_JS_BAD=0; GRAND_CSS_BAD=0
   for app in "${APPS[@]}"; do
     d=$(dist_for "$app"); p=$(prefix_for "$app")
-    for f in $(ls "$d/assets" 2>/dev/null | grep -E '^index-.*\.(js|css)$' | head -2); do
+    [ -d "$d/assets" ] || continue
+    n_js=0; n_js_bad=0; n_css_bad=0; shown=0; bad_list=""
+    for f in $(ls "$d/assets" 2>/dev/null); do
+      case "$f" in *.js|*.css) ;; *) continue ;; esac
       url="$CDN_HOST/$p/assets/$f"
-      hdrs=$(curl -sSI -m 10 -H 'Origin: https://mall.rose7.cn' "$url" 2>&1 || true)
+      hdrs=$(curl -sSI -m 10 -H "Origin: $CDN_ORIGIN" "$url" 2>&1 || true)
       code=$(printf '%s' "$hdrs" | sed -n '1s/.* \([0-9][0-9][0-9]\).*/\1/p')
       acao=$(printf '%s' "$hdrs" | sed -n 's/^[Aa]ccess-[Cc]ontrol-[Aa]llow-[Oo]rigin: *//p' | tr -d '\r')
       ctype=$(printf '%s' "$hdrs" | sed -n 's/^[Cc]ontent-[Tt]ype: *//p' | tr -d '\r')
       cache=$(printf '%s' "$hdrs" | sed -n 's/^[Cc]ache-[Cc]ontrol: *//p' | tr -d '\r')
       auth=$(printf '%s' "$hdrs" | sed -n 's/^[Xx]-[Oo]ss-[Cc]dn-[Aa]uth: *//p' | tr -d '\r')
-      printf '  %-72s HTTP=%s\n' "$p/assets/$f" "${code:-?}"
-      printf '    Content-Type=%s  Cache-Control=%s  x-oss-cdn-auth=%s  ACAO=%s\n' \
-        "${ctype:-<无>}" "${cache:-<无>}" "${auth:-<无>}" "${acao:-<无>}"
+      # 入口 js/css 仍打印明细，方便人眼扫一眼（其余只汇总）
+      case "$f" in
+        index-*.js|index-*.css)
+          if [ "$shown" -lt 2 ]; then
+            shown=$((shown+1))
+            printf '  %-72s HTTP=%s\n' "$p/assets/$f" "${code:-?}"
+            printf '    Content-Type=%s  Cache-Control=%s  x-oss-cdn-auth=%s  ACAO=%s\n' \
+              "${ctype:-<无>}" "${cache:-<无>}" "${auth:-<无>}" "${acao:-<无>}"
+          fi ;;
+      esac
+      case "$f" in
+        *.js)
+          n_js=$((n_js+1))
+          if [ "$code" != "200" ] || [ "$acao" != "*" ]; then
+            n_js_bad=$((n_js_bad+1)); bad_list="$bad_list $f(HTTP=${code:-?},ACAO=${acao:-<无>})"
+          fi ;;
+        *.css)
+          [ "$acao" != "*" ] && n_css_bad=$((n_css_bad+1)) ;;
+      esac
     done
+    GRAND_JS=$((GRAND_JS+n_js)); GRAND_JS_BAD=$((GRAND_JS_BAD+n_js_bad)); GRAND_CSS_BAD=$((GRAND_CSS_BAD+n_css_bad))
+    printf '  [%s] js %d/%d 有 ACAO；css 缺 ACAO %d 个（仅告警）\n' \
+      "$app" "$((n_js-n_js_bad))" "$n_js" "$n_css_bad"
+    if [ -n "$bad_list" ]; then
+      printf '  ❌ %s 以下 js 缺 ACAO 或非 200（会白屏）：%s\n' "$app" "$bad_list"
+      echo "     → 先确认没有裸 curl 把坏副本写进边缘缓存；坏副本只能靠 CDN 刷新（策略严禁，需用户明确批准）或换前缀解决。"
+    fi
   done
+  echo "  汇总：js $((GRAND_JS-GRAND_JS_BAD))/$GRAND_JS 有 ACAO；css 缺 ACAO $GRAND_CSS_BAD 个"
+  if [ "$GRAND_JS_BAD" -gt 0 ]; then
+    echo "  ★ js 缺 ACAO = 模块脚本会被浏览器拦掉 → 不要切流量。（本次共 $GRAND_JS_BAD 个）" >&2
+  fi
   cat <<'TIP'
 
   判读：
     HTTP=200 + x-oss-cdn-auth=success + Content-Type=application/javascript  → 源站与回源鉴权都没问题
     ACAO=<无>  ⇒ ★会白屏：module script 是 CORS 请求，缺 Access-Control-Allow-Origin 直接被浏览器拒绝执行。
-                需要对桶 qiqi-mall-static 增加 CORS 规则（本脚本不改 OSS 配置，需人工/主线决策）：
-                  来源 Origin : https://mall.rose7.cn, https://admin.rose7.cn（按实际入口域名加）
-                  Methods     : GET, HEAD
-                  Headers     : *
-                  Expose      : ETag, Content-Length, Content-Type
-                  MaxAge      : 3600
+                两种成因要分清：
+                  (a) 桶上没有 CORS 规则            → 需改 bucket CORS（本脚本不改 OSS 配置，需人工/主线决策）
+                  (b) 有人用「不带 Origin」的请求先填充了边缘缓存 → 本文档顶部的【CORS 事故】节
+                排查一句：同一个 URL 加个 ?t=1 再请求一次；带参数那次有 ACAO、不带那次没有 ⇒ 就是 (b)。
+                对 (b) 的处理：CDN 刷新（/root/.aliyun-qiqi/README.txt [6] 默认禁止，需用户明确批准）
+                              或换一个未缓存过的前缀重发（只新增对象，不碰 CDN 配置）。
     Cache-Control 不是 max-age=31536000, immutable  ⇒ 检查上传时的 Cache-Control（本脚本写对了；若被 CDN 缓存规则覆盖，看 RUNBOOK 六节）
 TIP
 fi

@@ -1,6 +1,6 @@
 阿里云 CDN 收敛工具 RUNBOOK（cdn.rose7.cn / docs.rose7.cn）
 ================================================================
-纯运维说明，无外部依赖文档。最后更新：2026-11-12
+纯运维说明，无外部依赖文档。最后更新：2026-11-14（新增第九节：静态资源 CORS 红线）
 
 一、这一堆文件是干什么的
 ----------------------------------------------------------------
@@ -139,3 +139,32 @@ img.rose7.cn 没有独立 DNS 记录（CDN 域名已删除，现在回落 * 泛�
   续期会失败，需由 Caddy 负责人删掉该 site block，并确认 *.rose7.cn 通配证书
   走的是 DNS-01。
 - 本工具只碰 CDN / DNS / 证书，不碰 OSS 对象、不碰 ECS 配置。
+
+九、静态资源 CORS 红线（2026-11-14 00:35 事故，务必看）
+----------------------------------------------------------------
+一句话：**验证线上 CDN 资源时必须带 `-H 'Origin: https://admin.rose7.cn'`，裸 curl 会把资源刷成 CORS 坏副本。**
+
+为什么：
+- 桶 qiqi-mall-static 的 CORS 规则会在响应里给 Access-Control-Allow-Origin: *，但
+  **只在请求带 Origin 头时**才带。
+- CDN 边缘**不把 Origin 算进缓存键**：一次「不带 Origin 的请求」如果是 MISS（首次填充），
+  写进边缘缓存的就是**无 ACAO 的响应**；而 assets/* 的 Cache-Control 是
+  public, max-age=31536000, immutable ⇒ 这份坏副本会挂一年。
+- 浏览器加载的 ES module（<script type="module" crossorigin>）是 CORS 请求，缺 ACAO 直接被拒
+  ⇒ 页面白屏 / 路由 chunk 加载失败。css 走 <link> 不是 CORS，缺 ACAO 无影响。
+
+事故记录（2026-11-14）：
+- 00:26 v1.1.1 首轮发布，上传脚本只 HEAD 预热了 2 个样本；随后按验证剧本用裸 curl
+  巡检 index 的 3 个资源、并对 90 个 assets 逐一 curl 查 200。
+- 结果：新构建 52 个 .js 里 50 个被写成无 ACAO 副本 → /order-audit、/audit-policy、/channel
+  三页 console error 21 条、testid 全不出现 → 当次回滚 admin-web（server 保持新镜像）。
+- 修复方式：换未缓存过的前缀 qiqi-mall-v111 重发（只新增对象，不碰任何 CDN 配置），
+  上传后立刻带 Origin 把 52 个 js 全部预热 → 52/52 ACAO=*，页面 console error=0。
+- CDN 刷新（RefreshObjectCaches）能直接修好，但本 RAM key 的边界见
+  /root/.aliyun-qiqi/README.txt [6]：默认禁止刷新/预热/变更任何 CDN 配置，需用户明确批准。
+
+正确做法：
+- 上传后预热 = `curl -sI -H 'Origin: https://admin.rose7.cn' <url>`，**遍历全部 js/css**，不是抽样。
+  scripts/upload-web-assets.sh 的 --apply/--verify 已经内置这个全量预热 + 52/52 汇总，直接用脚本。
+- 查状态码也要带 Origin；线上巡检/监控探针同理（裸 curl 只对已缓存的好副本无害，对未缓存的新对象有害）。
+- 排查口诀：同一 URL 加 `?t=1` 再请求 → 带参数那次有 ACAO、不带那次没有 ⇒ 是缓存坏副本，不是桶配置。
