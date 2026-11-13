@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "qiqi-mall MCP Server（stdio）：订单/商品/字典/履约/退货/配置/会员/概览 39 个工具（version 乐观锁 + dryRun 预演 + 统一分页；覆盖后台 100% 面向人端点）",
+  "description": "qiqi-mall MCP Server（stdio）：订单/商品/字典/履约/退货/配置/会员/概览/台账/库存对账/自动审核/渠道 48 个工具（version 乐观锁 + dryRun 预演 + 统一分页；管理端业务端点覆盖 83/93，剩余 10 个是结构上不给 AI 的写动作）",
   "engines": {
     "node": ">=20"
   },

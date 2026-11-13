@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 第 4 批：概览 + 上传（misc）工具测试。
 //
-// ① dashboard_overview 在 tools/list 里，title/description 中文；**write=1 时工具总数 = 39**（第 4 批 24 + 第 5 批补齐 14 + upload_image_from_url 1）
+// ① dashboard_overview 在 tools/list 里，title/description 中文；**write=1 时工具总数 = 48**（第 4 批 24 + 第 5 批补齐 14 + upload_image_from_url 1 + 第 6 批 9）
 // ② dashboard_overview 能调通、返回非空，且数据自洽（口径断言，不是「数字等于某个常量」）：
 //      · 商品总数 ≥ 在架数 ≥ 0
 //      · 订单状态分布各档之和 === 订单总数
@@ -22,7 +22,7 @@
 //      · https://example.com:8443   非 443 端口 → 必须 400（端口拒绝）
 // ⑨ 反向断言：https://example.com/x.png（**不带端口**，getPort()=-1）**不能**被端口校验误拦，
 //      真实拒绝原因必须是网络层的（415 不是图片 / 404 / 超时），不能出现「端口」二字。
-// ⑤ write=0：dashboard_overview 仍然在，**upload_image_from_url 不注册**（只读模式不留上传通道），工具总数 = 26
+// ⑤ write=0：dashboard_overview 仍然在，**upload_image_from_url 不注册**（只读模式不留上传通道），工具总数 = 35
 //
 // ⚠️ 本文件会真的往对象存储写 1 张图（正常用例），为的是能断言「CDN 立刻 200」。
 //    造出来的 objectName 会追加写到 /tmp/mcp-upload-created.txt（供收尾清理），并打印到输出里。
@@ -66,9 +66,10 @@ async function check(step, fn) {
   }
 }
 
-/** 工具总数：24（第 4 批）+ 字典 3 + 商品只读 2 + 商品写 4 + 订单写 5 = 38，再加 upload_image_from_url 1 = 39 */
-const TOTAL_WRITE_ON = 39;
-/** write=0 时消失的纯写工具共 13 个（订单 6 + 商品 6 + upload_image_from_url 1）：39 - 13 = 26 */
+/** 工具总数：24（第 4 批）+ 字典 3 + 商品只读 2 + 商品写 4 + 订单写 5 = 38，再加 upload_image_from_url 1 = 39，
+ *  再 + 第 6 批 9 个只读证据/巡检工具（台账 1 + 库存对账 2 + 自动审核 4 + 渠道 2）= 48 */
+const TOTAL_WRITE_ON = 48;
+/** write=0 时消失的纯写工具共 13 个（订单 6 + 商品 6 + upload_image_from_url 1）：48 - 13 = 35 */
 const WRITE_ONLY_COUNT = 13;
 const TOTAL_WRITE_OFF = TOTAL_WRITE_ON - WRITE_ONLY_COUNT;
 
@@ -82,7 +83,7 @@ async function main() {
     client = await connectServer({ MCP_ENABLE_WRITE: '1' }, 'misc');
 
     // ① tools/list + 工具总数
-    await check(`① tools/list 含 dashboard_overview，且 write=1 时工具总数 = ${TOTAL_WRITE_ON}（第 4 批 24 + 第 5 批补齐 14）`, async () => {
+    await check(`① tools/list 含 dashboard_overview，且 write=1 时工具总数 = ${TOTAL_WRITE_ON}（第 4 批 24 + 第 5 批补齐 14 + 第 6 批 9）`, async () => {
       const { tools } = await client.listTools();
       const names = tools.map((t) => t.name);
       const t = tools.find((x) => x.name === 'dashboard_overview');

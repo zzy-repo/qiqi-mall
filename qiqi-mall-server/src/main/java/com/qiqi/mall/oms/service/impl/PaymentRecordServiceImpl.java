@@ -46,7 +46,7 @@ import java.util.concurrent.ThreadLocalRandom;
  *   <li><b>REQUIRES_NEW 新事务</b>的读（另一条连接 = 新快照）—— 只有它看得见「别的写入方刚提交」的幂等行。
  *       缺了它就会把真重放判成「不是重放」：{@code pay()} 的事务在第一条 {@code getById} 时就把
  *       consistent snapshot 定下来了，对方之后提交的行，本事务的快照读**永远**看不见
- *       （{@code PaymentIdemKeyTest} 用例 ⑤ 用真库复现：本事务快照读=0、新事务=1）。</li>
+ *       （{@code PaymentIdemKeyTest} 用例 ⑤ 就是这个场景的回归：本事务快照读=0、新事务=1）。</li>
  * </ol>
  * 这两道都在**不改全局隔离级别**的前提下成立：新事务 = 新快照，普通快照读不加锁，
  * 所以也不会和「撞键失败的那次 INSERT 留在本事务里的唯一索引共享锁」抢锁。
@@ -93,8 +93,7 @@ public class PaymentRecordServiceImpl extends ServiceImpl<PaymentRecordMapper, P
         record.setType(type);
         record.setChannel(channel);
         // 随机后缀：trade_no 只精确到毫秒，同毫秒两笔合法流水会撞 uk_channel_trade(channel, trade_no)
-        record.setTradeNo((type == PaymentRecord.TYPE_REFUND ? "MOCKREF" : "MOCKPAY")
-                + LocalDateTime.now().format(TS) + String.format("%04d", ThreadLocalRandom.current().nextInt(10000)));
+        record.setTradeNo(generateTradeNo(type));
         record.setCreatedAt(LocalDateTime.now());
         record.setOrderId(orderId);
         record.setRefType(refType);
@@ -116,13 +115,87 @@ public class PaymentRecordServiceImpl extends ServiceImpl<PaymentRecordMapper, P
         } catch (DuplicateKeyException e) {
             // 只有「同一个幂等键」才算重放（钱已经记过账）。其余唯一键（uk_channel_trade）撞了是
             // 真问题 —— 抛出，宁可这次业务失败，也不能静默丢一条流水。
-            if (idemKey != null && getBaseMapper().countByIdemKey(idemKey) > 0) {
+            if (idemKey == null) {
+                // 幂等键没写（qiqi.ledger.payment-trace-enabled=false）：uk_idem 上多个 NULL 互不冲突，
+                // 所以撞的必然是别道的唯一键。行为与改动前逐字一致：原样抛出，不改异常类型。
+                throw e;
+            }
+            if (idemKeyAlreadyBooked(idemKey, e)) {
                 log.info("支付流水重放：幂等键 {} 已入账，本次跳过（订单 {} 金额 {} 类型 {}）",
                         idemKey, orderSn, amount, type);
                 return;
             }
-            throw e;
+            // 撞的不是幂等键（这张表上另一道唯一键就是 uk_channel_trade(channel, trade_no)）：
+            // 那是「同一笔钱可能被记了两遍」的疑似场景，绝不能像重放一样静默吞掉 ——
+            // 包成可读的业务异常抛出，原始 DuplicateKeyException 挂在 cause 上（排障要看得到库说的话）。
+            throw new IllegalStateException("支付流水未入账：订单 " + orderSn
+                    + " 本次写入撞了唯一键，但不是幂等键（" + idemKey + " 在库里没有已提交的行），"
+                    + "只可能是 uk_channel_trade(channel=" + channel + ", trade_no=" + record.getTradeNo() + ") 撞了"
+                    + " —— 疑似同一笔钱重复入账，需人工对账", e);
         }
+    }
+
+    /**
+     * 撞键之后：这个幂等键到底「已入账」了没有？—— 两道回查，缺一不可。
+     *
+     * <ol>
+     *   <li><b>本事务内</b>（{@code SELECT COUNT(*) ... idem_key=?}，走本事务快照）：
+     *       看得见「本事务自己刚插、还没提交」的那一行 —— 同一个事务里 {@code record()} 被调两次
+     *       就是这一种（{@code PaymentIdemKeyTest} 用例 ①/③），漏了它会把同事务重放判成撞别键；</li>
+     *   <li><b>REQUIRES_NEW 新事务</b>（{@link #countCommittedByIdemKey}，另一条连接 = 新快照）：
+     *       看得见「别的写入方刚提交」的那一行。REPEATABLE READ 下本事务的快照在
+     *       {@code pay()} 第一条 {@code getById} 时就定下来了，对方之后提交的幂等行对快照读**不可见**，
+     *       所以只靠第 ① 道会把真重放判成「不是重放」，把它原样抛出去（用户看到失败，
+     *       而设计承诺的是幂等跳过）。用例 ⑤ 就是这条的回归。</li>
+     * </ol>
+     *
+     * <p>为什么不是 {@code SELECT ... FOR UPDATE} / 改隔离级别：撞键失败的那次 INSERT 已经在本事务里
+     * 对该唯一索引记录留下了**共享锁**，再在同一事务里加锁读等于跟自己抢锁（还可能升级成死锁）；
+     * 新事务里的普通快照读不加锁、不阻塞、也不用为一次判重去改全局隔离级别。
+     *
+     * @param original 原始 {@link DuplicateKeyException}：回查自己失败时**不能把它吞掉**，
+     *                 挂到它身上再抛（见下），否则「DB 抖动」会被伪装成「撞了别的唯一键」
+     */
+    private boolean idemKeyAlreadyBooked(String idemKey, DuplicateKeyException original) {
+        if (getBaseMapper().countByIdemKey(idemKey) > 0) {
+            return true;
+        }
+        try {
+            return countCommittedByIdemKey(idemKey) > 0;
+        } catch (RuntimeException lookupFailure) {
+            // 回查本身失败（连接池耗尽 / DB 抖动 / 查询超时）：既不能当「已入账」（那是拿一笔钱赌运气），
+            // 也不能把回查的失败当成新的失败原因、把原始 DuplicateKeyException 吃掉 ——
+            // 原样抛出原始异常，把回查失败挂成 suppressed，两个事实都留在堆栈里。
+            original.addSuppressed(lookupFailure);
+            throw original;
+        }
+    }
+
+    /**
+     * 在**新事务**里数这个幂等键的行数 —— 换一条连接，因此拿到的是**新快照**，
+     * 看得见别的写入方在本事务快照之后提交的行。
+     *
+     * <p>{@code protected} 的原因：{@code PaymentIdemKeyTest} 要能覆写它来模拟「回查自己失败」
+     * （用例 ⑧），验证原始 {@link DuplicateKeyException} 不会被吞掉。
+     */
+    protected int countCommittedByIdemKey(String idemKey) {
+        Integer n = newTransaction.execute(status -> getBaseMapper().countByIdemKey(idemKey));
+        return n == null ? 0 : n;
+    }
+
+    /**
+     * 本地生成渠道流水号（模拟支付用；渠道回调走 {@link #recordChannelNotice}，流水号由渠道给）。
+     *
+     * <p>随机后缀是必需的：{@code trade_no} 原来只精确到毫秒，同毫秒两笔合法流水会撞
+     * {@code uk_channel_trade}，而那是合法业务、不该被当成重放。
+     *
+     * <p>{@code protected} 的原因：生产路径永远随机、不可预测，所以「撞 uk_channel_trade」这个
+     * 场景没法用真实调用造出来。{@code PaymentIdemKeyTest} 覆写它把流水号钉成已知值，
+     * 才能验「撞别道唯一键时**仍然抛**、不被当成重放吞掉」（用例 ⑦）。
+     */
+    protected String generateTradeNo(int type) {
+        return (type == PaymentRecord.TYPE_REFUND ? "MOCKREF" : "MOCKPAY")
+                + LocalDateTime.now().format(TS) + String.format("%04d", ThreadLocalRandom.current().nextInt(10000));
     }
 
     /**

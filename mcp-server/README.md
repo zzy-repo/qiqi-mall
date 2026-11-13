@@ -65,6 +65,15 @@
 | 会员 | `member_cart(action)` | 1 只读 + 3 写（L2） | `GET /admin/carts?memberId=`、`POST /admin/carts`、`PUT/DELETE /admin/carts/{id}`（表无 version 列；改的是库里那条记录，不是买家自助购物车） |
 | 概览 | `dashboard_overview()` | 只读 | `GET /admin/dashboard/overview` |
 | 上传 | `upload_image_from_url(url)` | **写**（`MCP_ENABLE_WRITE`） | `POST /admin/upload/image-from-url`（body `{url}`）。**只传 URL，不传文件 / base64 / 本地路径**：拉取由后端做，带全套 SSRF 防护 —— 只允许 https（http / file / ftp / gopher 一律拒）、禁内网 / 回环 / 链路本地 / CGNAT（`127/8`、`10/8`、`172.16/12`、`192.168/16`、`169.254/16`、`100.64/10`、`::1`、`fc00::/7`、`fe80::/10`）、**不跟随重定向**（3xx 直接拒）、连接 5s / 读取 10s、正文 **≤5MB**、**前 16 字节嗅探**真实类型（只收 jpg/png/webp，不信 Content-Type）、**解析一次拿 IP 后用该 IP 连**（防 DNS 重绑定）。失败是中文原因 + 400/403/413/415/502/504（不是 500）。返回结构与人工上传一致：`{url: "/qiqi-mall/products/2026/11/uuid.webp", objectName}`，scope `catalog:write` |
+| 台账 | `list_ledgers(type,bizId,operatorType,from,to,page,size)` | 只读 | `GET /admin/ledgers`（scope `ledger:read`）：七类台账 UNION —— ORDER_STATUS / DELIVERY_STATUS / RETURN_STATUS / AUDIT / WMS / STOCK / PAYMENT，**真分页**；`type` 留空=查全部（此时 `bizId` 传订单 id 会连它的包裹与售后一起带出来）；`operatorType` 只放行 ADMIN/MEMBER/APIKEY/SYSTEM，且 **STOCK 支没有操作人列**、按操作人筛时被排除 |
+| 库存对账 | `get_inventory_reconcile(skuId)` | 只读 | `GET /admin/inventory/reconcile?skuId=`（scope `stock:read`）：`bucketSum`（桶权威）/ `skuStock`（展示缓存）/ `drift` / `ledgerNet`（**全生命周期进出和，不是余额**）/ 桶数一致性 / 最近 20 条流水。SKU 不存在时后端 `code=1` 报错（不是空对象） |
+| 库存对账 | `list_inventory_drifts(threshold,page,size)` | 只读 | `GET /admin/inventory/reconcile/drift`（scope `stock:read`）：`|桶和−缓存| > threshold`，**真分页**；`threshold` 默认 100，传 `0` = 任何非零偏差都列（排查缓存回写是否在工作） |
+| 自动审核 | `list_order_audit_queue(result,page,size)` | 只读 | `GET /admin/order-audit/queue`（scope `audit:read`）：每单最新一轮决策，五判定 AUTO_PASS/MANUAL/BLOCKED/FROZEN/NO_MATCH。⚠️ 后端是手写 Map → 行数组叫 **`rows` 不是 `records`**，行内字段是 **snake_case**（工具层不改名） |
+| 自动审核 | `get_order_audit_trail(orderId)` | 只读 | `GET /admin/order-audit/orders/{id}/trail`（scope `audit:read`）：判定 / 状态台账 / 操作审计三段按时间拼，带「判定↔台账」对齐信息。**id 不存在时返回空数组且 code=0** → 工具层判空 |
+| 自动审核 | `list_audit_policies()` | 只读 | `GET /admin/audit-policies`（scope `audit:read`）：策略（AUTO/BLOCK/EXCEPTION，含优先级/启用/versionNo/条件行）+ 全局排除 + 字段/操作符元数据 |
+| 自动审核 | `list_audit_runs(page,size)` | 只读 | `GET /admin/audit-runs`（scope `audit:read`）：每轮 run 一行（范围内单数 + 五类计数），形态同 queue（`rows`） |
+| 多平台 | `list_channel_shops()` | 只读 | `GET /admin/channel-shops`（scope `channel:read`）：裸数组，每店带平台类型 / 启用 / 水位 / 上次拉单 / 今日 OK·FAIL·SKIP |
+| 多平台 | `list_channel_sync_logs(shopId,action,result,page,size)` | 只读 | `GET /admin/channel-sync-logs`（scope `channel:read`）：**真分页**；`action` = PULL/SHIP_PUSH，`result` = OK/FAIL/SKIP（**SKIP 不是失败**：幂等命中或 SKU 对不上整单跳过），带请求/响应原文 |
 
 并发控制口径：**只读工具无副作用、可反复调用；写工具靠 `version` 乐观锁**。
 `update_product` / `update_sku_stock` 的 `version` 是 **zod 必填**（缺了在协议层就被拒，请求都到不了后端）；
@@ -111,34 +120,95 @@ src/
     ├── returns.mjs    退货域 2 个：return_apply(list|get|audit|create|delete) / return_reason(list|create|update|delete)
     ├── config.mjs     配置域 2 个：warehouse(list|create|update|delete) / order_setting(get|update)
     ├── member.mjs     会员域 3 个：member / member_address / member_cart(action=list|create|update|delete)
-    └── misc.mjs       概览 + 上传 2 个：dashboard_overview（只读）、upload_image_from_url（写，按 URL 拉图存对象存储）
+    ├── misc.mjs       概览 + 上传 2 个：dashboard_overview（只读）、upload_image_from_url（写，按 URL 拉图存对象存储）
+    ├── ledger.mjs     台账域 1 个只读：list_ledgers（七类台账 UNION 检索，scope ledger:read）
+    ├── inventory.mjs  库存对账域 2 个只读：get_inventory_reconcile / list_inventory_drifts（scope stock:read）
+    ├── audit.mjs      自动审核域 4 个只读：list_order_audit_queue / get_order_audit_trail / list_audit_policies / list_audit_runs（scope audit:read）
+    └── channel.mjs    多平台接入域 2 个只读：list_channel_shops / list_channel_sync_logs（scope channel:read）
+
+../scripts/mcp-coverage.mjs   覆盖账目生成器（零依赖）：扫后端 @*Mapping + 解析工具声称的接口，
+                              生成下面「覆盖账目」那一段；`--check` 与 README 比对（不一致 exit 1）
 ```
 
-工具总数：**39 个**（write=1）/ **26 个**（write=0 —— 纯写工具 13 个不注册：
+工具总数：**48 个**（write=1）/ **35 个**（write=0 —— 纯写工具 13 个不注册：
 `execute_audit_pass` / `create_order` / `update_order` / `audit_reject_order` / `ship_order` / `delete_order` /
 `update_product` / `update_sku_stock` / `create_product` / `delete_product` / `create_sku` / `delete_sku` /
 `upload_image_from_url`；
 用 `action` 承载写动作的工具仍在，但 action 枚举里只剩只读动作）。
+第 6 批的 9 个工具（台账 / 库存对账 / 自动审核 / 渠道）**全部只读、不受写开关影响**：write=0 时也在，
+且这一批**没有新增任何写工具**（红线：AI 能读证据与巡检，不能改判定、不能放行、不能动钱）。
 测试：`npm test` 串行跑 12 个文件（loop / catalog / catalog-write / catalog-dict / order-read / order-write /
 optimistic-lock / delivery / returns / config / member / misc），
 自带造数据+清数据，**连跑两轮、第二轮不 reset 库**，两轮都必须 0 失败。
 
-**覆盖口径（2026-11 第 5 批盘点，真 grep 出来的）**：后端 `@GetMapping/@PostMapping/@PutMapping/@DeleteMapping`
-共 **112 个端点**（`grep -rn '@\(Get\|Post\|Put\|Delete\)Mapping' qiqi-mall-server/src/main/java`）。分类：
+## 覆盖账目（脚本生成，勿手改）
 
-| 分类 | 数量 | 说明 |
-|---|---|---|
-| 系统内部（不含业务操作） | 6 | `/admin/auth` 3（captcha-required / captcha / login）、`/api/health` 1、`/portal/auth` 2（买家用 JWT 登录注册） |
-| **面向人** | **106** | 后台 admin-web + 商城 portal-web 上「人能点的操作」 |
-| ├ 已覆盖 | **78** | 73 个后台端点（含 `GET /admin/members/{id}/detail` 由 member+address+cart 三个工具组合等价覆盖）+ 5 个 portal 只读（与后台读同一份数据） |
-| └ 缺口 | **28** | 1 形态不支持（`POST /admin/upload/image` 只吃 multipart）、8 红线（`/admin/admins**` 4 + `/admin/api-keys**` 4，后端对 API Key 一律 403）、19 C 端无主体（`/portal/**` 需会员身份，API Key 的 `CurrentUser.id()` 为 null） |
-| 真漏了（本批已补完） | **0** | 第 5 批前有 29 个真漏，本次一次性补齐（见下） |
+这段账目以前是**手写**的：写「112 端点 / 覆盖 73」，而重扫实测是 134 个端点（第 6 批加工具前真实覆盖 74，加完 83）—— 手写的账一定会漂移。
+现在它是 `scripts/mcp-coverage.mjs` 的**生成物**：扫后端 `@*Mapping` 拼全路径、解析 MCP 侧声称的接口、
+按方法+路径段比对，输出下表。**别手改这一段**（`--check` 会红）。
 
-第 5 批新增覆盖的 **29 个端点**：订单 5（create / update / audit-reject / ship / delete）、
-商品 6（SKU 详情、SKU 可用属性、商品增/删、SKU 增/删）、字典 12（分类/类型/属性 各 get+create+update+delete）、
-履约 1（`wms-callback`）、购物车 3（增改删）、退货申请 2（代客登记 / 删记录）。
+<!-- BEGIN mcp-coverage（本段由 scripts/mcp-coverage.mjs 生成，勿手改） -->
+**覆盖账目（脚本生成）**：后端 `@GetMapping/@PostMapping/@PutMapping/@DeleteMapping/@PatchMapping`
+共 **134** 个端点（`qiqi-mall-server/src/main/java` 全量扫描，类级前缀已拼上）。分类如下：
 
-新增一个域 = 新建 `src/tools/<域>.mjs` + 在 `src/tools/index.mjs` 加一行 import/调用；
+| 分类 | 端点 | MCP 已覆盖 | 缺口 | 说明 |
+| --- | ---: | ---: | ---: | --- |
+| 管理端业务 | 93 | 83 | 10 | 后台 admin-web 上「人能点」的接口（AI 应当覆盖的部分） |
+| 内部系统 | 7 | — | — | 登录/验证码、买家注册，以及 mock 平台的入站回调（/channel-api）；不是后台业务操作 |
+| 红线 | 8 | — | — | `/admin/admins**` + `/admin/api-keys**`：管理员与密钥管理，API Key 一律 403 |
+| multipart 形态 | 1 | — | — | 只吃文件流的接口（`MultipartFile`），MCP 入参是模型产出的 JSON 文本，形态上做不到 |
+| portal 端 | 24 | — | — | 买家端接口：读写都依赖会员身份，API Key 没有会员主语（`CurrentUser.id()` 为 null） |
+| health | 1 | — | — | 健康检查，不是业务接口 |
+| **合计** | **134** | **83** | **10** | 已覆盖只对管理端业务有「应当覆盖」的含义 |
+
+**一句话汇总**：管理端业务 **93** / MCP 已覆盖 **83** / 缺口 **10**（后端共 134 个端点 = 管理端业务 93 + 内部系统 7 + 红线 8 + multipart 1 + portal 端 24 + health 1）；缺口 10 个里**结构上不给 AI 10 个、真漏 0 个**。
+
+**portal 端 24 个端点（只读 13 / 写入 11）**：写接口需要买家身份，API Key 一律 403（`CurrentUser.id()` 为 null，写进去的数据无主）；只读接口与后台读的是**同一份数据**，用管理端工具读等价（所以单列在这里，不计入「管理端业务缺口」）。
+
+**管理端业务缺口 10 个 = 结构上不给 AI 10 + 真漏 0**（「结构上不给 AI」的判定见下：它们的写 scope 不在 ALL_SCOPES 里，任何 API Key 都 403）：
+
+| 方法 | 路径 | 性质 | 源文件 |
+| --- | --- | --- | --- |
+| POST | `/admin/audit-policies` | 不给 AI：audit:write 不在 ALL_SCOPES 里（任何 key 都拿不到） | com/qiqi/mall/audit/controller/AuditPolicyController.java |
+| PUT | `/admin/audit-policies/{id}` | 不给 AI：audit:write 不在 ALL_SCOPES 里（任何 key 都拿不到） | com/qiqi/mall/audit/controller/AuditPolicyController.java |
+| DELETE | `/admin/audit-policies/{id}` | 不给 AI：audit:write 不在 ALL_SCOPES 里（任何 key 都拿不到） | com/qiqi/mall/audit/controller/AuditPolicyController.java |
+| POST | `/admin/audit-policies/{id}/move` | 不给 AI：audit:write 不在 ALL_SCOPES 里（任何 key 都拿不到） | com/qiqi/mall/audit/controller/AuditPolicyController.java |
+| POST | `/admin/order-audit/run` | 不给 AI：audit:write 不在 ALL_SCOPES 里（任何 key 都拿不到） | com/qiqi/mall/audit/controller/OrderAuditController.java |
+| POST | `/admin/order-audit/orders/{id}/freeze` | 不给 AI：audit:write 不在 ALL_SCOPES 里（任何 key 都拿不到） | com/qiqi/mall/audit/controller/OrderAuditController.java |
+| POST | `/admin/order-audit/orders/{id}/unfreeze` | 不给 AI：audit:write 不在 ALL_SCOPES 里（任何 key 都拿不到） | com/qiqi/mall/audit/controller/OrderAuditController.java |
+| POST | `/admin/channel-shops/{id}/pull` | 不给 AI：channel:write 不在 ALL_SCOPES 里（任何 key 都拿不到） | com/qiqi/mall/channel/controller/ChannelAdminController.java |
+| POST | `/admin/channel/push-shipment` | 不给 AI：channel:write 不在 ALL_SCOPES 里（任何 key 都拿不到） | com/qiqi/mall/channel/controller/ChannelAdminController.java |
+| POST | `/admin/payments/{id}/replay-channel-callback` | 不给 AI：payment:write 不在 ALL_SCOPES 里（任何 key 都拿不到） | com/qiqi/mall/oms/controller/AdminPaymentController.java |
+
+口径：MCP 侧声称的接口来自 `mcp-server/src/tools/*.mjs` 头注释 + `mcp-server/src/mall.mjs` 的 request() 路径常量，去 query、通配 `{id}` 后按「方法 + 段数 + 段值」严格比对（通配只匹配通配，避免 `/admin/skus/{id}` 顺手把 `/admin/skus/attributes` 也算掉）。重算：`node scripts/mcp-coverage.mjs`。
+<!-- END mcp-coverage -->
+
+```bash
+node scripts/mcp-coverage.mjs           # 打印账目（stdout）
+node scripts/mcp-coverage.mjs --check    # 与上面这段比对，不一致 exit 1（CI / 提交前跑）
+node scripts/mcp-coverage.mjs --write    # 重新生成并写回本文件（人肉确认后再提交）
+```
+
+### 不给 AI 清单（刻意留的缺口，不是漏做）
+
+这 10 个管理端端点**永远不会有 MCP 工具**，而且不是靠「没人写」兜住的 —— 它们的写 scope
+（`audit:write` / `channel:write` / `payment:write`）**不在 `AiApiKeyService.ALL_SCOPES` 里**，
+所以任何 API Key 打过去都是 403（过滤器还专门为这几种 scope 回一句「该接口对 API Key 只读」）。
+上面缺口表里的「结构上不给 AI」就是这条规则自动算出来的，不是人工维护的清单。
+
+| 端点 | 为什么不给 |
+|---|---|
+| `POST /admin/order-audit/run` | 一次批量改大量订单的命运（批量过审 = 批量放行） |
+| `POST /admin/order-audit/orders/{id}/freeze`、`/unfreeze` | 动的是「人的刹车」：冻结/解冻决定这单能不能被自动处理 |
+| `POST` / `PUT` / `DELETE /admin/audit-policies/{id}`、`POST /admin/audit-policies/{id}/move` | 动的是判定标准本身（改策略=改结论），还含策略排序 |
+| `POST /admin/payments/{id}/replay-channel-callback` | 触发资金记账路径（钱） |
+| `POST /admin/channel-shops/{id}/pull`、`POST /admin/channel/push-shipment` | 拉单会**建订单**、回传发货是**不可撤回的外呼**（改动在平台侧） |
+
+**一句话口径：AI 能读证据与巡检，不能改判定、不能放行、不能动钱。**
+
+### 新增一个域
+
+新建一个域 = 新建 `src/tools/<域>.mjs` + 在 `src/tools/index.mjs` 加一行 import/调用；
 工具内一律「中文 title + 说清什么时候用的 description + zod `.describe()` 参数 +
 文本摘要 + `JSON:` 两段 + 空结果明确文案 + `fail(e)` 兜错」；
 写工具统一用 `failWrite(e, {...})`（保留后端 bizCode，409 时给「重新读」的下一步）。
@@ -277,7 +347,7 @@ bash scripts/start-inspector.sh    # 在仓库根目录执行
 |---|---|---|
 | `MALL_BASE` | `http://127.0.0.1:18080` | 后端网关地址 |
 | `MALL_API_KEY` | —（**必填**） | 管理端 API Key，随请求头 `X-Api-Key` 发出；**按库隔离**（dev 一把、test 一把），造 key 见上面「认证」 |
-| `MCP_ENABLE_WRITE` | `0` | `0`=只注册 26 个只读工具（纯只读 + 「只读动作」工具，后者的 action 枚举里写动作被摘掉）；`1`=再加 13 个纯写工具（含 `upload_image_from_url`）并放开所有 action 的写动作，共 39 个 |
+| `MCP_ENABLE_WRITE` | `0` | `0`=只注册 35 个只读工具（纯只读 + 「只读动作」工具，后者的 action 枚举里写动作被摘掉）；`1`=再加 13 个纯写工具（含 `upload_image_from_url`）并放开所有 action 的写动作，共 48 个。第 6 批的 9 个证据/巡检工具**只读、不受开关影响** |
 
 见 `.env.example`。
 

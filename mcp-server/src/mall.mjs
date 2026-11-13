@@ -616,4 +616,73 @@ export function deleteReturnApply(id) {
   return request('DELETE', `/admin/return-applies/${encodeURIComponent(id)}`);
 }
 
+// ---------- 第 6 批：证据 / 巡检四个只读域（台账、库存对账、自动审核、多平台接入）----------
+// 口径：**这一批一个写接口都不加**。四个域在 ApiKeyAuthFilter 里都是「读 scope 可授予、
+// 写 scope 不存在（NO_WRITE_*）」的形态，所以这些**拿不到**（对任何 API Key 都是 403）：
+//   触发审核 run / 冻结与解冻、audit-policies 的增删改与 move、
+//   立即拉单 / 回传发货、支付渠道回调重放 ——
+// 这些是「AI 只能读证据、不能改判定、不能放行、不能动钱」的那条线，别在这里开口子。
+//
+// 后端实际形态（已逐个读 Controller 确认，别按「标准 REST」想当然）：
+//   GET /admin/ledgers                      七类台账 UNION，**真分页**（Page: records/total/size/current/pages）；
+//                                           size 后端夹 1..50；type 白名单七类，拼错直接报错并列出可选值
+//   GET /admin/inventory/reconcile?skuId    单 SKU 三数 + 最近 20 条流水；skuId 不存在时后端 code=1 报错（不是空对象）
+//   GET /admin/inventory/reconcile/drift    **真分页**；threshold 默认 100，传 0 = 任何非零偏差都列
+//   GET /admin/order-audit/queue            返回 **{total,page,size,rows}**（不是 MP 的 Page，字段名是 rows 不是 records，
+//                                           行里字段是 snake_case —— 后端是手写 Map，原样透出别改名）
+//   GET /admin/order-audit/orders/{id}/trail 返回**裸数组**（决策/状态台账/操作审计三段按时间拼）；
+//                                           id 不存在时是空数组且 code=0，判空在工具层
+//   GET /admin/audit-policies               {policies[], globalExclusions[], fields[], operators[]}
+//   GET /admin/audit-runs                   {total,page,size,rows}（同 queue 的形态）
+//   GET /admin/channel-shops                裸数组（三个店铺 + 今日 OK/FAIL/SKIP 计数）
+//   GET /admin/channel-sync-logs            **真分页**（MP Page）
+
+/** 七类台账统一检索：type 留空 = 一次查全链路（订单 id 连它的包裹与售后一起带出来） */
+export function listLedgers({ page, size, type, bizId, operatorType, from, to } = {}) {
+  return request(
+    'GET',
+    `/admin/ledgers${qs({ page, size, type: typeof type === 'string' ? type.trim() : type, bizId, operatorType, from, to })}`
+  );
+}
+
+/** 单 SKU 库存对账（桶权威值 / sku.stock 缓存 / 偏差 / 台账净额 / 最近 20 条流水） */
+export function inventoryReconcile(skuId) {
+  return request('GET', `/admin/inventory/reconcile?skuId=${encodeURIComponent(skuId)}`);
+}
+
+/** 全库偏差分页（|桶和 − sku.stock| > threshold；threshold=0 = 任何非零偏差都列出来） */
+export function inventoryDrifts({ page, size, threshold } = {}) {
+  return request('GET', `/admin/inventory/reconcile/drift${qs({ page, size, threshold })}`);
+}
+
+/** 自动审核人工队列（每单最新一轮决策，可按 result 过滤）—— 注意返回是 {total,page,size,rows} */
+export function orderAuditQueue({ result, page, size } = {}) {
+  return request('GET', `/admin/order-audit/queue${qs({ result, page, size })}`);
+}
+
+/** 单张订单的审核时间线（决策 + 状态台账 + 操作审计三段拼在一起）—— 返回裸数组，可能为空 */
+export function orderAuditTrail(orderId) {
+  return request('GET', `/admin/order-audit/orders/${encodeURIComponent(orderId)}/trail`);
+}
+
+/** 审核策略全量（策略 + 全局排除 + 字段/操作符元数据；**只读**，增删改与 move 拿不到） */
+export function listAuditPolicies() {
+  return request('GET', '/admin/audit-policies');
+}
+
+/** 审核批次列表（每次 run 一行：总数 / 自动过 / 人工 / 拦截 / 冻结 / 无匹配） */
+export function listAuditRuns({ page, size } = {}) {
+  return request('GET', `/admin/audit-runs${qs({ page, size })}`);
+}
+
+/** 渠道店铺列表（三个平台店铺 + 水位 / 上次拉单 / 今日 OK·FAIL·SKIP）—— 返回裸数组 */
+export function listChannelShops() {
+  return request('GET', '/admin/channel-shops');
+}
+
+/** 渠道同步日志分页（可按店铺 / 动作 / 结果过滤）—— MP Page */
+export function channelSyncLogs({ shopId, action, result, page, size } = {}) {
+  return request('GET', `/admin/channel-sync-logs${qs({ shopId, action, result, page, size })}`);
+}
+
 export const mallBase = BASE;

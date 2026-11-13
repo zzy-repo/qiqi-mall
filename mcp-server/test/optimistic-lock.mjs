@@ -89,7 +89,8 @@ const WRITE_TOOLS = [
   'create_sku',
   'delete_sku',
 ];
-// write=0 时应当全部在场的只读工具：订单 6 + 商品 8 + 字典 3 + 第 4 批 8 个「带只读动作」的工具 + 概览 1 = 26。
+// write=0 时应当全部在场的只读工具：订单 6 + 商品 8 + 字典 3 + 第 4 批 8 个「带只读动作」的工具 + 概览 1
+// + 第 6 批 9 个只读证据/巡检工具 = 35。
 // ⚠️ 第 4 批的工具是「一个资源一个工具、用 action 区分动作」的形态（delivery / return_apply / return_reason /
 //    warehouse / order_setting / member / member_address / member_cart），write=0 时它们**仍在**，
 //    但 action 枚举里只剩只读动作（各域自己的测试会断言这一点）。
@@ -120,6 +121,16 @@ const READONLY_TOOLS = [
   'member_address',
   'member_cart',
   'dashboard_overview',
+  // 第 6 批：只读证据/巡检四域
+  'list_ledgers',
+  'get_inventory_reconcile',
+  'list_inventory_drifts',
+  'list_order_audit_queue',
+  'get_order_audit_trail',
+  'list_audit_policies',
+  'list_audit_runs',
+  'list_channel_shops',
+  'list_channel_sync_logs',
 ];
 
 // ---------------- 主流程 ----------------

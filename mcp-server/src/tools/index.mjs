@@ -50,6 +50,11 @@ import { registerReturnsTools } from './returns.mjs';
 import { registerConfigTools } from './config.mjs';
 import { registerMemberTools } from './member.mjs';
 import { registerMiscTools } from './misc.mjs';
+// 第 6 批：只读证据 / 巡检四域（台账 / 库存对账 / 自动审核 / 多平台接入）—— **零写工具**
+import { registerLedgerTools } from './ledger.mjs';
+import { registerInventoryTools } from './inventory.mjs';
+import { registerAuditTools } from './audit.mjs';
+import { registerChannelTools } from './channel.mjs';
 
 /**
  * 注册全部工具。
@@ -71,6 +76,16 @@ export function registerAll(server, ctx = {}) {
   registerConfigTools(server, { writeEnabled }); // 配置：warehouse(list|create|update|delete) + order_setting(get|update)
   registerMemberTools(server, { writeEnabled }); // 会员：member / member_address / member_cart(含 create|update|delete)
   registerMiscTools(server, { writeEnabled }); // 概览 + 上图：dashboard_overview（只读）+ upload_image_from_url（写，按 URL 拉图存对象存储）
+
+  // 第 6 批：只读证据 / 巡检四域。**全部只读、不接受 writeEnabled**（不是写域，开关关掉也照常注册）：
+  //   · 台账 ledger:read、库存对账 stock:read、自动审核 audit:read、渠道 channel:read —— 四个读 scope 都可授予；
+  //   · 对应的写 scope（ledger:write / stock:write / audit:write / channel:write / payment:write）
+  //     **不在 ALL_SCOPES 里**，所以「改判定 / 放行 / 改库存 / 拉单 / 回传 / 动钱」对任何 API Key 天然 403。
+  //   一句话：AI 能读证据与巡检，不能改判定、不能放行、不能动钱。
+  registerLedgerTools(server); // 台账：1 个（list_ledgers 七类台账 UNION 检索）
+  registerInventoryTools(server); // 库存对账：2 个（get_inventory_reconcile / list_inventory_drifts）
+  registerAuditTools(server); // 自动审核：4 个（queue / trail / policies / runs，全是读）
+  registerChannelTools(server); // 多平台接入：2 个（list_channel_shops / list_channel_sync_logs）
 }
 
 export default registerAll;
