@@ -16,7 +16,8 @@ import { tid } from './tid.js'
 
 export async function openProductTypes(page) {
   await page.goto(`${ADMIN}/product-type`)
-  await page.waitForTimeout(1000)
+  // 下面这条断的是「路由挂载后的静态标题」，不是某个动作异步产出的值；
+  // toContainText 自己会轮询到标题出现，所以前面的固定 sleep 是纯等待、可去。
   await expect(page.locator('.card-header')).toContainText('商品类型')
 }
 
@@ -51,7 +52,7 @@ export async function renameProductType(page, from, to) {
 export async function openAttributesOf(page, typeName) {
   await typeRowOf(page, typeName).getByTestId('product-type-row-attributes').click()
   await page.waitForURL(/\/product-type\/\d+\/attributes/, { timeout: 15_000 })
-  await page.waitForTimeout(1000)
+  // 同上：断静态标题，toContainText 自己轮询，固定 sleep 多余。
   await expect(page.locator('.card-header')).toContainText('属性管理')
 }
 
@@ -103,7 +104,7 @@ export async function editAttribute(page, from, { name, isFilter } = {}) {
 
 export async function openCategories(page) {
   await page.goto(`${ADMIN}/category`)
-  await page.waitForTimeout(1000)
+  // 断静态标题（分类页），toContainText 自带轮询 → 固定 sleep 多余。
   await expect(page.locator('.card-header')).toContainText('商品分类')
 }
 
@@ -219,7 +220,7 @@ export async function editProductById(page, productId, { name, publish } = {}) {
 export async function openSkusById(page, productId) {
   await tid(page, `product-row-${productId}`).getByTestId('product-row-skus').click()
   await page.waitForURL(new RegExp(`/product/${productId}/skus`), { timeout: 15_000 })
-  await page.waitForTimeout(1200)
+  // 断静态标题（SKU 管理页）；toContainText 轮询到标题出现即可，sleep 多余。
   await expect(page.locator('.card-header')).toContainText('SKU 管理')
 }
 
@@ -227,7 +228,7 @@ export async function openSkusById(page, productId) {
 export async function openSkus(page, productName) {
   await productRowOf(page, productName).getByTestId('product-row-skus').click()
   await page.waitForURL(/\/product\/\d+\/skus/, { timeout: 15_000 })
-  await page.waitForTimeout(1200)
+  // 断静态标题（SKU 管理页）；toContainText 轮询到标题出现即可，sleep 多余。
   await expect(page.locator('.card-header')).toContainText('SKU 管理')
 }
 

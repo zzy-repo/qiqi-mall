@@ -98,6 +98,22 @@ export function queryDb(sql) {
 }
 
 /**
+ * 执行一段**可多语句**的 SQL（建数据 / 清数据用）。
+ *
+ * 只给「本用例自己造的事实」开这个口子，两条硬约束：
+ *  1) **不许**用它推进业务状态（审核/发货/退款一律走 UI 点击，那才是被测对象）；
+ *  2) 只允许两种用途：① 铺**种子基线**（例如跑 sql/seed-order-audit-demo.sql）；
+ *     ② 清理/复位本用例碰过的行（决策、标、台账、把订单还原成待审核）。
+ * 需要第三种用途时先想清楚：能不能走接口或 UI —— 能，就别写在这里。
+ *
+ * @param sql 可以含多条语句（mysql -e 支持），执行失败会抛带 mysql 原文的错误
+ * @param dbName 目标库；不传 = 当前 API_BASE 推导出的库（见 dbOfApi）
+ */
+export function execSql(sql, dbName) {
+  return mysqlRaw(sql, dbName || dbOfApi())
+}
+
+/**
  * 查**指定**库（供 admin-ui-return.js 这类「一个查询要试几个候选库」的场景复用）。
  * 返回 行 × 列 的二维数组（与 admin-ui-return.js 原本的 mysqlQuery 同形）。
  */

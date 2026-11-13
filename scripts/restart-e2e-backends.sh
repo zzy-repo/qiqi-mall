@@ -35,6 +35,15 @@
 # 唯一需要人介入的情况：systemd 的瞬态单元已经被 --collect 回收（unit not loaded），
 # 此时 restart 无从下手，脚本会提示先跑 scripts/start-e2e-backends.sh 起一次。
 #
+# ── 日志截断（步骤 2 的一部分）─────────────────────────────────────────────
+# restart 成功后会 `: > /tmp/e2e-server-<x>.log`。原因：单元用 StandardOutput=file:，
+# 它既不 truncate 也不 append —— 不截断就会「size 冻结」，新内容写在前 N 字节里、
+# 文件长度不缩回，依赖日志水位（先记 size、再等新记录）的验证码类用例因此反复假红。
+# 时机必须在 restart **之后**：旧进程还活着时截断，它的 fd 会在旧偏移继续写，
+# 把文件撑成「空洞 + 新尾巴」，Bug 原样保留且更难查。
+# 绝不用 stop/start 来争取截断时机：这两个是 systemd-run --collect 的瞬态单元，
+# stop 之后单元即被回收，`systemctl start` 会 Unit not found（踩过，弄挂过后端 40 秒）。
+#
 # ── 前置 ───────────────────────────────────────────────────────────────────
 # target/e2e-cp.txt（运行时 classpath）必须已存在 —— 由 scripts/start-e2e-backends.sh 用到的那份。
 set -euo pipefail
@@ -59,7 +68,9 @@ for arg in "$@"; do
     --only)      EXPECT_ONLY=1 ;;
     --only=*)    ONLY="${arg#--only=}" ;;
     --check-only) CHECK_ONLY=1 ;;
-    -h|--help)   sed -n '2,42p' "$0" | sed 's/^# \?//'; exit 0 ;;
+    # 帮助 = 文件头注释（第 2 行到 `set -euo pipefail` 之前那一行）。
+    # 不用固定行号：以前写死 sed -n '2,42p'，头注释一加行就把代码段也打进帮助里。
+    -h|--help)   awk 'NR>1 && /^set -euo pipefail/{exit} NR>1{print}' "$0" | sed 's/^# \?//'; exit 0 ;;
     *)
       echo "✗ 不认识的参数：$arg" >&2
       echo "  用法：$0 [--only a|b] [--check-only]" >&2
@@ -175,7 +186,7 @@ echo "  最新 class mtime：$(fmt_epoch "$NEWEST_CLASS_MTIME")"
 
 # ---------------------------------------------------------------- 步骤 2：重启
 echo
-echo "════ 步骤 2/4：重启（只用 systemd unit 名，不用 pkill -f）════"
+echo "════ 步骤 2/4：重启 + 截断日志（只用 systemctl unit 名与文件操作，不用 pkill -f）════"
 for s in "${TARGETS[@]}"; do
   name="${s%%:*}"; unit="$(unit_of "$name")"
   load="$(systemctl show -p LoadState --value "$unit" 2>/dev/null || echo not-found)"
@@ -184,11 +195,42 @@ for s in "${TARGETS[@]}"; do
     echo "  处理：先跑一次 ./scripts/start-e2e-backends.sh 把分片起起来，之后本脚本即可反复 restart" >&2
     exit 4
   fi
+  # ── 日志为什么必须截断（已知假红源头）──────────────────────────────────────
+  # 单元是 `StandardOutput=file:/tmp/e2e-server-<x>.log`（见 scripts/start-e2e-backends.sh）。
+  # 实测（systemd 语义，2026-11-13 用无害单元验证过）：`file:` 既**不 truncate 也不 append** ——
+  # 新进程从 offset 0 开始覆写，但文件长度不缩回。于是：
+  #   · 新内容只写在前 N 字节里，文件尾部仍是上一次运行的旧尾巴 → 「size 冻结」；
+  #   · 依赖日志水位的用例（先记 `wc -c` 原位、再等日志里出现新记录 —— 验证码/票据类）
+  #     按 size 判断「有没有新东西」，size 没长就永远读不到 → **反复假红，重跑也红**，
+  #     直到有人手工 `: > /tmp/e2e-server-a.log`。
+  #
+  # ── 为什么不用 stop → truncate → start（踩过，别再改回去）──────────────────
+  # 这两个单元是 `systemd-run --collect` 起的**瞬态单元**：stop 之后单元立即被回收，
+  # 紧接着的 `systemctl start` 直接 `Unit not found` —— 把 shard 后端弄挂 40 秒。
+  # 瞬态单元只能用 restart（restart 不销毁单元）。要 stop 就必须走
+  # scripts/start-e2e-backends.sh 重建单元，不能在这里 stop/start。
+  #
+  # ── 为什么 truncate 放在 restart **之后**（而不是之前）───────────────────────
+  # 在旧进程还持有该 fd 时 truncate 是有害的：它那份 fd 仍保留原 offset，
+  # 下一次写就落在旧偏移上，文件立刻被撑成「一段空洞 + 新尾巴」（实测复现），
+  # size 依旧冻结、Bug 原样保留，而且更难查。
+  # restart 返回时旧进程已退出、新进程的 fd 从 0 起算，此刻 `: > file` 之后，
+  # 新进程的每一行都落在递增偏移上 → size 单调增长 → 水位判断恢复正常。
+  # 代价：restart 到 truncate 之间（毫秒级）新进程可能已吐出的极少数行会变成 NUL，
+  # 不影响后续读取（读取方是按字节偏移从水位往后读的），启动日志本身完整保留。
   echo "  ▶ systemctl restart $unit"
   if ! systemctl restart "$unit"; then
     fail "systemctl restart $unit 失败"
-    echo "  排查：systemctl status $unit --no-pager -l；日志 /tmp/e2e-server-$name.log" >&2
+    echo "  排查：systemctl status $unit --no-pager -l；日志 /tmp/e2e-server-$name.log（此时**未截断**，旧日志还在，方便查）" >&2
     exit 5
+  fi
+  log_file="/tmp/e2e-server-$name.log"
+  if [[ -e "$log_file" ]]; then
+    before="$(stat -c %s "$log_file" 2>/dev/null || echo 0)"
+    : > "$log_file"          # 只截断、不删除：保留 inode / 属主 / 权限，systemd 的 file: 重定向继续写这个文件
+    echo "    ✂ 已截断日志 $log_file（$before → $(stat -c %s "$log_file") 字节）—— 新进程日志水位从 0 起算"
+  else
+    echo "    · 日志 $log_file 尚不存在，新进程启动时会创建"
   fi
 done
 

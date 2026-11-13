@@ -17,7 +17,8 @@ import { tid, tidPrefix } from './tid.js'
 /** 打开「收货地址」页（需已登录） */
 export async function openAddresses(page) {
   await page.goto(`${PORTAL}/addresses`)
-  await page.waitForTimeout(1000)
+  // 「收货地址」是这一页的静态标题，不依赖任何接口返回；heading 的 toBeVisible 自带轮询，
+  // 所以这条固定 sleep 只是多等 1 秒，删掉不改变语义。
   await expect(page.getByRole('heading', { name: '收货地址' })).toBeVisible()
 }
 
