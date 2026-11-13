@@ -20,17 +20,17 @@ package com.qiqi.mall.shared.ledger.mapper;
  * </ul>
  *
  * <h3>「全部类型」用视图、「单类型」直查</h3>
- * 分支由 service 传入（{@code branches} 参数，一个或六个），UNION 只拼**传进来的**那些。
+ * 分支由 service 传入（{@code branches} 参数，一个或七个），UNION 只拼**传进来的**那些。
  * 所以「全部类型」= 七个分支 UNION；「单类型」= 只有一个分支 —— 视图那一支上
  * MySQL 还会把 {@code biz_type = 'X'} 推到各 UNION 分支、另外两支判 {@code Impossible WHERE}
  * 直接不扫（EXPLAIN 实测），等价于直查对应的那张台账表。
  *
- * <h3>列序（16 列，所有分支逐字一致）</h3>
+ * <h3>列序（15 列，所有分支逐字一致）</h3>
  * {@code type, id, biz_id, biz_sn, from_status, to_status, reason, reason_detail,
  * operator_type, operator_id, operator_name, ref_type, ref_id, summary, created_at}
  * —— 与 {@link com.qiqi.mall.shared.ledger.dto.LedgerRow} 一一对应（下划线 → 驼峰自动映射）。
  *
- * <h3>三个口径决定（改之前先读）</h3>
+ * <h3>四个口径决定（改之前先读）</h3>
  * <ol>
  *   <li><b>三个状态分支的 id 不是同一个序列</b>（三张台账各自的 AUTO_INCREMENT），合并后
  *       {@code id} 会重复。前端只把它当行标识（{@code data-testid="ledger-row-{id}"}），
@@ -54,7 +54,7 @@ package com.qiqi.mall.shared.ledger.mapper;
  *       但桥一断就只剩冗余列，这正是补这一列的原因。</li>
  * </ol>
  *
- * <p><b>关于三处 {@code WHERE 1 = 1}</b>：审计 / WMS / 库存三支本身没有 WHERE，而可选过滤条件
+ * <p><b>关于四处 {@code WHERE 1 = 1}</b>：审计 / WMS / 库存 / 支付四支本身没有 WHERE，而可选过滤条件
  * 都以 {@code AND} 开头拼接 —— 没有这个锚点就成了 {@code FROM t AND cond} 的语法错误
  * （第一次跑就撞上了）。它不产生任何执行成本（优化器直接消掉）。
  */

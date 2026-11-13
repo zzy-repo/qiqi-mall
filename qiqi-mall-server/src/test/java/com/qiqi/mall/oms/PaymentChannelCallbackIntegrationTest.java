@@ -54,7 +54,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *   <li><b>① 台账 PAYMENT 支</b>：{@code GET /admin/ledgers?type=PAYMENT&bizId=订单id} 能把该单的
  *       支付行与退款行都查出来，15 个字段逐字对得上表（bizSn=order_sn、reason=支付入账/退款入账、
  *       reasonDetail=trade_no、operator 三列照表取、refType/refId、createdAt）；
- *       并且「按 operatorType 筛选时 PAYMENT 支不参与」（与 STOCK 支同一口径）；</li>
+ *       并且「按 operatorType 筛选时 PAYMENT 支<b>照实参与</b>（付款行 MEMBER / 退款行 ADMIN 各归各的）」——<b>只有</b>
+ *       STOCK 支不参与（它没有 operator 列，口径见 {@code LedgerSql#STOCK_FILTER}）；</li>
  *   <li><b>② 重复通知被 uk_channel_trade 挡住</b>：重放端点连调两次都是 code=0 +「重复通知，已忽略」，
  *       行数与金额总和都不变；再反向证明「闸是活的」：换一个新的 trade_no 应当入账（不是一律拒绝）；
  *       同时绕开 service 直插「同 channel+trade_no、不同 idem_key」必须抛 uk_channel_trade；</li>

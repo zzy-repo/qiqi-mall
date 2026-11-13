@@ -36,7 +36,7 @@ import java.time.LocalDateTime;
  *
  * <h3>两个「如实返回、不做推断」的地方</h3>
  * <ul>
- *   <li>{@code fromStatus}/{@code toStatus} 只对三个状态类型有值；审计 / WMS / 库存三类台账
+ *   <li>{@code fromStatus}/{@code toStatus} 只对三个状态类型有值；审计 / WMS / 库存 / 支付四类台账
  *       本来就不是状态机（没有「从哪到哪」），这里给 {@code null} 而不是硬编一个 0 —— 前端对
  *       null 显示 {@code —}。</li>
  *   <li>{@code id} 只在**同一张台账内**唯一（七支合并后可能重复）。前端只把它当行 key。</li>

@@ -56,8 +56,11 @@ import { adminTokenOf, getProductApi, getAdminOrderBySnApi } from '../../support
  *   · `payment_record` 与 `order` **没有外键**：order_sn 是唯一对账键，order_id 允许悬空；
  *     删单时由 OrderPurgeService 按 order_sn 显式清理流水（不是级联），
  *     所以本文件的清理要么走删单接口、要么按单号显式删。
- *   · 台账按 operatorType 筛选时 PAYMENT 支**整支不参与**（与 STOCK 支同一口径）：
- *     支付流水里的 operator_* 只是「谁点了这个动作」的快照，不是「谁改了这笔钱」。
+ *   · 台账按 operatorType 筛选时 PAYMENT 支**照实过滤**（`p.operator_type = #{operatorType}`，见
+ *     `LedgerSql#PAYMENT_FILTER`）：`payment_record` 有 operator 三列且落的是真值（ActorResolver 记
+ *     「谁点的这个动作」：买家付 MEMBER、管理员批退货触发的退款 ADMIN）。**只有 STOCK 支整支不参与**
+ *     （`1 = 0`）—— 那张表没有 operator 列，它给的是编出来的 'SYSTEM' 常量。
+ *     本文件的三条用例不筛 operatorType，这条口径只作写断言时的背景。
  */
 
 // ---------------------------------------------------------------------------

@@ -30,7 +30,7 @@
 #   6 build_frontend     portal-web / admin-web 各建一个 $VER 镜像
 #   7 rolling_frontend   两个前端一起换（静态资源，无状态，见下方缓存策略）
 #   8 build_docs         node build-material.mjs --mode=prod → dist-prod/
-#   8.5 docs_gate        ★文档产物硬门禁（scripts/check-docs-site.mjs 十一项，含「私人文稿零泄漏」+「产物洁净度」）：
+#   8.5 docs_gate        ★文档产物硬门禁（scripts/check-docs-site.mjs 十二项，含「私人文稿零泄漏」+「产物洁净度」+「侧边栏编号连续性」）：
 #                        不过就 die，一个字节都不上传 —— 详见【十二】
 #   9 publish_docs       oss2 同步 dist-prod → oss://qiqi-mall-docs/ + docs/**/*.mmd → _src/ + CDN 刷新（html/md/目录首页 + _vendor/ 的 js/css）
 #  10 smoke              线上 5 个探针 + 登录接口（失败只提示回滚，不自动回滚：先让人看一眼）
@@ -180,7 +180,7 @@
 #         ② 提交后**必须回读校验**（抽 5 条 HEAD，看 X-Cache 从 HIT 变 MISS/EXPIRED）——
 #            这个接口错了也返回成功，没有回读就等于没有证据。
 #
-# 【十二】文档产物硬门禁 = 上传 OSS 之前必须整条 PASS（check-docs-site.mjs 十一项）
+# 【十二】文档产物硬门禁 = 上传 OSS 之前必须整条 PASS（check-docs-site.mjs 十二项）
 #   历史教训：口语稿（作者口述稿）和 build-material.mjs 里 PRIVATE_DOCS 那 12 篇私人笔记
 #   属于「私人文稿」，**只能出现在 dev 站**。prod 侧原先只靠 build-material.mjs 的实现细节
 #   保证干净（`if (MODE !== 'dev') return null` 不读口语稿、prod 分支不拷那 12 篇）——
@@ -191,8 +191,8 @@
 #   边缘节点上那份字节也要 30 天才会自然过期 —— 公网上撤不干净。
 #   所以：build_docs 之后、publish_docs 之前加一道 check_docs_gate：
 #     node scripts/check-docs-site.mjs --root dist-prod --skip-http
-#   十一项（页面数 / 图引用 / 视频引用 / 图-src 配对 / 场景齐全 / 内网信息 / SVG 硬指标 /
-#   图内禁词 / 侧边栏 / **⑩ 私人文稿零泄漏** / **⑪ 产物洁净度**）里有任何一项不过 → die，
+#   十二项（页面数 / 图引用 / 视频引用 / 图-src 配对 / 场景齐全 / 内网信息 / SVG 硬指标 /
+#   图内禁词 / 侧边栏 / **⑩ 私人文稿零泄漏** / **⑪ 产物洁净度** / **⑫ 侧边栏编号连续性**）里有任何一项不过 → die，
 #   **一个字节都不上传**。
 #   上传前只做静态检查（--skip-http）：此刻公网还是上一版，探测公网既慢又没有意义。
 #   ⑩ 的口径是「按字节判」，不看代码怎么写的：产物里出现 ①「口语稿」/「spoken」文件名、
@@ -1036,7 +1036,7 @@ build_docs() {
   fi
 }
 
-# --------------------------------------------------- 8.5 文档产物硬门禁（十一项体检）
+# --------------------------------------------------- 8.5 文档产物硬门禁（十二项体检）
 # 见脚本头【十二】：口语稿 / PRIVATE_DOCS 那 12 篇私人笔记一旦上了 OSS + 刷了 CDN，
 # svg/mp4/_vendor 下 js/css 是 30 天缓存，**公网上撤不干净**。所以必须在 publish_docs 之前拦：
 # 这条门禁只看退出码，不看代码怎么写的（产物字节里有没有那些东西，由 check-docs-site.mjs 判）。

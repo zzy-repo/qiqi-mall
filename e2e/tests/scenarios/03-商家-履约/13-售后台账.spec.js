@@ -44,7 +44,7 @@ import {
  * 一、bizId 口径（本 spec 的第一条交付物：把双口径显式钉住，不靠文档承诺）
  * ════════════════════════════════════════════════════════════════════════════
  * 售后台账的接口是 `GET /admin/ledgers?type=RETURN_STATUS&bizId=<值>`，而 bizId 在售后分支里
- * **同时**匹配两个东西（见 `LedgerSql.java:232-233` / 视图 RETURN 分支）：
+ * **同时**匹配两个东西（见 `LedgerSql.java:283-284` / 视图 RETURN 分支）：
  *
  *     AND (v.biz_id = #{bizId} OR v.order_id = #{bizId})
  *          ↑ 退货申请 id（biz_id）      ↑ return_status_ledger 的 order_id 冗余列
@@ -191,7 +191,7 @@ const orderRowOfReason = (orderId, reason, { last = false } = {}) => {
 
 /**
  * 接口口径的**镜像**：RETURN 分支的过滤是 `v.biz_id = X OR v.order_id = X`
- * （LedgerSql.java:232-233，v.biz_id 即 return_apply_id）。页面行数拿它来对撞，
+ * （LedgerSql.java:283-284，v.biz_id 即 return_apply_id）。页面行数拿它来对撞，
  * 这样「一个输入框两种含义」的副作用（别的申请的 id 恰好等于这个订单 id）不会被写成假红。
  */
 const mirroredReturnRowsOf = (bizId) => dbCount(
