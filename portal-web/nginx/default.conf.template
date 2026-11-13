@@ -53,9 +53,27 @@ server {
     gzip_types text/plain text/css application/javascript application/json image/svg+xml;
 
     # 静态资源长缓存（文件名带 hash）
+    # ★ CDN 兜底（修「缓存着旧 index 的浏览器白屏」）：
+    #   CDN 化之前发出去的 index.html 引用的是同源相对路径 /assets/<旧hash>，而镜像里只
+    #   有本次构建的产物 ⇒ 旧 hash 打到容器一律 404，入口 JS 拿不到 ⇒ 整页白屏。
+    #   旧 hash 的产物已用 scripts/upload-web-assets.sh 补进 OSS/CDN（新旧 hash 不同名，共存），
+    #   所以这里改成「本地命中就本地发，本地没有才 302 到 CDN」：
+    #     · 新 hash → try_files 命中，直接本地返回，零跳转
+    #     · 旧 hash → error_page 兜到 @cdn_assets，302 到 CDN 上的同一对象键
     location /assets/ {
         expires 30d;
         add_header Cache-Control "public, immutable";
+        error_page 404 = @cdn_assets;
+        try_files $uri =404;
+    }
+
+    # /assets/ 缺失资源的兜底。
+    # 命名 location 拿不到 location 匹配里的捕获组（$1 是空的），所以不用捕获组：
+    # $request_uri = 原始完整 URI（含查询串，如 /assets/index-abc.js?v=1），
+    # 拼上前缀正好是 CDN 上的对象键：https://cdn.rose7.cn/qiqi-mall/portal-web/assets/index-abc.js。
+    # IMG_CDN_BASE 与上面商品图 301 复用同一个变量（默认 https://cdn.rose7.cn）。
+    location @cdn_assets {
+        return 302 ${IMG_CDN_BASE}/qiqi-mall/portal-web$request_uri;
     }
 
     # C 端接口反向代理到后端容器（/portal/**）
