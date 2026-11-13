@@ -1,0 +1,30 @@
+{
+  "label": "sqlfix-r2",
+  "url": "http://127.0.0.1:18080/portal/orders",
+  "method": "POST",
+  "mode": "open-loop-fixed-rate",
+  "steps": [
+    380,
+    400,
+    420,
+    450
+  ],
+  "step_duration_s": 75,
+  "warmup_s": 90,
+  "warmup_rps": 350,
+  "start_iso": "2026-11-13T21:19:07.974Z",
+  "end_iso": "2026-11-13T21:25:54.895Z",
+  "measure_wall_s": 311.37,
+  "fired": 129616,
+  "completed": 129616,
+  "dropped": 25634,
+  "ok": 112891,
+  "fail": 15,
+  "token_pool": 488174,
+  "token_exhausted": false,
+  "client_cpu_pct": 19.17,
+  "loadavg_1m": 34.25,
+  "errors": {
+    "HTTP200 code=1 msg=已存在相同记录，请检查唯一字段": 16
+  }
+}

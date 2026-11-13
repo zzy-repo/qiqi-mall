@@ -51,8 +51,9 @@ sql_db() { docker exec -i -e MYSQL_PWD="$MYSQL_PASSWORD" qiqi-mysql mysql --defa
 
 # ---------------------------------------------------------------- 采样器/锁的收尾
 CG_PID=""; ENV_PID=""; DS_PID=""; GEN_PID=""; WD_PID=""; MY_PID=""; DUMP_PID=""
+MYCPU_PID=""; DIG_PID=""
 cleanup() {
-  for p in "$CG_PID" "$ENV_PID" "$DS_PID" "$WD_PID" "$MY_PID" "$DUMP_PID"; do [ -n "$p" ] && kill "$p" 2>/dev/null; done
+  for p in "$CG_PID" "$ENV_PID" "$DS_PID" "$WD_PID" "$MY_PID" "$DUMP_PID" "$MYCPU_PID" "$DIG_PID"; do [ -n "$p" ] && kill "$p" 2>/dev/null; done
   if [ -n "$GEN_PID" ] && kill -0 "$GEN_PID" 2>/dev/null; then kill "$GEN_PID" 2>/dev/null; fi
   [ -x "$LOCK" ] && "$LOCK" release >>"$LOG" 2>&1 || true
 }
@@ -72,6 +73,19 @@ for c in $CONTAINERS; do
   log "  $c health=$st java_opts=$(docker inspect "$c" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -o 'Xlog:gc[^ ]*' || echo '(无 GC 日志!)')"
 done
 curl -s -o /dev/null -w "  gateway /api/health -> %{http_code}\n" http://127.0.0.1:18080/api/health | tee -a "$LOG"
+
+# performance_schema 的重负载 consumer 必须是关的：events_statements_history_long 会给**每条语句**
+# 写一行环形缓冲，在 7.7k SQL/s 下等于给 MySQL 加了一层审计，实测能把 380 档压垮（ok/s 273、丢 7986）。
+# 这一步把它变成硬门禁 —— 谁为了排障临时开过，忘了关就会被这里拦下，而不是污染一整轮实验。
+CONS=$(sql_db "select VARIABLE_VALUE from performance_schema.global_status where VARIABLE_NAME='performance_schema'" 2>/dev/null)
+HIST=$(docker exec -i -e MYSQL_PWD="$MYSQL_PASSWORD" qiqi-mysql mysql -uroot -N -e \
+  "select ENABLED from performance_schema.setup_consumers where NAME='events_statements_history_long'" 2>/dev/null | tr -d '\r')
+log "  P_S: enabled=${CONS:-?} events_statements_history_long=${HIST:-?}"
+if [ "${HIST:-NO}" = "YES" ]; then
+  log "✗ events_statements_history_long 还开着（每条语句一行环形缓冲，会严重拖慢 MySQL）→ 关掉再跑："
+  log "    update performance_schema.setup_consumers set enabled='NO' where name='events_statements_history_long';"
+  exit 3
+fi
 
 # ================================================================ 1. 数据前置
 log "=== 1. 数据前置 ==="
@@ -139,7 +153,10 @@ DS_PID=$!
 # MySQL 侧计数器（2s）：用来判断「瓶颈有没有搬到 DB」——Threads_running 上去 = DB 侧成了新瓶颈
 MY_PID=""
 if [ "${SAMPLE_MYSQL:-1}" = "1" ]; then
-  ( echo "epoch,threads_run,threads_conn,row_lock_waits,row_lock_time_ms,queries" > "$OUT/mysql.csv";
+  # 前 6 列是历史口径（avalanche.py 按位置取前 6 列，**只能往后追加**，不能插队）。
+  # 追加的 6 列是第三步要的证据：fsync / log_waits 用来判「闸门是不是提交落盘」，
+  # rows_* 与 com_commit 用来对账「7.7k SQL/s 到底有多少是真的改数据的」。
+  ( echo "epoch,threads_run,threads_conn,row_lock_waits,row_lock_time_ms,queries,data_fsyncs,log_fsyncs,log_waits,bp_wait_free,rows_updated,rows_inserted" > "$OUT/mysql.csv";
     while :; do
       k=$(date +%s)
       docker exec -i -e MYSQL_PWD="$MYSQL_PASSWORD" qiqi-mysql mysql -uroot -N -e "
@@ -148,11 +165,28 @@ if [ "${SAMPLE_MYSQL:-1}" = "1" ]; then
           (select VARIABLE_VALUE from performance_schema.global_status where VARIABLE_NAME='Threads_connected'),',',
           (select VARIABLE_VALUE from performance_schema.global_status where VARIABLE_NAME='Innodb_row_lock_waits'),',',
           (select VARIABLE_VALUE from performance_schema.global_status where VARIABLE_NAME='Innodb_row_lock_time'),',',
-          (select VARIABLE_VALUE from performance_schema.global_status where VARIABLE_NAME='Queries'))" 2>/dev/null \
+          (select VARIABLE_VALUE from performance_schema.global_status where VARIABLE_NAME='Queries'),',',
+          (select VARIABLE_VALUE from performance_schema.global_status where VARIABLE_NAME='Innodb_data_fsyncs'),',',
+          (select VARIABLE_VALUE from performance_schema.global_status where VARIABLE_NAME='Innodb_os_log_fsyncs'),',',
+          (select VARIABLE_VALUE from performance_schema.global_status where VARIABLE_NAME='Innodb_log_waits'),',',
+          (select VARIABLE_VALUE from performance_schema.global_status where VARIABLE_NAME='Innodb_buffer_pool_wait_free'),',',
+          (select VARIABLE_VALUE from performance_schema.global_status where VARIABLE_NAME='Innodb_rows_updated'),',',
+          (select VARIABLE_VALUE from performance_schema.global_status where VARIABLE_NAME='Innodb_rows_inserted'))" 2>/dev/null \
         | sed "s/^/$k,/" >> "$OUT/mysql.csv"
       sleep 2
     done ) &
   MY_PID=$!
+fi
+# MySQL **自己**的 cgroup CPU（第三步要的因果证据：DB 算力有没有打满、有没有 cfs 节流）
+if [ "${MYSQL_CGROUP:-1}" = "1" ]; then
+  INTERVAL_MS=1000 "$SELF/mycpu.sh" "$OUT/mycpu.csv" qiqi-mysql >>"$LOG" 2>&1 &
+  MYCPU_PID=$!
+fi
+# 按 DIGEST 的 SQL 画像（第三步要的「每单那 N 条到底是哪几条」）
+if [ "${SQLPROFILE:-1}" = "1" ]; then
+  MYSQL_PASSWORD="$MYSQL_PASSWORD" INTERVAL_S=2 TOPN=80 \
+    "$SELF/sqldigest.sh" "$OUT/sqldigest.csv" >>"$LOG" 2>&1 &
+  DIG_PID=$!
 fi
 # 连接池实际生效值的硬证据：MySQL 侧每个容器 IP 各自挂了几条连接（pool 10 → 10/实例，pool 30 → 30/实例）
 {
@@ -164,13 +198,14 @@ fi
     echo "$c java_opts=$(docker inspect $c --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^JAVA_OPTS=' | tr -d '\n')"
     echo "$c hikari_env=$(docker inspect $c --format '{{range .Config.Env}}{{println .}}{{end}}' | grep MAXIMUM_POOL || echo '(未设=默认10)')"
     echo "$c ip=$(docker inspect $c --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')"
+    echo "$c jar=$(docker exec $c sh -c 'md5sum /app/app.jar' 2>/dev/null | cut -d' ' -f1) mount=$(docker inspect $c --format '{{range .Mounts}}{{.Source}}->{{.Destination}} {{end}}' | tr -d '\n' | sed 's/^$/(无，用镜像自带 jar)/')"
   done
   echo "mysql_conns_per_client（连接池是否真的生效的硬证据：pool N → 每实例 N 条）:"
   docker exec -i -e MYSQL_PWD="$MYSQL_PASSWORD" qiqi-mysql mysql -uroot -N -e \
     "select concat('  ',ip,' -> ',n,' 条') from (select substring_index(host,':',1) ip, count(*) n from information_schema.processlist group by substring_index(host,':',1)) t" 2>&1
   echo "steps=$STEPS step_duration=${STEP_DURATION}s warmup=${WARMUP}s@${WARMUP_RPS}rps dump_at=${DUMP_AT_RPS:-无}"
 } | tee "$OUT/provenance.txt" | sed 's/^/  /' >> "$LOG"
-log "  cgwatch(200ms)=$CG_PID envsample(5s)=$ENV_PID dockerstats(5s)=$DS_PID mysql(2s)=${MY_PID:-off}"
+log "  cgwatch(200ms)=$CG_PID envsample(5s)=$ENV_PID dockerstats(5s)=$DS_PID mysql(2s)=${MY_PID:-off} mysqlcpu(1s)=${MYCPU_PID:-off} sqldigest(2s)=${DIG_PID:-off}"
 
 # 宿主机内存看门狗：可用内存掉到 GUARD_MIN_MB 以下就掐掉压测（按 pid 精确 kill，不做宽匹配）
 ( while :; do

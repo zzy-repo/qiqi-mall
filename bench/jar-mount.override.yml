@@ -1,0 +1,21 @@
+# 下单路径 SQL 合并实验的「换 jar」注入口（compose override，**只在显式 -f 时生效**）
+#
+#   ⚠️ 它**不重建镜像**：镜像仍然是 qiqi-mall-server:test（同一 digest），
+#      只把宿主机上刚 mvn 出来的 jar 只读挂到 /app/app.jar 上，然后重建容器。
+#      → 回滚 = 不带这个 -f 再 up 一次（容器回到镜像自带的 jar），秒级、无残留。
+#
+#   为什么必须这么做：本轮要验证「压 SQL 条数能不能换吞吐」，需要**业务代码**有一处改动；
+#   而任务书禁止重建镜像。挂 jar 是唯一同时满足「改代码生效」与「镜像不变」的做法，
+#   而且天然保证 A/B 两臂除 jar 内容外完全同构（同一镜像、同一 JAVA_OPTS、同一 Hikari 池）。
+#
+#   用法（见 tools/jar-deploy.sh）：
+#     export JAR_HOST_PATH=/tmp/loadgen/jar/a/app.jar       # 宿主机绝对路径
+#     docker compose -f docker-compose.yml -f bench/jvm-gc.override.yml \
+#                    -f bench/jar-mount.override.yml up -d --no-deps server-1 server-2
+services:
+  server-1:
+    volumes:
+      - "${JAR_HOST_PATH:?必须指定 JAR_HOST_PATH（宿主机上的 fat jar 绝对路径）}:/app/app.jar:ro"
+  server-2:
+    volumes:
+      - "${JAR_HOST_PATH:?必须指定 JAR_HOST_PATH（宿主机上的 fat jar 绝对路径）}:/app/app.jar:ro"

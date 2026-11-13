@@ -1,0 +1,324 @@
+epoch_ms,epoch_s,jvm,gc_id,kind,heap_before_MB,heap_after_MB,heap_cap_MB,pause_ms,is_full
+1794603670470,1794603670,qiqi-server-1,GC(0),Pause Young (Normal) (G1 Evacuation Pause),8.0,1.0,256.0,6.355,0
+1794603670636,1794603670,qiqi-server-1,GC(1),Pause Young (Normal) (G1 Evacuation Pause),9.0,2.0,256.0,15.907,0
+1794603671541,1794603671,qiqi-server-1,GC(2),Pause Young (Normal) (G1 Evacuation Pause),26.0,5.0,256.0,10.008,0
+1794603672231,1794603672,qiqi-server-1,GC(3),Pause Young (Normal) (G1 Evacuation Pause),37.0,6.0,256.0,12.344,0
+1794603675179,1794603675,qiqi-server-1,GC(4),Pause Young (Normal) (G1 Evacuation Pause),142.0,14.0,336.0,46.491,0
+1794603675493,1794603675,qiqi-server-1,GC(5),Pause Young (Concurrent Start) (Metadata GC Threshold),24.0,14.0,336.0,18.372,0
+1794603675535,1794603675,qiqi-server-1,GC(6),Pause Remark,18.0,18.0,112.0,7.140,0
+1794603675538,1794603675,qiqi-server-1,GC(6),Pause Cleanup,18.0,18.0,112.0,0.138,0
+1794603677492,1794603677,qiqi-server-1,GC(7),Pause Young (Prepare Mixed) (G1 Evacuation Pause),94.0,16.0,128.0,31.079,0
+1794603678874,1794603678,qiqi-server-1,GC(8),Pause Young (Mixed) (G1 Evacuation Pause),72.0,18.0,128.0,19.946,0
+1794603680114,1794603680,qiqi-server-1,GC(9),Pause Young (Concurrent Start) (Metadata GC Threshold),69.0,20.0,160.0,17.815,0
+1794603680201,1794603680,qiqi-server-1,GC(10),Pause Remark,23.0,23.0,80.0,10.279,0
+1794603680237,1794603680,qiqi-server-1,GC(10),Pause Cleanup,25.0,25.0,80.0,0.110,0
+1794603681415,1794603681,qiqi-server-1,GC(11),Pause Young (Prepare Mixed) (G1 Evacuation Pause),60.0,22.0,80.0,18.377,0
+1794603683519,1794603683,qiqi-server-1,GC(12),Pause Young (Mixed) (G1 Evacuation Pause),62.0,25.0,88.0,30.984,0
+1794603684401,1794603684,qiqi-server-1,GC(13),Pause Young (Normal) (G1 Evacuation Pause),65.0,26.0,88.0,27.775,0
+1794603684943,1794603684,qiqi-server-1,GC(14),Pause Young (Normal) (G1 Evacuation Pause),66.0,27.0,88.0,19.064,0
+1794603685709,1794603685,qiqi-server-1,GC(15),Pause Young (Normal) (G1 Evacuation Pause),67.0,29.0,112.0,6.584,0
+1794603686902,1794603686,qiqi-server-1,GC(16),Pause Young (Concurrent Start) (Metadata GC Threshold),75.0,31.0,112.0,12.816,0
+1794603687018,1794603687,qiqi-server-1,GC(17),Pause Remark,35.0,35.0,112.0,12.249,0
+1794603687071,1794603687,qiqi-server-1,GC(17),Pause Cleanup,36.0,36.0,112.0,0.113,0
+1794603688060,1794603688,qiqi-server-1,GC(18),Pause Young (Normal) (G1 Evacuation Pause),87.0,33.0,112.0,13.801,0
+1794603688711,1794603688,qiqi-server-1,GC(19),Pause Young (Normal) (G1 Evacuation Pause),89.0,35.0,112.0,16.787,0
+1794603689552,1794603689,qiqi-server-1,GC(20),Pause Young (Normal) (G1 Evacuation Pause),91.0,37.0,112.0,14.750,0
+1794603690461,1794603690,qiqi-server-1,GC(21),Pause Young (Normal) (G1 Evacuation Pause),93.0,38.0,112.0,18.029,0
+1794603692371,1794603692,qiqi-server-1,GC(22),Pause Young (Normal) (G1 Evacuation Pause),94.0,42.0,136.0,23.013,0
+1794603715471,1794603715,qiqi-server-1,GC(23),Pause Young (Normal) (G1 Evacuation Pause),114.0,45.0,136.0,14.132,0
+1794603724176,1794603724,qiqi-server-1,GC(24),Pause Young (Normal) (G1 Evacuation Pause),109.0,60.0,144.0,47.442,0
+1794603725510,1794603725,qiqi-server-1,GC(25),Pause Young (Normal) (G1 Evacuation Pause),116.0,78.0,152.0,63.013,0
+1794603726823,1794603726,qiqi-server-1,GC(26),Pause Young (Normal) (G1 Evacuation Pause),118.0,81.0,152.0,23.474,0
+1794603728439,1794603728,qiqi-server-1,GC(27),Pause Young (Concurrent Start) (G1 Evacuation Pause),121.0,82.0,152.0,32.916,0
+1794603729600,1794603729,qiqi-server-1,GC(28),Pause Remark,109.0,109.0,152.0,87.487,0
+1794603729980,1794603729,qiqi-server-1,GC(28),Pause Cleanup,117.0,117.0,152.0,0.138,0
+1794603730240,1794603730,qiqi-server-1,GC(29),Pause Young (Prepare Mixed) (G1 Evacuation Pause),122.0,83.0,152.0,42.524,0
+1794603731861,1794603731,qiqi-server-1,GC(30),Pause Young (Mixed) (G1 Evacuation Pause),123.0,83.0,256.0,55.955,0
+1794603736905,1794603736,qiqi-server-1,GC(31),Pause Young (Normal) (G1 Evacuation Pause),203.0,85.0,256.0,94.048,0
+1794603742071,1794603742,qiqi-server-1,GC(32),Pause Young (Normal) (G1 Evacuation Pause),213.0,85.0,256.0,23.600,0
+1794603746845,1794603746,qiqi-server-1,GC(33),Pause Young (Normal) (G1 Evacuation Pause),213.0,85.0,256.0,58.846,0
+1794603751414,1794603751,qiqi-server-1,GC(34),Pause Young (Normal) (G1 Evacuation Pause),221.0,85.0,256.0,99.635,0
+1794603756203,1794603756,qiqi-server-1,GC(35),Pause Young (Normal) (G1 Evacuation Pause),229.0,86.0,312.0,24.735,0
+1794603761586,1794603761,qiqi-server-1,GC(36),Pause Young (Normal) (G1 Evacuation Pause),262.0,87.0,312.0,36.551,0
+1794603766226,1794603766,qiqi-server-1,GC(37),Pause Young (Normal) (G1 Evacuation Pause),255.0,87.0,312.0,43.129,0
+1794603771024,1794603771,qiqi-server-1,GC(38),Pause Young (Normal) (G1 Evacuation Pause),255.0,87.0,312.0,60.404,0
+1794603775548,1794603775,qiqi-server-1,GC(39),Pause Young (Normal) (G1 Evacuation Pause),255.0,88.0,312.0,42.466,0
+1794603779790,1794603779,qiqi-server-1,GC(40),Pause Young (Normal) (G1 Evacuation Pause),256.0,87.0,312.0,47.469,0
+1794603784411,1794603784,qiqi-server-1,GC(41),Pause Young (Normal) (G1 Evacuation Pause),255.0,88.0,312.0,46.433,0
+1794603788644,1794603788,qiqi-server-1,GC(42),Pause Young (Normal) (G1 Evacuation Pause),256.0,89.0,312.0,52.336,0
+1794603792432,1794603792,qiqi-server-1,GC(43),Pause Young (Normal) (G1 Evacuation Pause),257.0,89.0,312.0,53.778,0
+1794603796729,1794603796,qiqi-server-1,GC(44),Pause Young (Normal) (G1 Evacuation Pause),257.0,90.0,376.0,83.791,0
+1794603801768,1794603801,qiqi-server-1,GC(45),Pause Young (Normal) (G1 Evacuation Pause),298.0,91.0,376.0,68.081,0
+1794603806401,1794603806,qiqi-server-1,GC(46),Pause Young (Normal) (G1 Evacuation Pause),299.0,90.0,376.0,44.314,0
+1794603811845,1794603811,qiqi-server-1,GC(47),Pause Young (Normal) (G1 Evacuation Pause),298.0,91.0,376.0,72.202,0
+1794603816383,1794603816,qiqi-server-1,GC(48),Pause Young (Normal) (G1 Evacuation Pause),299.0,91.0,376.0,42.644,0
+1794603819091,1794603819,qiqi-server-1,GC(49),Pause Young (Normal) (G1 Evacuation Pause),299.0,90.0,376.0,26.798,0
+1794603823248,1794603823,qiqi-server-1,GC(50),Pause Young (Normal) (G1 Evacuation Pause),306.0,90.0,376.0,37.105,0
+1794603827773,1794603827,qiqi-server-1,GC(51),Pause Young (Normal) (G1 Evacuation Pause),306.0,91.0,376.0,44.802,0
+1794603831605,1794603831,qiqi-server-1,GC(52),Pause Young (Normal) (G1 Evacuation Pause),307.0,91.0,376.0,33.190,0
+1794603836014,1794603836,qiqi-server-1,GC(53),Pause Young (Normal) (G1 Evacuation Pause),307.0,91.0,376.0,39.172,0
+1794603840913,1794603840,qiqi-server-1,GC(54),Pause Young (Normal) (G1 Evacuation Pause),307.0,91.0,376.0,99.106,0
+1794603845032,1794603845,qiqi-server-1,GC(55),Pause Young (Normal) (G1 Evacuation Pause),307.0,91.0,456.0,24.474,0
+1794603850939,1794603850,qiqi-server-1,GC(56),Pause Young (Normal) (G1 Evacuation Pause),355.0,91.0,456.0,81.760,0
+1794603855745,1794603855,qiqi-server-1,GC(57),Pause Young (Normal) (G1 Evacuation Pause),355.0,91.0,456.0,37.745,0
+1794603860884,1794603860,qiqi-server-1,GC(58),Pause Young (Normal) (G1 Evacuation Pause),355.0,91.0,456.0,69.376,0
+1794603866116,1794603866,qiqi-server-1,GC(59),Pause Young (Normal) (G1 Evacuation Pause),355.0,91.0,456.0,55.991,0
+1794603871238,1794603871,qiqi-server-1,GC(60),Pause Young (Normal) (G1 Evacuation Pause),355.0,91.0,456.0,67.293,0
+1794603875890,1794603875,qiqi-server-1,GC(61),Pause Young (Normal) (G1 Evacuation Pause),355.0,91.0,552.0,51.065,0
+1794603882034,1794603882,qiqi-server-1,GC(62),Pause Young (Normal) (G1 Evacuation Pause),411.0,91.0,552.0,48.096,0
+1794603887685,1794603887,qiqi-server-1,GC(63),Pause Young (Normal) (G1 Evacuation Pause),411.0,91.0,552.0,21.158,0
+1794603893144,1794603893,qiqi-server-1,GC(64),Pause Young (Normal) (G1 Evacuation Pause),411.0,91.0,552.0,41.420,0
+1794603898687,1794603898,qiqi-server-1,GC(65),Pause Young (Normal) (G1 Evacuation Pause),411.0,91.0,552.0,23.244,0
+1794603904791,1794603904,qiqi-server-1,GC(66),Pause Young (Normal) (G1 Evacuation Pause),411.0,91.0,552.0,28.833,0
+1794603910245,1794603910,qiqi-server-1,GC(67),Pause Young (Normal) (G1 Evacuation Pause),411.0,91.0,552.0,74.882,0
+1794603914650,1794603914,qiqi-server-1,GC(68),Pause Young (Normal) (G1 Evacuation Pause),411.0,91.0,552.0,28.412,0
+1794603919045,1794603919,qiqi-server-1,GC(69),Pause Young (Normal) (G1 Evacuation Pause),411.0,91.0,552.0,18.919,0
+1794603923695,1794603923,qiqi-server-1,GC(70),Pause Young (Normal) (G1 Evacuation Pause),411.0,91.0,552.0,22.152,0
+1794603928708,1794603928,qiqi-server-1,GC(71),Pause Young (Normal) (G1 Evacuation Pause),411.0,91.0,552.0,17.516,0
+1794603932793,1794603932,qiqi-server-1,GC(72),Pause Young (Normal) (G1 Evacuation Pause),411.0,91.0,552.0,56.058,0
+1794603937110,1794603937,qiqi-server-1,GC(73),Pause Young (Normal) (G1 Evacuation Pause),411.0,90.0,552.0,11.005,0
+1794603941555,1794603941,qiqi-server-1,GC(74),Pause Young (Normal) (G1 Evacuation Pause),410.0,91.0,552.0,44.779,0
+1794603945727,1794603945,qiqi-server-1,GC(75),Pause Young (Normal) (G1 Evacuation Pause),411.0,91.0,552.0,14.235,0
+1794603949690,1794603949,qiqi-server-1,GC(76),Pause Young (Normal) (G1 Evacuation Pause),411.0,90.0,552.0,11.945,0
+1794603953724,1794603953,qiqi-server-1,GC(77),Pause Young (Normal) (G1 Evacuation Pause),410.0,90.0,552.0,7.618,0
+1794603958079,1794603958,qiqi-server-1,GC(78),Pause Young (Normal) (G1 Evacuation Pause),410.0,90.0,552.0,7.209,0
+1794603962589,1794603962,qiqi-server-1,GC(79),Pause Young (Normal) (G1 Evacuation Pause),410.0,90.0,552.0,7.360,0
+1794603966934,1794603966,qiqi-server-1,GC(80),Pause Young (Normal) (G1 Evacuation Pause),410.0,91.0,552.0,39.718,0
+1794603971378,1794603971,qiqi-server-1,GC(81),Pause Young (Normal) (G1 Evacuation Pause),411.0,91.0,552.0,20.079,0
+1794603975271,1794603975,qiqi-server-1,GC(82),Pause Young (Normal) (G1 Evacuation Pause),411.0,90.0,552.0,11.943,0
+1794603979170,1794603979,qiqi-server-1,GC(83),Pause Young (Normal) (G1 Evacuation Pause),410.0,89.0,552.0,11.087,0
+1794603983634,1794603983,qiqi-server-1,GC(84),Pause Young (Normal) (G1 Evacuation Pause),409.0,90.0,552.0,7.056,0
+1794603987964,1794603987,qiqi-server-1,GC(85),Pause Young (Normal) (G1 Evacuation Pause),410.0,90.0,552.0,40.054,0
+1794603992194,1794603992,qiqi-server-1,GC(86),Pause Young (Normal) (G1 Evacuation Pause),410.0,91.0,552.0,57.386,0
+1794603996407,1794603996,qiqi-server-1,GC(87),Pause Young (Normal) (G1 Evacuation Pause),411.0,91.0,552.0,14.790,0
+1794604000863,1794604000,qiqi-server-1,GC(88),Pause Young (Normal) (G1 Evacuation Pause),411.0,90.0,552.0,32.280,0
+1794604005662,1794604005,qiqi-server-1,GC(89),Pause Young (Normal) (G1 Evacuation Pause),410.0,91.0,552.0,47.139,0
+1794604009713,1794604009,qiqi-server-1,GC(90),Pause Young (Normal) (G1 Evacuation Pause),411.0,91.0,552.0,11.860,0
+1794604013911,1794604013,qiqi-server-1,GC(91),Pause Young (Normal) (G1 Evacuation Pause),411.0,91.0,552.0,32.028,0
+1794604016048,1794604016,qiqi-server-1,GC(92),Pause Young (Concurrent Start) (CodeCache GC Threshold),262.0,91.0,552.0,13.860,0
+1794604016564,1794604016,qiqi-server-1,GC(93),Pause Remark,119.0,119.0,352.0,68.344,0
+1794604016702,1794604016,qiqi-server-1,GC(93),Pause Cleanup,130.0,130.0,352.0,0.147,0
+1794604018553,1794604018,qiqi-server-1,GC(94),Pause Young (Prepare Mixed) (G1 Evacuation Pause),291.0,91.0,352.0,26.329,0
+1794604021144,1794604021,qiqi-server-1,GC(95),Pause Young (Mixed) (G1 Evacuation Pause),291.0,91.0,352.0,12.589,0
+1794604023560,1794604023,qiqi-server-1,GC(96),Pause Young (Normal) (G1 Evacuation Pause),291.0,90.0,352.0,12.219,0
+1794604026187,1794604026,qiqi-server-1,GC(97),Pause Young (Normal) (G1 Evacuation Pause),290.0,90.0,352.0,12.755,0
+1794604028761,1794604028,qiqi-server-1,GC(98),Pause Young (Normal) (G1 Evacuation Pause),290.0,90.0,352.0,12.779,0
+1794604031667,1794604031,qiqi-server-1,GC(99),Pause Young (Normal) (G1 Evacuation Pause),290.0,90.0,352.0,24.592,0
+1794604034395,1794604034,qiqi-server-1,GC(100),Pause Young (Normal) (G1 Evacuation Pause),290.0,91.0,352.0,34.131,0
+1794604036871,1794604036,qiqi-server-1,GC(101),Pause Young (Normal) (G1 Evacuation Pause),291.0,90.0,352.0,9.134,0
+1794604039408,1794604039,qiqi-server-1,GC(102),Pause Young (Normal) (G1 Evacuation Pause),290.0,90.0,352.0,26.445,0
+1794604041899,1794604041,qiqi-server-1,GC(103),Pause Young (Normal) (G1 Evacuation Pause),290.0,90.0,352.0,7.785,0
+1794604044589,1794604044,qiqi-server-1,GC(104),Pause Young (Normal) (G1 Evacuation Pause),290.0,90.0,352.0,17.032,0
+1794604047481,1794604047,qiqi-server-1,GC(105),Pause Young (Normal) (G1 Evacuation Pause),290.0,91.0,352.0,25.004,0
+1794604050152,1794604050,qiqi-server-1,GC(106),Pause Young (Normal) (G1 Evacuation Pause),291.0,91.0,352.0,18.209,0
+1794604052661,1794604052,qiqi-server-1,GC(107),Pause Young (Normal) (G1 Evacuation Pause),291.0,91.0,352.0,19.751,0
+1794604055334,1794604055,qiqi-server-1,GC(108),Pause Young (Normal) (G1 Evacuation Pause),291.0,91.0,352.0,16.548,0
+1794604057984,1794604057,qiqi-server-1,GC(109),Pause Young (Normal) (G1 Evacuation Pause),291.0,91.0,352.0,10.016,0
+1794604060738,1794604060,qiqi-server-1,GC(110),Pause Young (Normal) (G1 Evacuation Pause),291.0,91.0,352.0,26.698,0
+1794604063488,1794604063,qiqi-server-1,GC(111),Pause Young (Normal) (G1 Evacuation Pause),291.0,91.0,352.0,19.168,0
+1794604066070,1794604066,qiqi-server-1,GC(112),Pause Young (Normal) (G1 Evacuation Pause),291.0,91.0,352.0,17.450,0
+1794604068591,1794604068,qiqi-server-1,GC(113),Pause Young (Normal) (G1 Evacuation Pause),291.0,91.0,352.0,17.928,0
+1794604071517,1794604071,qiqi-server-1,GC(114),Pause Young (Normal) (G1 Evacuation Pause),291.0,91.0,352.0,8.929,0
+1794604074229,1794604074,qiqi-server-1,GC(115),Pause Young (Normal) (G1 Evacuation Pause),291.0,91.0,352.0,18.577,0
+1794604076889,1794604076,qiqi-server-1,GC(116),Pause Young (Normal) (G1 Evacuation Pause),291.0,91.0,352.0,10.834,0
+1794604079139,1794604079,qiqi-server-1,GC(117),Pause Young (Normal) (G1 Evacuation Pause),291.0,91.0,352.0,10.003,0
+1794604081712,1794604081,qiqi-server-1,GC(118),Pause Young (Normal) (G1 Evacuation Pause),291.0,92.0,352.0,17.616,0
+1794604084254,1794604084,qiqi-server-1,GC(119),Pause Young (Normal) (G1 Evacuation Pause),292.0,91.0,352.0,12.497,0
+1794604086540,1794604086,qiqi-server-1,GC(120),Pause Young (Normal) (G1 Evacuation Pause),291.0,91.0,352.0,12.709,0
+1794604089193,1794604089,qiqi-server-1,GC(121),Pause Young (Normal) (G1 Evacuation Pause),291.0,91.0,352.0,14.906,0
+1794604092028,1794604092,qiqi-server-1,GC(122),Pause Young (Normal) (G1 Evacuation Pause),291.0,91.0,352.0,51.190,0
+1794604094978,1794604094,qiqi-server-1,GC(123),Pause Young (Normal) (G1 Evacuation Pause),291.0,91.0,352.0,10.363,0
+1794604097762,1794604097,qiqi-server-1,GC(124),Pause Young (Normal) (G1 Evacuation Pause),291.0,91.0,352.0,8.925,0
+1794604100506,1794604100,qiqi-server-1,GC(125),Pause Young (Normal) (G1 Evacuation Pause),291.0,92.0,352.0,28.821,0
+1794604103143,1794604103,qiqi-server-1,GC(126),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,9.212,0
+1794604105755,1794604105,qiqi-server-1,GC(127),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,15.114,0
+1794604108271,1794604108,qiqi-server-1,GC(128),Pause Young (Normal) (G1 Evacuation Pause),292.0,91.0,352.0,10.419,0
+1794604110947,1794604110,qiqi-server-1,GC(129),Pause Young (Normal) (G1 Evacuation Pause),291.0,92.0,352.0,24.875,0
+1794604113543,1794604113,qiqi-server-1,GC(130),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,13.920,0
+1794604115941,1794604115,qiqi-server-1,GC(131),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,18.638,0
+1794604118513,1794604118,qiqi-server-1,GC(132),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,7.884,0
+1794604121025,1794604121,qiqi-server-1,GC(133),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,9.946,0
+1794604123670,1794604123,qiqi-server-1,GC(134),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,16.296,0
+1794604126607,1794604126,qiqi-server-1,GC(135),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,20.792,0
+1794604129182,1794604129,qiqi-server-1,GC(136),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,24.354,0
+1794604131843,1794604131,qiqi-server-1,GC(137),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,20.043,0
+1794604134226,1794604134,qiqi-server-1,GC(138),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,10.584,0
+1794604136672,1794604136,qiqi-server-1,GC(139),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,19.636,0
+1794604139268,1794604139,qiqi-server-1,GC(140),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,24.764,0
+1794604141798,1794604141,qiqi-server-1,GC(141),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,17.684,0
+1794604144487,1794604144,qiqi-server-1,GC(142),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,21.991,0
+1794604147155,1794604147,qiqi-server-1,GC(143),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,50.322,0
+1794604149826,1794604149,qiqi-server-1,GC(144),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,26.133,0
+1794604152415,1794604152,qiqi-server-1,GC(145),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,9.631,0
+1794604155156,1794604155,qiqi-server-1,GC(146),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,58.804,0
+1794604158140,1794604158,qiqi-server-1,GC(147),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,20.027,0
+1794604160716,1794604160,qiqi-server-1,GC(148),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,16.147,0
+1794604163173,1794604163,qiqi-server-1,GC(149),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,16.598,0
+1794604165841,1794604165,qiqi-server-1,GC(150),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,28.265,0
+1794604168517,1794604168,qiqi-server-1,GC(151),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,15.564,0
+1794604171024,1794604171,qiqi-server-1,GC(152),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,11.732,0
+1794604174089,1794604174,qiqi-server-1,GC(153),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,26.723,0
+1794604176665,1794604176,qiqi-server-1,GC(154),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,9.611,0
+1794604179354,1794604179,qiqi-server-1,GC(155),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,17.273,0
+1794604181967,1794604181,qiqi-server-1,GC(156),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,23.579,0
+1794604184528,1794604184,qiqi-server-1,GC(157),Pause Young (Normal) (G1 Evacuation Pause),292.0,93.0,352.0,28.080,0
+1794604187063,1794604187,qiqi-server-1,GC(158),Pause Young (Normal) (G1 Evacuation Pause),293.0,92.0,352.0,14.994,0
+1794604189823,1794604189,qiqi-server-1,GC(159),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,35.895,0
+1794604192764,1794604192,qiqi-server-1,GC(160),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,10.168,0
+1794604195291,1794604195,qiqi-server-1,GC(161),Pause Young (Normal) (G1 Evacuation Pause),292.0,92.0,352.0,7.867,0
+1794604197839,1794604197,qiqi-server-1,GC(162),Pause Young (Normal) (G1 Evacuation Pause),292.0,93.0,352.0,12.680,0
+1794604200388,1794604200,qiqi-server-1,GC(163),Pause Young (Normal) (G1 Evacuation Pause),293.0,93.0,352.0,21.561,0
+1794604203782,1794604203,qiqi-server-1,GC(164),Pause Young (Normal) (G1 Evacuation Pause),293.0,92.0,352.0,35.717,0
+1794604206702,1794604206,qiqi-server-1,GC(165),Pause Young (Normal) (G1 Evacuation Pause),292.0,93.0,352.0,65.345,0
+1794604209308,1794604209,qiqi-server-1,GC(166),Pause Young (Normal) (G1 Evacuation Pause),293.0,94.0,424.0,11.951,0
+1794603670516,1794603670,qiqi-server-2,GC(0),Pause Young (Normal) (G1 Evacuation Pause),8.0,1.0,256.0,22.833,0
+1794603670702,1794603670,qiqi-server-2,GC(1),Pause Young (Normal) (G1 Evacuation Pause),9.0,2.0,256.0,3.926,0
+1794603671829,1794603671,qiqi-server-2,GC(2),Pause Young (Normal) (G1 Evacuation Pause),34.0,5.0,256.0,27.318,0
+1794603672664,1794603672,qiqi-server-2,GC(3),Pause Young (Normal) (G1 Evacuation Pause),45.0,6.0,256.0,13.885,0
+1794603675463,1794603675,qiqi-server-2,GC(4),Pause Young (Concurrent Start) (Metadata GC Threshold),135.0,14.0,256.0,17.942,0
+1794603675481,1794603675,qiqi-server-2,GC(5),Pause Remark,17.0,17.0,112.0,6.001,0
+1794603675493,1794603675,qiqi-server-2,GC(5),Pause Cleanup,17.0,17.0,112.0,0.089,0
+1794603677228,1794603677,qiqi-server-2,GC(6),Pause Young (Prepare Mixed) (G1 Evacuation Pause),94.0,17.0,128.0,27.723,0
+1794603678584,1794603678,qiqi-server-2,GC(7),Pause Young (Mixed) (G1 Evacuation Pause),73.0,19.0,160.0,40.816,0
+1794603680222,1794603680,qiqi-server-2,GC(8),Pause Young (Concurrent Start) (Metadata GC Threshold),65.0,20.0,160.0,13.993,0
+1794603680267,1794603680,qiqi-server-2,GC(9),Pause Remark,22.0,22.0,80.0,9.515,0
+1794603680286,1794603680,qiqi-server-2,GC(9),Pause Cleanup,22.0,22.0,80.0,2.213,0
+1794603681625,1794603681,qiqi-server-2,GC(10),Pause Young (Prepare Mixed) (G1 Evacuation Pause),60.0,22.0,80.0,21.546,0
+1794603683592,1794603683,qiqi-server-2,GC(11),Pause Young (Mixed) (G1 Evacuation Pause),62.0,25.0,88.0,35.113,0
+1794603684760,1794603684,qiqi-server-2,GC(12),Pause Young (Normal) (G1 Evacuation Pause),65.0,26.0,136.0,44.576,0
+1794603686183,1794603686,qiqi-server-2,GC(13),Pause Young (Normal) (G1 Evacuation Pause),98.0,28.0,136.0,65.764,0
+1794603687415,1794603687,qiqi-server-2,GC(14),Pause Young (Concurrent Start) (Metadata GC Threshold),82.0,31.0,136.0,11.397,0
+1794603687507,1794603687,qiqi-server-2,GC(15),Pause Remark,35.0,35.0,136.0,28.687,0
+1794603687556,1794603687,qiqi-server-2,GC(15),Pause Cleanup,37.0,37.0,136.0,0.339,0
+1794603688671,1794603688,qiqi-server-2,GC(16),Pause Young (Prepare Mixed) (G1 Evacuation Pause),95.0,33.0,136.0,17.343,0
+1794603689639,1794603689,qiqi-server-2,GC(17),Pause Young (Mixed) (G1 Evacuation Pause),97.0,35.0,136.0,26.374,0
+1794603690215,1794603690,qiqi-server-2,GC(18),Pause Young (Normal) (G1 Evacuation Pause),99.0,37.0,176.0,23.666,0
+1794603692548,1794603692,qiqi-server-2,GC(19),Pause Young (Normal) (G1 Evacuation Pause),125.0,41.0,176.0,32.794,0
+1794603723602,1794603723,qiqi-server-2,GC(20),Pause Young (Normal) (G1 Evacuation Pause),129.0,47.0,176.0,52.334,0
+1794603725487,1794603725,qiqi-server-2,GC(21),Pause Young (Normal) (G1 Evacuation Pause),135.0,75.0,184.0,37.016,0
+1794603727911,1794603727,qiqi-server-2,GC(22),Pause Young (Normal) (G1 Evacuation Pause),139.0,81.0,184.0,71.460,0
+1794603730449,1794603730,qiqi-server-2,GC(23),Pause Young (Normal) (G1 Evacuation Pause),145.0,83.0,224.0,19.504,0
+1794603734051,1794603734,qiqi-server-2,GC(24),Pause Young (Normal) (G1 Evacuation Pause),179.0,84.0,224.0,23.536,0
+1794603737914,1794603737,qiqi-server-2,GC(25),Pause Young (Normal) (G1 Evacuation Pause),188.0,86.0,224.0,27.028,0
+1794603741598,1794603741,qiqi-server-2,GC(26),Pause Young (Normal) (G1 Evacuation Pause),190.0,86.0,224.0,20.898,0
+1794603745385,1794603745,qiqi-server-2,GC(27),Pause Young (Concurrent Start) (G1 Evacuation Pause),190.0,85.0,224.0,99.552,0
+1794603745774,1794603745,qiqi-server-2,GC(28),Pause Remark,92.0,92.0,224.0,87.507,0
+1794603746295,1794603746,qiqi-server-2,GC(28),Pause Cleanup,111.0,111.0,224.0,0.656,0
+1794603749263,1794603749,qiqi-server-2,GC(29),Pause Young (Prepare Mixed) (G1 Evacuation Pause),197.0,85.0,224.0,42.323,0
+1794603752370,1794603752,qiqi-server-2,GC(30),Pause Young (Mixed) (G1 Evacuation Pause),197.0,84.0,224.0,39.221,0
+1794603755707,1794603755,qiqi-server-2,GC(31),Pause Young (Normal) (G1 Evacuation Pause),204.0,83.0,224.0,32.191,0
+1794603759106,1794603759,qiqi-server-2,GC(32),Pause Young (Normal) (G1 Evacuation Pause),203.0,84.0,224.0,141.594,0
+1794603762141,1794603762,qiqi-server-2,GC(33),Pause Young (Concurrent Start) (G1 Evacuation Pause),196.0,83.0,224.0,61.282,0
+1794603762808,1794603762,qiqi-server-2,GC(34),Pause Remark,99.0,99.0,224.0,79.190,0
+1794603763085,1794603763,qiqi-server-2,GC(34),Pause Cleanup,111.0,111.0,224.0,0.126,0
+1794603765775,1794603765,qiqi-server-2,GC(35),Pause Young (Prepare Mixed) (G1 Evacuation Pause),203.0,84.0,224.0,29.126,0
+1794603768616,1794603768,qiqi-server-2,GC(36),Pause Young (Mixed) (G1 Evacuation Pause),204.0,82.0,272.0,26.952,0
+1794603772329,1794603772,qiqi-server-2,GC(37),Pause Young (Normal) (G1 Evacuation Pause),234.0,82.0,272.0,53.343,0
+1794603776193,1794603776,qiqi-server-2,GC(38),Pause Young (Normal) (G1 Evacuation Pause),234.0,82.0,272.0,69.432,0
+1794603780176,1794603780,qiqi-server-2,GC(39),Pause Young (Normal) (G1 Evacuation Pause),234.0,83.0,272.0,78.523,0
+1794603783402,1794603783,qiqi-server-2,GC(40),Pause Young (Normal) (G1 Evacuation Pause),235.0,81.0,272.0,38.685,0
+1794603787015,1794603787,qiqi-server-2,GC(41),Pause Young (Normal) (G1 Evacuation Pause),233.0,81.0,328.0,77.618,0
+1794603791203,1794603791,qiqi-server-2,GC(42),Pause Young (Normal) (G1 Evacuation Pause),265.0,81.0,328.0,37.710,0
+1794603795028,1794603795,qiqi-server-2,GC(43),Pause Young (Normal) (G1 Evacuation Pause),265.0,81.0,328.0,25.495,0
+1794603799134,1794603799,qiqi-server-2,GC(44),Pause Young (Normal) (G1 Evacuation Pause),265.0,80.0,328.0,21.181,0
+1794603803928,1794603803,qiqi-server-2,GC(45),Pause Young (Normal) (G1 Evacuation Pause),264.0,81.0,328.0,67.894,0
+1794603808373,1794603808,qiqi-server-2,GC(46),Pause Young (Normal) (G1 Evacuation Pause),265.0,80.0,328.0,31.233,0
+1794603812625,1794603812,qiqi-server-2,GC(47),Pause Young (Normal) (G1 Evacuation Pause),264.0,80.0,328.0,52.026,0
+1794603819554,1794603819,qiqi-server-2,GC(48),Pause Young (Normal) (G1 Evacuation Pause),264.0,80.0,328.0,6.801,0
+1794603823421,1794603823,qiqi-server-2,GC(49),Pause Young (Normal) (G1 Evacuation Pause),264.0,82.0,328.0,28.031,0
+1794603827618,1794603827,qiqi-server-2,GC(50),Pause Young (Normal) (G1 Evacuation Pause),266.0,84.0,328.0,19.909,0
+1794603831636,1794603831,qiqi-server-2,GC(51),Pause Young (Normal) (G1 Evacuation Pause),268.0,85.0,328.0,40.109,0
+1794603835148,1794603835,qiqi-server-2,GC(52),Pause Young (Normal) (G1 Evacuation Pause),269.0,85.0,328.0,24.798,0
+1794603838613,1794603838,qiqi-server-2,GC(53),Pause Young (Normal) (G1 Evacuation Pause),269.0,85.0,328.0,64.591,0
+1794603842319,1794603842,qiqi-server-2,GC(54),Pause Young (Normal) (G1 Evacuation Pause),269.0,85.0,328.0,37.738,0
+1794603846008,1794603846,qiqi-server-2,GC(55),Pause Young (Normal) (G1 Evacuation Pause),269.0,85.0,328.0,62.881,0
+1794603849347,1794603849,qiqi-server-2,GC(56),Pause Young (Normal) (G1 Evacuation Pause),269.0,85.0,328.0,25.403,0
+1794603852488,1794603852,qiqi-server-2,GC(57),Pause Young (Normal) (G1 Evacuation Pause),269.0,85.0,328.0,38.196,0
+1794603856005,1794603856,qiqi-server-2,GC(58),Pause Young (Normal) (G1 Evacuation Pause),269.0,85.0,400.0,36.386,0
+1794603860728,1794603860,qiqi-server-2,GC(59),Pause Young (Normal) (G1 Evacuation Pause),317.0,85.0,400.0,64.739,0
+1794603865228,1794603865,qiqi-server-2,GC(60),Pause Young (Normal) (G1 Evacuation Pause),317.0,85.0,400.0,51.051,0
+1794603869134,1794603869,qiqi-server-2,GC(61),Pause Young (Normal) (G1 Evacuation Pause),317.0,85.0,400.0,25.373,0
+1794603873589,1794603873,qiqi-server-2,GC(62),Pause Young (Normal) (G1 Evacuation Pause),317.0,85.0,400.0,22.106,0
+1794603877930,1794603877,qiqi-server-2,GC(63),Pause Young (Normal) (G1 Evacuation Pause),317.0,85.0,400.0,44.128,0
+1794603881862,1794603881,qiqi-server-2,GC(64),Pause Young (Normal) (G1 Evacuation Pause),317.0,85.0,480.0,49.315,0
+1794603887185,1794603887,qiqi-server-2,GC(65),Pause Young (Normal) (G1 Evacuation Pause),365.0,85.0,480.0,39.951,0
+1794603892394,1794603892,qiqi-server-2,GC(66),Pause Young (Normal) (G1 Evacuation Pause),365.0,85.0,480.0,55.609,0
+1794603897265,1794603897,qiqi-server-2,GC(67),Pause Young (Normal) (G1 Evacuation Pause),365.0,85.0,480.0,21.212,0
+1794603902240,1794603902,qiqi-server-2,GC(68),Pause Young (Normal) (G1 Evacuation Pause),365.0,85.0,480.0,80.998,0
+1794603906676,1794603906,qiqi-server-2,GC(69),Pause Young (Normal) (G1 Evacuation Pause),365.0,85.0,480.0,14.601,0
+1794603911728,1794603911,qiqi-server-2,GC(70),Pause Young (Normal) (G1 Evacuation Pause),365.0,85.0,480.0,15.219,0
+1794603916151,1794603916,qiqi-server-2,GC(71),Pause Young (Normal) (G1 Evacuation Pause),365.0,85.0,480.0,34.485,0
+1794603920324,1794603920,qiqi-server-2,GC(72),Pause Young (Normal) (G1 Evacuation Pause),365.0,85.0,480.0,40.742,0
+1794603925313,1794603925,qiqi-server-2,GC(73),Pause Young (Normal) (G1 Evacuation Pause),365.0,86.0,480.0,15.545,0
+1794603929193,1794603929,qiqi-server-2,GC(74),Pause Young (Normal) (G1 Evacuation Pause),366.0,86.0,480.0,32.445,0
+1794603933046,1794603933,qiqi-server-2,GC(75),Pause Young (Normal) (G1 Evacuation Pause),366.0,86.0,480.0,14.676,0
+1794603938168,1794603938,qiqi-server-2,GC(76),Pause Young (Normal) (G1 Evacuation Pause),366.0,87.0,480.0,35.750,0
+1794603942131,1794603942,qiqi-server-2,GC(77),Pause Young (Normal) (G1 Evacuation Pause),367.0,88.0,480.0,29.675,0
+1794603945742,1794603945,qiqi-server-2,GC(78),Pause Young (Normal) (G1 Evacuation Pause),368.0,88.0,480.0,25.843,0
+1794603949519,1794603949,qiqi-server-2,GC(79),Pause Young (Normal) (G1 Evacuation Pause),368.0,89.0,480.0,13.775,0
+1794603953421,1794603953,qiqi-server-2,GC(80),Pause Young (Normal) (G1 Evacuation Pause),369.0,91.0,480.0,28.037,0
+1794603956974,1794603956,qiqi-server-2,GC(81),Pause Young (Normal) (G1 Evacuation Pause),363.0,91.0,480.0,44.663,0
+1794603960579,1794603960,qiqi-server-2,GC(82),Pause Young (Normal) (G1 Evacuation Pause),363.0,91.0,480.0,68.832,0
+1794603963890,1794603963,qiqi-server-2,GC(83),Pause Young (Normal) (G1 Evacuation Pause),363.0,90.0,480.0,15.213,0
+1794603967701,1794603967,qiqi-server-2,GC(84),Pause Young (Normal) (G1 Evacuation Pause),370.0,90.0,480.0,20.143,0
+1794603971512,1794603971,qiqi-server-2,GC(85),Pause Young (Normal) (G1 Evacuation Pause),362.0,90.0,480.0,35.413,0
+1794603975441,1794603975,qiqi-server-2,GC(86),Pause Young (Normal) (G1 Evacuation Pause),370.0,90.0,480.0,13.813,0
+1794603979499,1794603979,qiqi-server-2,GC(87),Pause Young (Normal) (G1 Evacuation Pause),370.0,91.0,480.0,33.896,0
+1794603982799,1794603982,qiqi-server-2,GC(88),Pause Young (Normal) (G1 Evacuation Pause),363.0,92.0,480.0,52.842,0
+1794603986512,1794603986,qiqi-server-2,GC(89),Pause Young (Normal) (G1 Evacuation Pause),364.0,91.0,480.0,29.656,0
+1794603989834,1794603989,qiqi-server-2,GC(90),Pause Young (Normal) (G1 Evacuation Pause),363.0,92.0,480.0,13.122,0
+1794603993141,1794603993,qiqi-server-2,GC(91),Pause Young (Normal) (G1 Evacuation Pause),364.0,91.0,480.0,22.750,0
+1794603996770,1794603996,qiqi-server-2,GC(92),Pause Young (Normal) (G1 Evacuation Pause),371.0,92.0,480.0,19.405,0
+1794604001046,1794604001,qiqi-server-2,GC(93),Pause Young (Normal) (G1 Evacuation Pause),372.0,91.0,480.0,21.150,0
+1794604004565,1794604004,qiqi-server-2,GC(94),Pause Young (Normal) (G1 Evacuation Pause),371.0,91.0,480.0,17.029,0
+1794604008435,1794604008,qiqi-server-2,GC(95),Pause Young (Normal) (G1 Evacuation Pause),371.0,91.0,480.0,31.661,0
+1794604011914,1794604011,qiqi-server-2,GC(96),Pause Young (Normal) (G1 Evacuation Pause),371.0,91.0,480.0,16.090,0
+1794604015763,1794604015,qiqi-server-2,GC(97),Pause Young (Normal) (G1 Evacuation Pause),371.0,91.0,480.0,20.566,0
+1794604019410,1794604019,qiqi-server-2,GC(98),Pause Young (Normal) (G1 Evacuation Pause),371.0,91.0,480.0,54.393,0
+1794604023561,1794604023,qiqi-server-2,GC(99),Pause Young (Normal) (G1 Evacuation Pause),371.0,91.0,480.0,14.498,0
+1794604027220,1794604027,qiqi-server-2,GC(100),Pause Young (Normal) (G1 Evacuation Pause),371.0,91.0,480.0,32.314,0
+1794604031044,1794604031,qiqi-server-2,GC(101),Pause Young (Normal) (G1 Evacuation Pause),371.0,91.0,480.0,37.011,0
+1794604034881,1794604034,qiqi-server-2,GC(102),Pause Young (Normal) (G1 Evacuation Pause),371.0,91.0,480.0,12.750,0
+1794604038453,1794604038,qiqi-server-2,GC(103),Pause Young (Normal) (G1 Evacuation Pause),371.0,91.0,480.0,16.627,0
+1794604042200,1794604042,qiqi-server-2,GC(104),Pause Young (Normal) (G1 Evacuation Pause),371.0,91.0,480.0,14.146,0
+1794604045769,1794604045,qiqi-server-2,GC(105),Pause Young (Normal) (G1 Evacuation Pause),371.0,91.0,480.0,10.427,0
+1794604049466,1794604049,qiqi-server-2,GC(106),Pause Young (Normal) (G1 Evacuation Pause),371.0,91.0,480.0,8.238,0
+1794604053316,1794604053,qiqi-server-2,GC(107),Pause Young (Normal) (G1 Evacuation Pause),371.0,91.0,480.0,13.837,0
+1794604056855,1794604056,qiqi-server-2,GC(108),Pause Young (Normal) (G1 Evacuation Pause),371.0,91.0,480.0,39.669,0
+1794604060432,1794604060,qiqi-server-2,GC(109),Pause Young (Normal) (G1 Evacuation Pause),371.0,91.0,480.0,13.643,0
+1794604064232,1794604064,qiqi-server-2,GC(110),Pause Young (Normal) (G1 Evacuation Pause),371.0,91.0,480.0,10.109,0
+1794604068216,1794604068,qiqi-server-2,GC(111),Pause Young (Normal) (G1 Evacuation Pause),371.0,91.0,480.0,42.000,0
+1794604071685,1794604071,qiqi-server-2,GC(112),Pause Young (Normal) (G1 Evacuation Pause),371.0,91.0,480.0,15.933,0
+1794604075212,1794604075,qiqi-server-2,GC(113),Pause Young (Normal) (G1 Evacuation Pause),371.0,91.0,480.0,8.713,0
+1794604078927,1794604078,qiqi-server-2,GC(114),Pause Young (Normal) (G1 Evacuation Pause),371.0,92.0,480.0,11.936,0
+1794604082861,1794604082,qiqi-server-2,GC(115),Pause Young (Normal) (G1 Evacuation Pause),372.0,92.0,480.0,23.685,0
+1794604086572,1794604086,qiqi-server-2,GC(116),Pause Young (Normal) (G1 Evacuation Pause),372.0,91.0,480.0,43.403,0
+1794604090090,1794604090,qiqi-server-2,GC(117),Pause Young (Normal) (G1 Evacuation Pause),371.0,92.0,480.0,16.759,0
+1794604093717,1794604093,qiqi-server-2,GC(118),Pause Young (Normal) (G1 Evacuation Pause),372.0,92.0,480.0,22.326,0
+1794604097144,1794604097,qiqi-server-2,GC(119),Pause Young (Normal) (G1 Evacuation Pause),372.0,92.0,480.0,45.163,0
+1794604100692,1794604100,qiqi-server-2,GC(120),Pause Young (Normal) (G1 Evacuation Pause),372.0,92.0,480.0,10.789,0
+1794604104172,1794604104,qiqi-server-2,GC(121),Pause Young (Normal) (G1 Evacuation Pause),372.0,92.0,480.0,47.732,0
+1794604108086,1794604108,qiqi-server-2,GC(122),Pause Young (Normal) (G1 Evacuation Pause),372.0,92.0,576.0,7.925,0
+1794604112307,1794604112,qiqi-server-2,GC(123),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,36.385,0
+1794604116807,1794604116,qiqi-server-2,GC(124),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,10.452,0
+1794604121175,1794604121,qiqi-server-2,GC(125),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,19.577,0
+1794604125490,1794604125,qiqi-server-2,GC(126),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,9.426,0
+1794604129805,1794604129,qiqi-server-2,GC(127),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,21.382,0
+1794604134229,1794604134,qiqi-server-2,GC(128),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,15.149,0
+1794604138516,1794604138,qiqi-server-2,GC(129),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,15.532,0
+1794604142803,1794604142,qiqi-server-2,GC(130),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,15.545,0
+1794604147249,1794604147,qiqi-server-2,GC(131),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,25.684,0
+1794604151602,1794604151,qiqi-server-2,GC(132),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,8.500,0
+1794604155897,1794604155,qiqi-server-2,GC(133),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,10.849,0
+1794604160545,1794604160,qiqi-server-2,GC(134),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,31.145,0
+1794604165104,1794604165,qiqi-server-2,GC(135),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,36.928,0
+1794604169377,1794604169,qiqi-server-2,GC(136),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,26.989,0
+1794604173996,1794604173,qiqi-server-2,GC(137),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,12.488,0
+1794604178254,1794604178,qiqi-server-2,GC(138),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,15.155,0
+1794604182770,1794604182,qiqi-server-2,GC(139),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,13.916,0
+1794604186916,1794604186,qiqi-server-2,GC(140),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,15.451,0
+1794604191296,1794604191,qiqi-server-2,GC(141),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,14.597,0
+1794604195543,1794604195,qiqi-server-2,GC(142),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,22.305,0
+1794604200186,1794604200,qiqi-server-2,GC(143),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,26.602,0
+1794604205184,1794604205,qiqi-server-2,GC(144),Pause Young (Normal) (G1 Evacuation Pause),428.0,92.0,576.0,11.726,0
+1794604209205,1794604209,qiqi-server-2,GC(145),Pause Young (Normal) (G1 Evacuation Pause),428.0,90.0,576.0,25.432,0

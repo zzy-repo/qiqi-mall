@@ -596,3 +596,241 @@ python3 bench/tools/poolcmp.py bench/results/2026-11-14-avalanche-pool{10-r1,10-
    `unexpected EOF`，丢了 GC 快照与自动清场（压测原始数据完好，GC 两列缺失）。
 3. 采样器表头曾 echo 到 stdout（`mysql.csv` 缺表头）→ 解析器已做缺表头兼容。
 4. `group by 1` 撞聚合函数（ERROR 1056）导致 provenance 的连接数一行为空 → 已改显式子查询。
+
+---
+
+## 13. 闸门是「每单 SQL 条数 × 这台机的语句吞吐」吗？—— 采 MySQL CPU + SQL 画像 + 一处合并对照
+
+上一轮（§12）只拿到**强相关**：每个配置每个饱和档 `SQL/s` 都钉在 7,300~7,830、每单约 19 条，
+于是 ok/s ≈ 400。当时明确标注「没采 MySQL CPU、没动 SQL 条数 ⇒ 不是因果」。本轮把它往因果推：
+① 采 MySQL 自己的 cgroup CPU/节流；② 用 performance_schema 出「那 19 条到底是哪几条」；
+③ 只改**一处** SQL（建单的 INSERT+UPDATE 合成一条），再压同一批档位对撞。
+
+### 13.1 新工具（都是只读观测，不改业务/不重建镜像）
+
+| 工具 | 干什么 | 为什么必须新写 |
+| --- | --- | --- |
+| `tools/mycpu.sh` | 宿主机直读 **MySQL 容器**的 `cpu.stat`（usage_usec / nr_throttled / throttled_usec）、`cpu.max`、memory、以及**宿主机** `cpu.pressure` + `/proc/stat` 全机忙核数，1s 一次 | `cgwatch.sh` 只采 server-1/-2，DB 侧一直是空白；`docker exec` 每 200ms 起进程本身就是干扰 |
+| `tools/sqldigest.sh` | 每 2s 快照 `performance_schema.events_statements_summary_by_digest`（按 SCHEMA 分行、洗掉逗号/换行） | 慢查询日志有阈值、要改配置；DIGEST 聚合天然回答「同一形状执行了几次、总共多久」 |
+| `tools/sqlprofile.py` | 按档窗口把两次快照**做差** → 每档每语句的次数/占比/均耗时、每单语句数、driver/read/write 三分类 | 累计计数器必须做差才有意义；口径（样本用压测内部轴 `planned_ms`、档窗口用墙上 `epoch`）踩过一次坑，见 §13.7 |
+| `tools/QpsProbe.java` | 单文件 Java 探针：N 条连接闭环保压 `SELECT 1`，输出 qps/p50/p99 | 要一个**与业务代码无关**的外部常量（QPS_cap），否则「改吞吐 + 改每单条数」是自证 |
+| `tools/qpscap.sh` | 两段式测 QPS_cap：①机器空闲裸能力 ②**450 rps 下单负载跑着时**的探针 | ①证明机器没变；②才是「业务饱和时 MySQL 还剩多少语句能力」 |
+| `tools/sqlmerge.py` | 多轮 A/B 并列表 + 每臂拐区起点/饱和点 + 因果检验（预测 vs 实测） | 单轮数字分不出 ±3% 的差别 |
+| `tools/jar-deploy.sh` + `bench/jar-mount.override.yml` | 把 mvn 出来的 jar **只读挂**到 `/app/app.jar` 再重建容器 | 任务要求改业务代码，又禁止重建镜像：挂 jar 是唯一同时满足两者的做法，且 A/B 两臂除 jar 内容外完全同构（同一镜像 digest、同一 JAVA_OPTS、同一 Hikari 10） |
+
+`avalanche.sh` 顺手挂上了这三个采样器（`MYSQL_CGROUP` / `SQLPROFILE` 默认开），
+并给 `mysql.csv` **追加**了 6 列（data_fsyncs / log_fsyncs / log_waits / bp_wait_free / rows_updated / rows_inserted，
+只能往后追加 —— `avalanche.py` 按位置取前 6 列）。
+
+### 13.2 ① MySQL 自己的 CPU 与 throttle（饱和档，380/400/420/450 每档 75s，6 轮）
+
+| 档 | MySQL 核数（改前 A） | MySQL 核数（改后 B） | `cpu.max` | nr_throttled | 全机忙核 | cpu.pressure some / full |
+| --: | --: | --: | --- | --: | --: | --- |
+| 380 | 1.39 | 1.06~1.42 | `max 100000` | **0** | 4.00 / 4 | 91% / 0% |
+| 400 | 1.44 | 1.31~1.42 | `max 100000` | **0** | 4.00 / 4 | 91% / 0% |
+| 420 | 1.44 | 1.42 | `max 100000` | **0** | 4.00 / 4 | 91% / 0% |
+| 450 | 1.43 | 1.42 | `max 100000` | **0** | 4.00 / 4 | 91% / 0% |
+
+**回答①：MySQL 在饱和档只用 1.42~1.46 核（4 核的 36%），`cpu.max=max`（没有配额）、`nr_throttled=0`、
+`nr_periods=0` —— 节流在物理上不可能发生。所以「DB 算力打满」这个因果不成立。**
+但要看清另一半：**这台机 4 核已经是 4.00/4 打满**（app 2×0.71 + MySQL 1.43 + 压测器 0.22 + 平台其它容器），
+`cpu.pressure some` 91% 说明到处在等 CPU。而且把**每条语句的耗时**拆开看：
+一档里所有语句的 `SUM_TIMER_WAIT` 合计约 800~840s，而 MySQL CPU 只有约 110s ⇒
+**86.6% 的语句时间是「等」（行锁/IO/调度），只有 13.4% 在算**。
+
+### 13.3 ② SQL 画像：那「19 条」到底是哪几条（改前 A@420 档，30,199 单）
+
+| # | 语句（DIGEST 归一化后） | 条/单 | 占比 | 均耗时 | 分类 |
+| --: | --- | --: | --: | --: | --- |
+| 1 | `SELECT @@SESSION.transaction_read_only` | **7.04** | **35.0%** | 0.14ms | driver |
+| 2 | `SET autocommit = ?` | **2.01** | **10.0%** | 0.12ms | driver |
+| 3 | `COMMIT` | 1.00 | 5.0% | **4.11ms** | driver |
+| 4 | `INSERT INTO order` | 1.00 | 5.0% | 0.52ms | write |
+| 5 | `INSERT INTO order_status_ledger`（出生台账） | 1.00 | 5.0% | 0.53ms | write |
+| 6 | `INSERT IGNORE INTO stock_ledger` | 1.00 | 5.0% | 0.53ms | write |
+| 7 | `UPDATE sku_bucket SET stock=stock-?` | 1.00 | 5.0% | **16.84ms** | write |
+| 8 | `UPDATE stock_ledger SET bucket_no=...` | 1.00 | 5.0% | 0.57ms | write |
+| — | （其余）`INSERT order_item` / `UPDATE order`(总额回填) / `SELECT sku` / `SELECT product` / `SELECT order_item`(明细回查) 各 1.00 条 | 5.00 | 25.0% | 0.3~0.6ms | — |
+| | **合计** | **20.10** | 100% | | |
+
+- **driver 10.05 条（50%）**：其中 7 条是 Connector/J 在**每条 DML 之前**发的一句
+  `SELECT @@session.transaction_read_only`（`useLocalSessionState=false` 的默认行为）。
+  ⇒ 删一条 DML 实际省的是 **2 条语句**（DML + 它的探针），这是选合并点时最关键的一条画像结论。
+- 按**时间**排则是另一个故事：`UPDATE sku_bucket` 一档累计 510s（占全部语句时间 **63.8%**），
+  `COMMIT` 127s（15.9%），其余 20% —— 时间几乎全花在等那把热点行锁上（与 §12 的行锁数据一致）。
+- 也解释了「19 vs 我数出来的 10 条业务语句」：19~20 条里有一半是驱动/池自己的往返，不是业务 SQL。
+
+### 13.4 ② 唯一改的那处合并 + mvn
+
+**一句话**：建单不再「先插 `total_amount=0`、扣完库存再 `UPDATE order` 回填总额」，
+改成把读（SKU/商品/价格）前置、总额算好后**一条 INSERT 写对** —— 少 1 条 DML、连带少 1 条 read_only 探针。
+
+```java
+// 改前：两条 DML
+order.setTotalAmount(BigDecimal.ZERO);
+orderService.save(order);          // INSERT order(total=0)
+for (ItemInput in : inputs) { ...deductStock...; total = total.add(...); }
+orderItemService.saveBatch(items);
+order.setTotalAmount(total);
+int rows = orderService.getBaseMapper().updateById(order);   // ← 这条消失
+OptimisticLockGuard.requireAffected(rows, MSG_RECORD_DELETED);
+
+// 改后：一条 DML（读前置 → 总额算完 → 一次 INSERT → 再扣库存/写明细）
+for (ItemInput in : inputs) { sku=getById; product=getById; resolved.add(...); total=total.add(...); }
+if (resolved.isEmpty()) throw new IllegalStateException("商品信息无效，无法下单");
+order.setTotalAmount(total);
+orderService.save(order);          // INSERT order(total=正确值)
+...deductStock / build items...
+orderItemService.saveBatch(items);
+```
+
+等价性（写在类注释里，逐条对齐）：落库终态逐列相同；失败语义相同（整笔 REQUIRES_NEW 回滚）；
+读的快照相同（同一事务内的一致性读，价格/商品名取值不变）；明细为空时抛异常的位置前移但提交状态同样为空。
+**代价如实记**：那条 `updateById` 后面跟的 `requireAffected(MSG_RECORD_DELETED)` 一起消失了 ——
+它在本事务里不可达（同事务内没有 DELETE order，未提交的 INSERT 对其他事务不可见），
+但确实是一条被删掉的防御性检查。
+
+`mvn -B clean test`：**Tests run: 246, Failures: 0, Errors: 0 —— BUILD SUCCESS**（含下单契约/库存/台账/幂等全量集成测试）。
+
+### 13.5 ③ 对照阶梯（每档 75s，预热 90s@350 rps，热点 SKU 0.8，Tomcat 200 / Hikari 10 / 镜像未变）
+
+`ok/s` 每臂 3 轮原始值 + 中位数（噪声带 ±2.8%；420/450 三档两臂都可比，
+380/400 的 r1/r2 是**冷 JVM 假崩**，见 §13.7，只有热机轮可比 —— 这两档两臂都正好压满目标，本来也没有差别可比）：
+
+| λ | A 改前 r1/r2/r3 | **A 中位** | B 改后 r1/r2/r3 | **B 中位** | Δ |
+| --: | --- | --: | --- | --: | --: |
+| 380 | 379.9 / 360.1* / 379.9 | 379.9 | 285.5* / 286.8* / 380.0 | (380.0 热机) | 0%（都压满） |
+| 400 | 400.0 / 392.6* / 399.9 | 399.9 | 369.1* / 352.2* / 399.9 | (399.9 热机) | 0%（都压满） |
+| 420 | 402.7 / 397.0 / 400.5 | **400.5** | **419.9 / 419.9 / 419.9** | **419.9** | **+4.8%** |
+| 450 | 399.6 / 393.6 / 398.4 | **398.4** | **434.1 / 446.2 / 441.0** | **441.0** | **+10.7%** |
+
+（*冷启动轮，见 §13.7；B@420 三轮完全一致 419.9 = 目标值、丢弃 0，说明饱和点已经不在 420。）
+
+| 指标 | A 改前（450 档） | B 改后（450 档） |
+| --- | --: | --: |
+| ok/s（中位） | 398.4 | **441.0** |
+| p50 / p99 | 4.6s / 7.2~8.0s | 3.6s / 6.4~7.0s |
+| 每单语句数 | 20.62 | **18.77**（−9.0%） |
+| **SQL/s（语句率）** | **7,703~7,767** | **7,575~7,716**（−0.4%，没变） |
+| MySQL 核数 | 1.43 | 1.42（没变） |
+| 行锁等待/s | 190.3 | 193.5（没变） |
+| fsync/s（data / log） | 900 / 855 | 914 / 868（没变） |
+| after-GC 堆峰 / GC% | 95MB / 0.8% | 93MB / 0.9%（没变） |
+
+**拐区起点 / 饱和点**（判据沿用 §11.3 的弹性版：弹性 = Δok/s ÷ Δλ < 0.5 判饱和；拐区起点 = p50 首次 ≥1s）：
+
+| | 拐区起点 | 饱和点 |
+| --- | --- | --- |
+| A 改前 | **400 rps**（p50 319ms → 2337ms，×7.3） | **420 rps**（弹性 0.06） |
+| B 改后 | **450 rps**（p50 60→241→649→3570ms） | **>450 rps**（450 档弹性 0.71，仍跟着涨） |
+
+### 13.6 外部常量 QPS_cap：它变没变？预测 vs 实测
+
+先解决**自证陷阱**：合并既然改的是「每单语句数」，就不能只用「吞吐涨了」当结论 —— 必须把
+`QPS_cap` 当外部常量先量出来。
+
+**① 裸能力（与业务代码完全无关：`QpsProbe` 10 条连接闭环保压 `SELECT 1`，20s，机器空闲）**
+
+| | 第一次 | 第二次 | 结论 |
+| --- | --: | --: | --- |
+| A 改前 | 21,832 qps | 22,026 qps | 一致 |
+| B 改后 | 21,419 qps | 21,694 qps | 一致（两臂差 ≤2%） |
+
+⇒ **机器/MySQL 的裸语句能力在合并前后没变，整组对照成立。**
+
+**② 饱和负载下的探针（450 rps 下单负载跑着，同一探针 10 连接 × 25s）**
+
+| | 第一次 | 第二次 |
+| --- | --: | --: |
+| A 改前 | 9,762 qps | 14,185 qps |
+| B 改后 | 14,476 qps | 8,814 qps |
+
+⇒ **这个量噪声极大（同一臂两次差 45%），分辨不出两臂差别，不能当外部常量用** —— 如实写在这里，
+免得后面的人拿它做结论。（它也确实说明：MySQL 在业务饱和时还有 9k~14k 的纯读语句余量，
+所以「8k 就是 MySQL 的算力上限」这个说法是错的，见 §13.7 结论。）
+
+**③ 于是常量改用「阶梯里直接量到的语句率」**（`global_status.Queries` 增量 ÷ 档时长，不是从 ok/s 反推）：
+A 8,215 语句/s（450 档，= 398.4 × 20.62）、B 8,277（= 441.0 × 18.77）—— **两臂差 0.8%，常量没动。**
+
+**预测 vs 实测（先用 A 的常量算，再去压测对撞）**
+
+```
+预测：ok/s_B = QPS_cap ÷ 语句/单_B = 8215 ÷ 18.77 = 437.5
+实测：441.0              → 偏差 +0.8%
+反向：ok/s_A = 8215 ÷ 20.62 = 398.4  实测 398.4  （完全吻合）
+```
+
+结论不是「改完更快了」，而是「**改完快到了不变式预测的位置**」：+10.7% 的吞吐 ≈ 1/0.91 的语句数倒数。
+
+`tools/sqlmerge.py` 把三张三轮的原始值一起喂进去，450 档直接给出这个对撞（判据自带 ±25% 的一致性带）：
+
+```
+λ=450: 语句/单 20.71 → 18.49（预测 ok/s ×1.120）  实测 ×1.109  比值 0.99 ⇒ 与不变式一致
+λ=420: 语句/单 20.64 → 18.60（预测 ok/s ×1.110）  实测 ×1.050  比值 0.95 ⇒ 与不变式一致
+λ=380/400: 比值 0.61 / 0.86 ⇒ **不一致**，原因是这两档混进了冷启动轮（见 §13.7），剔除后无差别可比
+（两臂这四档的 SQL/s 中位都落在 7.5~7.7k，MySQL 核数都落在 1.4 上下 —— 常量没动，动的是每单条数）
+```
+
+### 13.7 结论：不变式**部分成立** —— 关系成立，机制被改写
+
+- **关系成立**：`ok/s ≈ 语句率上限 ÷ 每单语句数`，两臂的乘积都落在 8.2k（8215 / 8277，差 0.8%），
+  预测 437 vs 实测 441（+0.8%）。压 SQL 条数**确实**能换吞吐，且换到的量等于条数倒数。
+- **机制被推翻一半**：闸门**不是**「MySQL 算力打满」——
+  MySQL 只用 1.42~1.46 核（4 核的 36%）、没有配额、`nr_throttled=0`、
+  而且业务饱和时还能额外跑 9k~14k 条 `SELECT 1`/s；86.6% 的语句时间在等而不是在算。
+- **更像的机制**：这台 **4 核机已经被 4.00/4 吃满**（app 1.42 + MySQL 1.43 + 压测器 0.22 + 平台容器 + 采样器），
+  `cpu.pressure some` 91%。于是「每秒能承担多少条语句」是**整机预算**（≈8.2k 条/s），
+  每条语句（应用侧 JDBC/MyBatis/Spring + DB 侧解析执行）摊一份固定 CPU；
+  **少一条语句就少一份预算占用** ⇒ 吞吐按 1/条数 上升。这也解释了上一轮池子调大为什么没用
+  （并发上去了，但总预算不变，多出来的并发全变成行锁排队：2.1k s → 16.3k s）。
+- **下一步最该做的（按性价比）**：
+  1. **关掉那 7 条 `SELECT @@session.transaction_read_only`**：Connector/J 的
+     `useLocalSessionState=true`（JDBC URL 参数）。它一条不占业务语义，却是 34% 的语句
+     —— 按不变式预测 ok/s ≈ 8215 ÷ 13.1 ≈ **627**。⚠️ 这会改变驱动对「会话状态」的信任方式
+     （外部工具改 autocommit/read-only 会失联），必须单独做一轮对照 + 全量回归，本轮**没做**。
+  2. 把 `COMMIT` 的成本往下压（4.1ms/次、占语句时间 16%）：这是**提交落盘**的钱，
+     与 SQL 条数无关；改 `sync_binlog`/`innodb_flush_log_at_trx_commit` 属于可用性取舍，不是性能实验能顺手定的。
+  3. 真要提吞吐上限，先把这台机从 4 核里腾出来（平台其它 15 个容器），或者给 MySQL 独占核；
+     「加连接」已被证伪、「热点行锁」已被证伪、单条 SQL 合并的收益已经吃到（+10.7%）。
+
+### 13.8 本轮踩到/修掉的坑（都已在工具里留门禁）
+
+1. **`events_statements_history_long` 忘了关 → 直接把系统压垮**。我为取语句顺序临时开了这个 consumer，
+   忘了关就跑第一轮：380 档 ok/s 273.5、丢 7,986、SQL/s 只有 5,505（离不变式的 7.7k 差很远）。
+   ⇒ 它给**每条语句**写一行环形缓冲，等于给 MySQL 套了一层审计。
+   现在 `avalanche.sh` 开跑前**硬门禁**：这个 consumer 是 YES 就直接退出，不许带病跑。
+2. **冷 JVM 会把前两档打假**（§12.6 那条坑的升级版）：容器重建后 1~2 分钟内开跑，
+   380 档 ok/s 285~287、SQL/s 只有 4.9~5.4k，**根本不在不变式的墙上**。
+   ⇒ 判「这一轮能不能用」的新口径不是看它崩没崩，而是看**该档 SQL/s 是否已到 7.5~8.3k**；
+   不到就说明是被冷启动/预热拖的，不是被闸门限的。A 组的 r1 与 r3 是热机轮（相差 ≤0.6%），
+   B 组 r3 是热机轮；B 组 r1/r2 的 380/400 两档已按此口径作废（420/450 不受影响，冷启动在热身后 ~1.5%）。
+3. **同一个 λ 放两档会让 `avalanche.py` 崩**（弹性 = Δok/s ÷ 0 → None → 格式化异常）：
+   我试过「380 烧机档 + 380 测量档」的协议，直接踩到。已改成对 `None` 打 `n/a（λ 与上一档相同）`。
+4. **`Com_commit` 不在 `performance_schema.global_status` 里**（MySQL 8.4）：一个不存在的变量让整个
+   `concat()` 变 NULL，`mysql.csv` 整列写不出来。已换成 `Innodb_buffer_pool_wait_free`，
+   并保留「前 6 列位置不变」的兼容约束。
+5. **`sqlprofile.py` 混用了两个时间轴**：样本的 `planned_ms` 是压测内部轴（从 0 起），档窗口的
+   `epoch_start/end` 是墙上毫秒 —— 混用得到「每单 0.00 条」这种假数字。已改为样本用 `start_ms/end_ms`。
+6. **jar 挂载要 644**：`target/*.jar` 是 `0600 root:root`，容器以 `USER app` 运行，直接挂上去 JVM 读不了。
+   `jar-deploy.sh` 复制到 `$LG/jar/<label>/app.jar` 并 `chmod 644`，再用 md5 核对容器内外的确是同一份。
+
+### 13.9 本轮产物
+
+`results/2026-11-14-avalanche-sqlbase-r{1,2,3}/`（改前，jar md5 `2176d5fc…`）、
+`results/2026-11-14-avalanche-sqlfix-r{1,2,3}/`（改后，jar md5 `2e1a77ab…`）：
+每轮含 `ladder.csv/.txt`、`persecond.csv`、`cg.csv`、`gc_*.csv`、`mysql.csv`（12 列）、
+**`mycpu.csv`**（MySQL CPU/节流）、**`sqldigest.csv` + `sqlprofile.csv/.txt`**（SQL 画像）、`provenance.txt`（含容器内外 jar md5）。
+`/tmp/loadgen/qpscap/{armA,armA2,armB,armB2}/qpsprobe.txt` 是外部常量探针的原始输出（不入库，重跑见 §13.1）。
+
+⚠️ **`sqldigest.csv` 已 gzip**（每轮 2.7MB → 约 0.25MB；6 轮合计省 ~15MB）。要重算画像先解压：
+`gunzip -k bench/results/<轮>/sqldigest.csv.gz` 再跑 `sqlprofile.py`。
+`samples.csv`（逐请求明细）仍按 §4 的老规矩**不入库**，只在本机留全量。
+
+一条命令复现（先 `tools/jar-deploy.sh <jar> <label>`，再）：
+
+```bash
+MEMBER_PASS='<自选>' STEPS=380,400,420,450 STEP_DURATION=75 WARMUP=90 WARMUP_RPS=350 \
+  LABEL=sqlmerge-r1 bench/tools/avalanche.sh
+python3 bench/tools/sqlprofile.py bench/results/<日期>-avalanche-sqlmerge-r1
+python3 bench/tools/sqlmerge.py --a results/<改前…r1> results/<改前…r2> --b results/<改后…r1> results/<改后…r2>
+```

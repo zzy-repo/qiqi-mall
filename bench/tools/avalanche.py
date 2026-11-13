@@ -295,7 +295,9 @@ def verdict_v3(rows):
                 reason = f"下一档({nxt['target_rps']:.0f}) 弹性={e_next:.2f} 仍跟着涨"
         detail.append(
             f"  档{r['step']}（λ={r['lambda_in']:.0f}/s, ok/s={r['ok_s']:.1f}）："
-            f"Δλ=+{dl*100:.1f}% Δok/s=+{dt*100:.1f}% 弹性={e:.2f}"
+            # e 为 None = 本档 λ 与上一档相同（例如阶梯里刻意放了「烧机档」380,380,...）
+            # 那时「Δλ」没有意义、弹性无法定义 —— 报 n/a，**不要**把它当成饱和信号
+            f"Δλ=+{dl*100:.1f}% Δok/s=+{dt*100:.1f}% 弹性={'n/a（λ 与上一档相同）' if e is None else f'{e:.2f}'}"
             + ("  ← 弹性<0.5 **饱和信号**" if flag else "")
             + (f"  ⇒ 本档判据**作废**（{reason}）" if invalidated else ""))
         if flag and not invalidated and sat is None:
