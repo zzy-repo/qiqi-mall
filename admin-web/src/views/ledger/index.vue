@@ -67,6 +67,7 @@
     <el-table
       v-loading="loading"
       :data="list"
+      :row-key="rowKey"
       border
       empty-text="没有符合条件的台账记录"
       data-testid="ledger-list-table"
@@ -74,7 +75,8 @@
       <el-table-column label="时间" width="170">
         <template #default="{ row }">
           <!-- 每行的 testid 挂在时间格上：el-table 无法给 <tr> 直接加 data-testid -->
-          <span :data-testid="`ledger-row-${row.id}`" class="datetime">{{ fmtTime(row.createdAt) }}</span>
+          <!-- key 必须带 type：六支台账的 id 各自自增，合并到一个列表后 id 会撞（见 rowKey） -->
+          <span :data-testid="`ledger-row-${rowKey(row)}`" class="datetime">{{ fmtTime(row.createdAt) }}</span>
         </template>
       </el-table-column>
 
@@ -181,6 +183,16 @@ const resetQuery = () => {
   range.value = null
   search()
 }
+
+/**
+ * 行唯一标识 = `${type}-${id}`。
+ *
+ * 六个分支（订单/包裹/售后/审计/WMS/库存）的 id 来自**各自的自增序列**，UNION 到一张表后
+ * 必然出现重复 id（订单台账第 12 行与包裹台账第 12 行是两条完全不同的记录）。
+ * 所以行 key / data-testid 一律带 type：只用 row.id 会让 el-table 把两行当成同一行（复用错节点），
+ * 自动化用例的 `ledger-row-<id>` 也会撞。E2E 用 `ledger-row-` 前缀匹配，格式变了仍然命中。
+ */
+const rowKey = (row) => `${row.type}-${row.id}`
 
 /** 后端时间可能是 'YYYY-MM-DD HH:mm:ss' 或 ISO（带 T），统一成可读形式 */
 const fmtTime = (value) => {

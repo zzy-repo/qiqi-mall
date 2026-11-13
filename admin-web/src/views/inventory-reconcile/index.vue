@@ -58,8 +58,13 @@
           <div class="stat-card">
             <div class="stat-label">展示缓存（sku.stock）</div>
             <div class="stat-value" data-testid="reconcile-sku-stock">{{ num(detail.skuStock) }}</div>
+            <!-- 不是「缓存最后回写」：sku 表没有回写时间列，后端给的是 MAX(sku_bucket.updated_at) -->
             <div class="stat-foot">
-              缓存最后回写：{{ detail.lastRefreshAt ? fmtTime(detail.lastRefreshAt) : '无记录' }}
+              桶最近变动：{{ detail.lastRefreshAt ? fmtTime(detail.lastRefreshAt) : '无记录' }}
+              <div class="muted">
+                数据来源 MAX(sku_bucket.updated_at)（该 SKU 库存桶最近一次变动）；
+                库里没有「缓存回写时间」列，所以这不是缓存回写时刻
+              </div>
             </div>
           </div>
 
