@@ -157,6 +157,28 @@ const NO_UI_SCENES = [
 ]
 const NO_UI_SET = new Set(NO_UI_SCENES)
 
+/* ------------------------------------------------- 待补视频清单（第 ⑤ 项用） */
+
+// 「待补视频」= 有界面、该录、但**确实还没录**的场景（spec 仍 fixme）。
+// 与 NO_UI_SCENES 的区别：那是「视频不适用」，这是「视频欠着」—— 技术债必须显式登记，不许悄悄绿。
+// 规则（每条都由第 ⑤ 项强制校验，不是注释）：
+//   · 命中清单 → 该项降级为 ⚠ 并计入「待补 N 项」，⑤ 仍算通过；
+//   · 不在清单里的缺视频 → 照旧判红（门禁没有放松）；
+//   · 每条必须同时写 reason（为什么缺）与 plan（何时/怎么补），缺一即 FAIL；
+//   · 清单长度 ≤ PENDING_VIDEO_MAX（防止长成垃圾桶）；
+//   · 清单里的 path 必须真的存在（场景改名/删了却没清清单 → FAIL）；
+//   · 清单里的场景**已经有视频了** → FAIL（提示「可从未补清单移除」），防清单长期不清。
+const PENDING_VIDEO_MAX = 3
+const PENDING_VIDEO = [
+  { path: '03-商家-履约/13-售后台账',
+    reason: 'spec 仍 fixme：台账查询的 bizId 口径未定（订单 id 还是退货申请 id）',
+    plan: 'W5 闭环口径后补录' },
+  { path: '03-商家-履约/15-支付流水加固',
+    reason: 'spec 仍 fixme：台账页缺 PAYMENT 类型 + 缺可重放的渠道回调入口',
+    plan: 'W5 补 PAYMENT 分支与回调后补录' },
+]
+const PENDING_VIDEO_MAP = new Map(PENDING_VIDEO.map((p) => [p.path, p]))
+
 /* ============================================================== 通用小工具 */
 
 const results = []
@@ -373,15 +395,51 @@ const noUiList = sceneList.filter((s) => s.noUi)
 // 反向保护：白名单里写了但目录不存在 = 名单已过期/写错（不会放宽检查，只提示，避免悄悄失效）
 const noUiStale = NO_UI_SCENES.filter((n) => !sceneList.some((s) => s.path === n))
 
-push('⑤', '场景图+视频齐全', sceneGaps.length === 0,
+// ⑤ 分三类：被待补清单登记的（⚠ 降级）、没登记的（❌ 照旧判红）、无界面白名单（免视频）。
+// 清单自身的腐烂（超长 / 路径不存在 / 条目重复 / 缺 reason|plan / 已经有视频）同样判红 —— 门禁只管是否「登记过」，不管是否「合规矩」就等于没人管。
+const pendingHits = sceneGaps.filter((g) => PENDING_VIDEO_MAP.has(g.path))
+const hardGaps = sceneGaps.filter((g) => !PENDING_VIDEO_MAP.has(g.path))
+const pendingProblems = []
+const pendingSeen = new Set()
+if (PENDING_VIDEO.length > PENDING_VIDEO_MAX) {
+  pendingProblems.push(`待补清单 ${PENDING_VIDEO.length} 条 > 上限 ${PENDING_VIDEO_MAX} 条（清单正在变成垃圾桶）`)
+}
+for (const p of PENDING_VIDEO) {
+  if (!p || !p.path) { pendingProblems.push(`待补清单存在没有 path 的条目：${JSON.stringify(p)}`); continue }
+  if (!String(p.reason || '').trim()) pendingProblems.push(`待补清单 ${p.path} 缺 reason（为什么缺）`)
+  if (!String(p.plan || '').trim()) pendingProblems.push(`待补清单 ${p.path} 缺 plan（何时/怎么补）`)
+  if (pendingSeen.has(p.path)) pendingProblems.push(`待补清单 ${p.path} 重复登记`)
+  pendingSeen.add(p.path)
+  const hit = sceneList.find((s) => s.path === p.path)
+  if (!hit) {
+    pendingProblems.push(`待补清单里的 ${p.path} 未匹配到任何场景目录（场景改名/删除后没清清单？）`)
+  } else if (hit.vids > 0) {
+    pendingProblems.push(`待补清单里的 ${p.path} 已经有 ${hit.vids} 段视频了 → 可从待补清单移除（防清单长期不清）`)
+  }
+}
+
+push('⑤', '场景图+视频齐全', hardGaps.length === 0 && pendingProblems.length === 0,
   `场景 ${sceneList.length} 个，缺件 ${sceneGaps.length}`
+  + (hardGaps.length
+    ? `（其中 ${hardGaps.length} 项未登记进「待补视频」清单 → 判红）`
+    : (pendingHits.length ? '（均在「待补视频」清单内，已登记原因与计划）' : ''))
   + (noUiList.length ? `（其中 ${noUiList.length} 个为无界面场景，仅校验图）` : ''),
   [
-    ...sceneGaps.map((g) => `${g.path}  缺 ${g.missing.join(' + ')}`),
+    // 未登记的缺件：真红，逐条点名
+    ...hardGaps.map((g) => `${g.path}  缺 ${g.missing.join(' + ')}（未在待补清单登记 → 判红）`),
+    // 已登记的缺件：⚠ 降级，但原因与计划必须现场打出来（不靠去翻源码）
+    ...pendingHits.map((g) => {
+      const p = PENDING_VIDEO_MAP.get(g.path)
+      return `⚠ ${g.path}  缺 ${g.missing.join(' + ')} —— 原因：${p.reason} / 计划：${p.plan}`
+    }),
+    ...(pendingHits.length || PENDING_VIDEO.length
+      ? [`（待补 ${pendingHits.length} 项 / 清单上限 ${PENDING_VIDEO_MAX} 项）`] : []),
+    ...pendingProblems.map((x) => `待补清单自检不通过：${x}`),
     // 被豁免的场景逐个打印出来，不悄悄跳过
     ...noUiList.map((s) => `无界面场景免视频：${s.path}（图 ${s.imgs} 个，已在⑦⑧校验）`),
     ...noUiStale.map((n) => `提示：NO_UI_SCENES 里的 ${n} 未匹配到任何场景目录（名单已过期？）`),
   ])
+const pendingCount = pendingHits.length
 
 /* ============================================================== ⑦⑧ SVG 体检对象 */
 
@@ -711,7 +769,8 @@ console.log('')
 console.log(`页面 ${scenarioPages + diagramPages}（场景 ${scenarioPages} / 图页 ${diagramPages}）  `
   + `图片引用 ${imgStat.total}（${imgMode}: ${imgStat.ok}，失败 ${imgStat.fail}）  `
   + `视频引用 ${vidStat.total}（${vidMode}: ${vidStat.ok}，失败 ${vidStat.fail}）`)
-console.log(`孤儿图 ${mmdOnly.length + svgOnly.length}  场景缺件 ${sceneGaps.length}  `
+console.log(`孤儿图 ${mmdOnly.length + svgOnly.length}  场景缺件 ${sceneGaps.length}`
+  + (pendingCount ? `（待补 ${pendingCount}）` : '') + '  '
   + `泄露命中 ${leakHits.length}  SVG 不合规 ${svgBad.length}  死链 ${deadLinks.length}  `
   + `私密命中 ${PRIVATE_OK ? 'n/a（dev 豁免）' : priHits.length}`
   + `  洁净命中 ${PRIVATE_OK ? 'n/a（dev 豁免）' : cleanHits.length}`)
@@ -720,5 +779,8 @@ const reasons = []
 if (floorFailed.length) reasons.push(`下限断言：${floorFailed.map((f) => `${f.label} ${f.actual} < ${f.floor}`).join('、')}`)
 if (failed.length) reasons.push(failed.map((r) => r.id + r.title).join('、'))
 const pass = reasons.length === 0
-console.log(`结论：${pass ? 'PASS' : 'FAIL'}` + (pass ? '' : `（${reasons.join('；')}）`))
+console.log(`结论：${pass ? 'PASS' : 'FAIL'}`
+  + (pass
+    ? (pendingCount ? `（含 ${pendingCount} 项已登记的待补视频）` : '')
+    : `（${reasons.join('；')}）`))
 process.exit(pass ? 0 : 1)
