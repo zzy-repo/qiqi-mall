@@ -45,6 +45,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class PaymentSandboxOffTest {
 
+    /** admin 口令：默认种子值；改过口令（scripts/set-admin-password.sh）时用环境变量 ADMIN_PASSWORD
+     *  覆盖 —— 与 e2e 侧（e2e/tests/support/ui.js: process.env.ADMIN_PASSWORD || '123456'）同一口径 */
+    private static final String ADMIN_PASSWORD = System.getenv().getOrDefault("ADMIN_PASSWORD", "123456");
+
     private static final String SN_PREFIX = "PAYCBOFF";
 
     @Autowired
@@ -60,7 +64,7 @@ class PaymentSandboxOffTest {
     void prepare() {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("username", "admin");
-        body.put("password", "123456");
+        body.put("password", ADMIN_PASSWORD);
         ResponseEntity<JsonNode> resp = rest.postForEntity("/admin/auth/login", body, JsonNode.class);
         adminJwt = resp.getBody().path("data").path("accessToken").asText(null);
         assertThat(adminJwt).as("admin 登录失败：%s", resp.getBody()).isNotBlank();

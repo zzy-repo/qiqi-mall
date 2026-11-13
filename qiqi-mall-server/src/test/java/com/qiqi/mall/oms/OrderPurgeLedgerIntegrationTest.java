@@ -58,6 +58,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 @ExtendWith(OutputCaptureExtension.class)
 class OrderPurgeLedgerIntegrationTest {
 
+    /** admin 口令：默认种子值；改过口令（scripts/set-admin-password.sh）时用环境变量 ADMIN_PASSWORD
+     *  覆盖 —— 与 e2e 侧（e2e/tests/support/ui.js: process.env.ADMIN_PASSWORD || '123456'）同一口径 */
+    private static final String ADMIN_PASSWORD = System.getenv().getOrDefault("ADMIN_PASSWORD", "123456");
+
     /** 审计日志的固定前缀（改文案要同步改断言 —— 这正是它存在的意义：日志是对账凭据） */
     static final String LEDGER_AUDIT_PREFIX = "删除订单前清理库存台账";
 
@@ -89,7 +93,7 @@ class OrderPurgeLedgerIntegrationTest {
     void prepare() {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("username", "admin");
-        body.put("password", "123456");
+        body.put("password", ADMIN_PASSWORD);
         ResponseEntity<JsonNode> resp = rest.postForEntity("/admin/auth/login", body, JsonNode.class);
         adminJwt = resp.getBody() == null ? null : resp.getBody().path("data").path("accessToken").asText(null);
         assertThat(adminJwt).as("admin 登录失败：%s", resp.getBody()).isNotBlank();

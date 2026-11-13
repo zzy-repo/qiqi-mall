@@ -50,6 +50,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class LedgerQueryIntegrationTest {
 
+    /** admin 口令：默认种子值；改过口令（scripts/set-admin-password.sh）时用环境变量 ADMIN_PASSWORD
+     *  覆盖 —— 与 e2e 侧（e2e/tests/support/ui.js: process.env.ADMIN_PASSWORD || '123456'）同一口径 */
+    private static final String ADMIN_PASSWORD = System.getenv().getOrDefault("ADMIN_PASSWORD", "123456");
+
     /** 固定的台账时间：时间窗用例靠它做确定性断言（不跟别人抢「今天」） */
     private static final Timestamp LEDGER_TIME = Timestamp.valueOf("2020-01-01 12:00:00");
 
@@ -393,7 +397,7 @@ class LedgerQueryIntegrationTest {
 
     private String loginAsAdmin() {
         ResponseEntity<JsonNode> resp = rest.postForEntity("/admin/auth/login",
-                Map.of("username", "admin", "password", "123456"), JsonNode.class);
+                Map.of("username", "admin", "password", ADMIN_PASSWORD), JsonNode.class);
         JsonNode node = resp.getBody();
         assertThat(node).isNotNull();
         String token = node.path("data").path("accessToken").asText(null);

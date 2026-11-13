@@ -73,7 +73,8 @@ const SKU_WAREHOUSE_CYCLE = [1, 2, 3, 1]
 const SKU_STOCK = 1000
 /**
  * 库存分桶数：必须与后端配置 qiqi.stock.bucket-count（application-dev/test.yml）一致，
- * 也必须与 sql/migrate-sku-bucket.sql 回填里的 8 一致。
+ * 也必须与 `sql/_rollback/migrate-sku-bucket.sql` 回填里的 8 一致（历史脚本，已下线；
+ * 现结构见 db/migration/V1__baseline.sql）。
  * 种子先写 sku.stock，再按同一口径把它平均拆到 N 个桶（余数进 0 号桶）——
  * 拆的是同一份库存，SUM(桶) == sku.stock，不是第二份库存。
  */
@@ -339,7 +340,7 @@ async function main() {
   }
 
   // ---- 库存分桶行：sku_stock 平均拆成 BUCKET_COUNT 个桶（余数进 0 号桶）----
-  // 与 sql/migrate-sku-bucket.sql 的回填口径完全一致（同一份库存的物理拆分）。
+  // 与 `sql/_rollback/migrate-sku-bucket.sql` 的回填口径完全一致（同一份库存的物理拆分；该脚本已下线）。
   // 为什么种子必须自己写：sku_bucket 是权威库存，reset 库时只 TRUNCATE 不插入的话，
   // 每个 SKU 都会变成「0 库存」—— 所有下单都会报库存不足，而且看不出原因。
   const bucketNoOf = (stock, bucketNo) => {

@@ -10,6 +10,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -34,7 +37,19 @@ import java.util.concurrent.ThreadLocalRandom;
  * 如果无脑用 {@code ON DUPLICATE KEY UPDATE id = id}（或 INSERT IGNORE），
  * 撞到 {@code uk_channel_trade} 时这笔流水会被**静默丢弃** —— 那是丢钱。
  * 所以这里：捕获 {@link DuplicateKeyException} 后先按 {@code idem_key} 回查，
- * 命中 ⇒ 真的是重放（已入账），返回；没命中 ⇒ 是别的唯一键撞了 ⇒ 原样抛出，让业务失败。
+ * 命中 ⇒ 真的是重放（已入账），返回；没命中 ⇒ 是别的唯一键撞了 ⇒ 抛出可读的业务异常，让业务失败。
+ *
+ * <h3>回查必须跨两道「视野」，否则承诺在真并发下不成立</h3>
+ * 一次回查不够，原因见 {@link #idemKeyAlreadyBooked}：
+ * <ol>
+ *   <li>本事务内的读（含「本事务自己刚插、还没提交」的那一行）—— 同事务里 record() 调两次走这条；</li>
+ *   <li><b>REQUIRES_NEW 新事务</b>的读（另一条连接 = 新快照）—— 只有它看得见「别的写入方刚提交」的幂等行。
+ *       缺了它就会把真重放判成「不是重放」：{@code pay()} 的事务在第一条 {@code getById} 时就把
+ *       consistent snapshot 定下来了，对方之后提交的行，本事务的快照读**永远**看不见
+ *       （{@code PaymentIdemKeyTest} 用例 ⑤ 用真库复现：本事务快照读=0、新事务=1）。</li>
+ * </ol>
+ * 这两道都在**不改全局隔离级别**的前提下成立：新事务 = 新快照，普通快照读不加锁，
+ * 所以也不会和「撞键失败的那次 INSERT 留在本事务里的唯一索引共享锁」抢锁。
  *
  * <p>（{@code trade_no} 也顺手加了随机后缀：它原来只精确到毫秒，同一毫秒两笔流水会撞
  * {@code uk_channel_trade}，而那是合法业务，不该被当成重放。）
@@ -49,8 +64,19 @@ public class PaymentRecordServiceImpl extends ServiceImpl<PaymentRecordMapper, P
 
     private final LedgerProperties ledger;
 
-    public PaymentRecordServiceImpl(LedgerProperties ledger) {
+    /**
+     * 「撞键之后回查」专用的新事务模板（{@link TransactionDefinition#PROPAGATION_REQUIRES_NEW}）。
+     *
+     * <p>为什么不用 {@code @Transactional(REQUIRES_NEW)} 注解：{@code record()} 是同类内部调用，
+     * 注解式事务靠代理生效，自调用不会开新事务 —— 那个注解在这里会**静默失效**，
+     * 代码看起来「已经修了」，行为却没变。用 TransactionTemplate 是显式的，绕不过去。
+     */
+    private final TransactionTemplate newTransaction;
+
+    public PaymentRecordServiceImpl(LedgerProperties ledger, PlatformTransactionManager txManager) {
         this.ledger = ledger;
+        this.newTransaction = new TransactionTemplate(txManager);
+        this.newTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     @Override

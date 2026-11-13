@@ -74,9 +74,11 @@
 #   - 禁止：改列名/类型、删列、加 NOT NULL 无默认值、收紧约束。
 #   原因见【五】。版本回滚时新代码退场、老代码回来；如果 migration 改过老列，
 #   老代码就会撞上它不认识的 schema（或写出它读不回的数据），那时**没有退路**。
-#   本项目目前没有 Flyway/Liquibase（pom 里没有），迁移是 sql/migrate-*.sql 手工执行：
-#     → 手工迁移更要在发布前想清楚"这次能不能回滚"，并把它写进发布说明。
-#     → 迁移脚本一律单独执行、先于新镜像上线（新代码要能读老库，老代码也要能读新库）。
+#   本项目现在的结构事实来源是 Flyway（`db/migration/V*.sql`；pom 里已有 flyway-core + flyway-mysql，
+#   dev/test 的 yml 配了 enabled/baseline-on-migrate，启动时自动迁移）；`sql/_rollback/migrate-*.sql`
+#   是收敛前的**历史脚本，已下线**（11 个增量一次性并进了 V1 基线，不能当迁移用）。所以：
+#     → 改结构 = 新写一个 `V<N>__xxx.sql`（只能增不能改），回滚与重建按 Flyway 的规则想清楚。
+#     → 新代码要能读老库、老代码也要能读新库：加列必须带默认值或可空。
 #
 # 【四】前端缓存策略：index.html 不缓存、带 hash 的 js/css 长缓存
 #   admin-web/portal-web 的 nginx 模板对 /assets/（vite 产物，文件名带 content hash）
@@ -1041,7 +1043,7 @@ build_docs() {
 # svg/mp4/_vendor 下 js/css 是 30 天缓存，**公网上撤不干净**。所以必须在 publish_docs 之前拦：
 # 这条门禁只看退出码，不看代码怎么写的（产物字节里有没有那些东西，由 check-docs-site.mjs 判）。
 check_docs_gate() {
-  step_begin "文档产物门禁（十一项体检：私人文稿零泄漏 + 产物洁净度）"
+  step_begin "文档产物门禁（十二项体检：私人文稿零泄漏 + 产物洁净度 + 侧边栏编号连续性）"
   if [ "$SKIP_DOCS" -eq 1 ]; then info "--skip-docs：跳过"; step_end skip; return 0; fi
 
   local checker="$REPO_ROOT/scripts/check-docs-site.mjs"
@@ -1058,14 +1060,14 @@ check_docs_gate() {
   fi
 
   # 上传前只做静态检查：--skip-http（此刻公网还是上一版，探测公网既慢又没意义）
-  drynote "node $checker --root $dist --skip-http    # 十一项全 PASS 才允许上传 OSS/刷 CDN"
+  drynote "node $checker --root $dist --skip-http    # 十二项全 PASS 才允许上传 OSS/刷 CDN"
   local rc=0
   node "$checker" --root "$dist" --skip-http 2>&1 | sed 's/^/      /' || rc=$?
   if [ "$rc" -ne 0 ]; then
     die "文档产物门禁未通过（EXIT=$rc）→ 拒绝上传：dist-prod 里有不该上公网的东西（口语稿 / PRIVATE_DOCS 私人笔记 / 私密文件名 / 原始录屏 / 内网 IP 与绝对路径 等，见上面每条命中）。\
 一旦传上 OSS 再刷 CDN，svg/mp4/_vendor 是 30 天缓存，公网上撤不干净（见脚本头【十二】）"
   fi
-  info "十一项体检全 PASS：没有口语稿/私人笔记，也没有私密文件名、原始录屏、绝对路径 ✓"
+  info "十二项体检全 PASS：没有口语稿/私人笔记，也没有私密文件名、原始录屏、绝对路径，侧边栏编号连续 ✓"
   if [ "$DRY_RUN" -eq 1 ]; then step_end dry; else step_end ok; fi
 }
 

@@ -50,6 +50,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class InventoryReconcileIntegrationTest {
 
+    /** admin 口令：默认种子值；改过口令（scripts/set-admin-password.sh）时用环境变量 ADMIN_PASSWORD
+     *  覆盖 —— 与 e2e 侧（e2e/tests/support/ui.js: process.env.ADMIN_PASSWORD || '123456'）同一口径 */
+    private static final String ADMIN_PASSWORD = System.getenv().getOrDefault("ADMIN_PASSWORD", "123456");
+
     /** 桶合计（8 桶：6×63 + 2×61 = 500），与 sku.stock 故意不一致 */
     private static final int BUCKET_TOTAL = 500;
     /** 台账净额：−5（下单扣减）+ 2（退货回补）= −3 */
@@ -214,7 +218,7 @@ class InventoryReconcileIntegrationTest {
 
     private String loginAsAdmin() {
         ResponseEntity<JsonNode> resp = rest.postForEntity("/admin/auth/login",
-                Map.of("username", "admin", "password", "123456"), JsonNode.class);
+                Map.of("username", "admin", "password", ADMIN_PASSWORD), JsonNode.class);
         JsonNode node = resp.getBody();
         assertThat(node).isNotNull();
         String token = node.path("data").path("accessToken").asText(null);

@@ -284,7 +284,8 @@ echo
 
 # ================================================================ ⑥ 状态台账 ↔ status_seq 一致
 echo "⑥ 状态台账 ↔ status_seq 一致（每次状态流转一条台账，一条不多一条不少）"
-# 口径（与 sql/migrate-ledger.sql 的幂等键定义逐字对应）：
+# 口径（与 sql/_rollback/migrate-ledger.sql 的幂等键定义逐字对应；该脚本是历史脚本、已下线，
+#       现结构见 db/migration/V1__baseline.sql 里三张台账的 idem_key 注释）：
 #   · status_seq 是「这张单被状态服务改过几次」，与 status 在**同一条 UPDATE** 里自增；
 #   · 台账里 from_status IS NULL 的那一行是「出生事件」，它对应 status_seq = 0；
 #   · 所以恒等式是：COUNT(台账行 WHERE from_status IS NOT NULL) == status_seq
@@ -298,7 +299,7 @@ for db in "${DBS[@]}"; do
   has_ledger="$(q "SELECT COUNT(*) FROM information_schema.tables
                    WHERE table_schema = '$db' AND table_name = 'order_status_ledger'")"
   if [[ "$has_ledger" != "1" ]]; then
-    printf '  ⚠ %-16s 还没有状态台账表（未跑 sql/migrate-ledger.sql）—— 跳过本项\n' "$db"
+    printf '  ⚠ %-16s 还没有状态台账表（历史脚本 migrate-ledger.sql 已下线；结构请用 db/migration/V*）—— 跳过本项\n' "$db"
     warnings=$((warnings + 1))
     continue
   fi
@@ -355,5 +356,5 @@ if [[ "$problems" == "0" ]]; then
 fi
 printf '结论：FAIL（问题 %s 项，告警 %s 项）｜耗时 %ss\n' "$problems" "$warnings" "$elapsed"
 echo "处理建议：孤儿台账先 dump 再按 NOT EXISTS 清理；负库存查扣减入口；A/B 分叉用父单状态重算（DeliveryFlowService#recomputeOrderStatus）回填；
-⑤ 桶缺失/缓存偏差：跑 sql/migrate-sku-bucket.sql（补桶）或 sql/reset-sku-bucket.sql（重置目标总量）。"
+⑤ 桶缺失/缓存偏差：历史脚本 migrate-sku-bucket.sql 已下线（结构请用 db/migration/V*）；桶缺失用 sql/reset-sku-bucket-N.sql 按目标桶数重铺，重置总量用 sql/reset-sku-bucket.sql（分仓库存是另一件事，用 scripts/backfill-inventory.sh）。"
 exit 1

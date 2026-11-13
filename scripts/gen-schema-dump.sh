@@ -9,7 +9,7 @@
 # 为什么要有这个脚本
 # ------------------
 # 以前 DDL 存在四份手工维护的副本（sql/schema.sql、sql/testdb/01-schema.sql、11 个
-# sql/migrate-*.sql、以及每个库里"事实上的结构"），靠人工同步。实测两份手写文件与真实库
+# `sql/_rollback/migrate-*.sql`（收敛前在 `sql/` 根）、以及每个库里"事实上的结构"），靠人工同步。实测两份手写文件与真实库
 # 结构 0 差异，但**注释已漂移 30 行**、还留着 4 行指向早已删除的表（tenant/plan/…）的
 # DROP TABLE IF EXISTS —— 手抄注定漂移，只是什么时候被发现的问题。
 #
@@ -144,7 +144,8 @@ printf ';\n\n' >> "$BODY"
   echo "-- ============================================================================"
   echo "-- 3. 参考数据（channel_shop 店铺种子）"
   echo "--    这 3 行是结构的一部分（后端/前端都靠 shop_code 定位店铺），不是演示数据："
-  echo "--    历史来源是 sql/migrate-channel.sql 的种子段，e2e 重置后必须有，否则店铺表为空。"
+  echo "--    历史来源是 channel_shop 的种子段（原 migrate-channel.sql：历史脚本，已下线；"
+  echo "--    结构请用 db/migration/V1__baseline.sql，本段基线已包含它），e2e 重置后必须有，否则店铺表为空。"
   echo "--    02-seed.sql 既不 TRUNCATE 也不 INSERT 它 —— 所以必须跟着结构一起进基线。"
   echo "-- ============================================================================"
   echo

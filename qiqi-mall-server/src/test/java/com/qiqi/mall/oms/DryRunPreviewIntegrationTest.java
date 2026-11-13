@@ -98,6 +98,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class DryRunPreviewIntegrationTest {
 
+    /** admin 口令：默认种子值；改过口令（scripts/set-admin-password.sh）时用环境变量 ADMIN_PASSWORD
+     *  覆盖 —— 与 e2e 侧（e2e/tests/support/ui.js: process.env.ADMIN_PASSWORD || '123456'）同一口径 */
+    private static final String ADMIN_PASSWORD = System.getenv().getOrDefault("ADMIN_PASSWORD", "123456");
+
     static final String MSG_MISSING_VERSION = "缺少版本号，请刷新页面后重试";
     static final String MSG_CONFLICT = "数据已被他人修改（可能其他人在编辑），请刷新后重试";
 
@@ -145,7 +149,7 @@ class DryRunPreviewIntegrationTest {
     void prepare() {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("username", "admin");
-        body.put("password", "123456");
+        body.put("password", ADMIN_PASSWORD);
         ResponseEntity<JsonNode> resp = rest.postForEntity("/admin/auth/login", body, JsonNode.class);
         adminJwt = resp.getBody() == null ? null : resp.getBody().path("data").path("accessToken").asText(null);
         assertThat(adminJwt).as("admin 登录失败：%s", resp.getBody()).isNotBlank();

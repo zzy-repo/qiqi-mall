@@ -51,7 +51,7 @@ mysql -h127.0.0.1 -uroot -pqiqi123456 qiqi_mall
 |------|------|
 | `sql/schema.sql` | 建库建表 |
 | `sql/data.sql` | 示例数据（3 会员 / 3 地址 / 3 购物车 / 1 管理员 / 10 分类 / 3 类型 / 6 属性 / 5 商品 / 9 SKU / 4 订单 / 2 退货）|
-| `sql/migrate-optimistic-lock.sql` | 5 张热表加乐观锁 `version` 列（幂等，已有库升级时跑；见「并发控制」一节） |
+| `sql/_rollback/migrate-optimistic-lock.sql` | 5 张热表加乐观锁 `version` 列（**历史脚本，已并入 Flyway 基线 `db/migration/V1__baseline.sql`**；新库不用跑，只有老数据卷要手工补跑，幂等；见「并发控制」一节） |
 
 示例账号（密码统一 `123456`，BCrypt 存储）：后台 `admin`，买家 `qiqi` / `xiaoming`（`laowang` 为禁用状态）。
 
@@ -60,10 +60,11 @@ mysql -h127.0.0.1 -uroot -pqiqi123456 qiqi_mall
 
 ```bash
 docker exec -i -e MYSQL_PWD=$MYSQL_ROOT_PASSWORD qiqi-mysql \
-  mysql --default-character-set=utf8mb4 -uroot < sql/migrate-optimistic-lock.sql
+  mysql --default-character-set=utf8mb4 -uroot < sql/_rollback/migrate-optimistic-lock.sql
 ```
 
-`migrate-*.sql` 都是幂等的：重跑第二次全部命中「已存在」→ 跳过，不报错、不动数据。
+`sql/_rollback/migrate-*.sql` 都是幂等的：重跑第二次全部命中「已存在」→ 跳过，不报错、不动数据。
+（这几个脚本**已下线**：结构现在由 Flyway 的 `db/migration/V*.sql` 管理，它们只留作老库补跑的参考。）
 
 ## 本地开发（日常迭代）
 
@@ -274,7 +275,7 @@ JWT 回答「**谁**登录着」（人），API Key（`X-Api-Key` + scopes）回
 `PUT /admin/products/{id}` 就是 `updateById(product)` —— 纯 last-write-wins。两个人同时编辑同一个商品，
 **后保存的完整覆盖前保存的**，双方的修改都丢，而且谁都不知道。
 
-**现在**：这 5 张表各加一列 `version INT NOT NULL DEFAULT 0`（迁移：`sql/migrate-optimistic-lock.sql`，幂等可重跑），
+**现在**：这 5 张表各加一列 `version INT NOT NULL DEFAULT 0`（迁移：新库由 Flyway 基线 `db/migration/V1__baseline.sql` 带上；老库补跑 `sql/_rollback/migrate-optimistic-lock.sql`，幂等可重跑），
 实体上是 MyBatis-Plus 的 `@Version`，`MybatisPlusConfig` 注册了 `OptimisticLockerInnerInterceptor`（**必须排在分页之前**），
 所以 `updateById(entity)` 生成的是 `UPDATE ... SET version = version + 1 WHERE id = ? AND version = ?`。
 
