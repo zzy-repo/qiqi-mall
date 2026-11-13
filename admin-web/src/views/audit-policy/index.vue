@@ -25,6 +25,12 @@
     />
 
     <el-tabs v-model="activeType" data-testid="policy-tabs">
+      <!-- 优先级的作用域：只在同类型内比较。跨类型顺序写死在引擎里（AuditEngine：BLOCK → EXCEPTION → AUTO），
+           把异常策略 priority 调到 5 也抢不过阻止策略 —— 不写明就会有人以为「数字小就一定先判」。
+           放在 default slot 里 = 渲染在 tab 栏下方、表格上方，且全局只有这一行（不随 tab 复制）。 -->
+      <div class="priority-note" data-testid="policy-priority-scope-note">
+        优先级只在<b>同类型</b>策略之间比较；跨类型的判定顺序固定为：阻止 → 异常 → 自动
+      </div>
       <el-tab-pane
         v-for="t in TYPES"
         :key="t"
@@ -740,6 +746,11 @@ onMounted(async () => {
 .card-header .header-tip { margin-left: 10px; font-size: 12px; color: #909399; }
 .header-actions { display: flex; gap: 8px; }
 .tab-tip { font-size: 12px; color: #909399; margin-bottom: 8px; }
+.priority-note {
+  font-size: 12px; color: #909399; line-height: 20px;
+  margin: 4px 0 10px; padding: 4px 10px;
+  background: #fafafa; border-left: 3px solid #dcdfe6; border-radius: 2px;
+}
 .policy-name { font-weight: 600; }
 .muted { color: #909399; font-size: 12px; }
 .datetime { font-size: 13px; color: #606266; }

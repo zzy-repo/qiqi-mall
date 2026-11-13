@@ -155,6 +155,10 @@
           <div v-if="wouldBeText(row)" class="reason-would-be" data-testid="audit-row-would-be">
             {{ wouldBeText(row) }}
           </div>
+          <!-- 但「本可自动过审」只按 MATCH+排除 算过，**没跑库存预检** —— 缺货时要当场说清 -->
+          <div v-if="wouldBeText(row) && stockWarnText(row)" class="reason-stock-warn" data-testid="audit-row-would-be-stock">
+            {{ stockWarnText(row) }}
+          </div>
         </template>
       </el-table-column>
 
@@ -235,6 +239,14 @@
         <!-- 与队列行同一句：被拦/冻结时才有的「本来会怎样」（放在判定徽标 / hint 行正下方） -->
         <div v-if="wouldBeText(whyRow)" class="why-would-be" data-testid="audit-why-would-be">
           {{ wouldBeText(whyRow) }}
+        </div>
+        <!-- 同一句的缺货附注（与队列行一字不差） -->
+        <div v-if="wouldBeText(whyRow) && stockWarnText(whyRow)" class="why-stock-warn" data-testid="audit-why-would-be-stock">
+          {{ stockWarnText(whyRow) }}
+        </div>
+        <!-- 阻止命中即返回 → EXCEPTION 段没跑过；要说出「这单还挂着退款申请」只能靠后端给的 other_gates -->
+        <div v-if="otherGatesText(whyRow)" class="why-other-gates" data-testid="audit-why-other-gates">
+          {{ otherGatesText(whyRow) }}
         </div>
         <div class="why-reason">{{ whyRow.reason || '后端没有给出原因' }}</div>
 
@@ -502,6 +514,57 @@ const wouldBeText = (row) => {
   if (!name) return ''
   if (!WOULD_BE_RESULTS.includes(String(row.result || '').toUpperCase())) return ''
   return `本可自动过审：命中「${name}」（被上面那条策略先拦下）`
+}
+
+/**
+ * 上面那句的**附注**：would_be 只按 MATCH 条件 + 排除算，**不跑库存预检**（见 AuditEngine#wouldBe）。
+ * 所以「本可自动过审」≠「解冻 / 放开后一定过审」：桶里不够时，STRICT 档会在 [7a] 把结论降级成
+ * MANUAL + STOCK_SHORT（文案：转人工：库存不足 —— 可用 X < 需求 Y）。
+ *
+ * 数据来源：队列行回传的 parsed `evidence.stock = { bucket_sum, demand, guard, short, ... }`
+ * （AuditEngine#evidence 对 BLOCKED / FROZEN 也照样写这一段）。short !== true 就一个字都不说 ——
+ * 没有依据就不许加戏。档位 LENIENT 时缺货**不拦**，也就不能写「转人工」。
+ */
+const stockWarnText = (row) => {
+  const stock = row?.evidence?.stock
+  if (!stock || stock.short !== true) return ''
+  // 只对 BLOCKED / FROZEN（有 would_be 那两句的）有意义；别的结局不加这句
+  if (!WOULD_BE_RESULTS.includes(String(row.result || '').toUpperCase())) return ''
+  const avail = stock.bucket_sum
+  const need = stock.demand
+  if (avail === null || avail === undefined || need === null || need === undefined) return ''
+  const nums = `本单可用 ${avail} < 需求 ${need}`
+  const guard = String(stock.guard || 'STRICT').toUpperCase()
+  if (guard === 'LENIENT') {
+    return `（注意：${nums}，但库存档是 LENIENT —— 缺货不拦，仍会自动过审，扣减时可能失败）`
+  }
+  return String(row.result || '').toUpperCase() === 'FROZEN'
+    ? `（注意：${nums}，解冻后仍会因缺货转人工）`
+    : `（注意：${nums}，即使不被拦也会因缺货转人工）`
+}
+
+/**
+ * 「阻止命中即返回」的副作用：引擎在 [3] BLOCK 就 return 了，**[4] EXCEPTION 段根本没跑**，
+ * 所以页面上的 BLOCKED 结论不会告诉你「这单其实还挂着一笔退款申请」。
+ *
+ * 这件事**只能由后端说**，前端不许猜（猜错就是让运营以为单子干净/脏）。
+ * 期望契约（后端当前 **还没有**，见交付报告③）：队列行 evidence 里加
+ *   "other_gates": [ { "type": "EXCEPTION", "policy_name": "退款申请冻结", "text": "有退款申请 = 是" } ]
+ * 数组非空才渲染；空 / 缺失 = 这一行不出现（宁可不说，也不编）。
+ */
+const otherGatesText = (row) => {
+  if (String(row?.result || '').toUpperCase() !== 'BLOCKED') return ''
+  const gates = row?.evidence?.other_gates
+  if (!Array.isArray(gates) || !gates.length) return ''
+  const texts = gates
+    .map((g) => g?.text ?? (Array.isArray(g?.reasons) ? g.reasons.join('；') : ''))
+    .filter(Boolean)
+  // 后端只给策略名、没给人话条件时，退化成「策略「X」命中」——仍然是有据可依的，不是编的
+  const detail = texts.length
+    ? texts.join('；')
+    : gates.map((g) => g?.policyName ?? g?.policy_name).filter(Boolean).map((n) => `策略「${n}」命中`).join('；')
+  if (!detail) return ''
+  return `本单同时触发了异常策略（${detail}），已按阻止优先处理`
 }
 
 /** 一条条件的可读文案（全局排除块用；EXISTS/NOT_EXISTS 不显示值） */
@@ -866,6 +929,11 @@ onMounted(() => {
   font-size: 12px; color: #909399; margin-top: 2px; word-break: break-all;
   font-style: italic; border-left: 2px solid #dcdfe6; padding-left: 6px;
 }
+/* 缺货附注：比 would_be 更小一号、橙色，属于「提醒」不是「结论」 */
+.reason-stock-warn {
+  font-size: 11px; color: #b88230; margin-top: 2px; word-break: break-all;
+  padding-left: 8px;
+}
 .row-skipped { opacity: .6; }
 .pager { display: flex; justify-content: flex-end; margin-top: 12px; }
 
@@ -884,6 +952,8 @@ onMounted(() => {
   margin-top: 6px; font-size: 12px; color: #909399; font-style: italic;
   border-left: 2px solid #dcdfe6; padding-left: 6px;
 }
+.why-stock-warn { margin-top: 4px; font-size: 11px; color: #b88230; padding-left: 8px; }
+.why-other-gates { margin-top: 4px; font-size: 12px; color: #c45656; padding-left: 8px; }
 .why-reason { margin-top: 8px; padding: 8px 10px; background: #fafafa; border-left: 3px solid #dcdfe6; font-size: 13px; color: #303133; }
 .why-meta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 12px 0; font-size: 13px; color: #606266; }
 .why-group { margin-bottom: 20px; }
