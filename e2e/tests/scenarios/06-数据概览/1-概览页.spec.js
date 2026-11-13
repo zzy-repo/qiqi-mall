@@ -75,7 +75,8 @@ test.describe('商家侧 6 数据概览', () => {
   test('侧边菜单能进概览页（导航入口存在）', async ({ page }) => {
     await adminLogin(page)
     await page.goto(`${ADMIN}/dashboard`)
-    await page.waitForTimeout(1200)
+    // dashboard-page 是概览页的静态容器（路由挂载即出现），不依赖概览接口的返回值；
+    // toBeVisible 自带轮询，固定 sleep 只是白等 1.2 秒。
     await expect(tid(page, 'dashboard-page'), '概览页容器应存在').toBeVisible()
     // 菜单里「数据概览」可点，点完仍在本页
     const navItem = page.locator('.el-menu-item').filter({ hasText: '数据概览' }).first()

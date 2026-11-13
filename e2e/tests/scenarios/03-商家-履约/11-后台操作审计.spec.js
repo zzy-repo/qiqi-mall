@@ -58,7 +58,10 @@ const filterAuditLedger = async (page) => {
   await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '审计' }).first().click()
   await tid(page, 'ledger-search-reset').click()   // 清掉别的筛选项，避免上一段残留
   await tid(page, 'ledger-search-submit').click()
-  await page.waitForTimeout(1000)
+  // 注意这条断言的强度：ledger-list-table 在 gotoLedger() 里就已经断言过一次可见了，
+  // 搜索只是给已有表格换数据 —— 所以它对「搜索请求回来没有」其实没有判别力（恒真）。
+  // 删掉前面的 sleep 不会新增假绿（本来就断不到），只是不再白等 1 秒。
+  // 真正想等「筛选生效」应改成 expect.poll(() => 行数/首行文本变化) —— 见报告待决栏。
   await expect(tid(page, 'ledger-list-table'), '审计台账列表应渲染').toBeVisible()
 }
 
