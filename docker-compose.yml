@@ -207,6 +207,11 @@ services:
       context: ./portal-web
       args:
         BUILD_MODE: test
+        # 前端静态资源 CDN 基址（见 scripts/upload-web-assets.sh）。
+        # ★默认空 = 现状：index.html 引用 /assets/**，容器自托管（dev/e2e/回滚零影响）。
+        # 要切 CDN 时这样构建（前缀必须带结尾斜杠）：
+        #   PORTAL_CDN_BASE=https://cdn.rose7.cn/qiqi-mall/portal-web/ docker compose build portal-web
+        CDN_BASE: ${PORTAL_CDN_BASE:-}
     image: qiqi-portal-web:test
     container_name: qiqi-portal-web
     environment:
@@ -229,6 +234,11 @@ services:
       context: ./admin-web
       args:
         BUILD_MODE: test
+        # 前端静态资源 CDN 基址（见 scripts/upload-web-assets.sh）。
+        # ★默认空 = 现状：index.html 引用 /assets/**，容器自托管（dev/e2e/回滚零影响）。
+        # 要切 CDN 时这样构建（前缀必须带结尾斜杠）：
+        #   ADMIN_CDN_BASE=https://cdn.rose7.cn/qiqi-mall/admin-web/ docker compose build admin-web
+        CDN_BASE: ${ADMIN_CDN_BASE:-}
     image: qiqi-admin-web:test
     container_name: qiqi-admin-web
     environment:

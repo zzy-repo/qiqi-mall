@@ -9,6 +9,12 @@ RUN npm ci --registry=https://registry.npmmirror.com
 COPY . .
 # 构建模式由 compose 传入：development / test（test = 测试环境，加载 .env.test）
 ARG BUILD_MODE=test
+# 静态资源基址（前端 JS/CSS 上 CDN 的开关，见 scripts/upload-web-assets.sh）。
+# 空 = 现状：index.html 引用 /assets/**，由容器自己提供（本地/e2e/回滚零影响）。
+# 非空例：https://cdn.rose7.cn/qiqi-mall/portal-web/ → index.html 里换成 CDN 绝对 URL。
+# 只影响构建产物里的引用形式；dist 仍然整目录打进镜像（/assets 留作零成本备份）。
+ARG CDN_BASE=""
+ENV CDN_BASE=${CDN_BASE}
 RUN npx vite build --mode ${BUILD_MODE}
 
 # ---------- 运行阶段 ----------
