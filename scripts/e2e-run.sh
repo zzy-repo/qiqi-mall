@@ -402,6 +402,34 @@ else
   fi
 fi
 
+# ── 审核定时任务留痕（跑前一行）───────────────────────────────────────────────
+# 为什么要打这一行：AuditScheduleJob 默认开启（application-dev.yml 里
+# `qiqi.audit.schedule-enabled: ${AUDIT_SCHEDULE_ENABLED:true}`，启动 5 分钟后每分钟醒一次），
+# 它会去捞 status=7 的种子单自动过审/冻结 —— 种子单被它吃掉之后，spec 报出来的是
+# 「待审核单数量不对 / 找不到某笔单」，看着像 spec 不稳，其实是这条后台定时任务在动数据。
+# 没有这行留痕，排查时会反复在 spec 里找一个不存在的 bug。
+# 所以每次跑前把「生效值 + 最近一次 run」摆出来：看到 scheduleEnabled=true 就知道结论要打折。
+echo "▶ 审核定时任务留痕（status=7 的种子单会被它间歇性吃掉；报错指错地方时先看这里）"
+for s in "${SHARDS[@]:$SHARD_FROM:$WANT_SHARDS}"; do
+  IFS=: read -r name _pport _aport _backend <<< "$s"
+  _db="qiqi_mall_e2e_$name"
+  # 生效值：单元环境变量优先（Environment=AUDIT_SCHEDULE_ENABLED=...），没设就是 application-dev.yml 的默认 true
+  _eff="$(systemctl show -p Environment --value "qiqi-e2e-server-$name" 2>/dev/null | tr ' ' '\n' \
+            | grep -E '^AUDIT_SCHEDULE_ENABLED=' | tail -1 || true)"
+  if [[ -n "$_eff" ]]; then
+    _val="scheduleEnabled=${_eff#AUDIT_SCHEDULE_ENABLED=}（来源：qiqi-e2e-server-$name 的 Environment）"
+  else
+    _val="scheduleEnabled=true（来源：application-dev.yml 默认 \${AUDIT_SCHEDULE_ENABLED:true}，单元未覆盖）"
+  fi
+  _latest="$(docker exec -i -e MYSQL_PWD="${MYSQL_PASSWORD:-qiqi123456}" "${MYSQL_CONTAINER:-qiqi-mysql}" \
+    mysql --default-character-set=utf8mb4 -N -B -u"${MYSQL_USER:-root}" -e \
+    "SELECT id, idem_key, total, auto_pass, manual, created_at
+       FROM ${_db}.audit_run ORDER BY id DESC LIMIT 1;" 2>/dev/null || true)"
+  # 用 -N -B（制表符分隔）直出列值：CONCAT 遇到任一 NULL 列会把整行拼成 NULL，看不出是「没跑过」还是「字段空」
+  _latest="$(tr '\t' ' ' <<<"$_latest" | sed 's/  */ /g')"
+  echo "  shard $name  $_val  |  latestRun(id idem_key total auto_pass manual created_at): ${_latest:-（audit_run 空或库不可达）}"
+done
+
 # 前置：重置库（独立库的最大好处就是可以随便重置）
 if [[ "$DO_RESET" == "1" ]]; then
   # 单分片时只重置自己要用的那个库：`--all` 会把**另一个分片的库**也 TRUNCATE，

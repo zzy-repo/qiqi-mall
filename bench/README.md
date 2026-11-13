@@ -303,3 +303,42 @@ bench/
 且开环把闭环掩盖的长尾暴露出来（同吞吐下 p99 高 33%~888%），
 还顺带发现「闭环容量 390 rps」是被 VU 数自限的**假上限**（530 目标下开环仍完成 474.6 rps，+21.6%）。
 代价是 60s 预热省不掉、必须独占机器、`load1` 不能当污染判据 —— 三条都写在上面的缺陷清单里。
+
+---
+
+## 10. 验证「删等待」类改动的标准动作（e2e）
+
+删掉 e2e 里的固定 `waitForTimeout` 之后，「跑一次是绿的」说明不了任何事 —— 竞态窗口是概率性的，
+一次通过只证明「这次没踩上」。标准动作四步：
+
+1. **挑被删处覆盖的 test**：先 grep 被改的 support helper 的调用方（`grep -rn <helper 名> tests/`）。
+   support 里的改动影响**所有**调用它的 spec，不是只有同目录那几个 —— 漏掉一个调用方，
+   这条结论就只管了半个入口。
+2. **独占一个 shard**：拿 `bench-lock.sh`，跑前 `pgrep -f playwright` 确认没有别的跑批；
+   然后钉死一个分片/库（`E2E_SHARD_FROM=1 E2E_SHARDS=1` → shard b / `qiqi_mall_e2e_b`）。
+3. **同一个 shard + 重复跑**：`--repeat-each=20 --workers=1`（别为了快加 worker，
+   并发本身会制造新的互相干扰，红了分不清是被测物还是自己）。
+4. **判据**：20/20 全绿才算安全；任何一次红都算「该处不成立」，把 sleep 从 git 原值恢复，
+   不许为了让绿去改断言或放宽 timeout。
+
+```bash
+/root/.qiqi-standing/bench-lock.sh acquire e2e-repeat-each
+pgrep -f playwright || true                 # 有别的跑批就等它结束，别强开
+cd /root/qiqi-mall && E2E_SHARD_FROM=1 E2E_SHARDS=1 E2E_WORKERS=1 \
+  bash scripts/e2e-run.sh <覆盖到的 spec 文件...> --repeat-each=20 --workers=1
+/root/.qiqi-standing/bench-lock.sh release
+```
+
+理由：竞态窗口靠**重复次数**覆盖，比「`page.route` 注入延迟 + 等干净窗口」省一个数量级，
+而且不受其它 agent 并发重置库的影响（注入延迟那套一旦和别人共用库，就没有判别力）。
+**先估时再定 N**：单轮耗时 × N 才是成本，别按「删改点数」拍脑袋。
+单轮耗时取 `e2e/report/runs.jsonl` 里同文件的历史中位数之和（例：6 个 spec 合计 ≈ 276s，
+再加并发/DB 重置的开销），×N 就是总墙钟 —— 一个 helper 里的删改会波及**所有**调用它的 spec，
+实际要跑的 test 数常是删改点的 2~3 倍，按删改点数估会差一个数量级。
+
+与其它跑批共存怎么办：`repeat-each` 的判据是**零失败**而非**耗时**，所以和别人并发跑
+不影响结论（各用各的 shard 库就不会被重置污染）；但单遍墙钟会明显变长（抢 CPU），
+**估时要把并发算进去**，别拿空载时的中位数当准。
+
+N 的档位：**N=20 属严格口径**（发版前跑满，20 条 test 级覆盖约 2.5 小时）；
+日常**N=3 做烟测**够用（约 20 分钟，能抓到高概率 flake），红了的按第 4 步处理，绿的再排严格档。

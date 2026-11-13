@@ -1,7 +1,6 @@
 package com.qiqi.mall.audit;
 
 import com.qiqi.mall.audit.dto.ConditionRequest;
-import com.qiqi.mall.audit.dto.DecisionRowDto;
 import com.qiqi.mall.audit.dto.PolicyRequest;
 import com.qiqi.mall.audit.dto.RunResultDto;
 import com.qiqi.mall.audit.service.AuditExecutor;
