@@ -4,10 +4,12 @@ E2E 要跑得快、又要互不污染，所以每个 Playwright worker 一套「
 
 ## 目录里有什么
 
-这里**不放** schema / seed 的副本：`sql/testdb/01-schema.sql` 与 `02-seed.sql` 是唯一事实来源，
-`scripts/reset-e2e-db.sh <库名>` 会把这两个文件里的库名 `qiqi_mall_test` 替换成目标库再灌进去。
+这里**不放** schema / seed 的副本：结构由 Flyway 基线（`qiqi-mall-server/src/main/resources/db/migration/V*.sql`）建，
+种子是 `sql/testdb/02-seed.sql`；`scripts/reset-e2e-db.sh <库名>` 的动作是
+「DROP DATABASE → CREATE DATABASE → flyway migrate（空库 ⇒ 全量执行 V1）→ 断言 39 表 + 1 视图 → 灌 seed」。
 
-这样避免「两份 DDL 各自漂移」——改表结构只改 `sql/schema.sql` + `sql/testdb/01-schema.sql`。
+这样避免「两份 DDL 各自漂移」——**改表结构只改 Flyway 的 `V*.sql`**。（当年的手抄副本
+`sql/testdb/01-schema.sql` 已下线到 `sql/_rollback/01-schema.sql`，只留作老库对照，不要再改它。）
 
 ## 库清单
 

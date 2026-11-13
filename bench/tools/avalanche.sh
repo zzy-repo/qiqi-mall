@@ -2,7 +2,7 @@
 # avalanche.sh —— 雪崩实验（A 型：内存/线程耗尽）一键基线阶梯
 #
 #   一条命令复现：
-#     MEMBER_PASS='LgBench2026' bench/tools/avalanche.sh
+#     MEMBER_PASS='<自选>' bench/tools/avalanche.sh
 #   自定义阶梯：
 #     STEPS=50,100,150,200 STEP_DURATION=75 MEMBER_PASS='...' bench/tools/avalanche.sh
 #

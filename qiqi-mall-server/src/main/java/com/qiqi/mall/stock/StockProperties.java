@@ -57,7 +57,9 @@ public class StockProperties {
      *    再大必须先 {@code ALTER ... MODIFY idem_key VARCHAR(128)}。
      *
      * <h3>⚠️ 切这个开关的顺序（不可并发）</h3>
-     * <b>停流量 → 跑 sql/migrate-ledger-idem-shard.sql 回填旧行 → 起新镜像</b>。
+     * <b>停流量 → 跑 sql/_rollback/migrate-ledger-idem-shard.sql 回填旧行 → 起新镜像</b>
+     * （该脚本是历史脚本、已下线：新库结构由 Flyway 基线 {@code db/migration/V*.sql} 带来，不用跑；
+     * 只有「早就在跑、库里还是无前缀旧键」的老数据卷需要手工补跑这一遍回填）。
      * 反了就会出事：旧触发重放时算出的是「带前缀」的新键，而库里那行还是「无前缀」的旧键 →
      * 查不到 → 被当成首次触发 → 重复扣减/重复回补。
      */
