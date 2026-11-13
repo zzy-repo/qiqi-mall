@@ -287,9 +287,11 @@ CREATE TABLE `channel_sync_log` (
   `result` enum('OK','FAIL','SKIP') NOT NULL COMMENT 'OK=成功 FAIL=失败 SKIP=幂等跳过',
   `reason` varchar(255) DEFAULT NULL COMMENT '结果原因：IDEMPOTENT / SKU_NOT_MATCHED / 异常信息…',
   `attempt` int NOT NULL DEFAULT '1' COMMENT '第几次尝试（回传重试时第 2 次记 attempt=2）',
+  `idem_key` varchar(160) GENERATED ALWAYS AS (if((`action` = _utf8mb4'SHIP_PUSH'),concat(`shop_id`,_utf8mb4':',_utf8mb4'SHIP_PUSH',_utf8mb4':',`ref_id`,_utf8mb4':',`attempt`),NULL)) VIRTUAL COMMENT '仅 SHIP_PUSH 行非空：{shopId}:SHIP_PUSH:{refId}:{attempt}；PULL 行恒 NULL（不参与唯一约束）',
   `latency_ms` int DEFAULT NULL COMMENT '外呼耗时（毫秒）',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '记录时间',
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_sync_idem` (`idem_key`),
   KEY `idx_shop_time` (`shop_id`,`created_at`),
   KEY `idx_action_result` (`action`,`result`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='渠道同步日志（只追加）';

@@ -15,6 +15,10 @@ import java.time.LocalDateTime;
  *
  * <p>{@code attempt} 记「同一次业务动作的第几次尝试」：回传失败重试一次，
  * 库里就是 attempt=1 FAIL + attempt=2 OK 两行 —— 重试次数由数据自己说明，不另设统计列。
+ *
+ * <p><b>没有 {@code idemKey} 字段，这是故意的</b>：库里那一列是生成列（V2 迁移），
+ * 值由 {@code action/ref_id/attempt} 自己算出来，写入侧既算不出第二份、也不许指定。
+ * 实体里放一个字段，就等于给了「Java 侧算一遍、库侧再算一遍」的分裂机会。
  */
 @Data
 @TableName("channel_sync_log")
