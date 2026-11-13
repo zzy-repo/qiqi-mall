@@ -23,6 +23,7 @@
 # 一次发布按顺序做这些事（任一步失败即停，并打印回滚提示）
 # -----------------------------------------------------------------------------
 #   1 preflight          工作区干净 / 分支是 main / 版本号格式 / tag 未被占用 / 依赖齐 / 凭据可读
+#                        / **JDBC 会话安全**（useLocalSessionState=true 的前提，见【十三】）
 #   2 tag                本地 git tag -a（不推送）
 #   3 tag_push           git push origin <tag>（失败只警告，不阻塞本地 tag、不阻塞发布）
 #   4 build_backend      docker build -t qiqi-mall-server:$VER（沿用 compose 的构建上下文）
@@ -207,6 +208,22 @@
 #   新加一篇私人笔记忘了登记就漏 —— ⑪ 是那条路的兜底。
 #   ⚠ 门禁本身被绕过的方式只剩「改脚本」，所以 check-docs-site.mjs 的 --private-ok（dev 站豁免）
 #     绝不能出现在这里的命令行里。
+#
+# 【十三】JDBC 会话状态红线 = useLocalSessionState=true 的**可执行前提**（不是一次性 grep）
+#   application-{dev,test}.yml 的 JDBC URL 里开了 useLocalSessionState=true：Connector/J 不再对每条
+#   语句发 `SELECT @@SESSION.transaction_read_only` 探针（每单语句数 18.8→12.5，**少 33%**，
+#   600 档 +10.5% / 520 档 +16.2%）。代价只有一条：驱动从此**信任自己的本地会话视图**
+#   （autocommit / transaction isolation / read-only）。
+#   于是安全前提变成一句代码约定：「仓库里 0 处绕过驱动改会话状态」。它一旦回潮，出错形态是
+#   **静默做错账**（服务器上的状态被改了、驱动还以为没改）—— 没有异常、没有日志，只有账对不上。
+#   所以这条前提必须能被**执行**，不能靠某天的一次 grep：scripts/check-jdbc-session-safety.sh
+#   扫 qiqi-mall-server/src/main + sql/（排除 sql/_rollback/），命中禁止形态即 exit 1。
+#   为什么挂在 preflight（第 1 步）而不是 8.5 那十二项体检（docs_gate）：
+#     · 8.5 判的是**产物字节**（dist-prod 能不能上 OSS），这条判的是**源码与配置**，两码事；
+#     · 8.5 排在 build_backend + 两次滚动重启**之后**，一条源码约束在那里才炸 = 白折腾线上；
+#     · 8.5 会被 --skip-docs 整个跳过（"这次不发文档"），源码门禁跟着消失就是漏洞；
+#     · preflight 失败时**连 tag 都不打、镜像也不构建**，这是源码类约束唯一正确的位置。
+#   回滚模式跳过本项（紧急通道不重跑源码门禁，且回滚用的是老镜像、新 yml 不参与）。
 # =============================================================================
 
 set -uo pipefail
@@ -566,6 +583,31 @@ check_gateway_retry() {
   return 1
 }
 
+# JDBC 会话状态红线（useLocalSessionState=true 的**安全前提**，见【十三】）
+# 参数开在 URL 里 = 驱动只信自己的本地会话视图；代码里任何"绕过驱动改会话状态"的写法
+# （SET SESSION / SET autocommit / init-SQL / 原生 getConnection）都会让它静默分叉 → 做错账。
+# 所以每次发布都跑一遍 scripts/check-jdbc-session-safety.sh，命中即拦（连 tag 都不打）。
+# 只读、不连库、不需要容器，几十毫秒。
+check_jdbc_session_safety() {
+  local checker="$REPO_ROOT/scripts/check-jdbc-session-safety.sh" out rc=0
+  if [ ! -f "$checker" ]; then
+    err "门禁脚本缺失：$checker"
+    info "没有门禁就不能声称「0 处绕过驱动改会话状态」—— useLocalSessionState=true 的前提是**可执行的约束**，不是一句口号。"
+    return 1
+  fi
+  out="$(bash "$checker" 2>&1)" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    info "JDBC 会话安全 ✓（无绕过驱动改会话状态的写法，useLocalSessionState 的前提成立）"
+    return 0
+  fi
+  # 命中：把脚本逐条 file:line 原样打出来（人一眼知道改哪一行），再给结论
+  printf '%s\n' "$out" | sed 's/^/      /' >&2
+  err "JDBC 会话安全门禁未通过（EXIT=$rc）→ useLocalSessionState=true 的前提不成立"
+  info "修法：删掉那些 SET SESSION / SET autocommit / init-SQL / 原生 getConnection；"
+  info "      会话状态一律交给驱动 API（Spring 事务管理器）。允许清单见脚本头。"
+  return 1
+}
+
 check_build_inputs() {
   local ok=0 f
   for f in \
@@ -607,6 +649,8 @@ preflight() {
     check_git_clean || bad=1
     check_tag_free  || bad=1
     check_build_inputs || bad=1
+    # useLocalSessionState=true 的**可执行前提**：0 处绕过驱动改会话状态（见【十三】）
+    check_jdbc_session_safety || bad=1
     [ "$SKIP_DOCS" -eq 1 ] || check_credentials || bad=1
   else
     # 回滚是紧急操作：不要求工作区干净、不要求 main（本地镜像 tag 存在即可）

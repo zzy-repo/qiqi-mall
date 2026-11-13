@@ -18,8 +18,23 @@ spring:
       port: ${REDIS_PORT:6379}
       timeout: 3s
   datasource:
+    # ── JDBC URL 参数：useLocalSessionState=true（性能，不是随手调参）─────────────
+    # 为什么开：Connector/J 默认对**每条语句**都发探针 `SELECT @@SESSION.transaction_read_only`
+    #   （还有 autocommit / 隔离级别）去问服务器"我的会话状态变了吗"。开这个参数后驱动改用自己的
+    #   本地视图，不再问。实测：每单语句数 18.8 → 12.5（**少 33%**）、天花板 447.6 → 494.4~501.4 ok/s
+    #   （600 档 **+10.5%**、520 档 **+16.2%**）。数据正确性已验证：31,496 单审计零不一致。
+    # 风险前提（这是它唯一的代价，别当成注释看过就算）：驱动从此**信任本地状态**。
+    #   任何绕过驱动去改会话状态的写法（SET SESSION / SET TRANSACTION / SET autocommit / SET @@、
+    #   setReadOnly / setTransactionIsolation、连接池 init-SQL、连接多路复用型代理）都会让本地视图
+    #   与服务器真实状态**静默**分叉 —— 出错形态不是"崩"，而是**做错账**。
+    #   所以"0 处绕过写法"必须是一条持续约束，不是一次性 grep：
+    #     scripts/check-jdbc-session-safety.sh（CI + 发布前跑；publish.sh 的 preflight 已挂）
+    # ★ 这套容器栈跑的就是 test profile（compose 里 SPRING_PROFILE=test），所以参数落在这里，
+    #   本仓库**没有** application-prod.yml（将来新增 prod profile 时必须同步加上这一行，门禁会查）。
+    # ★ 压测注入路径会**整体覆盖**这一行（bench/jdbc-url.override.yml 用 SPRING_DATASOURCE_URL
+    #   透传完整 URL）；用 bench/tools/jdbc-url.sh 时，URL 里必须自己带上本参数，否则等于关掉它。
     # 库名可覆盖：容器编排用 MYSQL_DATABASE 注入（测试环境指向独立库 qiqi_mall_test，与 dev 库隔离）
-    url: jdbc:mysql://${MYSQL_HOST:mysql}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:qiqi_mall}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    url: jdbc:mysql://${MYSQL_HOST:mysql}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:qiqi_mall}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useLocalSessionState=true
     username: ${MYSQL_USER:root}
     password: ${MYSQL_PASSWORD:qiqi123456}
     driver-class-name: com.mysql.cj.jdbc.Driver

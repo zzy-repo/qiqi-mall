@@ -965,9 +965,93 @@ OUT=…/flow-audit bench/tools/audit-flow.sh        # 真实 HTTP：下单→库
 出问题的形态不是"崩"，而是**静默做错账**。四条硬约束：
 
 1. **禁止**业务代码/SQL 里出现 `SET SESSION` / `SET TRANSACTION` / `SET autocommit` / `setReadOnly(` /
-   `setTransactionIsolation(`（现状 0 命中，建议加 CI grep 门禁防回潮）；
+   `setTransactionIsolation(`（现状 0 命中；**已加 CI/发布门禁** `scripts/check-jdbc-session-safety.sh`，见 §15）；
 2. **禁止**给 Hikari 配 `connection-init-sql`（要初始化会话就用 `SET GLOBAL` 改服务器默认值）；
 3. **禁止**在该参数开启的前提下前置**连接多路复用**型代理（ProxySQL multiplexing / MySQL Router 连接复用）——
    别人的 `SET` 会落到你的会话上，本地状态整体不可信；
-4. 配置**写进 `application-prod.yml`**，别用环境变量 `SPRING_DATASOURCE_URL`：环境变量会覆盖 yml，
+4. 配置**写进 yml**，别用环境变量 `SPRING_DATASOURCE_URL`：环境变量会覆盖 yml，
    "某台机器上有人另设了一个 URL"就能悄悄把这个参数关掉（或反过来在没验证过的服务上打开）。
+   ⚠ 本仓库**没有** `application-prod.yml`（容器栈跑的是 `test` profile），所以参数落在
+   `application-{dev,test}.yml`；将来新增 prod profile 必须同步加上（门禁会查，见 §15）。
+
+---
+
+## 15. JDBC 会话状态红线（`useLocalSessionState=true` 的**持续约束**，不是一次性检查）
+
+> 参数已落地：`qiqi-mall-server/src/main/resources/application-{dev,test}.yml` 的 `spring.datasource.url`
+> 末尾追加 `&useLocalSessionState=true`（既有参数一个没动）。
+> 本仓库没有 `application-prod.yml`（`docker-compose.yml` 里 `SPRING_PROFILE=test`），所以是 dev + test 两份；
+> **没有 prod 就跳过**，将来新增时必须同步加，门禁会拦。
+
+### 15.1 一句话红线
+
+**仓库里不允许有任何"绕过驱动改会话状态"的写法。**
+驱动一旦信任本地视图（`useLocalSessionState=true`），任何别人的 `SET` 就是让它**静默说谎**。
+
+### 15.2 为什么（出错形态是"静默做错账"，不是"崩"）
+
+驱动原本对每条语句都问一次服务器 `SELECT @@SESSION.transaction_read_only`（外加 autocommit / 隔离级别）；
+开参数后改用自己的本地视图。省下来的正是这 33% 的语句（18.8 → 12.5 条/单），
+代价是：**服务器上的会话状态被改了，驱动不知道**。
+
+后果不是异常、不是报错，而是「本该回滚的写变成逐条自动提交」「本该被只读拦住的操作照写不误」——
+账对不上，日志里什么都没有。所以这条前提不能靠"某天 grep 过一次"，必须每次都能被**执行**。
+
+### 15.3 四条硬约束
+
+| # | 约束 | 为什么 |
+| --- | --- | --- |
+| 1 | **禁** `SET SESSION` / `SET TRANSACTION` / `SET autocommit` / `SET @@`，以及 `setReadOnly(` / `setTransactionIsolation(` | 这几种就是"绕过驱动本地视图"的全部入口；会话状态只许交给驱动 API（Spring 事务管理器） |
+| 2 | **禁** Hikari 的 `connection-init-sql`（及 URL 里的 `sessionVariables`） | 连接一建立就替应用 `SET` 一把，是本地视图最容易失真处。要改服务器默认值用 `SET GLOBAL`，由驱动在连接时自行读取 |
+| 3 | **禁**连接多路复用型代理（ProxySQL multiplexing / MySQL Router 复用） | 别人会话的 `SET` 会落到你的连接上，本地状态整体不可信 |
+| 4 | 配置**写 yml，不写环境变量** | `SPRING_DATASOURCE_URL` 优先级高于 yml、且**整体覆盖** URL：一次环境变量注入就能把参数悄悄关掉（见 §14.2 的压测注入路径） |
+
+### 15.4 怎么执行（可执行门禁，不是口号）
+
+```bash
+bash scripts/check-jdbc-session-safety.sh     # CI 与发布前都跑；exit 0 = 前提成立，exit 1 = 命中并打印 file:line
+```
+
+- 扫 `qiqi-mall-server/src/main` + `sql/`（**排除** `sql/_rollback/`：历史脚本不随应用启动）；
+- 已挂在 `scripts/publish.sh` 的 **preflight（第 1 步）**：命中就**连 tag 都不打、镜像也不构建**
+  （不放 8.5 的文档产物门禁：那里判的是 dist-prod 的**产物字节**，而且排在两次滚动重启之后、还会被 `--skip-docs` 跳过）；
+- **允许清单**（故意放行，不是漏检）：`src/test` 的 `setAutoCommit(`（走驱动 API，本地视图同步更新）、
+  `sql/` 里的 `SET @x` 用户变量（不属于驱动缓存的三样状态，且脚本跑在**另一个** mysql 会话）、
+  以及**整行注释**里的同名字样（说明性文字不是语句）；
+- **正向断言**：每个定义了 `datasource.url` 的 `application*.yml` 必须带 `useLocalSessionState=true`
+  —— 防"参数被删掉 / 新 profile 复制了旧 URL"导致性能静默退回 447.6。
+
+反向验证（2026-11-14 实测，证明门禁真能抓）：临时在 `src/main` 放一行 `SET SESSION x=1;` → `exit 1` 并指名
+`tmp-gate-probe.sql:3`；删掉后 → `exit 0`。同一轮也验证了 `setReadOnly(` / `getConnection(` 各自单独命中。
+
+### 15.5 收益与事故数字（**别拿 627 做容量规划**）
+
+| λ | 未开 ok/s | 开了 ok/s | Δ |
+| --: | --: | --: | --: |
+| 480 | 434.0 | 479.9 | +10.6% |
+| 520 | 431.6 | **501.4** | **+16.2%** |
+| 600 | 447.6 | **494.4** | **+10.5%** |
+
+- 天花板 **447.6 → 494.4~501.4 ok/s**；每单语句数 18.8 → 12.5（**少 33%**）；
+- 数据零差异：31,496 单审计零不一致、桶守恒**精确相等**（10,468,504 + 31,496 = 10,500,000）、
+  三方扫描 0 不一致、`mvn` **246 tests 绿**（§14.7）；
+- ⚠ 预测值 **627 没到**（实测差 −21%）：`QPS_cap` 不是常量（§14.6）。
+  **容量规划按实测 494~501，不是 627** —— 拿 627 排容量会在真实流量下直接超卖。
+
+### 15.6 下一个闸门：「连接数 × 每单事务时长」
+
+开完参数后，600 档 SIGQUIT 快照里 **191/202、187/202 个 http-nio 线程停在 `HikariPool.getConnection`**，
+真在跑 SQL 的只有 8~9 个。也就是说闸门已经不是"SQL 条数"，而是：
+
+```
+ok/s ≈ 连接数（2 实例 × 10 = 20） ÷ 每单事务墙钟时长 T
+```
+
+600 档实测 T = 40.5~47.5ms（§14.6）。要再抬吞吐只剩三条路，且都不是"再调一次池子"：
+
+1. **缩短 T**：每单语句时间已到 20.7~21.3ms，边际越来越小；
+2. **加连接数**：§12 已证非线性（maxPoolSize 10→30 只 +9%），因为墙在 DB 侧（MySQL 1.26~1.45 核、
+   `nr_throttled=0`、行锁 213/s 平均等 25ms）；
+3. **减事务数**：合并下单路径上的写事务。
+
+**下一步要量的是 T 的分布（每单事务时长），不是池子大小。**
