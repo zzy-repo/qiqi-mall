@@ -191,7 +191,10 @@ public class AuditExecutor {
             rows.add(new DecisionRowDto(orderId, order.getOrderSn(), round, verdict.result().name(),
                     verdict.matchedPolicy() == null ? null : verdict.matchedPolicy().name(),
                     verdict.wouldBePolicy() == null ? null : verdict.wouldBePolicy().name(),
-                    verdict.downgradeReason(), verdict.reasonText()));
+                    verdict.downgradeReason(), verdict.reasonText(),
+                    // 店铺 / 渠道 / 毛利 / 种类数：执行时本来就在手上（order + 上下文），不额外查库；
+                    // 队列行给的是同一组事实，页面两者对齐显示才不会一列有一列没有
+                    ctx.shopName(), ctx.channel(), ctx.itemKindCount(), ctx.grossProfit()));
         }
 
         int total = rows.size();
@@ -294,9 +297,11 @@ public class AuditExecutor {
 
     private RunResultDto toResult(AuditRun run) {
         List<DecisionRowDto> rows = decisionMapper.selectByRun(run.getId()).stream()
+                // 重放路径（同 idem_key 的 SCHEDULE 重投）只读决策行：订单侧那 4 列没有快照可给，
+                // 给 null 而不是现查一次库 —— 重放的语义是「返回那一轮记下的事实」，不是「重新描述现在」
                 .map(d -> new DecisionRowDto(d.getOrderId(), null, d.getRoundNo(), d.getResult(),
                         d.getMatchedPolicyName(), d.getWouldBeAutoPolicyName(), d.getDowngradeReason(),
-                        evidenceReason(d.getEvidenceJson())))
+                        evidenceReason(d.getEvidenceJson()), null, null, null, null))
                 .toList();
         int skipped = (int) rows.stream().filter(r -> AuditResult.SKIPPED.name().equals(r.result())).count();
         return new RunResultDto(run.getId(), run.getTriggerType(), nz(run.getTotal()), nz(run.getAutoPass()),

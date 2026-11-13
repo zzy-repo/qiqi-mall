@@ -454,7 +454,9 @@ public class AuditPolicyService {
         return new PolicyDto(policy.getId(), policy.getType(), policy.getPriority(), policy.getName(),
                 policy.getEnabled() != null && policy.getEnabled() == 1, policy.getVersionNo(),
                 action == null ? null : action.tagCode(), action == null ? null : action.reason(),
-                conditions.stream().map(this::toDto).toList());
+                conditions.stream().map(this::toDto).toList(),
+                // ⑥ 顺手补：实体上有 updated_at（ON UPDATE 自动刷），策略页那一列不用再显示「—」
+                policy.getUpdatedAt());
     }
 
     private ConditionDto toDto(AuditPolicyCondition c) {

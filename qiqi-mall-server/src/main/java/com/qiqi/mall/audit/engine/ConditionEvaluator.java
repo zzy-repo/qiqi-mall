@@ -36,13 +36,13 @@ public final class ConditionEvaluator {
             boolean present = raw != null && (!(raw instanceof String s) || !s.isBlank());
             boolean satisfied = op == OpCode.EXISTS ? present : !present;
             String text = def.label() + (present ? " 有值" : " 无值") + "（实际 " + actualText + "）";
-            return new ConditionTrace(def.code(), def.label(), op.name(), "", actualText, satisfied, text);
+            return ConditionTrace.evaluated(condition.seq(), def.code(), def.label(), op.name(), "", actualText, satisfied, text);
         }
 
         String expectedText = expectedText(condition, def);
         if (raw == null) {
             String text = def.label() + " 无值，无法比较 " + op.symbol() + " " + expectedText;
-            return new ConditionTrace(def.code(), def.label(), op.name(), expectedText, actualText, false, text);
+            return ConditionTrace.evaluated(condition.seq(), def.code(), def.label(), op.name(), expectedText, actualText, false, text);
         }
 
         boolean satisfied = switch (def.type()) {
@@ -52,7 +52,7 @@ public final class ConditionEvaluator {
             case JSON -> throw new IllegalArgumentException("JSON 值类型的条件本轮引擎不消费（字段 " + def.code() + "）");
         };
         String text = text(def, op, actualText, expectedText);
-        return new ConditionTrace(def.code(), def.label(), op.name(), expectedText, actualText, satisfied, text);
+        return ConditionTrace.evaluated(condition.seq(), def.code(), def.label(), op.name(), expectedText, actualText, satisfied, text);
     }
 
     // ------------------------------------------------------------------ 类型校验

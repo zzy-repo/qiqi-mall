@@ -111,9 +111,11 @@ public final class AuditEngine {
             List<ConditionTrace> traces = evalMatches(ctx, policy);
             List<ConditionTrace> failed = traces.stream().filter(t -> !t.satisfied()).toList();
 
-            // 5a 条件没全满足 → 记「差在哪」
+            // 5a 条件没全满足 → 记「差在哪」（逐条件四元组 + 人话摘要）
             if (!failed.isEmpty()) {
-                misses.add(new PolicyMiss(policy.id(), policy.name(), failed.stream().map(ConditionTrace::text).toList()));
+                misses.add(new PolicyMiss(policy.id(), policy.name(),
+                        failed.stream().map(ConditionTrace::text).toList(),
+                        andChain(traces)));
                 continue;
             }
 
@@ -121,8 +123,13 @@ public final class AuditEngine {
             List<ConditionTrace> excluded = new ArrayList<>(satisfied(ctx, policy.policyExclusions()));
             excluded.addAll(satisfied(ctx, globalExclusions));
             if (!excluded.isEmpty()) {
+                // 条件全满足、只是被例外挡掉：留痕要把「满足的 MATCH」和「成立的排除」都摆出来，
+                // 否则运营只看到「被排除」四个字，仍然不知道是备注还是城市把它挡下来的。
+                List<ConditionTrace> trace = new ArrayList<>(traces);
+                trace.addAll(excluded);
                 misses.add(new PolicyMiss(policy.id(), policy.name(),
-                        excluded.stream().map(t -> "被排除：" + t.text()).toList()));
+                        excluded.stream().map(t -> "被排除：" + t.text()).toList(),
+                        trace));
                 if (firstExcluded == null) {
                     firstExcluded = policy;
                     firstExcludedBy = List.copyOf(excluded);
@@ -231,6 +238,24 @@ public final class AuditEngine {
 
     private static boolean allSatisfied(List<ConditionTrace> traces) {
         return traces.stream().allMatch(ConditionTrace::satisfied);
+    }
+
+    /**
+     * 按 <b>AND 链</b>标 {@code evaluated}：首个不满足之后的条件标 {@code evaluated=false}。
+     *
+     * <p>值不重算也不清空 —— 引擎确实把每条条件都求过值（{@link #evalMatches} 不做短路，
+     * 「差在哪几条」要一次说清）。{@code evaluated=false} 表达的是「这条<b>不再决定结论</b>」，
+     * 不是「值不可信」；前端据此把它画成灰色「未求值」，而不是红色「不满足」。
+     * 不这么标，前端就只能自己按 AND 规则猜，猜错就把没比过的条件说成比过且不满足。
+     */
+    static List<ConditionTrace> andChain(List<ConditionTrace> traces) {
+        boolean broken = false;
+        List<ConditionTrace> out = new ArrayList<>(traces.size());
+        for (ConditionTrace t : traces) {
+            out.add(t.withEvaluated(!broken));
+            if (!t.satisfied()) broken = true;
+        }
+        return out;
     }
 
     private static String join(List<ConditionTrace> traces) {

@@ -319,6 +319,98 @@ class AuditRunIntegrationTest {
         });
     }
 
+    // ================================================================== 补审核模块的查询面缺口（①②③）
+
+    @Test
+    @Order(5)
+    @DisplayName("队列行补 4 字段（店铺/渠道/种类数/毛利）+ miss 逐条件 trace + 决策↔台账对齐")
+    void queueTraceAndAlignment() {
+        // ---------------- ① 队列行缺的 4 个字段：真库取真值 ----------------
+        Map<String, Object> all = queryService.queue(null, 1, 50);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rows = (List<Map<String, Object>>) all.get("rows");
+        Map<String, Object> d6 = rows.stream()
+                .filter(r -> "QT-1006".equals(String.valueOf(r.get("order_sn"))))
+                .findFirst().orElseThrow();
+        assertThat(String.valueOf(d6.get("shop_name"))).isEqualTo("官方旗舰店");
+        assertThat(String.valueOf(d6.get("channel"))).isEqualTo("淘宝");
+        assertThat(((Number) d6.get("item_kind_count")).intValue())
+                .as("种类数 = 去重 product_sku_id 个数（QT-1006 是 6 个样），与 AuditContextLoader 同口径")
+                .isEqualTo(6);
+        assertThat(((Number) d6.get("item_qty_total")).intValue()).isEqualTo(6);
+        assertThat(new BigDecimal(String.valueOf(d6.get("gross_profit")))).isEqualByComparingTo("100.00");
+
+        // ---------------- ② miss_reason_json 是逐条件 trace（不再是纯文案），且被解析成结构 ----------------
+        Object miss = d6.get("miss_reasons");
+        assertThat(miss).as("队列行必须把 miss_reason_json 解析成数组再返回，否则前端只能走本地降级").isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> missGroups = (List<Map<String, Object>>) miss;
+        Map<String, Object> taobao = missGroups.stream()
+                .filter(g -> "淘宝-标准单".equals(String.valueOf(g.get("policyName"))))
+                .findFirst().orElseThrow();
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> conds = (List<Map<String, Object>>) taobao.get("conditions");
+        assertThat(conds).extracting(c -> c.get("fieldCode"))
+                .containsExactly("CHANNEL", "RECEIVABLE_AMOUNT", "ITEM_KIND_COUNT");
+        assertThat(conds).extracting(c -> c.get("seq")).as("seq 直接来自 audit_policy_condition（建策略时 0 起编号）")
+                .containsExactly(0, 1, 2);
+        assertThat(conds).extracting(c -> c.get("satisfied")).containsExactly(true, true, false);
+        assertThat(conds).extracting(c -> c.get("evaluated"))
+                .as("三条都求值过：前两条满足、第三条才是「差在哪」").containsExactly(true, true, true);
+        Map<String, Object> last = conds.get(2);
+        assertThat(String.valueOf(last.get("expected"))).isEqualTo("5");
+        assertThat(String.valueOf(last.get("actual"))).isEqualTo("6");
+        assertThat(String.valueOf(last.get("reason"))).isEqualTo("商品种类数 6 ≤ 5");
+
+        // 未求值项：QT-1003 的「淘宝-标准单」第一条（渠道）就不成立 → 后面两条 evaluated=false
+        Map<String, Object> d3 = rows.stream()
+                .filter(r -> "QT-1003".equals(String.valueOf(r.get("order_sn"))))
+                .findFirst().orElseThrow();
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> miss3 = (List<Map<String, Object>>) d3.get("miss_reasons");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> conds3 = (List<Map<String, Object>>) miss3.stream()
+                .filter(g -> "淘宝-标准单".equals(String.valueOf(g.get("policyName"))))
+                .findFirst().orElseThrow().get("conditions");
+        assertThat(conds3).extracting(c -> c.get("evaluated"))
+                .as("AND 链已断：后面两条标未求值，但值照实给出").containsExactly(true, false, false);
+        assertThat(String.valueOf(conds3.get(1).get("actual"))).isEqualTo("1580.00");
+
+        // ---------------- ③ trail 对齐字段：决策段 order_status_seq / 台账段 status_seq + idem_key ----------------
+        Long order1 = orderIdOf("QT-1001");
+        List<Map<String, Object>> trail = queryService.trail(order1);
+        Map<String, Object> decisionEntry = trail.stream()
+                .filter(e -> "DECISION".equals(e.get("segment")))
+                .findFirst().orElseThrow();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> decisionRaw = (Map<String, Object>) decisionEntry.get("raw");
+        assertThat(decisionRaw.get("order_status_seq")).as("决策段必须回 order_status_seq").isNotNull();
+        assertThat(((Number) decisionRaw.get("order_status_seq")).intValue()).isEqualTo(1);
+
+        Map<String, Object> statusEntry = trail.stream()
+                .filter(e -> "STATUS".equals(e.get("segment")))
+                .filter(e -> "AUDIT_AUTO_PASS".equals(String.valueOf(((Map<?, ?>) e.get("raw")).get("reason"))))
+                .findFirst().orElseThrow();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> statusRaw = (Map<String, Object>) statusEntry.get("raw");
+        assertThat(((Number) statusRaw.get("status_seq")).intValue()).isEqualTo(1);
+        assertThat(String.valueOf(statusRaw.get("idem_key"))).isEqualTo(order1 + ":1");
+
+        // 已对齐的配对：AUTO_PASS 那一轮的台账是同一个 run 推进的 → 强对齐 RUN_REF
+        @SuppressWarnings("unchecked")
+        Map<String, Object> decisionPair = (Map<String, Object>) decisionEntry.get("aligned");
+        assertThat(decisionPair.get("aligned")).isEqualTo(true);
+        assertThat(decisionPair.get("matchedBy")).isEqualTo("RUN_REF");
+        assertThat(((Number) decisionPair.get("ledgerRowId")).longValue())
+                .isEqualTo(((Number) statusRaw.get("id")).longValue());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> statusPair = (Map<String, Object>) statusEntry.get("aligned");
+        List<?> pairedDecisionIds = (List<?>) statusPair.get("decisionIds");
+        assertThat(pairedDecisionIds).hasSize(1);
+        assertThat(((Number) pairedDecisionIds.get(0)).longValue())
+                .isEqualTo(((Number) decisionRaw.get("id")).longValue());
+    }
+
     private Long orderIdOf(String orderSn) {
         return jdbc.queryForObject("SELECT id FROM `order` WHERE order_sn = ?", Long.class, orderSn);
     }
