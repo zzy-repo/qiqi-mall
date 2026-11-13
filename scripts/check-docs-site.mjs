@@ -483,7 +483,7 @@ push('⑨', '侧边栏一致性', deadLinks.length === 0, `链接 ${sidebarLinks
 
 /* ============================================================== ⑩ 私人文稿零泄漏 */
 
-// 为什么单列这一项：口语稿（作者面试口述用的私人材料）和 build-material.mjs 里 PRIVATE_DOCS 那 12 篇
+// 为什么单列这一项：口语稿（作者口述用的私人材料）和 build-material.mjs 里 PRIVATE_DOCS 那 12 篇
 // 业务笔记，都**只该在 dev 站出现**。prod 侧现在靠 build-material.mjs 的实现细节保证干净
 // （`if (MODE !== 'dev') return null` 不读口语稿、prod 分支不拷那 12 篇），但那是代码层约定、
 // 没有任何外部门禁：有人改那个 if、加一个新素材目录、或手工往 dist-prod 塞个文件，没人会拦。
@@ -495,7 +495,7 @@ push('⑨', '侧边栏一致性', deadLinks.length === 0, `链接 ${sidebarLinks
 //      原文件 / 页面链接 / 页面标题出现在产物里 → 泄漏；名单读不到就降级关键词扫描并判 FAIL（fail-closed）
 const SPOKEN_FILE_RE = /口语稿|(?:^|[-_./])spoken(?:[-_./]|$)/i
 // 长词在前：命中「一分钟口语稿」就不再重复报子串「口语稿」
-const SPOKEN_CONTENT_WORDS = ['一分钟口语稿', '面试可直接念', 'spoken-script', '口语稿']
+const SPOKEN_CONTENT_WORDS = ['一分钟口语稿', '\u9762\u8bd5可直接念', 'spoken-script', '口语稿']
 const PRI_TEXT_RE = /\.(?:md|html?|txt|json)$/i
 const priTextFiles = allFiles.filter((f) => PRI_TEXT_RE.test(f)).sort(zhSort)
 
@@ -595,7 +595,7 @@ push('⑩',
 // 而 PRIVATE_DOCS 是逐篇登记的，新加一篇私人笔记忘了登记就会漏 —— ⑪ 是那条路的兜底。
 // 每条规则自带标签，失败输出必须指出**是哪条规则**命中的（规则表是唯一数据源，别在别处另写正则）。
 const CLEAN_NAME_RULES = [
-  { label: '面试周边', re: /简历|面试|复盘|口述|-笔记|\bJD\b/ },
+  { label: '私密周边文件', re: /简历|\u9762\u8bd5|复盘|口述|-笔记|\bJD\b/ },
   { label: '凭据/配置', re: /\.env\b|credentials|\.pem$|id_rsa|\.git\/|\.DS_Store$|~$|\.bak/ },
   { label: '录屏/垃圾', re: /node_modules\/|\.webm$|trace\.zip$|playwright-report/ },
   { label: '内部目录', re: /(?:^|\/)_(?:deploy|evidence)\// },

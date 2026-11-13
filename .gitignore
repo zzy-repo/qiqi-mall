@@ -8,9 +8,6 @@ target/
 .DS_Store
 .vite/
 
-# 面试准备（本地私有）
-docs/面试准备.md
-
 # docs 整体不入库（本地维护）
 docs/
 

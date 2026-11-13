@@ -181,7 +181,7 @@
 #            这个接口错了也返回成功，没有回读就等于没有证据。
 #
 # 【十二】文档产物硬门禁 = 上传 OSS 之前必须整条 PASS（check-docs-site.mjs 十一项）
-#   历史教训：口语稿（作者面试口述稿）和 build-material.mjs 里 PRIVATE_DOCS 那 12 篇私人笔记
+#   历史教训：口语稿（作者口述稿）和 build-material.mjs 里 PRIVATE_DOCS 那 12 篇私人笔记
 #   属于「私人文稿」，**只能出现在 dev 站**。prod 侧原先只靠 build-material.mjs 的实现细节
 #   保证干净（`if (MODE !== 'dev') return null` 不读口语稿、prod 分支不拷那 12 篇）——
 #   那是代码层约定，**没有任何外部门禁**：谁改了那个 if、加一个新素材目录、或手工往 dist-prod
@@ -196,9 +196,9 @@
 #   **一个字节都不上传**。
 #   上传前只做静态检查（--skip-http）：此刻公网还是上一版，探测公网既慢又没有意义。
 #   ⑩ 的口径是「按字节判」，不看代码怎么写的：产物里出现 ①「口语稿」/「spoken」文件名、
-#   ② 口语稿特征词（一分钟口语稿 / 面试可直接念 / spoken-script / 口语稿）、
+#   ② 口语稿特征词（一分钟口语稿 / 「可直接念」句式 / spoken-script / 口语稿）、
 #   ③ PRIVATE_DOCS 那 12 篇的原文件、页面链接或标题 —— 任意一处命中即 FAIL。
-#   ⑪ 管「根本不该出现在产物里」的东西（不需要逐篇登记）：私密文件名（简历/面试/复盘/口述/-笔记/JD、
+#   ⑪ 管「根本不该出现在产物里」的东西（不需要逐篇登记）：私密文件名（简历/口述周边/复盘/-笔记/JD、
 #   .env/credentials/*.pem/id_rsa/.git/.DS_Store/*~/ *.bak、node_modules、*.webm/trace.zip/
 #   playwright-report、_deploy/_evidence）+ 正文里的内网 IP / 绝对路径 /root/ /tmp/ / 容器名 /
 #   docker compose。理由：这些原先全靠 build-material「不拷」这个约定，PRIVATE_DOCS 又是逐篇登记，
