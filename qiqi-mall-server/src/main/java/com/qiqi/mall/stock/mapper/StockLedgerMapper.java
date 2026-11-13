@@ -1,6 +1,7 @@
 package com.qiqi.mall.stock.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.qiqi.mall.stock.dto.InventoryLedgerRow;
 import com.qiqi.mall.stock.entity.StockLedger;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
@@ -10,6 +11,7 @@ import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 库存台账 DAO。两条关键 SQL 都是**原子**的，不在应用层做「先查再写」：
@@ -131,4 +133,22 @@ public interface StockLedgerMapper extends BaseMapper<StockLedger> {
     @Select("SELECT COALESCE(SUM(delta), 0) FROM stock_ledger "
             + "WHERE order_id = #{orderId} AND sku_id = #{skuId} AND delta > 0")
     int sumRestoredQty(@Param("orderId") Long orderId, @Param("skuId") Long skuId);
+
+    /**
+     * 该 SKU 的<b>台账净额</b>：{@code SUM(delta)} —— 全生命周期进出和。
+     *
+     * <p><b>它不是余额，也永远不该等于当前库存</b>：这里把该 SKU 历史上所有扣减（负数）与
+     * 回补（正数）加在一起，而当前库存是「初始库存 + 全部进出」—— 两者的差正是那笔
+     * 「没有被台账覆盖过的初始库存」（分桶迁移前就存在的老 SKU、直接 INSERT 造出来的数据等）。
+     * 所以对账页把它单独摆一块，接口也**只如实返回**：<b>绝不在后端做
+     * {@code ledgerNet == bucketSum} 的校验或修正</b>（那会把一个正常的账变成「错误」，
+     * 再顺手改掉真库存）。
+     */
+    @Select("SELECT COALESCE(SUM(delta), 0) FROM stock_ledger WHERE sku_id = #{skuId}")
+    int sumDelta(@Param("skuId") Long skuId);
+
+    /** 该 SKU 最近的 N 条库存流水（对账页展示用；按 id 倒序 = 最近的在前） */
+    @Select("SELECT id, reason, delta, bucket_no, ref_type, ref_id, created_at, idem_key "
+            + "FROM stock_ledger WHERE sku_id = #{skuId} ORDER BY id DESC LIMIT #{limit}")
+    List<InventoryLedgerRow> recentBySku(@Param("skuId") Long skuId, @Param("limit") int limit);
 }

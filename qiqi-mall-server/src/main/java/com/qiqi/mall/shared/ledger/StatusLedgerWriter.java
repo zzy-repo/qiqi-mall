@@ -104,7 +104,14 @@ public class StatusLedgerWriter {
 
     // ================================================================ 包裹
 
-    /** 包裹出生事件（拆单/人工拆分新建的包裹）：{@code from_status = NULL}，额外写 {@code delivery_sn} 快照 */
+    /**
+     * 包裹出生事件（拆单/人工拆分新建的包裹）：{@code from_status = NULL}，
+     * 额外写两个**已登记冗余列** —— {@code delivery_sn} 快照 + {@code order_id}。
+     *
+     * <p>为什么 order_id 也要冗余：{@code OrderPurgeService} 会物理删除包裹行，删完
+     * {@code delivery_order} 这座桥就断了，只留单号的话「按订单反查包裹流水」彻底失效
+     * （与 {@code return_status_ledger.order_id} 同一类缺口，两张表必须对称）。
+     */
     public void deliveryBirth(DeliveryOrder delivery, String reason, String reasonDetail) {
         if (!props.statusOn()) return;
         long deliveryId = requireId(delivery.getId(), "包裹");
@@ -112,14 +119,14 @@ public class StatusLedgerWriter {
         int seq = delivery.getStatusSeq() == null ? 0 : delivery.getStatusSeq();
         delivery.setStatusSeq(seq);
         int to = delivery.getStatus() == null ? 0 : delivery.getStatus();
-        deliveryLedger.insert(deliveryId, requireSn(delivery.getDeliverySn()), null, to,
+        deliveryLedger.insert(deliveryId, requireSn(delivery.getDeliverySn()), orderIdOf(delivery), null, to,
                 requireReason(reason), detail(reasonDetail), actor.type(), actor.id(), actor.name(),
                 null, null, null, idemKey(deliveryId, seq));
-        log.debug("包裹台账（出生）：包裹 {} {} status_seq={} reason={}",
-                deliveryId, delivery.getDeliverySn(), seq, reason);
+        log.debug("包裹台账（出生）：包裹 {} {} orderId={} status_seq={} reason={}",
+                deliveryId, delivery.getDeliverySn(), delivery.getOrderId(), seq, reason);
     }
 
-    /** 包裹状态流转事件 */
+    /** 包裹状态流转事件（同样带上冗余的 {@code order_id}，理由见 {@link #deliveryBirth}） */
     public void deliveryChanged(DeliveryOrder delivery, Integer from, int to, String reason, String reasonDetail,
                                 String refType, Long refId) {
         if (!props.statusOn()) return;
@@ -127,10 +134,11 @@ public class StatusLedgerWriter {
         ActorResolver.Actor actor = requireActor();
         int seq = nextSeq(deliveryId, delivery.getStatusSeq(), deliveryLedger::selectStatusSeq);
         delivery.setStatusSeq(seq);
-        deliveryLedger.insert(deliveryId, requireSn(delivery.getDeliverySn()), from, to,
+        deliveryLedger.insert(deliveryId, requireSn(delivery.getDeliverySn()), orderIdOf(delivery), from, to,
                 requireReason(reason), detail(reasonDetail), actor.type(), actor.id(), actor.name(),
                 refType, refId, null, idemKey(deliveryId, seq));
-        log.debug("包裹台账：包裹 {} {} → {} status_seq={} reason={}", deliveryId, from, to, seq, reason);
+        log.debug("包裹台账：包裹 {} {} → {} orderId={} status_seq={} reason={}",
+                deliveryId, from, to, delivery.getOrderId(), seq, reason);
     }
 
     // ================================================================ 售后
@@ -199,6 +207,24 @@ public class StatusLedgerWriter {
             throw new IllegalStateException(what + "台账写入时还没有业务ID（必须先 save() 拿到自增主键，再写台账）");
         }
         return id;
+    }
+
+    /**
+     * 包裹的订单 id（台账的已登记冗余列）：优先取实体上的值，缺失才回查一次
+     * {@code delivery_order.order_id}（该列 NOT NULL ⇒ 回查不到 = 包裹行已不存在，直接抛）。
+     *
+     * <p>为什么不许写 NULL 蒙过去：这条冗余列存在的**全部意义**就是「包裹行被物理删除后仍能按订单反查」，
+     * 写一条 order_id 为 NULL 的台账等于把缺口原样保留下来，而且它看起来「写成功了」，事后没人会再发现。
+     */
+    private Long orderIdOf(DeliveryOrder delivery) {
+        Long orderId = delivery.getOrderId();
+        if (orderId == null) orderId = deliveryLedger.selectOrderId(delivery.getId());
+        if (orderId == null) {
+            throw new IllegalStateException("包裹台账写入缺少 order_id（包裹ID=" + delivery.getId()
+                    + "）：delivery_order.order_id 是 NOT NULL，回查不到说明包裹行已不存在 —— "
+                    + "拒绝写一条丢掉了订单归属的包裹台账");
+        }
+        return orderId;
     }
 
     private static String requireSn(String deliverySn) {

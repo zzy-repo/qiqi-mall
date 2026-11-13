@@ -444,11 +444,12 @@ CREATE TABLE `order_status_ledger` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='订单状态台账（只追加证据链）';
 
--- 包裹状态台账（带单号快照：OrderPurgeService 会物理删包裹行，单号必须留快照）
+-- 包裹状态台账（带单号快照 + 冗余订单ID：OrderPurgeService 会物理删包裹行，单号与 order_id 都必须留在台账里）
 CREATE TABLE `delivery_status_ledger` (
   `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
   `delivery_id` BIGINT NOT NULL COMMENT '包裹ID（业务主键·无外键：证据不随包裹级联删除）',
   `delivery_sn` VARCHAR(50) NOT NULL COMMENT '【已登记冗余列】发货单号快照（包裹被物理删除后仍可读）',
+  `order_id` BIGINT DEFAULT NULL COMMENT '【已登记冗余列】冗余订单ID：包裹行被物理删除（OrderPurgeService）后，仍能从订单反查包裹状态流水',
   `from_status` TINYINT DEFAULT NULL COMMENT '变更前状态；NULL=出生事件（建包裹）',
   `to_status` TINYINT NOT NULL COMMENT '变更后状态',
   `reason` VARCHAR(32) NOT NULL COMMENT '流转原因码',
@@ -465,10 +466,11 @@ CREATE TABLE `delivery_status_ledger` (
   UNIQUE KEY `uk_idem` (`idem_key`),
   UNIQUE KEY `uk_event` (`event_key`),
   KEY `idx_biz` (`delivery_id`, `created_at`),
+  KEY `idx_order` (`order_id`, `created_at`),
   CONSTRAINT `ck_delivery_status_ledger_operator_type`
     CHECK (`operator_type` IN ('ADMIN','MEMBER','APIKEY','SYSTEM'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-  COMMENT='包裹状态台账（只追加证据链；带单号快照）';
+  COMMENT='包裹状态台账（只追加证据链；带单号快照 + 冗余订单ID）';
 
 -- 售后状态台账（冗余 order_id：return_apply 随订单级联删除/物理删单后仍能反查）
 CREATE TABLE `return_status_ledger` (
@@ -537,7 +539,7 @@ CREATE TABLE `wms_exchange_ledger` (
   `operator_type` VARCHAR(16) NOT NULL COMMENT 'ADMIN / MEMBER / APIKEY / SYSTEM',
   `operator_id` BIGINT DEFAULT NULL COMMENT '操作者ID（系统重试可空）',
   `operator_name` VARCHAR(64) DEFAULT NULL COMMENT '操作者名快照（密钥名 / 登录名）',
-  `idem_key` VARCHAR(96) NOT NULL COMMENT '幂等键 {deliveryId}:WMS:{attemptNo}:{REQ|ACK}',
+  `idem_key` VARCHAR(96) NOT NULL COMMENT '幂等键 {deliveryId}:{direction}:{attemptNo}（如 3364:REQ:1）',
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '记账时间（只追加，无 updated_at）',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_idem` (`idem_key`),
@@ -585,7 +587,7 @@ UNION ALL
 SELECT
     CAST('DELIVERY' AS CHAR(8)),
     CAST(l.`delivery_id` AS SIGNED),
-    CAST(NULL AS SIGNED),
+    CAST(l.`order_id` AS SIGNED),
     CAST(l.`delivery_sn` AS CHAR(50)),
     CAST(l.`from_status` AS SIGNED),
     CAST(l.`to_status` AS SIGNED),

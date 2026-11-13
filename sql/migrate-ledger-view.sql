@@ -19,8 +19,13 @@
 --
 -- ── 口径（照定稿执行，不再重新论证）────────────────────────────────────────
 --   ① 三个分支的**共同 13 列**必须逐字一致（同构契约）；各分支独有的列只能以 NULL 补齐：
---      order_id（包裹分支为 NULL：包裹台账不冗余订单 id，包裹被物理删除后只能靠 delivery_sn 追）
---      delivery_sn（订单/售后分支没有）
+--      order_id（**三个分支都有值**：订单分支 = 订单 id；包裹分支 = 已登记的冗余列
+--                delivery_status_ledger.order_id；售后分支 = 冗余的 return_status_ledger.order_id）
+--      delivery_sn（订单/售后分支没有 → NULL）
+--      ⚠️ 包裹分支的 order_id 曾经是 `CAST(NULL AS SIGNED)`（包裹台账当时不冗余订单 id），
+--         后果是「从订单反查这个订单的几个包裹是怎么走的」只能靠 `delivery_order` 搭桥，
+--         而 OrderPurgeService 会**物理删除**包裹行 —— 桥一断就永久查不到。
+--         2026-11-13 补登 delivery_status_ledger.order_id 冗余列（与售后台账对称），这里改读真实列。
 --   ② **UNION ALL**，不是 UNION：台账里同一秒可能有 from=to 的幂等重算行，去重会把「又算了一次」
 --      这个事实抹掉；而且 UNION 要做全量排序去重，视图会变得很慢。
 --   ③ 只读：视图不带 INSTEAD OF 触发器（MySQL 不支持），任何人都只能 SELECT。
@@ -38,14 +43,21 @@
 --
 -- ── 查询示例（直接可用）──────────────────────────────────────────────────────
 --   -- 1) 一张订单的完整时间线（含它的包裹与售后申请）
---   SELECT biz_type, biz_id, from_status_text, to_status_text, reason, operator_type, operator_name,
---          ref_type, ref_id, created_at
+--   --    ⚠️ 这条曾经是"错例句"：包裹分支的 order_id 当时是 CAST(NULL)，`biz_type='DELIVERY' AND order_id=12`
+--   --       恒不成立（永远 0 行），等于告诉人一个查不到东西的写法。现在 order_id 是真实列，示例成立。
+--   SELECT biz_type, biz_id, order_id, delivery_sn, from_status_text, to_status_text,
+--          reason, operator_type, operator_name, ref_type, ref_id, created_at
 --     FROM v_biz_status_timeline
---    WHERE (biz_type = 'ORDER'    AND biz_id = 12)
---       OR (biz_type = 'DELIVERY' AND order_id = 12)
---       OR (biz_type = 'RETURN'   AND order_id = 12)
+--    WHERE order_id = 12
 --    ORDER BY created_at, id;
+--   --（`WHERE order_id = 12` 等价于上面那个三段 OR 的写法，且能用上 delivery_status_ledger.idx_order）
 --
+--   -- 1b) 按订单反查该订单下**所有包裹**的状态流水（包裹行已被物理删除也查得到：走冗余 order_id）
+--   SELECT biz_id AS delivery_id, delivery_sn, from_status_text, to_status_text, reason, created_at
+--     FROM v_biz_status_timeline
+--    WHERE biz_type = 'DELIVERY' AND order_id = 12
+--    ORDER BY created_at, id;
+
 --   -- 2) 某个包裹（含被物理删除的包裹：单号只能从台账里读）
 --   SELECT * FROM v_biz_status_timeline WHERE biz_type = 'DELIVERY' AND biz_id = 34 ORDER BY created_at;
 --
@@ -94,7 +106,7 @@ UNION ALL
 SELECT
     CAST('DELIVERY' AS CHAR(8)),
     CAST(l.`delivery_id` AS SIGNED),
-    CAST(NULL AS SIGNED),                                  -- 包裹台账不冗余 order_id（包裹可能已被物理删除）
+    CAST(l.`order_id` AS SIGNED),                          -- 已登记冗余列：删包裹行后仍能从订单反查包裹流水
     CAST(l.`delivery_sn` AS CHAR(50)),                     -- 已登记冗余列：删包后唯一的追踪线索
     CAST(l.`from_status` AS SIGNED),
     CAST(l.`to_status` AS SIGNED),

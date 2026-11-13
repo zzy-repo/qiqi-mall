@@ -130,7 +130,7 @@ class LedgerWriteIntegrationTest {
     }
 
     @Test
-    @DisplayName("② 包裹：出生行带 delivery_sn 快照 + 流转行；幂等键 {deliveryId}:{seq}")
+    @DisplayName("② 包裹：出生行带 delivery_sn + order_id 两个冗余列；幂等键 {deliveryId}:{seq}")
     void deliveryLedgerRows() {
         Order order = newOrder(1);
         DeliveryOrder delivery = newDelivery(order.getId());
@@ -141,11 +141,15 @@ class LedgerWriteIntegrationTest {
                 DeliveryStatusService.REASON_DISPATCH, null)).isEqualTo(1);
 
         List<Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT delivery_sn, from_status, to_status, reason, idem_key FROM delivery_status_ledger "
-                        + "WHERE delivery_id = ? ORDER BY id", delivery.getId());
+                "SELECT delivery_sn, order_id, from_status, to_status, reason, idem_key "
+                        + "FROM delivery_status_ledger WHERE delivery_id = ? ORDER BY id", delivery.getId());
         assertThat(rows).hasSize(2);
         assertThat(rows.get(0).get("delivery_sn")).as("已登记冗余列：包裹被物理删除后单号只能靠它")
                 .isEqualTo(delivery.getDeliverySn());
+        assertThat(rows.get(0).get("order_id")).as("已登记冗余列：包裹行被物理删除后仍能按订单反查")
+                .isEqualTo(order.getId());
+        assertThat(rows.get(1).get("order_id")).as("流转行同样带冗余 order_id（每一行都要能按订单反查）")
+                .isEqualTo(order.getId());
         assertThat(rows.get(0).get("from_status")).isNull();
         assertThat(rows.get(1).get("from_status")).isEqualTo(DeliveryOrder.PENDING);
         assertThat(rows.get(1).get("to_status")).isEqualTo(DeliveryOrder.DISPATCHED);

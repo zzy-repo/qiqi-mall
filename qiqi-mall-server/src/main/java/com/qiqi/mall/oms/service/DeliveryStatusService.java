@@ -87,11 +87,14 @@ public class DeliveryStatusService {
     }
 
     /**
-     * 出生台账（{@code from_status = NULL}，并写下 {@code delivery_sn} 快照）：拆单/人工拆分
-     * 新建出来的包裹也要有「出生」这条证据。
+     * 出生台账（{@code from_status = NULL}，并写下两个已登记冗余列 —— {@code delivery_sn} 快照
+     * 与 {@code order_id}）：拆单/人工拆分新建出来的包裹也要有「出生」这条证据。
      *
      * <p>必须在 {@code save()} 之后调用（幂等键 {@code {deliveryId}:0} 要真实 id），且同一事务。
-     * 单号快照尤其重要：{@code OrderPurgeService} 会物理删包裹行，单号只留在台账里。
+     * 单号快照尤其重要：{@code OrderPurgeService} 会物理删包裹行，单号只留在台账里；
+     * {@code order_id} 同理 —— 包裹行一删，{@code delivery_order} 这座「台账 → 订单」的桥就断了，
+     * 不冗余订单 id 就再也回答不了「这张订单的几个包裹是怎么走的」（与售后台账的 order_id 对称）。
+     * 订单 id 由 {@link StatusLedgerWriter} 从包裹实体取（实体缺失才回查一次，取不到直接抛）。
      */
     public void recordBirth(DeliveryOrder delivery, String reason, String reasonDetail) {
         ledger.deliveryBirth(delivery, reason, reasonDetail);
@@ -103,7 +106,8 @@ public class DeliveryStatusService {
     }
 
     /**
-     * 流转：一条 UPDATE 写 {@code status} + {@code status_seq+1} + {@code version+1}。
+     * 流转：一条 UPDATE 写 {@code status} + {@code status_seq+1} + {@code version+1}；
+     * 台账那一行同时带上 {@code delivery_sn} 与 {@code order_id} 两个已登记冗余列。
      *
      * @param extraSets 需要与状态同一条 UPDATE 一起写的其它列（当前没有调用方用，留作第二步/后续）
      * @return 影响行数；0 = version 不匹配（期间被别人改过）→ 调用方抛 409

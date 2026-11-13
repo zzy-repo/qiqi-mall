@@ -1,6 +1,8 @@
 package com.qiqi.mall.stock.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.qiqi.mall.stock.dto.InventoryDriftRow;
 import com.qiqi.mall.stock.entity.SkuBucket;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
@@ -9,6 +11,7 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -106,4 +109,35 @@ public interface SkuBucketMapper extends BaseMapper<SkuBucket> {
     /** 清空该 SKU 的桶（只给「管理端重置库存」用；SKU 删除走外键级联，不经过这里） */
     @Delete("DELETE FROM sku_bucket WHERE sku_id = #{skuId}")
     int deleteBySku(@Param("skuId") Long skuId);
+
+    /** 该 SKU 的桶最近一次变动时间（对账页「缓存最后回写」的可观测近似；没有桶时为 null） */
+    @Select("SELECT MAX(updated_at) FROM sku_bucket WHERE sku_id = #{skuId}")
+    LocalDateTime lastChangedAt(@Param("skuId") Long skuId);
+
+    /**
+     * <b>全库偏差分页</b>（{@code |bucketSum - skuStock| > threshold}，偏差大的在前）。
+     *
+     * <p>为什么必须新增而不是复用现有的两条：{@link #countCacheDrift()} 只给「有多少个 SKU 偏了」
+     * 一个数、单 SKU 的对账只给一个 SKU —— 谁需要「偏了多少、偏的是哪几个、怎么翻页」就得有这条。
+     *
+     * <h3>口径（与 {@code scripts/check-data-integrity.sh} 的 ⑤ 同源，只有符号相反）</h3>
+     * <ul>
+     *   <li>{@code bucketSum = COALESCE(SUM(桶), 0)} —— 一个桶都没有的 SKU 算 0
+     *       （那正是「桶缺失」的信号，会以 {@code drift = -skuStock} 出现在列表里）；</li>
+     *   <li>{@code drift = bucketSum - skuStock}（前端契约：正 = 缓存少记，负 = 缓存多记）。
+     *       体检脚本里判断用的是 {@code ABS()}，阈值判定两边完全等价。</li>
+     * </ul>
+     *
+     * <p>{@code ABS(...)} 出现在 WHERE 上 ⇒ 这条查询是全表扫（sku + 桶聚合），走不了索引。
+     * 这是对账类查询的固有代价（偏差本身是派生值），只读、按需触发，单页 50 行。
+     */
+    @Select("SELECT s.id AS sku_id, CONCAT('SKU-', s.id) AS sku_code, "
+            + "s.stock AS sku_stock, COALESCE(b.total, 0) AS bucket_sum, "
+            + "(COALESCE(b.total, 0) - s.stock) AS drift "
+            + "FROM sku s "
+            + "LEFT JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket GROUP BY sku_id) b "
+            + "ON b.sku_id = s.id "
+            + "WHERE ABS(COALESCE(b.total, 0) - s.stock) > #{threshold} "
+            + "ORDER BY ABS(COALESCE(b.total, 0) - s.stock) DESC, s.id ASC")
+    IPage<InventoryDriftRow> pageCacheDrift(IPage<InventoryDriftRow> page, @Param("threshold") int threshold);
 }

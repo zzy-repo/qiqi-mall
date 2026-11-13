@@ -20,11 +20,15 @@
 --      ── 冗余列登记表（REGISTRY）────────────────────────────────────────
 --        表                       业务主键          已登记冗余列
 --        order_status_ledger      order_id          （无）
---        delivery_status_ledger   delivery_id       delivery_sn
+--        delivery_status_ledger   delivery_id       delivery_sn, order_id
 --        return_status_ledger     return_apply_id   order_id
 --      ───────────────────────────────────────────────────────────────────
 --
 --      · delivery_sn：OrderPurgeService 物理删包裹，单号必须留快照
+--      · order_id（包裹）：OrderPurgeService 物理删包裹行，`delivery_order` 这座桥一断，
+--        「从订单反查包裹状态流水」就彻底查不到了 —— 与售后台账的 order_id 冗余是同一类缺口，
+--        两张表必须对称（2026-11-13 补登）。历史行按 delivery_id → delivery_order.order_id 回填；
+--        包裹已被物理删除的旧行回填不到，保持 NULL（那时桥本来就已断，只能靠 delivery_sn 追）
 --      · order_id（售后）：return_apply 对 order 是 CASCADE + 物理删单，
 --        删单后无 order_id 冗余则从订单反查售后流水彻底断链
 --      · 新增冗余列必须先改这张登记表 + ER 图例，再改 verify 的白名单，
@@ -123,13 +127,16 @@ CREATE TABLE IF NOT EXISTS `order_status_ledger` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='订单状态台账（只追加证据链）';
 
--- ---------- 2. 包裹状态台账（多一列 delivery_sn 快照）----------
---   ⚠️ 已登记冗余列：delivery_sn。
+-- ---------- 2. 包裹状态台账（多两列冗余：delivery_sn 快照 + order_id）----------
+--   ⚠️ 已登记冗余列：delivery_sn、order_id。
 --   OrderPurgeService 会**物理删除**包裹行，所以单号必须在此留快照，否则删单后证据链断裂。
+--   order_id 同理：删包裹行后 `delivery_order` 这条桥没了，「从订单反查包裹流水」会断链；
+--   与 return_status_ledger.order_id 是同一类缺口，必须对称。
 CREATE TABLE IF NOT EXISTS `delivery_status_ledger` (
   `id`            BIGINT       NOT NULL AUTO_INCREMENT              COMMENT '主键',
   `delivery_id`   BIGINT       NOT NULL                             COMMENT '包裹ID（业务主键·无外键：证据不随包裹级联删除）',
   `delivery_sn`   VARCHAR(50)  NOT NULL                             COMMENT '【已登记冗余列】发货单号快照（包裹被物理删除后仍可读）',
+  `order_id`      BIGINT       DEFAULT NULL                         COMMENT '【已登记冗余列】冗余订单ID：包裹行被物理删除（OrderPurgeService）后，仍能从订单反查包裹状态流水',
   `from_status`   TINYINT      DEFAULT NULL                         COMMENT '变更前状态；NULL=出生事件（建包裹）',
   `to_status`     TINYINT      NOT NULL                             COMMENT '变更后状态',
   `reason`        VARCHAR(32)  NOT NULL                             COMMENT '流转原因码',
@@ -146,10 +153,11 @@ CREATE TABLE IF NOT EXISTS `delivery_status_ledger` (
   UNIQUE KEY `uk_idem`  (`idem_key`),
   UNIQUE KEY `uk_event` (`event_key`),
   KEY `idx_biz` (`delivery_id`, `created_at`),
+  KEY `idx_order` (`order_id`, `created_at`),
   CONSTRAINT `ck_delivery_status_ledger_operator_type`
     CHECK (`operator_type` IN ('ADMIN','MEMBER','APIKEY','SYSTEM'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-  COMMENT='包裹状态台账（只追加证据链；带单号快照）';
+  COMMENT='包裹状态台账（只追加证据链；带单号快照 + 冗余订单ID）';
 
 -- ---------- 3. 售后状态台账 ----------
 --   ⚠️ 已登记冗余列：order_id。
@@ -214,7 +222,10 @@ CREATE TABLE IF NOT EXISTS `admin_audit_log` (
 
 -- ---------- 5. WMS 下发/回传（REQ/ACK 两阶段，write-ahead）----------
 --   一次外发最多两行：先写 REQ 行（write-ahead，回执列留空），拿到回执后追加 ACK 行。
---   ⚠️ 两行都在同一张表 ⇒ idem_key 必须含 direction，建议 {deliveryId}:WMS:{attemptNo}:REQ|ACK。
+--   ⚠️ 两行都在同一张表 ⇒ idem_key 必须含 direction。
+--   **实现口径（以此为准，2026-11-13 对齐）**：`{deliveryId}:{direction}:{attemptNo}`，
+--     例 `3364:REQ:1` —— 见 `WmsExchangeLedgerWriter#key`。
+--     （曾写作 `{deliveryId}:WMS:{attemptNo}:{REQ|ACK}`，那是过期描述，实现里从来没有 `WMS` 段。）
 --   不设 updated_at：ACK 行是新的一行，不是对 REQ 行的修改。
 --   request_payload/response_payload 允许 NULL：REQ 行落库时回执还不存在。
 CREATE TABLE IF NOT EXISTS `wms_exchange_ledger` (
@@ -229,7 +240,7 @@ CREATE TABLE IF NOT EXISTS `wms_exchange_ledger` (
   `operator_type`    VARCHAR(16) NOT NULL                          COMMENT 'ADMIN / MEMBER / APIKEY / SYSTEM',
   `operator_id`      BIGINT      DEFAULT NULL                      COMMENT '操作者ID（系统重试可空）',
   `operator_name`    VARCHAR(64) DEFAULT NULL                      COMMENT '操作者名快照（密钥名 / 登录名）',
-  `idem_key`         VARCHAR(96) NOT NULL                          COMMENT '幂等键 {deliveryId}:WMS:{attemptNo}:{REQ|ACK}',
+  `idem_key`         VARCHAR(96) NOT NULL                          COMMENT '幂等键 {deliveryId}:{direction}:{attemptNo}（如 3364:REQ:1）',
   `created_at`       DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '记账时间（只追加，无 updated_at）',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_idem` (`idem_key`),
@@ -331,6 +342,34 @@ CALL zz_ledger_add_col('payment_record', 'operator_name', 'VARCHAR(64) DEFAULT N
 CALL zz_ledger_add_col('payment_record', 'idem_key',      'VARCHAR(96) DEFAULT NULL COMMENT ''幂等键（历史行为 NULL，新写入必填）''');
 
 
+-- ---------- 3.5 delivery_status_ledger：补已登记冗余列 order_id ----------
+-- 为什么必须放在这里（而不是只改上面的 CREATE TABLE）：
+--   上面是 CREATE TABLE IF NOT EXISTS —— 已经建过这张表的库（qiqi_mall / qiqi_mall_test / e2e_*）
+--   会**整表跳过**，新列永远加不上去。所以「已登记的冗余列」在 CREATE 之外还要走一次幂等 ADD COLUMN。
+-- 位置用 AFTER delivery_sn：与上面的 CREATE TABLE 列序一致，避免「新库/老库 SHOW CREATE TABLE
+--   列序不同」这种只在 diff 时才暴露的漂移。
+CALL zz_ledger_add_col('delivery_status_ledger', 'order_id',
+  'BIGINT DEFAULT NULL COMMENT ''【已登记冗余列】冗余订单ID：包裹行被物理删除（OrderPurgeService）后，仍能从订单反查包裹状态流水'' AFTER `delivery_sn`');
+CALL zz_ledger_add_idx('delivery_status_ledger', 'idx_order',
+  'KEY `idx_order` (`order_id`, `created_at`)');
+-- 表注释与 CREATE TABLE 对齐（ALTER ... COMMENT 本身幂等，重跑只是重设同一个值）
+ALTER TABLE `delivery_status_ledger`
+  COMMENT='包裹状态台账（只追加证据链；带单号快照 + 冗余订单ID）';
+
+-- ---------- 3.6 wms_exchange_ledger.idem_key：注释与实现对齐 ----------
+-- 实现生成 `{deliveryId}:{direction}:{attemptNo}`（如 `3364:REQ:1`，见 WmsExchangeLedgerWriter#key）；
+-- DDL 旧注释写的 `{deliveryId}:WMS:{attemptNo}:{REQ|ACK}` 是过期描述（实现里从来没有 `WMS` 段）。
+-- 只改注释、不动类型：先查 information_schema 里的当前注释，不一致才 MODIFY，重跑打 [SKIP]。
+SET @old_wms_ck := (SELECT COLUMN_COMMENT FROM information_schema.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME = 'wms_exchange_ledger' AND COLUMN_NAME = 'idem_key');
+SET @new_wms_ck := '幂等键 {deliveryId}:{direction}:{attemptNo}（如 3364:REQ:1）';
+SET @s := IF(@old_wms_ck IS NULL OR @old_wms_ck = @new_wms_ck,
+  'SELECT ''[SKIP] wms_exchange_ledger.idem_key 注释已对齐'' AS ddl_step',
+  'ALTER TABLE `wms_exchange_ledger` MODIFY COLUMN `idem_key` VARCHAR(96) NOT NULL COMMENT ''幂等键 {deliveryId}:{direction}:{attemptNo}（如 3364:REQ:1）''');
+PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
+
+
 -- ############################################################################
 -- 四、回填（全部带 IS NULL 守卫，重跑 0 行）
 -- ############################################################################
@@ -376,6 +415,26 @@ UPDATE `order`
    AND CAST(SUBSTRING(order_sn, 15, 2) AS UNSIGNED) <= 59;
 
 SELECT CONCAT('[BACKFILL] order.created_at：本次回填 ', ROW_COUNT(), ' 行（其余为短号，按设计留 NULL 不猜）') AS ddl_step;
+
+-- ---------- 4.3 delivery_status_ledger.order_id ← delivery_id → delivery_order.order_id ----------
+-- 这是本轮新加的**已登记冗余列**（与 return_status_ledger.order_id 对称）的历史数据回填。
+-- 能回多少回多少：包裹行还在 → 桥还在 → 能回填；
+-- **包裹已被 OrderPurgeService 物理删除的历史行回填不到**，保持 NULL —— 那时 `delivery_order`
+-- 行本来就没了，本来也查不到，不是回填写漏（那种行只能用 delivery_sn 在台账里追）。
+-- 🔑 回填之后，即使以后再删包裹行，新写入的行已经自带 order_id，桥断掉也能按订单反查。
+UPDATE `delivery_status_ledger` l
+  JOIN `delivery_order` d ON d.id = l.delivery_id
+   SET l.order_id = d.order_id
+ WHERE l.order_id IS NULL;
+
+SELECT CONCAT('[BACKFILL] delivery_status_ledger.order_id：本次回填 ', ROW_COUNT(), ' 行') AS ddl_step;
+
+-- 回填后仍为 NULL 的行数（= 包裹已被物理删除的历史行，按设计保持 NULL）
+SELECT COUNT(*) AS ledger_rows,
+       SUM(order_id IS NOT NULL) AS with_order_id,
+       SUM(order_id IS NULL)     AS without_order_id_null_by_design,
+       CONCAT(SUM(order_id IS NOT NULL), '/', COUNT(*)) AS fill_rate
+  FROM `delivery_status_ledger`;
 
 
 -- ############################################################################

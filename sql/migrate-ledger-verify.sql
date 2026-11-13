@@ -26,7 +26,7 @@ SELECT '############################################################' AS s;
 
 WITH want AS (
   SELECT 'order_status_ledger'    AS t, 14 AS expect UNION ALL   -- 13 共同契约 + order_id
-  SELECT 'delivery_status_ledger' AS t, 15 AS expect UNION ALL   -- 13 共同契约 + delivery_id + delivery_sn
+  SELECT 'delivery_status_ledger' AS t, 16 AS expect UNION ALL   -- 13 共同契约 + delivery_id + delivery_sn + order_id(冗余)
   SELECT 'return_status_ledger'   AS t, 15 AS expect UNION ALL   -- 13 共同契约 + return_apply_id + order_id(冗余)
   SELECT 'admin_audit_log'        AS t, 16 AS expect UNION ALL   -- 13 + target_sn/summary/reason
   SELECT 'wms_exchange_ledger'    AS t, 13 AS expect
@@ -59,10 +59,11 @@ SELECT '############################################################' AS s;
 -- 2.1 判据：三张表的 13 列定义串必须只有一种
 WITH reg AS (
   SELECT 'order_status_ledger'    AS tbl, 'order_id'        AS biz_pk, 'order_id'                   AS expect_extras
-  UNION ALL SELECT 'delivery_status_ledger', 'delivery_id',     'delivery_id, delivery_sn'
+  UNION ALL SELECT 'delivery_status_ledger', 'delivery_id',     'delivery_id, delivery_sn, order_id'
   UNION ALL SELECT 'return_status_ledger',   'return_apply_id', 'order_id, return_apply_id'
 ), redun AS (
   SELECT 'delivery_status_ledger' AS tbl, 'delivery_sn' AS col
+  UNION ALL SELECT 'delivery_status_ledger', 'order_id'
   UNION ALL SELECT 'return_status_ledger', 'order_id'
 ), cols AS (
   SELECT c.TABLE_NAME AS tbl, c.COLUMN_NAME AS col,
@@ -94,10 +95,11 @@ SELECT COUNT(*)             AS tables_cnt,
 -- 2.2 逐表明细：三行 MD5 相同 = 13 列逐字相同
 WITH reg AS (
   SELECT 'order_status_ledger'    AS tbl, 'order_id'        AS biz_pk, 'order_id'                   AS expect_extras
-  UNION ALL SELECT 'delivery_status_ledger', 'delivery_id',     'delivery_id, delivery_sn'
+  UNION ALL SELECT 'delivery_status_ledger', 'delivery_id',     'delivery_id, delivery_sn, order_id'
   UNION ALL SELECT 'return_status_ledger',   'return_apply_id', 'order_id, return_apply_id'
 ), redun AS (
   SELECT 'delivery_status_ledger' AS tbl, 'delivery_sn' AS col
+  UNION ALL SELECT 'delivery_status_ledger', 'order_id'
   UNION ALL SELECT 'return_status_ledger', 'order_id'
 ), cols AS (
   SELECT c.TABLE_NAME AS tbl, c.COLUMN_NAME AS col,
@@ -127,10 +129,11 @@ SELECT tbl       AS table_name,
 -- 2.3 冗余列白名单：每表独有的列必须恰好等于登记清单（多一列 / 少一列都报 ✗）
 WITH reg AS (
   SELECT 'order_status_ledger'    AS tbl, 'order_id'        AS biz_pk, 'order_id'                   AS expect_extras
-  UNION ALL SELECT 'delivery_status_ledger', 'delivery_id',     'delivery_id, delivery_sn'
+  UNION ALL SELECT 'delivery_status_ledger', 'delivery_id',     'delivery_id, delivery_sn, order_id'
   UNION ALL SELECT 'return_status_ledger',   'return_apply_id', 'order_id, return_apply_id'
 ), redun AS (
   SELECT 'delivery_status_ledger' AS tbl, 'delivery_sn' AS col
+  UNION ALL SELECT 'delivery_status_ledger', 'order_id'
   UNION ALL SELECT 'return_status_ledger', 'order_id'
 ), cols AS (
   SELECT c.TABLE_NAME AS tbl, c.COLUMN_NAME AS col
@@ -444,3 +447,70 @@ SELECT COLUMN_NAME AS col, IS_NULLABLE AS nullable, COLUMN_TYPE AS type,
   FROM information_schema.COLUMNS
  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'admin_audit_log'
    AND COLUMN_NAME = 'idem_key';
+
+
+SELECT '############################################################' AS s;
+SELECT '  8 · delivery_status_ledger.order_id 冗余列（与售后台账对称）+ 视图 DELIVERY 分支可读真实列' AS s;
+SELECT '############################################################' AS s;
+
+-- 8.1 列存在、可空、位置紧挨 delivery_sn（新库/老库列序一致）
+SELECT COLUMN_NAME AS col, COLUMN_TYPE AS type, IS_NULLABLE AS nullable, ORDINAL_POSITION AS pos,
+       CASE WHEN COLUMN_NAME <> 'order_id' THEN '（对照列：已登记的 delivery_sn）'
+            WHEN COLUMN_TYPE = 'bigint' AND IS_NULLABLE = 'YES'
+                 THEN '✓ 已登记冗余列 order_id 存在（可空）'
+            ELSE '✗ 类型/可空性不对' END AS verdict
+  FROM information_schema.COLUMNS
+ WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'delivery_status_ledger'
+   AND COLUMN_NAME IN ('delivery_sn','order_id')
+ ORDER BY ORDINAL_POSITION;
+
+-- 8.2 回填率：能回多少回多少；包裹已被物理删除的历史行保持 NULL（设计如此，不是漏回填）
+SELECT COUNT(*)                        AS ledger_rows,
+       SUM(order_id IS NOT NULL)       AS filled_order_id,
+       SUM(order_id IS NULL)           AS null_by_design,
+       CONCAT(SUM(order_id IS NOT NULL), '/', COUNT(*)) AS fill_rate
+  FROM `delivery_status_ledger`;
+
+-- 8.2b 仍为 NULL 且「包裹行还在」的行 —— 这些才是真的漏回填，应为空
+SELECT l.id AS ledger_id, l.delivery_id, l.delivery_sn, '✗ 包裹还在却没回填 order_id' AS problem
+  FROM `delivery_status_ledger` l
+  JOIN `delivery_order` d ON d.id = l.delivery_id
+ WHERE l.order_id IS NULL
+ LIMIT 20;
+
+-- 8.3 回填值与桥一致（不一致行数应为 0）
+SELECT COUNT(*) AS mismatch_rows,
+       IF(COUNT(*) = 0, '✓ 冗余 order_id 与 delivery_order.order_id 一致', '✗ 存在不一致') AS verdict
+  FROM `delivery_status_ledger` l
+  JOIN `delivery_order` d ON d.id = l.delivery_id
+ WHERE l.order_id IS NOT NULL AND l.order_id <> d.order_id;
+
+-- 8.4 索引 idx_order(order_id, created_at) 已建（按订单反查走这里）
+SELECT INDEX_NAME AS idx, COLUMN_NAME AS col, SEQ_IN_INDEX AS seq
+  FROM information_schema.STATISTICS
+ WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'delivery_status_ledger'
+   AND INDEX_NAME IN ('idx_biz','idx_order')
+ ORDER BY INDEX_NAME, SEQ_IN_INDEX;
+
+SELECT IF((SELECT COUNT(*) FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'delivery_status_ledger'
+              AND INDEX_NAME = 'idx_order' AND COLUMN_NAME = 'order_id' AND SEQ_IN_INDEX = 1) = 1,
+          '✓ idx_order(order_id, created_at) 已建', '✗ 缺 idx_order') AS verdict;
+
+-- 8.5 视图 DELIVERY 分支的 order_id 现在是**真实列**（不再是 CAST(NULL)）
+SELECT COLUMN_NAME AS view_col, COLUMN_TYPE AS type,
+       CASE WHEN COLUMN_TYPE LIKE '%binary%' THEN '✗ 被推断成 BINARY（前端会拿到字节串）'
+            WHEN COLUMN_NAME = 'order_id' THEN '✓ order_id 是真实列（不是 CAST(NULL)）'
+            ELSE '（对照列）' END AS verdict
+  FROM information_schema.COLUMNS
+ WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'v_biz_status_timeline'
+   AND COLUMN_NAME IN ('biz_type','order_id','delivery_sn');
+
+-- 若本库还没建视图（migrate-ledger-view.sql 未执行 / 纯结构副本），这里降级成一句提示，
+-- 不让整个 verify 因为 1146 中断（本文件必须能在任何库安全重跑）。
+SET @has_view := (SELECT COUNT(*) FROM information_schema.VIEWS
+                   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'v_biz_status_timeline');
+SET @s := IF(@has_view = 0,
+  'SELECT ''— 本库未建 v_biz_status_timeline（先跑 sql/migrate-ledger-view.sql）'' AS verdict',
+  'SELECT COUNT(*) AS delivery_rows, SUM(order_id IS NOT NULL) AS delivery_rows_with_order_id, IF(SUM(order_id IS NOT NULL) > 0, ''✓ 视图 DELIVERY 分支能读到真实 order_id（可按订单反查包裹流水）'', ''— 本库该分支暂无带 order_id 的行'') AS verdict FROM `v_biz_status_timeline` WHERE biz_type = ''DELIVERY''');
+PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
