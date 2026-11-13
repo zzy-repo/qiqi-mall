@@ -6,8 +6,6 @@ import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.order.entity.OrderItem;
-import com.qiqi.mall.catalog.entity.Product;
-import com.qiqi.mall.catalog.entity.Sku;
 import com.qiqi.mall.shared.security.CurrentUser;
 import com.qiqi.mall.oms.entity.PaymentRecord;
 import com.qiqi.mall.oms.service.DeliveryFlowService;
@@ -25,7 +23,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;

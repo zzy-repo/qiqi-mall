@@ -19,7 +19,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.TreeMap;
 
@@ -270,16 +269,6 @@ public class DeliveryFlowService {
     private List<DeliveryItem> itemsOf(Long deliveryId) {
         return deliveryItemService.list(new LambdaQueryWrapper<DeliveryItem>()
                 .eq(DeliveryItem::getDeliveryId, deliveryId).orderByAsc(DeliveryItem::getId));
-    }
-
-    /** 明细摘要：{@code ["orderItemId:skuId:qty", ...]} 排序 —— 「包裹里到底是什么」的摘要来源 */
-    private List<String> itemLines(Long deliveryId) {
-        List<String> lines = new ArrayList<>();
-        for (DeliveryItem item : itemsOf(deliveryId)) {
-            lines.add(item.getOrderItemId() + ":" + item.getProductSkuId() + ":" + item.getQuantity());
-        }
-        lines.sort(Comparator.naturalOrder());
-        return lines;
     }
 
     /** 回补摘要：按 skuId 汇总件数（库存是按 sku 回补的，同 sku 多条明细必须合并后才对得上） */

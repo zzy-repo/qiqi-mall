@@ -48,12 +48,9 @@ e2e/
 
 ```bash
 cd e2e
-npm test                              # 全部五个场景（6 个用例）
-npm run test:s1                       # 场景1 商品浏览
-npm run test:s2                       # 场景2 购买下单
-npm run test:s3                       # 场景3 订单履约（发货 / 确认收货）
-npm run test:s4                       # 场景4 售后退货
-npm run test:s5                       # 场景5 拆单履约
+npm test                              # 全部用例（testDir=tests/scenarios，递归匹配 *.spec.js）
+npm run test:iso                      # 同上，但 BASE 地址钉到 shard a（5183/5185/8091）
+npx playwright test tests/scenarios/scenario1-browse.spec.js   # 只跑单个 spec（换文件名即可）
 npm run report                        # 查看 HTML 报告
 ```
 

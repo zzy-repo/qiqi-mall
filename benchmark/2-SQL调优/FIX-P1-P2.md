@@ -1,6 +1,6 @@
 # 修复方案：P1 订单列表分页 + P2 复合索引（sql-tuning 报告第三节实施版）
 
-> 依据：`benchmark/sql-tuning/README.md`（复现已完成，本方案是第三节的落地版）
+> 依据：`benchmark/2-SQL调优/README.md`（复现已完成，本方案是第三节的落地版）
 > 工作量：约 1 小时 ｜ 改动面：1 个配置类 + 1 个接口 + 前端 2 文件 + 1 条 DDL
 > ⚠️ 与 MinIO 实装（进行中）无文件冲突，可并行
 
@@ -66,7 +66,7 @@ export const listOrders = (page = 1, size = 10) =>
 - 响应解构：`res.data.records` → 表格数据；`res.data.total` → 分页总数（**原 `d.data` 是数组，模板 v-for 与 Promise.all 里的 listOrders 调用都要适配 .records**）
 - 售后状态联表逻辑保持不变（listMyReturns 不受影响）
 
-## 验收（对照 benchmark/sql-tuning/README 第三节，四项全做）
+## 验收（对照 benchmark/2-SQL调优/README.md 第三节，四项全做）
 
 1. **EXPLAIN**：上面 Commit 1 的验证 SQL，filesort 消失、rows <1000
 2. **单接口**：member 1（10 万行）`GET /portal/orders?page=1&size=10` 耗时 **<200ms**、响应 <20KB（修复前 3.4s/23.6MB）
@@ -76,7 +76,7 @@ export const listOrders = (page = 1, size = 10) =>
 
 ## 完成后
 
-- 修复前后数据填入 `benchmark/sql-tuning/README.md` 第四节对比表
+- 修复前后数据填入 `benchmark/2-SQL调优/README.md` 第四节对比表
 - `docs/er/12-ER图-订单域` 的订单实体补充索引说明（可不画，SQL 为准）
 - commit message 引用：`fix: P1 订单列表分页(23MB→KB级) + P2 复合索引消除filesort (sql-tuning#P1#P2)`
 
