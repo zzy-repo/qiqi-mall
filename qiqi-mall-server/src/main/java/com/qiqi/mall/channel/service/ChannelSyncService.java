@@ -299,7 +299,8 @@ public class ChannelSyncService {
         row.put("trackNo", info.trackNo());
         row.put("ok", ok);
         row.put("result", finalResult);
-        row.put("reason", lastError);
+        // 只有最终失败才把错误带出来；成功的（哪怕重试过）不挂旧错误，避免「成功了却显示报错」
+        row.put("lastError", ok ? null : lastError);
         return row;
     }
 
