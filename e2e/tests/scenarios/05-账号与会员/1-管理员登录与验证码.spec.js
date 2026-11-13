@@ -49,10 +49,10 @@ test('1-管理员登录与验证码：登录与验证码触发', async ({ page, 
   // ── 前置清零：确保 admin 当前不需要验证码 ──
   await resetLoginState(request)
 
-  // ── 1. 正常登录：admin/123456 → 进入后台 dashboard ──
+  // ── 1. 正常登录：admin + ADMIN_PASSWORD（e2e 独立库无该环境变量时回落 123456）→ 进入后台 dashboard ──
   // （成功的登录本身就会把 admin 的失败计数清零，所以「计数为 0」这条断言放在登录之后校验，
   //   否则会被别的用例/别的人为操作在登录前打满的计数误伤）
-  await uiLogin(page, { username: 'admin', password: '123456' })
+  await uiLogin(page, { username: 'admin', password: process.env.ADMIN_PASSWORD || '123456' })
   await expectLandedDashboard(page)
   expect(await apiCaptchaRequired(request, 'admin'), '成功登录后 admin 的失败计数应为 0').toBe(false)
   await page.evaluate(() => localStorage.clear())   // 退登态，后续从登录页重测
@@ -88,7 +88,7 @@ test('1-管理员登录与验证码：登录与验证码触发', async ({ page, 
   await expect(page).toHaveURL(/\/login/)
 
   // 4b. 填错误验证码 → 被拒「验证码错误，请重新获取」
-  await uiLogin(page, { username: PROBE, password: '123456', captchaCode: 'zzzz' })
+  await uiLogin(page, { username: PROBE, password: process.env.ADMIN_PASSWORD || '123456', captchaCode: 'zzzz' })
   await expect(loginErrorAlert(page)).toContainText('验证码错误')
 
   // 4c. 填正确验证码 → 仍因密码错被拒（此时计数继续累加）
@@ -99,10 +99,10 @@ test('1-管理员登录与验证码：登录与验证码触发', async ({ page, 
 
 test('1-管理员登录与验证码：登录成功清零与未登录拦截', async ({ page, request }) => {
   // admin 全程只成功、不失败，计数永远是 0；若这里出现验证码行说明被别人污染（afterEach 兜底）。
-  await uiLogin(page, { username: 'admin', password: '123456' })  // 自动读最新图码（若有）
+  await uiLogin(page, { username: 'admin', password: process.env.ADMIN_PASSWORD || '123456' })  // 自动读最新图码（若有）
   await expectLandedDashboard(page)
   await page.evaluate(() => localStorage.clear())
-  await uiLogin(page, { username: 'admin', password: '123456' })  // 无验证码行即证明计数已清零
+  await uiLogin(page, { username: 'admin', password: process.env.ADMIN_PASSWORD || '123456' })  // 无验证码行即证明计数已清零
   await expect(captchaInput(page), '成功登录清零后再次登录不应要求验证码').toBeHidden({ timeout: 6_000 })
   await expectLandedDashboard(page)
 
@@ -129,7 +129,7 @@ test('1-管理员登录与验证码：验证码一次性消费', async ({ reques
   expect(first.body.message).toContain('用户名或密码错误')
 
   // 第二次使用同一个 captchaId（这次密码是对的）→ 仍被拒「验证码错误」：取出即删，防重放
-  const second = await apiLogin(request, { username: PROBE, password: '123456', captchaId, captchaCode: code })
+  const second = await apiLogin(request, { username: PROBE, password: process.env.ADMIN_PASSWORD || '123456', captchaId, captchaCode: code })
   expect(second.status, '同一 captchaId 第二次使用应被拒').toBe(401)
   expect(second.body.message).toContain('验证码错误')
 })
