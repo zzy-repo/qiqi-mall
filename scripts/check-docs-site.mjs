@@ -173,15 +173,9 @@ const NO_UI_SET = new Set(NO_UI_SCENES)
 //   · 清单长度 ≤ PENDING_VIDEO_MAX（防止长成垃圾桶）；
 //   · 清单里的 path 必须真的存在（场景改名/删了却没清清单 → FAIL）；
 //   · 清单里的场景**已经有视频了** → FAIL（提示「可从未补清单移除」），防清单长期不清。
+// 空数组是**合法状态**（当前即如此：13/15 已补录完成）：⑤ 只按「缺件 0」判定，不假定清单非空。
 const PENDING_VIDEO_MAX = 3
-const PENDING_VIDEO = [
-  { path: '03-商家-履约/13-售后台账',
-    reason: 'spec 仍 fixme：台账查询的 bizId 口径未定（订单 id 还是退货申请 id）',
-    plan: 'W5 闭环口径后补录' },
-  { path: '03-商家-履约/15-支付流水加固',
-    reason: 'spec 仍 fixme：台账页缺 PAYMENT 类型 + 缺可重放的渠道回调入口',
-    plan: 'W5 补 PAYMENT 分支与回调后补录' },
-]
+const PENDING_VIDEO = []
 const PENDING_VIDEO_MAP = new Map(PENDING_VIDEO.map((p) => [p.path, p]))
 
 /* ============================================================== 通用小工具 */
@@ -438,7 +432,8 @@ push('⑤', '场景图+视频齐全', hardGaps.length === 0 && pendingProblems.l
       return `⚠ ${g.path}  缺 ${g.missing.join(' + ')} —— 原因：${p.reason} / 计划：${p.plan}`
     }),
     ...(pendingHits.length || PENDING_VIDEO.length
-      ? [`（待补 ${pendingHits.length} 项 / 清单上限 ${PENDING_VIDEO_MAX} 项）`] : []),
+      ? [`（待补 ${pendingHits.length} 项 / 清单上限 ${PENDING_VIDEO_MAX} 项）`]
+      : ['（待补清单为空：无待补视频）']),
     ...pendingProblems.map((x) => `待补清单自检不通过：${x}`),
     // 被豁免的场景逐个打印出来，不悄悄跳过
     ...noUiList.map((s) => `无界面场景免视频：${s.path}（图 ${s.imgs} 个，已在⑦⑧校验）`),
