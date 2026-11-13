@@ -88,7 +88,11 @@ server {
     }
 
     # history 路由回退
+    # ★ index.html 绝不缓存：容器是索引的唯一来源（JS/CSS 已上 CDN），浏览器启发式缓存
+    #   会让发版后的用户仍拿旧 index，指向已下线的 hash 资源 → 白屏。静态资源不受影响
+    #   （/assets/ 走上面的 30d + immutable，文件名带 hash）。
     location / {
+        add_header Cache-Control "no-cache";
         try_files $uri $uri/ /index.html;
     }
 }
