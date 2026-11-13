@@ -13,6 +13,8 @@ import com.qiqi.mall.oms.service.OrderItemService;
 import com.qiqi.mall.oms.service.OrderService;
 import com.qiqi.mall.oms.service.OrderStatusService;
 import com.qiqi.mall.oms.service.PaymentRecordService;
+import com.qiqi.mall.shared.ledger.AdminAuditWriter;
+import com.qiqi.mall.shared.ledger.ReasonCodes;
 import com.qiqi.mall.oms.service.ReturnApplyService;
 import com.qiqi.mall.oms.service.ReturnStatusService;
 import com.qiqi.mall.catalog.service.SkuService;
@@ -53,13 +55,16 @@ public class ReturnApplyController {
     private final OrderStatusService orderStatusService;
     /** 退货申请状态写入的唯一入口（含原来那句手写 UPDATE ... WHERE status=0 的原子守卫） */
     private final ReturnStatusService returnStatusService;
+    /** 后台操作审计（改价/删单/发货/退货审核这类敏感动作要留证；开关可一键关掉） */
+    private final AdminAuditWriter auditWriter;
 
     public ReturnApplyController(ReturnApplyService returnApplyService, OrderService orderService,
                                  OrderItemService orderItemService, SkuService skuService,
                                  PaymentRecordService paymentRecordService,
                                  DeliveryFlowService deliveryFlowService,
                                  OrderStatusService orderStatusService,
-                                 ReturnStatusService returnStatusService) {
+                                 ReturnStatusService returnStatusService,
+                                 AdminAuditWriter auditWriter) {
         this.returnApplyService = returnApplyService;
         this.orderService = orderService;
         this.orderItemService = orderItemService;
@@ -68,6 +73,7 @@ public class ReturnApplyController {
         this.deliveryFlowService = deliveryFlowService;
         this.orderStatusService = orderStatusService;
         this.returnStatusService = returnStatusService;
+        this.auditWriter = auditWriter;
     }
 
     /** 列表：附带订单号，方便后台直接辨认（原本只能看到 orderId） */
@@ -128,14 +134,23 @@ public class ReturnApplyController {
                 return Result.fail("当前订单状态不可受理退货申请（当前：" + statusText(order.getStatus())
                         + "；只有已付款/已发货/待审核/待发货/部分发货的订单可以）");
             }
-            if (order.getStatus() != 5) {          // 已经在退款中：状态不动（不白涨一次 version）
-                // 状态写入统一走 OrderStatusService（同一条 UPDATE 里带 status_seq 自增与 version 自增）
-                // 0 行 = 读到状态之后订单被别人改过 → 409 整笔回滚，申请也不会落库
-                int rows = orderStatusService.change(order, 5, OrderStatusService.REASON_RETURN_APPLY, null);
-                OptimisticLockGuard.requireAffected(rows);
-            }
         }
+        // 顺序：**先落申请（拿到 id），再联动改订单状态**。两件事在同一个事务里，先后不影响
+        // 一致性（改订单失败 → 申请一起回滚），但只有先拿到 id 才能把「这次流转是这张申请触发的」
+        // 记进订单台账（ref_type=RETURN_APPLY / ref_id=申请 id）。
         returnApplyService.save(body);
+        // 出生台账：待处理(0) 是流程起点；后台直接写入 1/2 是「历史结论」，两者都记出生事件，
+        // 用 reason 区分（RETURN_CREATE / RETURN_IMPORT），统计时不会混在一起
+        returnStatusService.recordBirth(body,
+                body.getStatus() == 0 ? ReturnStatusService.REASON_CREATE : ReturnStatusService.REASON_IMPORT,
+                body.getStatus() == 0 ? "后台代客登记" : "后台直接写入历史结论");
+        if (body.getStatus() == 0 && order.getStatus() != 5) {   // 已经在退款中：状态不动（不白涨一次 version）
+            // 状态写入统一走 OrderStatusService（同一条 UPDATE 里带 status_seq 自增与 version 自增）
+            // 0 行 = 读到状态之后订单被别人改过 → 409 整笔回滚，申请也不会落库
+            int rows = orderStatusService.change(order, 5, OrderStatusService.REASON_RETURN_APPLY, null,
+                    null, ReasonCodes.REF_RETURN_APPLY, body.getId());
+            OptimisticLockGuard.requireAffected(rows);
+        }
         return Result.ok(body);
     }
 
@@ -220,16 +235,34 @@ public class ReturnApplyController {
                 description,
                 description == null ? null : w -> w.set(ReturnApply::getDescription, description));
         OptimisticLockGuard.requireAffected(applyRows);
+        // 审计（敏感动作：退货审核 = 决定钱退不退）：before/after 只记状态与结论，不 dump 整实体
+        auditWriter.record(new AdminAuditWriter.Event(
+                ReasonCodes.ACTION_RETURN_AUDIT, ReasonCodes.TARGET_RETURN, exist.getId(),
+                orderSn, "审核退货申请 #" + exist.getId() + "（订单 " + orderSn + "）为「"
+                        + (target == 1 ? "通过" : "拒绝") + "」：" + (target == 1 ? "退款 ¥" + refund : "不退款"),
+                // ⚠️ 这里**不放**审核意见：admin_audit_log.reason 是 VARCHAR(32) 的**原因码**，
+                // 而审核意见是用户自由文本（return_apply.description 本身就是 VARCHAR(500)）——
+                // 塞进去会 1406 数据超长，把整笔审核回滚（实测踩过）。意见的原文留在
+                // return_apply.description 与 return_status_ledger.reason_detail（自由文本列，按列宽裁）里。
+                null, exist.getOrderId(),
+                AdminAuditWriter.snapshot("status", 0),
+                AdminAuditWriter.snapshot("status", target)));
 
         if (order == null) return Result.ok();
         if (target == 1) {
             // 通过：退款 + 回补库存
             // ② 订单（有 version）：0 行 = 另一个管理员同时审了同一张单 / 订单被别的流程改过 →
             //    抛 409 **整笔回滚**（申请状态一起退回去）。绝不能「申请已通过、订单没退款」只回滚一半。
-            int rows = orderStatusService.change(order, 6, OrderStatusService.REASON_RETURN_APPROVE, null);
+            int rows = orderStatusService.change(order, 6, OrderStatusService.REASON_RETURN_APPROVE, null,
+                    null, ReasonCodes.REF_RETURN_APPLY, exist.getId());
             OptimisticLockGuard.requireAffected(rows);
+            // 退款流水（P2 第二步加固）：ref=这张退货申请，origin_flow_id=原支付流水 ——
+            // 「这笔退款是谁批的、因为哪张申请、退的是哪一笔钱」三件事都落在库里；
+            // 幂等键 {orderSn}:REFUND:{申请id}，同一张申请被重放不会退两条。
             paymentRecordService.record(order.getOrderSn(), order.getTotalAmount(),
-                    PaymentRecord.TYPE_REFUND, order.getPayType() == null ? 0 : order.getPayType());
+                    PaymentRecord.TYPE_REFUND, order.getPayType() == null ? 0 : order.getPayType(),
+                    order.getId(), ReasonCodes.REF_RETURN_APPLY, exist.getId(),
+                    paymentRecordService.findOriginFlowId(order.getOrderSn()));
             // 回补必须记台账（缺陷：这条入口原来是裸的 stock = stock + N，和「审核不通过 / 取消包裹」
             // 叠加就会给同一件货补第二次）。refType/refId 记到这张退货申请上 —— 同一张申请被重放，
             // 幂等键命中即跳过；不同入口补同一件货则由数量守恒夹紧。
@@ -252,7 +285,8 @@ public class ReturnApplyController {
                 deliveryFlowService.recomputeOrderStatusAfterReturnReject(order.getId());
             } else {
                 // 直发单（没有任何未取消的包裹）：没有子单事实可依，订单回到已付款 1（保持原行为）
-                int rows = orderStatusService.change(order, 1, OrderStatusService.REASON_RETURN_REJECT, null);
+                int rows = orderStatusService.change(order, 1, OrderStatusService.REASON_RETURN_REJECT, null,
+                        null, ReasonCodes.REF_RETURN_APPLY, exist.getId());
                 OptimisticLockGuard.requireAffected(rows);
             }
         }
@@ -294,6 +328,14 @@ public class ReturnApplyController {
         if (exist == null) return Result.ok();          // 幂等：删一条不存在的申请不报错（保持原行为）
         boolean wasPending = exist.getStatus() != null && exist.getStatus() == 0;
         Long orderId = exist.getOrderId();
+        // 审计（敏感动作：删掉一条退货申请 = 退款流程被撤销，必须能回答「谁在什么时候删的」）
+        auditWriter.record(new AdminAuditWriter.Event(
+                ReasonCodes.ACTION_RETURN_DELETE, ReasonCodes.TARGET_RETURN, id, null,
+                "删除退货申请 #" + id + "（订单 id=" + orderId + "，原状态 " + exist.getStatus()
+                        + (wasPending ? " 待处理" : "") + "）",
+                null, orderId,
+                AdminAuditWriter.snapshot("status", exist.getStatus()),
+                AdminAuditWriter.snapshot("deleted", Boolean.TRUE)));
         returnApplyService.removeById(id);
         if (!wasPending || orderId == null) return Result.ok();
 

@@ -1,10 +1,12 @@
 package com.qiqi.mall.order.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -56,4 +58,17 @@ public class Order {
     @Version
     @TableField("version")
     private Integer version;
+
+    /**
+     * 状态流转序号（P2 第二步）：{@code status_seq} 与 {@code status} 在<b>同一条</b> UPDATE 里自增
+     * （见 {@code OrderStatusService#change}），是状态台账幂等键 {@code {orderId}:{statusSeq}} 的来源。
+     *
+     * <p><b>只读字段</b>：{@code insertStrategy / updateStrategy = NEVER} —— 本实体永远不写这一列，
+     * 唯一的写者是状态服务那句 {@code SET status_seq = status_seq + 1}。若让它参与 {@code updateById}，
+     * 任何一次「顺手保存订单」都会把 seq 写回旧值，幂等键立刻失去意义。
+     * <p>{@code @JsonIgnore}：不给接口响应加字段（P2 的硬门槛是「行为不变」）。
+     */
+    @TableField(value = "status_seq", insertStrategy = FieldStrategy.NEVER, updateStrategy = FieldStrategy.NEVER)
+    @JsonIgnore
+    private Integer statusSeq;
 }

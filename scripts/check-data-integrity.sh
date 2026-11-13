@@ -9,7 +9,9 @@
 #   · 库存分桶后：某个 SKU 一个桶都没有（扣减会判「库存不足」），或桶总量与 `sku.stock`
 #     这个展示缓存差太多（界面上的数字在骗人）；
 #   · 父订单状态与包裹事实分叉（父单说「已发货」但没有任何包裹真的出库；或货已出库、父单还挂着「待发货」）
-#     —— 所有按状态聚合的报表与文档从此都要为它开例外。
+#     —— 所有按状态聚合的报表与文档从此都要为它开例外；
+#   · **状态台账与 status_seq 不一致**（⑥）—— 每次状态流转应该恰好留一条台账，
+#     多一条少一条都说明「写入路径漏了或重了」，而这类漏记在业务层完全看不出。
 # 这三类都得**定期扫**，等到业务方发现「库存对不上」时已经查不出是哪一步坏的。
 # 所以把体检做成一条命令：只读、10 秒内跑完、有数字、有样本、退出码能直接当门禁。
 #
@@ -278,6 +280,70 @@ for db in "${DBS[@]}"; do
   fi
 done
 [[ $((bucket_missing_total + drift_total)) == 0 ]] && echo "  → 桶与缓存一致：扣减裁决（桶）与展示数字（sku.stock）没有分叉"
+echo
+
+# ================================================================ ⑥ 状态台账 ↔ status_seq 一致
+echo "⑥ 状态台账 ↔ status_seq 一致（每次状态流转一条台账，一条不多一条不少）"
+# 口径（与 sql/migrate-ledger.sql 的幂等键定义逐字对应）：
+#   · status_seq 是「这张单被状态服务改过几次」，与 status 在**同一条 UPDATE** 里自增；
+#   · 台账里 from_status IS NULL 的那一行是「出生事件」，它对应 status_seq = 0；
+#   · 所以恒等式是：COUNT(台账行 WHERE from_status IS NOT NULL) == status_seq
+#     （出生行**不算**在 status_seq 里；写成 COUNT(*) == status_seq 会恒差 1，
+#      这正是最容易写错的地方）。
+#   · 只约束「业务行还在」的对象：订单/包裹/申请被物理删除后台账仍在（那是刻意的，证据不随业务删除），
+#     它们没有 status_seq 可比，本项跳过 —— 不算问题。
+#   台账表不存在（未跑迁移）→ 只告警跳过，不当问题（与 ④/⑤ 同一套宽容口径）。
+ledger_problems=0
+for db in "${DBS[@]}"; do
+  has_ledger="$(q "SELECT COUNT(*) FROM information_schema.tables
+                   WHERE table_schema = '$db' AND table_name = 'order_status_ledger'")"
+  if [[ "$has_ledger" != "1" ]]; then
+    printf '  ⚠ %-16s 还没有状态台账表（未跑 sql/migrate-ledger.sql）—— 跳过本项\n' "$db"
+    warnings=$((warnings + 1))
+    continue
+  fi
+
+  # ① 订单：台账流转行数 vs order.status_seq
+  o_bad="$(q "SELECT COUNT(*) FROM \`$db\`.\`order\` o
+               WHERE o.status_seq <> (SELECT COUNT(*) FROM \`$db\`.order_status_ledger l
+                                       WHERE l.order_id = o.id AND l.from_status IS NOT NULL)")"
+  o_gap="$(q "SELECT COUNT(*) FROM \`$db\`.\`order\` o
+               WHERE NOT EXISTS (SELECT 1 FROM \`$db\`.order_status_ledger l WHERE l.order_id = o.id)")"
+  # ② 包裹
+  d_bad="$(q "SELECT COUNT(*) FROM \`$db\`.delivery_order d
+               WHERE d.status_seq <> (SELECT COUNT(*) FROM \`$db\`.delivery_status_ledger l
+                                       WHERE l.delivery_id = d.id AND l.from_status IS NOT NULL)")"
+  # ③ 售后
+  r_bad="$(q "SELECT COUNT(*) FROM \`$db\`.return_apply r
+               WHERE r.status_seq <> (SELECT COUNT(*) FROM \`$db\`.return_status_ledger l
+                                       WHERE l.return_apply_id = r.id AND l.from_status IS NOT NULL)")"
+  o_rows="$(q "SELECT COUNT(*) FROM \`$db\`.order_status_ledger")"
+  d_rows="$(q "SELECT COUNT(*) FROM \`$db\`.delivery_status_ledger")"
+  r_rows="$(q "SELECT COUNT(*) FROM \`$db\`.return_status_ledger")"
+
+  printf '  %-16s 订单台账 %s 行（不一致 %s，无台账 %s）｜包裹 %s 行（不一致 %s）｜售后 %s 行（不一致 %s）\n' \
+    "$db" "$o_rows" "$o_bad" "$o_gap" "$d_rows" "$d_bad" "$r_rows" "$r_bad"
+
+  if [[ "$o_bad" != "0" || "$d_bad" != "0" || "$r_bad" != "0" ]]; then
+    problems=$((problems + 1)); ledger_problems=$((ledger_problems + 1))
+    echo "    ✗ 台账行数与 status_seq 不一致（多记或漏记，两种情况都要查）："
+    echo "      （下列样本只打印订单维度；包裹/售后维度同理，把 SQL 里的表名换掉即可）"
+    q "SELECT CONCAT('      · order id=', o.id, ' sn=', o.order_sn, ' status_seq=', o.status_seq,
+                ' 台账流转行=', (SELECT COUNT(*) FROM \`$db\`.order_status_ledger l
+                                  WHERE l.order_id = o.id AND l.from_status IS NOT NULL),
+                ' 出生行=', (SELECT COUNT(*) FROM \`$db\`.order_status_ledger l
+                              WHERE l.order_id = o.id AND l.from_status IS NULL)), 0
+         FROM \`$db\`.\`order\` o
+        WHERE o.status_seq <> (SELECT COUNT(*) FROM \`$db\`.order_status_ledger l
+                                WHERE l.order_id = o.id AND l.from_status IS NOT NULL)
+        ORDER BY o.id DESC LIMIT $SAMPLES" | cut -f1
+  fi
+done
+if [[ "$ledger_problems" == "0" ]]; then
+  echo "  → 台账与 status_seq 一致：每次状态流转恰好一条台账（出生行单列，不混进 seq 计数）"
+  echo "    提示：o_gap = 「一条台账都没有的历史订单」—— 台账是 P2 第二步才接上的，迁移前的订单本来就没有，"
+  echo "          它只影响审计完整度、不影响对账；这类数量会随新单累积而自然趋近 0。"
+fi
 echo
 
 # ================================================================ 结论

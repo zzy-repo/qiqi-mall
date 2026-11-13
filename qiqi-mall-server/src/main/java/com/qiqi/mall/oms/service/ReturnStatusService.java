@@ -2,6 +2,8 @@ package com.qiqi.mall.oms.service;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.qiqi.mall.oms.entity.ReturnApply;
+import com.qiqi.mall.shared.ledger.ReasonCodes;
+import com.qiqi.mall.shared.ledger.StatusLedgerWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -37,10 +39,13 @@ public class ReturnStatusService {
 
     private static final Logger log = LoggerFactory.getLogger(ReturnStatusService.class);
 
-    // ---- 事件原因（reason 列口径）：第二步写台账时原样落到 return_status_ledger.reason ----
-    public static final String REASON_APPLY = "RETURN_APPLY";
-    public static final String REASON_APPROVE = "RETURN_APPROVE";
-    public static final String REASON_REJECT = "RETURN_REJECT";
+    // ---- 事件原因（reason 列口径）----
+    // 常量唯一来源是 shared/ledger/ReasonCodes；这里保留别名，P2 第一步的调用点不用改。
+    public static final String REASON_CREATE = ReasonCodes.RETURN_CREATE;
+    public static final String REASON_IMPORT = ReasonCodes.RETURN_IMPORT;
+    public static final String REASON_APPLY = ReasonCodes.RETURN_APPLY;
+    public static final String REASON_APPROVE = ReasonCodes.RETURN_APPROVE;
+    public static final String REASON_REJECT = ReasonCodes.RETURN_REJECT;
 
     /** 出生：新申请只能是「待处理(0)」（通过/拒绝是审核结论，只能由审核入口写入） */
     private static final Set<Integer> BIRTH = Set.of(0);
@@ -54,9 +59,12 @@ public class ReturnStatusService {
     private static final String STATUS_SEQ_INCREMENT = "status_seq = status_seq + 1";
 
     private final ReturnApplyService returnApplyService;
+    /** 状态台账写入口（与状态 UPDATE 同一事务；开关关闭时它自己 no-op） */
+    private final StatusLedgerWriter ledger;
 
-    public ReturnStatusService(ReturnApplyService returnApplyService) {
+    public ReturnStatusService(ReturnApplyService returnApplyService, StatusLedgerWriter ledger) {
         this.returnApplyService = returnApplyService;
+        this.ledger = ledger;
     }
 
     /** 出生：给**尚未落库**的新申请定初始状态（{@code save} 之前调用，不产生 UPDATE） */
@@ -65,6 +73,18 @@ public class ReturnStatusService {
             throw new IllegalStateException("新建退货申请只能是「待处理」状态，收到 " + to);
         }
         apply.setStatus(to);
+    }
+
+    /**
+     * 出生台账（{@code from_status = NULL}，并写下 {@code order_id} 冗余）：必须在 {@code save()}
+     * 之后、同一事务内调用（幂等键 {@code {returnApplyId}:0} 要真实 id）。
+     *
+     * <p>后台直接写入历史结论（status=1/2）时同样要记出生：
+     * 那一行也是「一张申请从无到有」，只是没有再经过流程（reason 用
+     * {@link ReasonCodes#RETURN_IMPORT}，与正常申请区分得开）。
+     */
+    public void recordBirth(ReturnApply apply, String reason, String reasonDetail) {
+        ledger.returnBirth(apply, reason, reasonDetail);
     }
 
     /** 流转（不带附带列） */
@@ -82,6 +102,12 @@ public class ReturnStatusService {
      */
     public int change(ReturnApply apply, int to, String reason, String reasonDetail,
                       Consumer<LambdaUpdateWrapper<ReturnApply>> extraSets) {
+        return change(apply, to, reason, reasonDetail, extraSets, null, null);
+    }
+
+    /** 流转（带触发单据）：refType/refId 记这次流转被哪张单据触发 */
+    public int change(ReturnApply apply, int to, String reason, String reasonDetail,
+                      Consumer<LambdaUpdateWrapper<ReturnApply>> extraSets, String refType, Long refId) {
         Integer from = apply.getStatus();
         requireAllowed(apply.getId(), from, to, reason);
 
@@ -95,6 +121,10 @@ public class ReturnStatusService {
 
         int rows = returnApplyService.getBaseMapper().update(null, update);
         log.debug("退货申请 {} 状态 {} → {}（reason={}，影响 {} 行）", apply.getId(), from, to, reason, rows);
+        if (rows > 0) {
+            // 台账：只在 UPDATE 成功之后写（0 行 = 申请刚被别人审过/被删 → 调用方 409 回滚）
+            ledger.returnChanged(apply, from, to, reason, reasonDetail, refType, refId);
+        }
         // 与旧写法一致：**不**回写内存实体（原来那处 wrapper 更新也没有改 exist 的状态）
         return rows;
     }

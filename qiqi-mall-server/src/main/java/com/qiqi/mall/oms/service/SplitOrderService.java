@@ -9,6 +9,8 @@ import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.order.entity.OrderItem;
 import com.qiqi.mall.shared.common.DeliverySnGenerator;
 import com.qiqi.mall.shared.guard.OptimisticLockGuard;
+import com.qiqi.mall.shared.ledger.AdminAuditWriter;
+import com.qiqi.mall.shared.ledger.ReasonCodes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -49,11 +51,13 @@ public class SplitOrderService {
     private final WarehouseService warehouseService;
     /** 包裹状态写入的唯一入口（出生：拆出来的包裹 = 待下发(0)） */
     private final DeliveryStatusService deliveryStatusService;
+    /** 后台操作审计（拆单决定货从哪个仓出，是敏感动作） */
+    private final AdminAuditWriter auditWriter;
 
     public SplitOrderService(OrderService orderService, OrderItemService orderItemService,
                              InventoryService inventoryService, DeliveryOrderService deliveryOrderService,
                              DeliveryItemService deliveryItemService, WarehouseService warehouseService,
-                             DeliveryStatusService deliveryStatusService) {
+                             DeliveryStatusService deliveryStatusService, AdminAuditWriter auditWriter) {
         this.orderService = orderService;
         this.orderItemService = orderItemService;
         this.inventoryService = inventoryService;
@@ -61,6 +65,7 @@ public class SplitOrderService {
         this.deliveryItemService = deliveryItemService;
         this.warehouseService = warehouseService;
         this.deliveryStatusService = deliveryStatusService;
+        this.auditWriter = auditWriter;
     }
 
     /**
@@ -183,6 +188,8 @@ public class SplitOrderService {
             delivery.setReceiverAddress(order.getReceiverAddress() == null ? "" : order.getReceiverAddress());
             delivery.setCreatedAt(LocalDateTime.now());
             deliveryOrderService.save(delivery);
+            // 出生台账（from_status = NULL + delivery_sn 快照）：拆单生成的包裹也有「出生」证据
+            deliveryStatusService.recordBirth(delivery, DeliveryStatusService.REASON_CREATE, "自动拆单");
 
             for (OrderItem item : entry.getValue()) {
                 DeliveryItem di = new DeliveryItem();
@@ -200,6 +207,16 @@ public class SplitOrderService {
         // 忽略返回值的后果：「发货单生成了、订单却没标记已拆」，履约链路从此对不上账。
         int rows = orderService.getBaseMapper().updateById(order);
         OptimisticLockGuard.requireAffected(rows);
+        // 审计（敏感动作：拆单决定货从哪个仓出；0 行上面已经抛 409，不会记一条没发生的拆单）
+        List<String> sns = new ArrayList<>();
+        for (DeliveryOrder d : created) sns.add(d.getDeliverySn());
+        auditWriter.record(new AdminAuditWriter.Event(
+                ReasonCodes.ACTION_ORDER_SPLIT, ReasonCodes.TARGET_ORDER, orderId, order.getOrderSn(),
+                "拆单：订单 " + order.getOrderSn() + " 拆成 " + created.size() + " 个包裹（"
+                        + String.join("、", sns) + "）",
+                null, orderId,
+                AdminAuditWriter.snapshot("splitStatus", order.getSplitStatus() == null ? null : 0),
+                AdminAuditWriter.snapshot("splitStatus", 1, "packages", sns)));
         return created;
     }
 

@@ -550,3 +550,87 @@ CREATE TABLE `wms_exchange_ledger` (
     CHECK (`operator_type` IN ('ADMIN','MEMBER','APIKEY','SYSTEM'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='WMS 下发/回传台账（REQ/ACK 两阶段 write-ahead）';
+
+-- ============================================================================
+-- 业务状态时间线只读视图（P3 UI 用；派生自三张状态台账，UNION ALL 带 biz_type）
+-- 完整注释见 sql/migrate-ledger-view.sql（含查询示例与口径说明）。
+-- ============================================================================
+DROP VIEW IF EXISTS `v_biz_status_timeline`;
+CREATE VIEW `v_biz_status_timeline` AS
+SELECT
+    CAST('ORDER' AS CHAR(8))          AS `biz_type`,
+    CAST(l.`order_id` AS SIGNED)      AS `biz_id`,
+    CAST(l.`order_id` AS SIGNED)      AS `order_id`,
+    CAST(NULL AS CHAR(50))            AS `delivery_sn`,
+    CAST(l.`from_status` AS SIGNED)   AS `from_status`,
+    CAST(l.`to_status` AS SIGNED)     AS `to_status`,
+    CAST(CASE l.`from_status`
+              WHEN 0 THEN '待付款' WHEN 1 THEN '已付款' WHEN 2 THEN '已发货' WHEN 3 THEN '已完成'
+              WHEN 4 THEN '已关闭' WHEN 5 THEN '退款中' WHEN 6 THEN '已退款' WHEN 7 THEN '待审核'
+              WHEN 8 THEN '待发货' WHEN 9 THEN '部分发货' ELSE NULL END AS CHAR(12)) AS `from_status_text`,
+    CAST(CASE l.`to_status`
+              WHEN 0 THEN '待付款' WHEN 1 THEN '已付款' WHEN 2 THEN '已发货' WHEN 3 THEN '已完成'
+              WHEN 4 THEN '已关闭' WHEN 5 THEN '退款中' WHEN 6 THEN '已退款' WHEN 7 THEN '待审核'
+              WHEN 8 THEN '待发货' WHEN 9 THEN '部分发货' ELSE NULL END AS CHAR(12)) AS `to_status_text`,
+    CAST(l.`reason` AS CHAR(32))                          AS `reason`,
+    CAST(l.`reason_detail` AS CHAR(255))                  AS `reason_detail`,
+    CAST(l.`operator_type` AS CHAR(16))                   AS `operator_type`,
+    CAST(l.`operator_id` AS SIGNED)                       AS `operator_id`,
+    CAST(l.`operator_name` AS CHAR(64))                   AS `operator_name`,
+    CAST(l.`ref_type` AS CHAR(24))                        AS `ref_type`,
+    CAST(l.`ref_id` AS SIGNED)                            AS `ref_id`,
+    CAST(l.`event_key` AS CHAR(96))                       AS `event_key`,
+    CAST(l.`idem_key` AS CHAR(96))                        AS `idem_key`,
+    l.`created_at`                                        AS `created_at`,
+    CAST(l.`id` AS SIGNED)                                AS `id`
+FROM `order_status_ledger` l
+UNION ALL
+SELECT
+    CAST('DELIVERY' AS CHAR(8)),
+    CAST(l.`delivery_id` AS SIGNED),
+    CAST(NULL AS SIGNED),
+    CAST(l.`delivery_sn` AS CHAR(50)),
+    CAST(l.`from_status` AS SIGNED),
+    CAST(l.`to_status` AS SIGNED),
+    CAST(CASE l.`from_status`
+              WHEN 0 THEN '待下发' WHEN 1 THEN '已下发' WHEN 2 THEN '已拣货' WHEN 3 THEN '已出库'
+              WHEN 4 THEN '运输中' WHEN 5 THEN '已签收' WHEN 9 THEN '已取消' ELSE NULL END AS CHAR(12)),
+    CAST(CASE l.`to_status`
+              WHEN 0 THEN '待下发' WHEN 1 THEN '已下发' WHEN 2 THEN '已拣货' WHEN 3 THEN '已出库'
+              WHEN 4 THEN '运输中' WHEN 5 THEN '已签收' WHEN 9 THEN '已取消' ELSE NULL END AS CHAR(12)),
+    CAST(l.`reason` AS CHAR(32)),
+    CAST(l.`reason_detail` AS CHAR(255)),
+    CAST(l.`operator_type` AS CHAR(16)),
+    CAST(l.`operator_id` AS SIGNED),
+    CAST(l.`operator_name` AS CHAR(64)),
+    CAST(l.`ref_type` AS CHAR(24)),
+    CAST(l.`ref_id` AS SIGNED),
+    CAST(l.`event_key` AS CHAR(96)),
+    CAST(l.`idem_key` AS CHAR(96)),
+    l.`created_at`,
+    CAST(l.`id` AS SIGNED)
+FROM `delivery_status_ledger` l
+UNION ALL
+SELECT
+    CAST('RETURN' AS CHAR(8)),
+    CAST(l.`return_apply_id` AS SIGNED),
+    CAST(l.`order_id` AS SIGNED),
+    CAST(NULL AS CHAR(50)),
+    CAST(l.`from_status` AS SIGNED),
+    CAST(l.`to_status` AS SIGNED),
+    CAST(CASE l.`from_status`
+              WHEN 0 THEN '待处理' WHEN 1 THEN '已通过' WHEN 2 THEN '已拒绝' ELSE NULL END AS CHAR(12)),
+    CAST(CASE l.`to_status`
+              WHEN 0 THEN '待处理' WHEN 1 THEN '已通过' WHEN 2 THEN '已拒绝' ELSE NULL END AS CHAR(12)),
+    CAST(l.`reason` AS CHAR(32)),
+    CAST(l.`reason_detail` AS CHAR(255)),
+    CAST(l.`operator_type` AS CHAR(16)),
+    CAST(l.`operator_id` AS SIGNED),
+    CAST(l.`operator_name` AS CHAR(64)),
+    CAST(l.`ref_type` AS CHAR(24)),
+    CAST(l.`ref_id` AS SIGNED),
+    CAST(l.`event_key` AS CHAR(96)),
+    CAST(l.`idem_key` AS CHAR(96)),
+    l.`created_at`,
+    CAST(l.`id` AS SIGNED)
+FROM `return_status_ledger` l;

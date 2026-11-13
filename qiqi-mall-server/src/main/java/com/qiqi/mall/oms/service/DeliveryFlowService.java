@@ -9,6 +9,9 @@ import com.qiqi.mall.oms.entity.Warehouse;
 import com.qiqi.mall.oms.wms.MockWmsService;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.shared.guard.OptimisticLockGuard;
+import com.qiqi.mall.shared.ledger.AdminAuditWriter;
+import com.qiqi.mall.shared.ledger.ReasonCodes;
+import com.qiqi.mall.shared.ledger.WmsExchangeLedgerWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -41,11 +44,16 @@ public class DeliveryFlowService {
     /** 包裹状态写入的唯一入口（P2 第一步收敛）；父订单状态写入走 {@link OrderStatusService} */
     private final DeliveryStatusService deliveryStatusService;
     private final OrderStatusService orderStatusService;
+    /** WMS 下发/回传台账（write-ahead 两阶段：REQ → 外呼 → ACK） */
+    private final WmsExchangeLedgerWriter wmsLedger;
+    /** 后台操作审计（下发是敏感动作：外呼不可撤回） */
+    private final AdminAuditWriter auditWriter;
 
     public DeliveryFlowService(DeliveryOrderService deliveryOrderService, DeliveryItemService deliveryItemService,
                                DeliveryLogisticsService deliveryLogisticsService, OrderService orderService,
                                SkuService skuService, MockWmsService wms, WarehouseService warehouseService,
-                               DeliveryStatusService deliveryStatusService, OrderStatusService orderStatusService) {
+                               DeliveryStatusService deliveryStatusService, OrderStatusService orderStatusService,
+                               WmsExchangeLedgerWriter wmsLedger, AdminAuditWriter auditWriter) {
         this.deliveryOrderService = deliveryOrderService;
         this.deliveryItemService = deliveryItemService;
         this.deliveryLogisticsService = deliveryLogisticsService;
@@ -55,6 +63,8 @@ public class DeliveryFlowService {
         this.warehouseService = warehouseService;
         this.deliveryStatusService = deliveryStatusService;
         this.orderStatusService = orderStatusService;
+        this.wmsLedger = wmsLedger;
+        this.auditWriter = auditWriter;
     }
 
     /**
@@ -75,7 +85,32 @@ public class DeliveryFlowService {
         int rows = deliveryStatusService.change(delivery, DeliveryOrder.DISPATCHED,
                 DeliveryStatusService.REASON_DISPATCH, null);
         OptimisticLockGuard.requireAffected(rows);
-        wms.dispatch(delivery.getDeliverySn());
+
+        // === WMS 台账（write-ahead 两阶段）===
+        // 顺序不可换：① 先把「我准备下发什么」落成 REQ 行（此时还没有回执）
+        //           ② 再外呼（副作用在库外，回滚救不回来）
+        //           ③ 拿到回执后补 ACK 行（result / latency / payload）
+        // 反过来（先外呼、成功才记账）在失败路径上会留下「WMS 收到了、我们库里没有任何记录」的黑洞。
+        java.util.Map<String, Object> req = new java.util.LinkedHashMap<>();
+        req.put("deliverySn", delivery.getDeliverySn());
+        req.put("orderId", delivery.getOrderId());
+        req.put("warehouseId", delivery.getWarehouseId());
+        int attemptNo = wmsLedger.requestSent(delivery, req);
+        long startedAt = System.nanoTime();
+        String ack = wms.dispatch(delivery.getDeliverySn());
+        long latencyMs = (System.nanoTime() - startedAt) / 1_000_000L;
+        wmsLedger.requestAcked(delivery, attemptNo, WmsExchangeLedgerWriter.RESULT_SUCCESS, latencyMs,
+                java.util.Map.of("ack", ack));
+
+        // 审计（敏感动作：下发后不可撤回，只能等 WMS 回传）
+        auditWriter.record(new AdminAuditWriter.Event(
+                ReasonCodes.ACTION_DELIVERY_DISPATCH, ReasonCodes.TARGET_PACKAGE, delivery.getId(),
+                delivery.getDeliverySn(),
+                "包裹 " + delivery.getDeliverySn() + " 下发给 WMS（订单 id=" + delivery.getOrderId()
+                        + "，仓 id=" + delivery.getWarehouseId() + "，回执 " + ack + "）",
+                null, delivery.getOrderId(),
+                AdminAuditWriter.snapshot("status", DeliveryOrder.PENDING),
+                AdminAuditWriter.snapshot("status", DeliveryOrder.DISPATCHED)));
         return delivery;
     }
 
@@ -150,6 +185,9 @@ public class DeliveryFlowService {
         // 状态机不会因为「后写的把先写的盖掉」而回退
         int rows = deliveryStatusService.change(delivery, target, reason, null);
         OptimisticLockGuard.requireAffected(rows);
+        // WMS 台账：仓库回传也是一次「交换」，记一行 ACK（方向=ACK，尝试号按 ACK 方向自增，
+        // 因此不会与「下发回执」撞幂等键）。业务幂等判断在上面已经挡掉了重复事件 —— 这里只记真实发生的那次。
+        wmsLedger.callbackReceived(delivery, event, current, target);
         recomputeOrderStatus(delivery.getOrderId());
         return delivery;
     }

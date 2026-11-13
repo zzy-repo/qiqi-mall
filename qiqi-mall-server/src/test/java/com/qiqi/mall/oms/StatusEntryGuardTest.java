@@ -14,6 +14,7 @@ import com.qiqi.mall.oms.service.ReturnApplyService;
 import com.qiqi.mall.oms.service.ReturnStatusService;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.order.mapper.OrderMapper;
+import com.qiqi.mall.shared.ledger.StatusLedgerWriter;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -61,6 +62,16 @@ class StatusEntryGuardTest {
         TableInfoHelper.initTableInfo(assistant, ReturnApply.class);
     }
 
+    /**
+     * 台账写入口：本类只验证**入口层的 CAS / 单语句 UPDATE / 守卫**，所以给一个 mock ——
+     * 台账真的写没写、写成什么样，由 {@code LedgerWriteIntegrationTest}（真库）负责。
+     * 用 mock 而不是 null 是有意义的：它同时断言「状态更新成功时会调用台账写入」
+     * （{@code verify(ledger)} 在 {@ code 台账与状态同一条 UPDATE} 那组用例里）。
+     */
+    private static StatusLedgerWriter ledger() {
+        return mock(StatusLedgerWriter.class);
+    }
+
     // ------------------------------------------------------------------ 夹具
 
     private static Order order(Integer status, Integer version) {
@@ -81,7 +92,7 @@ class StatusEntryGuardTest {
     private static OrderStatusService orderService(OrderMapper mapper) {
         OrderService orderService = mock(OrderService.class);
         when(orderService.getBaseMapper()).thenReturn(mapper);
-        return new OrderStatusService(orderService);
+        return new OrderStatusService(orderService, ledger());
     }
 
     // ------------------------------------------------------------------ ① CAS：条件 + 影响行数
@@ -159,7 +170,7 @@ class StatusEntryGuardTest {
         when(mapper.update(any(), any())).thenReturn(1);
         ReturnApplyService returnApplyService = mock(ReturnApplyService.class);
         when(returnApplyService.getBaseMapper()).thenReturn(mapper);
-        ReturnStatusService svc = new ReturnStatusService(returnApplyService);
+        ReturnStatusService svc = new ReturnStatusService(returnApplyService, ledger());
 
         assertThat(svc.change(apply, 1, ReturnStatusService.REASON_APPROVE, "同意",
                 w -> w.set(ReturnApply::getDescription, "同意"))).isEqualTo(1);
@@ -188,7 +199,7 @@ class StatusEntryGuardTest {
         DeliveryOrderService deliveryOrderService = mock(DeliveryOrderService.class);
         when(deliveryOrderService.getBaseMapper()).thenReturn(mapper);
 
-        int rows = new DeliveryStatusService(deliveryOrderService)
+        int rows = new DeliveryStatusService(deliveryOrderService, ledger())
                 .change(d, DeliveryOrder.SIGNED, DeliveryStatusService.REASON_CONFIRM_SIGN, null);
 
         assertThat(rows).isZero();
@@ -251,7 +262,7 @@ class StatusEntryGuardTest {
         DeliveryOrderService deliveryOrderService = mock(DeliveryOrderService.class);
         when(deliveryOrderService.getBaseMapper())
                 .thenReturn(mock(com.qiqi.mall.oms.mapper.DeliveryOrderMapper.class));
-        DeliveryStatusService svc = new DeliveryStatusService(deliveryOrderService);
+        DeliveryStatusService svc = new DeliveryStatusService(deliveryOrderService, ledger());
 
         DeliveryOrder d = new DeliveryOrder();
         d.setId(5L);
@@ -271,7 +282,7 @@ class StatusEntryGuardTest {
         ReturnApplyService returnApplyService = mock(ReturnApplyService.class);
         when(returnApplyService.getBaseMapper())
                 .thenReturn(mock(com.qiqi.mall.oms.mapper.ReturnApplyMapper.class));
-        ReturnStatusService svc = new ReturnStatusService(returnApplyService);
+        ReturnStatusService svc = new ReturnStatusService(returnApplyService, ledger());
 
         ReturnApply done = new ReturnApply();
         done.setId(8L);

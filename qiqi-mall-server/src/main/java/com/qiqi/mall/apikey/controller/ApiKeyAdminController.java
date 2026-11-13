@@ -6,9 +6,12 @@ import com.qiqi.mall.apikey.mapper.AiApiKeyMapper;
 import com.qiqi.mall.apikey.service.AiApiKeyService;
 import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.shared.guard.OptimisticLockGuard;
+import com.qiqi.mall.shared.ledger.AdminAuditWriter;
+import com.qiqi.mall.shared.ledger.ReasonCodes;
 import com.qiqi.mall.shared.security.CurrentUser;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -35,9 +38,13 @@ public class ApiKeyAdminController {
 
     private final AiApiKeyService apiKeyService;
     private final AiApiKeyMapper apiKeyMapper;
+    /** 后台操作审计（密钥增删改 = 权限变更，必须留证） */
+    private final AdminAuditWriter auditWriter;
 
-    public ApiKeyAdminController(AiApiKeyService apiKeyService, AiApiKeyMapper apiKeyMapper) {
+    public ApiKeyAdminController(AiApiKeyService apiKeyService, AiApiKeyMapper apiKeyMapper,
+                                 AdminAuditWriter auditWriter) {
         this.apiKeyService = apiKeyService;
+        this.auditWriter = auditWriter;
         this.apiKeyMapper = apiKeyMapper;
     }
 
@@ -53,6 +60,7 @@ public class ApiKeyAdminController {
 
     /** 新建：明文 key 只在此响应里出现一次 */
     @PostMapping
+    @Transactional(rollbackFor = Exception.class)
     public Result<CreatedKey> create(@RequestBody CreateRequest body, HttpServletRequest request) {
         try {
             String name = normalizeName(body.name());
@@ -61,6 +69,14 @@ public class ApiKeyAdminController {
             String createdBy = CurrentUser.get() == null ? "unknown" : CurrentUser.get().username();
             AiApiKeyService.IssuedKey issued = apiKeyService.issue(name, scopes, expiresAt, createdBy);
             AiApiKey row = issued.row();
+            // 审计：只记名称/权限范围/过期时间，**绝不记明文或 hash**（台账是只追加表，写进去就去不掉）
+            auditWriter.record(new AdminAuditWriter.Event(
+                    ReasonCodes.ACTION_APIKEY_CREATE, ReasonCodes.TARGET_APIKEY, row.getId(), row.getName(),
+                    "新建 API Key " + row.getName() + "（id=" + row.getId() + "，前缀 " + row.getKeyPrefix() + "）",
+                    null, null,
+                    null,
+                    AdminAuditWriter.snapshot("name", row.getName(), "scopes", row.getScopes(),
+                            "expiresAt", String.valueOf(row.getExpiresAt()))));
             return Result.ok(new CreatedKey(row.getId(), row.getName(), issued.plaintext(),
                     row.getKeyPrefix(), scopes, row.getExpiresAt()));
         } catch (IllegalArgumentException e) {
@@ -74,6 +90,7 @@ public class ApiKeyAdminController {
      * 改完立即 evict 缓存 —— 禁用 / 收窄权限下一次请求就生效。
      */
     @PutMapping("/{id}")
+    @Transactional(rollbackFor = Exception.class)
     public Result<Void> update(@PathVariable Long id, @RequestBody UpdateRequest body) {
         AiApiKey exist = apiKeyMapper.selectById(id);
         if (exist == null) return Result.fail("API Key 不存在");
@@ -95,16 +112,33 @@ public class ApiKeyAdminController {
         int rows = apiKeyMapper.updateById(update);
         OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_RECORD_DELETED);
         apiKeyService.evict(exist);
+        auditWriter.record(new AdminAuditWriter.Event(
+                ReasonCodes.ACTION_APIKEY_UPDATE, ReasonCodes.TARGET_APIKEY, id, exist.getName(),
+                "修改 API Key " + exist.getName() + "（id=" + id + "）的权限/状态/过期时间",
+                null, null,
+                AdminAuditWriter.snapshot("name", exist.getName(), "scopes", exist.getScopes(),
+                        "status", exist.getStatus(), "expiresAt", String.valueOf(exist.getExpiresAt())),
+                AdminAuditWriter.snapshot("name", update.getName(), "scopes", update.getScopes(),
+                        "status", update.getStatus(), "expiresAt", String.valueOf(update.getExpiresAt()))));
         return Result.ok();
     }
 
     /** 删除：物理删除。删了记录下次请求就查不到 = 立即吊销（缓存一并失效，不需要黑名单） */
     @DeleteMapping("/{id}")
+    @Transactional(rollbackFor = Exception.class)
     public Result<Void> delete(@PathVariable Long id) {
         AiApiKey exist = apiKeyMapper.selectById(id);
         if (exist == null) return Result.fail("API Key 不存在");
         apiKeyMapper.deleteById(id);
         apiKeyService.evict(exist);
+        // 审计（吊销证据）：名称与权限范围留快照，绝不记明文/hash
+        auditWriter.record(new AdminAuditWriter.Event(
+                ReasonCodes.ACTION_APIKEY_DELETE, ReasonCodes.TARGET_APIKEY, id, exist.getName(),
+                "删除（吊销）API Key " + exist.getName() + "（id=" + id + "）",
+                null, null,
+                AdminAuditWriter.snapshot("name", exist.getName(), "scopes", exist.getScopes(),
+                        "status", exist.getStatus()),
+                AdminAuditWriter.snapshot("deleted", Boolean.TRUE)));
         return Result.ok();
     }
 

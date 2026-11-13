@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.qiqi.mall.shared.common.PreviewResult;
 import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.shared.guard.CatalogDeleteGuard;
+import com.qiqi.mall.shared.ledger.AdminAuditWriter;
+import com.qiqi.mall.shared.ledger.ReasonCodes;
 import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.catalog.entity.Attribute;
 import com.qiqi.mall.catalog.entity.Product;
@@ -42,11 +44,13 @@ public class SkuController {
     private final AttributeService attributeService;
     private final ProductService productService;
     private final SpecTextHelper specTextHelper;
+    /** 后台操作审计（改价/改库存是敏感动作，必须留证；开关可一键关掉） */
+    private final AdminAuditWriter auditWriter;
 
     public SkuController(SkuService skuService, StockStore stockStore,
                          SkuSpecService skuSpecService, AttributeService attributeService,
                          ProductService productService, SpecTextHelper specTextHelper,
-                         CatalogDeleteGuard deleteGuard) {
+                         CatalogDeleteGuard deleteGuard, AdminAuditWriter auditWriter) {
         this.skuService = skuService;
         this.stockStore = stockStore;
         this.skuSpecService = skuSpecService;
@@ -54,6 +58,7 @@ public class SkuController {
         this.productService = productService;
         this.specTextHelper = specTextHelper;
         this.deleteGuard = deleteGuard;
+        this.auditWriter = auditWriter;
     }
 
     /** 列表：带规格文本，可按商品过滤 */
@@ -120,8 +125,22 @@ public class SkuController {
         sku.setId(id);
         // 缺版本号 → 真 HTTP 400；影响行数 0 → 真 HTTP 409（见 GlobalExceptionHandler）
         OptimisticLockGuard.requireVersion(sku.getVersion());
+        // 改价是敏感动作：改之前的售价/库存必须留证（审计只记敏感字段，不 dump 整实体）
+        Sku before = sku.getPrice() != null || sku.getStock() != null ? skuService.getById(id) : null;
         int rows = skuService.getBaseMapper().updateById(sku);
         OptimisticLockGuard.requireAffected(rows);
+        if (sku.getPrice() != null || sku.getStock() != null) {
+            auditWriter.record(new AdminAuditWriter.Event(
+                    sku.getPrice() != null ? ReasonCodes.ACTION_SKU_PRICE_CHANGE : ReasonCodes.ACTION_SKU_STOCK_CHANGE,
+                    ReasonCodes.TARGET_SKU, id, null,
+                    "修改规格价格/库存"
+                            + (before != null && sku.getPrice() != null
+                                    ? "：售价 ¥" + before.getPrice() + " → ¥" + sku.getPrice() : ""),
+                    null, null,
+                    AdminAuditWriter.snapshot("price", before == null ? null : before.getPrice(),
+                            "stock", before == null ? null : before.getStock()),
+                    AdminAuditWriter.snapshot("price", sku.getPrice(), "stock", sku.getStock())));
+        }
         // 库存被改过（请求里带了 stock）⇒ 用新总量重铺 N 个桶。
         // 这是「设置绝对量」而不是「扣减」：只改 sku.stock 而不改桶，会出现「界面写 100、实际还能扣老数字」，
         // 那是最坏的不一致。乐观锁失败时上面已经 409 返回，不会走到这里。

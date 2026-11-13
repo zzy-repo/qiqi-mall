@@ -1,10 +1,12 @@
 package com.qiqi.mall.oms.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -61,4 +63,12 @@ public class DeliveryOrder {
     @Version
     @TableField("version")
     private Integer version;
+
+    /**
+     * 状态流转序号（P2 第二步）：与 {@code status} 同一条 UPDATE 自增，是包裹状态台账幂等键
+     * {@code {deliveryId}:{statusSeq}} 的来源。只读字段（见 {@code Order#statusSeq} 的说明）。
+     */
+    @TableField(value = "status_seq", insertStrategy = FieldStrategy.NEVER, updateStrategy = FieldStrategy.NEVER)
+    @JsonIgnore
+    private Integer statusSeq;
 }

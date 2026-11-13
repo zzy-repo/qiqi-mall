@@ -2,6 +2,8 @@ package com.qiqi.mall.oms.service;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.qiqi.mall.order.entity.Order;
+import com.qiqi.mall.shared.ledger.ReasonCodes;
+import com.qiqi.mall.shared.ledger.StatusLedgerWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -52,16 +54,20 @@ public class OrderStatusService {
 
     private static final Logger log = LoggerFactory.getLogger(OrderStatusService.class);
 
-    // ---- 事件原因（reason 列口径）：第二步写台账时原样落到 order_status_ledger.reason ----
-    public static final String REASON_PAY = "ORDER_PAY";
-    public static final String REASON_AUDIT_PASS = "AUDIT_PASS";
-    public static final String REASON_AUDIT_REJECT = "AUDIT_REJECT";
-    public static final String REASON_SHIP = "ORDER_SHIP";
-    public static final String REASON_CONFIRM = "ORDER_CONFIRM";
-    public static final String REASON_RETURN_APPLY = "RETURN_APPLY";
-    public static final String REASON_RETURN_APPROVE = "RETURN_APPROVE";
-    public static final String REASON_RETURN_REJECT = "RETURN_REJECT";
-    public static final String REASON_AGGREGATE = "DELIVERY_AGGREGATE";
+    // ---- 事件原因（reason 列口径）----
+    // 常量本身住在 shared/ledger/ReasonCodes（唯一来源）；这里保留同名别名，是为了让 P2 第一步
+    // 已经写好的一批调用点（OrderStatusService.REASON_PAY 之类）一个字都不用改。
+    // 台账写入时 reason 会原样落到 order_status_ledger.reason（VARCHAR(32)）。
+    public static final String REASON_CREATE = ReasonCodes.ORDER_CREATE;
+    public static final String REASON_PAY = ReasonCodes.ORDER_PAY;
+    public static final String REASON_AUDIT_PASS = ReasonCodes.AUDIT_PASS;
+    public static final String REASON_AUDIT_REJECT = ReasonCodes.AUDIT_REJECT;
+    public static final String REASON_SHIP = ReasonCodes.ORDER_SHIP;
+    public static final String REASON_CONFIRM = ReasonCodes.ORDER_CONFIRM;
+    public static final String REASON_RETURN_APPLY = ReasonCodes.RETURN_APPLY;
+    public static final String REASON_RETURN_APPROVE = ReasonCodes.RETURN_APPROVE;
+    public static final String REASON_RETURN_REJECT = ReasonCodes.RETURN_REJECT;
+    public static final String REASON_AGGREGATE = ReasonCodes.DELIVERY_AGGREGATE;
 
     /** 出生：新建订单允许的初始状态（其余必须由业务流程流转产生，与建单守卫同一口径） */
     private static final Set<Integer> BIRTH = Set.of(0, 1, 7);
@@ -118,9 +124,12 @@ public class OrderStatusService {
     private static final String VERSION_INCREMENT = "version = version + 1";
 
     private final OrderService orderService;
+    /** 状态台账写入口（与状态 UPDATE 同一事务；开关关闭时它自己 no-op） */
+    private final StatusLedgerWriter ledger;
 
-    public OrderStatusService(OrderService orderService) {
+    public OrderStatusService(OrderService orderService, StatusLedgerWriter ledger) {
         this.orderService = orderService;
+        this.ledger = ledger;
     }
 
     // ------------------------------------------------------------------ 出生
@@ -137,6 +146,21 @@ public class OrderStatusService {
             throw new IllegalStateException("建单只允许「待付款」「已付款」「待审核」作为初始状态，收到 " + to);
         }
         order.setStatus(to);
+    }
+
+    /**
+     * 出生台账（{@code from_status = NULL}）：建单这一次也要留一条证据，否则「这张单是怎么来的」
+     * 在台账里是空白。
+     *
+     * <p><b>为什么出生要拆成两步（{@code init()} 在 save 前、本方法在 save 后）</b>：
+     * {@code init()} 的作用是「在落库前定初值」（{@code save} 时一次 INSERT 写进状态），
+     * 那时自增主键还不存在，而台账的幂等键 {@code {orderId}:0} 必须带真实 id。
+     * 所以 save 之后、同一事务内补这一条 —— 失败一起回滚，不会出现「订单建了、出生台账没有」。
+     *
+     * @param reason 出生原因码（{@link ReasonCodes#ORDER_CREATE}）
+     */
+    public void recordBirth(Order order, String reason, String reasonDetail) {
+        ledger.orderBirth(order, reason, reasonDetail);
     }
 
     // ------------------------------------------------------------------ 流转
@@ -158,6 +182,15 @@ public class OrderStatusService {
      */
     public int change(Order order, int to, String reason, String reasonDetail,
                       Consumer<LambdaUpdateWrapper<Order>> extraSets) {
+        return change(order, to, reason, reasonDetail, extraSets, null, null);
+    }
+
+    /**
+     * 流转（带触发单据）：{@code refType/refId} 记「这次流转是被哪张单据触发的」
+     * （退货申请审核 → RETURN_APPLY#12、支付 → PAYMENT#…），P3 的时间线视图靠它把单据串起来。
+     */
+    public int change(Order order, int to, String reason, String reasonDetail,
+                      Consumer<LambdaUpdateWrapper<Order>> extraSets, String refType, Long refId) {
         Integer from = order.getStatus();
         requireAllowed(order.getId(), from, to, reason);
         Integer version = order.getVersion();
@@ -177,6 +210,10 @@ public class OrderStatusService {
             // 与 updateById 之后实体手里的值保持一致（有的入口紧接着就用实体组装响应）
             order.setStatus(to);
             if (version != null) order.setVersion(version + 1);
+            // 台账：**只在 UPDATE 成功（rows > 0）之后**写，且与状态在同一个事务里。
+            // rows == 0 说明有人抢先改过（调用方会抛 409 回滚），这时状态根本没变，
+            // 写台账就是「记了一笔没发生的事」。
+            ledger.orderChanged(order, from, to, reason, reasonDetail, refType, refId);
         }
         log.debug("订单 {} 状态 {} → {}（reason={}，影响 {} 行）", order.getId(), from, to, reason, rows);
         return rows;

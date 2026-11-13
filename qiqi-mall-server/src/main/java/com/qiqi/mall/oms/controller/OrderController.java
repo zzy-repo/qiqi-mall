@@ -6,6 +6,8 @@ import com.qiqi.mall.shared.common.OrderSnGenerator;
 import com.qiqi.mall.shared.common.PreviewResult;
 import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.shared.guard.OptimisticLockGuard;
+import com.qiqi.mall.shared.ledger.AdminAuditWriter;
+import com.qiqi.mall.shared.ledger.ReasonCodes;
 import com.qiqi.mall.oms.dto.OrderDetailDTO;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.order.entity.OrderItem;
@@ -53,6 +55,8 @@ public class OrderController {
     private final MemberService memberService;
     /** 库存落点：「只剩 N 件」这类必须说准的地方走它（legacy 读 sku.stock，bucket 读 SUM(桶)） */
     private final StockStore stockStore;
+    /** 后台操作审计（删单/发货这类敏感动作要留证；开关可一键关掉） */
+    private final AdminAuditWriter auditWriter;
 
     public OrderController(OrderService orderService, OrderStatusService orderStatusService,
                            OrderItemService orderItemService,
@@ -61,7 +65,8 @@ public class OrderController {
                            DeliveryOrderService deliveryOrderService,
                            OrderPurgeService orderPurgeService,
                            MemberService memberService,
-                           StockStore stockStore) {
+                           StockStore stockStore,
+                           AdminAuditWriter auditWriter) {
         this.orderService = orderService;
         this.orderStatusService = orderStatusService;
         this.orderItemService = orderItemService;
@@ -73,6 +78,7 @@ public class OrderController {
         this.orderPurgeService = orderPurgeService;
         this.memberService = memberService;
         this.stockStore = stockStore;
+        this.auditWriter = auditWriter;
     }
 
     /**
@@ -197,6 +203,8 @@ public class OrderController {
             order.setTotalAmount(java.math.BigDecimal.ZERO);
         }
         orderService.save(order);
+        // 出生台账（from_status = NULL）：save 之后、同一事务内。后台建单同样是「订单的出生事件」
+        orderStatusService.recordBirth(order, OrderStatusService.REASON_CREATE, "后台建单");
         if (items != null && !items.isEmpty()) {
             items.forEach(item -> {
                 item.setId(null);
@@ -437,8 +445,16 @@ public class OrderController {
         }
         // 状态写入统一走 OrderStatusService（同一条 UPDATE 里带 status_seq 自增与 version 自增）
         // fail-closed：0 行 = 读到状态之后别人改过（另一个按钮/另一个实例已经发过货）→ 409 回滚
+        Integer statusBefore = order.getStatus();          // change() 成功后会把实体上的状态改成 2，先留旧值记审计
         int rows = orderStatusService.change(order, 2, OrderStatusService.REASON_SHIP, null);
         OptimisticLockGuard.requireAffected(rows);
+        // 审计（敏感动作：把订单标记为已发货，是「货已离开商家」的对外承诺）
+        auditWriter.record(new AdminAuditWriter.Event(
+                ReasonCodes.ACTION_ORDER_SHIP, ReasonCodes.TARGET_ORDER, id, order.getOrderSn(),
+                "订单 " + order.getOrderSn() + " 标记为已发货（直发路径，不拆单）",
+                null, id,
+                AdminAuditWriter.snapshot("status", statusBefore),
+                AdminAuditWriter.snapshot("status", 2)));
         return Result.ok(order);
     }
 
@@ -485,6 +501,16 @@ public class OrderController {
         if (PreviewResult.isDryRun(dryRun)) {
             return Result.ok(PreviewResult.of(deleteWillDo(order)));
         }
+        // 审计放在 purge **之前**：purge 会物理删掉订单/包裹/流水，删完再记就查不到单号了。
+        // before 只记敏感字段（状态/金额/归属），不 dump 整实体。
+        auditWriter.record(new AdminAuditWriter.Event(
+                ReasonCodes.ACTION_ORDER_DELETE, ReasonCodes.TARGET_ORDER, id, order.getOrderSn(),
+                "删除订单 " + order.getOrderSn() + "（id=" + id + "，原状态 " + statusText(order.getStatus())
+                        + "，金额 ¥" + order.getTotalAmount() + "）：级联删明细/发货单/支付流水，不可恢复",
+                null, id,
+                AdminAuditWriter.snapshot("status", order.getStatus(),
+                        "totalAmount", order.getTotalAmount(), "memberId", order.getMemberId()),
+                AdminAuditWriter.snapshot("deleted", Boolean.TRUE)));
         orderPurgeService.purge(order);
         return Result.ok();
     }

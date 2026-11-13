@@ -9,6 +9,7 @@ import com.qiqi.mall.oms.entity.ReturnReason;
 import com.qiqi.mall.shared.security.CurrentUser;
 import com.qiqi.mall.oms.service.OrderService;
 import com.qiqi.mall.oms.service.OrderStatusService;
+import com.qiqi.mall.shared.ledger.ReasonCodes;
 import com.qiqi.mall.oms.service.ReturnApplyService;
 import com.qiqi.mall.oms.service.ReturnReasonService;
 import com.qiqi.mall.oms.service.ReturnStatusService;
@@ -82,12 +83,16 @@ public class PortalReturnController {
         // 出生：申请初始状态「待处理(0)」也走唯一入口（save 之前定初值，不产生 UPDATE）
         returnStatusService.init(apply, 0);
         returnApplyService.save(apply);
+        // 出生台账（from_status = NULL + order_id 冗余）：save 之后才拿得到申请 id
+        returnStatusService.recordBirth(apply, ReturnStatusService.REASON_CREATE, "买家自助申请");
 
         // 联动：订单进入「退款中」（状态写入统一走 OrderStatusService）
         // 0 行 = 读出来之后订单被别人改过（管理员刚好发货/关闭、或另一次并发退货）→ 409 整笔回滚，
         // 连刚插入的退货申请一起撤回 —— 否则会留下一条「申请已建、订单没进退款中」的待处理单，
         // 反而把买家自己卡在「该订单已有待处理的退货申请」上，再也不能申请。
-        int rows = orderStatusService.change(order, 5, OrderStatusService.REASON_RETURN_APPLY, null);
+        // ref = 刚落的这张申请：订单台账里这一行写得出「是哪个申请把订单推进退款中的」
+        int rows = orderStatusService.change(order, 5, OrderStatusService.REASON_RETURN_APPLY, null,
+                null, ReasonCodes.REF_RETURN_APPLY, apply.getId());
         OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_ORDER_STATE_CHANGED);
         return Result.ok(apply);
     }

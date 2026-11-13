@@ -158,9 +158,11 @@ public class PortalOrderController {
         int rows = orderStatusService.change(order, 7, OrderStatusService.REASON_PAY, null,
                 update -> update.set(Order::getPayType, payType).set(Order::getPaymentTime, paidAt));
         OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_ORDER_STATE_CHANGED);
-        // 支付流水（对账键 = 订单号）：与上面的状态推进在同一个事务里，要么都成、要么都不记
+        // 支付流水（对账键 = 订单号）：与上面的状态推进在同一个事务里，要么都成、要么都不记。
+        // P2 第二步加固：带 orderId / 操作者 / 幂等键（{orderSn}:PAY）—— 重放时撞 uk_idem 静默跳过，
+        // 不会因为「同一次支付被提交两遍」而记两条钱。
         paymentRecordService.record(order.getOrderSn(), order.getTotalAmount(),
-                PaymentRecord.TYPE_PAY, payType);
+                PaymentRecord.TYPE_PAY, payType, order.getId(), null, null, null);
         return Result.ok(detailBody(order));
     }
 

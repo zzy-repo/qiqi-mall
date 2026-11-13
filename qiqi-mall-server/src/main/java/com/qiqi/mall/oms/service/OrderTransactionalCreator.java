@@ -60,6 +60,9 @@ public class OrderTransactionalCreator {
         order.setReceiverAddress(receiverAddress);
         order.setTotalAmount(BigDecimal.ZERO);
         orderService.save(order);
+        // 出生台账：save 之后（拿到自增 id）才写，与建单同一个 REQUIRES_NEW 事务 ——
+        // 台账写不进去就整单不成立，绝不出现「订单建了、出生事件没有」
+        orderStatusService.recordBirth(order, OrderStatusService.REASON_CREATE, null);
 
         BigDecimal total = BigDecimal.ZERO;
         List<OrderItem> items = new ArrayList<>();

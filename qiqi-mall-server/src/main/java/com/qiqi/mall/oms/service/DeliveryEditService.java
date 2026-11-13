@@ -10,6 +10,8 @@ import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.order.entity.OrderItem;
 import com.qiqi.mall.shared.common.DeliverySnGenerator;
 import com.qiqi.mall.shared.guard.OptimisticLockGuard;
+import com.qiqi.mall.shared.ledger.AdminAuditWriter;
+import com.qiqi.mall.shared.ledger.ReasonCodes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -51,12 +53,15 @@ public class DeliveryEditService {
     private final DeliveryLogisticsService deliveryLogisticsService;
     /** 包裹状态写入的唯一入口（出生：人工拆出来的包裹 = 待下发(0)） */
     private final DeliveryStatusService deliveryStatusService;
+    /** 后台操作审计（改仓/改量/拆包/合包/删包都是敏感动作） */
+    private final AdminAuditWriter auditWriter;
 
     public DeliveryEditService(DeliveryOrderService deliveryOrderService, DeliveryItemService deliveryItemService,
                                OrderItemService orderItemService, OrderService orderService,
                                WarehouseService warehouseService,
                                DeliveryLogisticsService deliveryLogisticsService,
-                               DeliveryStatusService deliveryStatusService) {
+                               DeliveryStatusService deliveryStatusService,
+                               AdminAuditWriter auditWriter) {
         this.deliveryOrderService = deliveryOrderService;
         this.deliveryItemService = deliveryItemService;
         this.orderItemService = orderItemService;
@@ -64,6 +69,7 @@ public class DeliveryEditService {
         this.warehouseService = warehouseService;
         this.deliveryLogisticsService = deliveryLogisticsService;
         this.deliveryStatusService = deliveryStatusService;
+        this.auditWriter = auditWriter;
     }
 
     // ------------------------------------------------------------------
@@ -73,6 +79,8 @@ public class DeliveryEditService {
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> update(Long deliveryId, Long warehouseId, List<DeliveryItemQty> items) {
         DeliveryOrder delivery = requirePending(deliveryId, "编辑");
+        Long warehouseBefore = delivery.getWarehouseId();          // 改之前的发货仓：审计的 before 要用旧值
+        List<String> itemsBefore = itemLines(deliveryId);
         if (warehouseId != null) {
             if (warehouseService.getById(warehouseId) == null) {
                 throw new IllegalStateException("仓库不存在：" + warehouseId);
@@ -89,6 +97,12 @@ public class DeliveryEditService {
             assertQuantityNotExceeded(delivery.getOrderId());
         }
         markManual(delivery);
+        auditWriter.record(new AdminAuditWriter.Event(
+                ReasonCodes.ACTION_DELIVERY_UPDATE, ReasonCodes.TARGET_PACKAGE, deliveryId, delivery.getDeliverySn(),
+                "编辑待下发包裹 " + delivery.getDeliverySn() + "（改发货仓 / 改明细数量）",
+                null, delivery.getOrderId(),
+                AdminAuditWriter.snapshot("warehouseId", warehouseBefore, "items", itemsBefore),
+                AdminAuditWriter.snapshot("warehouseId", delivery.getWarehouseId(), "items", itemLines(deliveryId))));
         return summary(delivery.getOrderId());
     }
 
@@ -119,6 +133,8 @@ public class DeliveryEditService {
         created.setReceiverAddress(source.getReceiverAddress());
         created.setCreatedAt(LocalDateTime.now());
         deliveryOrderService.save(created);
+        // 出生台账（from_status = NULL + delivery_sn 快照）：人工拆分出来的新包同样要有出生证据
+        deliveryStatusService.recordBirth(created, DeliveryStatusService.REASON_CREATE, "人工拆分");
 
         for (DeliveryItemQty row : items) {
             DeliveryItem item = requireItem(row.getDeliveryItemId(), deliveryId);
@@ -147,6 +163,14 @@ public class DeliveryEditService {
         if (itemsOf(source.getId()).isEmpty()) {                   // 全拆走 → 源包已空，删掉
             deliveryOrderService.removeById(source.getId());
         }
+        auditWriter.record(new AdminAuditWriter.Event(
+                ReasonCodes.ACTION_DELIVERY_SPLIT, ReasonCodes.TARGET_PACKAGE, source.getId(), source.getDeliverySn(),
+                "拆分包裹 " + source.getDeliverySn() + " → 新包 " + created.getDeliverySn()
+                        + "（" + requestLines(items).size() + " 条明细）",
+                null, source.getOrderId(),
+                AdminAuditWriter.snapshot("deliverySn", source.getDeliverySn()),
+                AdminAuditWriter.snapshot("newDeliverySn", created.getDeliverySn(),
+                        "newDeliveryId", created.getId(), "warehouseId", created.getWarehouseId())));
         return summary(source.getOrderId());
     }
 
@@ -181,6 +205,12 @@ public class DeliveryEditService {
         }
         deliveryOrderService.removeById(source.getId());
         markManual(target);
+        auditWriter.record(new AdminAuditWriter.Event(
+                ReasonCodes.ACTION_DELIVERY_MERGE, ReasonCodes.TARGET_PACKAGE, source.getId(), source.getDeliverySn(),
+                "合并包裹 " + source.getDeliverySn() + " 并入 " + target.getDeliverySn() + "（源包消失）",
+                null, target.getOrderId(),
+                AdminAuditWriter.snapshot("deliverySn", source.getDeliverySn(), "targetSn", target.getDeliverySn()),
+                AdminAuditWriter.snapshot("targetSn", target.getDeliverySn(), "targetId", target.getId())));
         return summary(target.getOrderId());
     }
 
@@ -207,6 +237,13 @@ public class DeliveryEditService {
         }
         deliveryOrderService.removeById(deliveryId);
         recomputeSplitStatus(delivery.getOrderId());
+        auditWriter.record(new AdminAuditWriter.Event(
+                ReasonCodes.ACTION_DELIVERY_DELETE, ReasonCodes.TARGET_PACKAGE, deliveryId, delivery.getDeliverySn(),
+                "删除空包裹 " + delivery.getDeliverySn() + "（没有明细，删后不可恢复）",
+                null, delivery.getOrderId(),
+                AdminAuditWriter.snapshot("deliverySn", delivery.getDeliverySn(),
+                        "status", delivery.getStatus()),
+                AdminAuditWriter.snapshot("deleted", Boolean.TRUE)));
         return summary(delivery.getOrderId());
     }
 

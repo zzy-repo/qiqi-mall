@@ -2,6 +2,8 @@ package com.qiqi.mall.oms.service;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.qiqi.mall.oms.entity.DeliveryOrder;
+import com.qiqi.mall.shared.ledger.ReasonCodes;
+import com.qiqi.mall.shared.ledger.StatusLedgerWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -35,14 +37,17 @@ public class DeliveryStatusService {
 
     private static final Logger log = LoggerFactory.getLogger(DeliveryStatusService.class);
 
-    // ---- 事件原因（reason 列口径）：第二步写台账时原样落到 delivery_status_ledger.reason ----
-    public static final String REASON_DISPATCH = "DELIVERY_DISPATCH";
-    public static final String REASON_CANCEL = "DELIVERY_CANCEL";
-    public static final String REASON_PICK = "WMS_PICK";
-    public static final String REASON_OUTBOUND = "WMS_OUTBOUND";
-    public static final String REASON_TRANSIT = "WMS_TRANSIT";
-    public static final String REASON_SIGNED = "WMS_SIGNED";
-    public static final String REASON_CONFIRM_SIGN = "ORDER_CONFIRM_SIGN";
+    // ---- 事件原因（reason 列口径）----
+    // 常量唯一来源是 shared/ledger/ReasonCodes；这里保留别名，P2 第一步的调用点不用改。
+    // 台账写入时原样落到 delivery_status_ledger.reason（VARCHAR(32)）。
+    public static final String REASON_CREATE = ReasonCodes.DELIVERY_CREATE;
+    public static final String REASON_DISPATCH = ReasonCodes.DELIVERY_DISPATCH;
+    public static final String REASON_CANCEL = ReasonCodes.DELIVERY_CANCEL;
+    public static final String REASON_PICK = ReasonCodes.WMS_PICK;
+    public static final String REASON_OUTBOUND = ReasonCodes.WMS_OUTBOUND;
+    public static final String REASON_TRANSIT = ReasonCodes.WMS_TRANSIT;
+    public static final String REASON_SIGNED = ReasonCodes.WMS_SIGNED;
+    public static final String REASON_CONFIRM_SIGN = ReasonCodes.ORDER_CONFIRM_SIGN;
 
     /** 出生：新建包裹只允许「待下发」（拆单出来的包裹还没下发，其它状态只能由 WMS 回传产生） */
     private static final Set<Integer> BIRTH = Set.of(DeliveryOrder.PENDING);
@@ -65,9 +70,12 @@ public class DeliveryStatusService {
     private static final String VERSION_INCREMENT = "version = version + 1";
 
     private final DeliveryOrderService deliveryOrderService;
+    /** 状态台账写入口（与状态 UPDATE 同一事务；开关关闭时它自己 no-op） */
+    private final StatusLedgerWriter ledger;
 
-    public DeliveryStatusService(DeliveryOrderService deliveryOrderService) {
+    public DeliveryStatusService(DeliveryOrderService deliveryOrderService, StatusLedgerWriter ledger) {
         this.deliveryOrderService = deliveryOrderService;
+        this.ledger = ledger;
     }
 
     /** 出生：给**尚未落库**的新包裹定初始状态（{@code save} 之前调用，不产生 UPDATE） */
@@ -76,6 +84,17 @@ public class DeliveryStatusService {
             throw new IllegalStateException("新建包裹只能是「待下发」状态，收到 " + to);
         }
         delivery.setStatus(to);
+    }
+
+    /**
+     * 出生台账（{@code from_status = NULL}，并写下 {@code delivery_sn} 快照）：拆单/人工拆分
+     * 新建出来的包裹也要有「出生」这条证据。
+     *
+     * <p>必须在 {@code save()} 之后调用（幂等键 {@code {deliveryId}:0} 要真实 id），且同一事务。
+     * 单号快照尤其重要：{@code OrderPurgeService} 会物理删包裹行，单号只留在台账里。
+     */
+    public void recordBirth(DeliveryOrder delivery, String reason, String reasonDetail) {
+        ledger.deliveryBirth(delivery, reason, reasonDetail);
     }
 
     /** 流转（不带附带列） */
@@ -91,6 +110,12 @@ public class DeliveryStatusService {
      */
     public int change(DeliveryOrder delivery, int to, String reason, String reasonDetail,
                       Consumer<LambdaUpdateWrapper<DeliveryOrder>> extraSets) {
+        return change(delivery, to, reason, reasonDetail, extraSets, null, null);
+    }
+
+    /** 流转（带触发单据）：refType/refId 记这次流转被哪张单据触发 */
+    public int change(DeliveryOrder delivery, int to, String reason, String reasonDetail,
+                      Consumer<LambdaUpdateWrapper<DeliveryOrder>> extraSets, String refType, Long refId) {
         Integer from = delivery.getStatus();
         requireAllowed(delivery.getId(), from, to, reason);
         Integer version = delivery.getVersion();
@@ -107,6 +132,8 @@ public class DeliveryStatusService {
         if (rows > 0) {
             delivery.setStatus(to);
             if (version != null) delivery.setVersion(version + 1);
+            // 台账：只在 UPDATE 成功之后写（0 行 = 有人抢先改过 → 调用方 409 回滚，状态没变就不许记）
+            ledger.deliveryChanged(delivery, from, to, reason, reasonDetail, refType, refId);
         }
         log.debug("包裹 {} 状态 {} → {}（reason={}，影响 {} 行）", delivery.getId(), from, to, reason, rows);
         return rows;
