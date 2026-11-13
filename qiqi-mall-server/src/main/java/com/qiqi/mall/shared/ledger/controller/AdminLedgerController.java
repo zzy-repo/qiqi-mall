@@ -31,9 +31,10 @@ import org.springframework.web.bind.annotation.RestController;
  * <p><b>这是只读接口</b>：六本账都是只追加证据表，没有任何写入口，所以这里只有 GET。
  * 它也是全站唯一「一张单/一个包裹到底怎么走到今天」的入口 —— 排查问题时先查它。
  *
- * <p>API Key（AI）访问：<b>刻意没有登记到 {@code ApiKeyAuthFilter.ADMIN_RULES}</b>，
- * 于是 AI 调用会被兜底规则拦成 403。理由见交付报告（台账里有全站审计流水与操作人快照，
- * 现有 scope 里没有能准确表达它的那一档，挂在 order:read / catalog:read 上是越权）。
+ * <p>API Key（AI）访问：已登记到 {@code ApiKeyAuthFilter.ADMIN_RULES}，只读档为 {@code ledger:read}
+ * （在 {@code AiApiKeyService.ALL_SCOPES} 里，可授予）；没有对应的写 scope，所以本前缀天然只读。
+ * 当年确曾"刻意不登记"（那时没有合适的 scope 档位，挂 order:read 等于越权读全站审计流水），
+ * 后来补了 ledger:read 才开放 —— 这段话与 {@code scripts/mcp-coverage.mjs} 的账目互为印证。
  */
 @Tag(name = "管理端-台账查询", description = "六本台账的统一只读检索：订单/包裹/售后状态、后台审计、WMS 收返、库存流水")
 @RestController

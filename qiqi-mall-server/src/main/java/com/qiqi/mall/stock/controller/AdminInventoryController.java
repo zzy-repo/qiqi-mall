@@ -37,9 +37,10 @@ import org.springframework.web.bind.annotation.RestController;
  * <p>两条都是只读：桶只由扣减/回补路径写，缓存只由 {@code StockCacheRefresher} 回写，
  * 台账只追加 —— 对账接口不许「顺手修一下」，那会把证据改成结论。
  *
- * <p>API Key（AI）访问：<b>刻意没有登记到 {@code ApiKeyAuthFilter.ADMIN_RULES}</b>
- * （现有 scope 里没有 stock:read 这一档，挂到 catalog:read 上等于让「只能改商品」的密钥
- * 读出全库库存与偏差），AI 调用会被兜底规则拦成 403。理由见交付报告。
+ * <p>API Key（AI）访问：已登记到 {@code ApiKeyAuthFilter.ADMIN_RULES}，只读档为 {@code stock:read}
+ * （在 {@code AiApiKeyService.ALL_SCOPES} 里，可授予）；没有对应的写 scope，所以本前缀天然只读。
+ * 当年确曾"刻意不登记"（那时没有 stock:read，挂 catalog:read 等于让「只能改商品」的密钥读全库库存），
+ * 后来补了 stock:read 才开放 —— 与 {@code scripts/mcp-coverage.mjs} 的账目互为印证。
  */
 @Tag(name = "管理端-库存对账", description = "桶 vs 展示缓存的偏差、台账净额与最近流水、全库偏差 TOP")
 @RestController
