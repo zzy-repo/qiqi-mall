@@ -71,10 +71,19 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
     private static final String NO_WRITE_STOCK = "stock:write";
     private static final String NO_WRITE_AUDIT = "audit:write";
     private static final String NO_WRITE_CHANNEL = "channel:write";
+    /**
+     * 支付域写权限（渠道回调重放 / 将来的退款重试等）：**刻意不放进** ALL_SCOPES。
+     *
+     * <p>为什么支付需要一个单独的不可授予写 scope，而不是复用 {@code order:write}：
+     * {@code order:write} 是**可授予**的（AI 能建单/发货），而 {@code POST /admin/payments/{id}/replay-channel-callback}
+     * 会主动去撞资金记账路径 —— 只要 AI 手里有一把 order:write 的钥匙，它就能反复触发这条路径。
+     * 支付是「钱」，不该有任何自动化主体拿得到这把钥匙（与 {@code audit:write} 同一条红线）。</p>
+     */
+    private static final String NO_WRITE_PAYMENT = "payment:write";
 
     /** 只读规则用的写 scope（单测据此断言它们永不可授予） */
     public static List<String> unGrantableWriteScopes() {
-        return List.of(NO_WRITE_LEDGER, NO_WRITE_STOCK, NO_WRITE_AUDIT, NO_WRITE_CHANNEL);
+        return List.of(NO_WRITE_LEDGER, NO_WRITE_STOCK, NO_WRITE_AUDIT, NO_WRITE_CHANNEL, NO_WRITE_PAYMENT);
     }
 
     /** 管理端映射（严格按需求单，不按接口细化） */
@@ -104,6 +113,10 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
             // 证据与库存：只读域（台账只追加、库存是扣减裁决，都不该由 AI 改）
             new Rule("/admin/ledgers", "ledger:read", NO_WRITE_LEDGER),
             new Rule("/admin/inventory", "stock:read", NO_WRITE_STOCK),
+            // 支付域：钱。读走订单域（看一笔支付＝看一张订单的钱），写是 payment:write ——
+            // 它不在 ALL_SCOPES 里，所以「渠道回调重放」这类接口对任何 API Key 都是 403，
+            // 只能人工 JWT 操作。别改成 order:write：那是可授予的。
+            new Rule("/admin/payments", "order:read", NO_WRITE_PAYMENT),
             // 多平台接入域：店铺与同步日志**只读**（AI 能读「今天拉了几单、失败原因是什么」），
             // 拉单（建订单）与回传发货（不可撤回的外呼）要 channel:write —— 它不在 ALL_SCOPES 里，
             // 所以对任何 API Key 都是 403，只能人工 JWT 点按钮。

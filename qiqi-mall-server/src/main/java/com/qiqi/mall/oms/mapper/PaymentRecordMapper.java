@@ -23,4 +23,15 @@ public interface PaymentRecordMapper extends BaseMapper<PaymentRecord> {
     /** 幂等键是否已入账（判重不依赖 DuplicateKeyException 的报文内容） */
     @Select("SELECT COUNT(*) FROM payment_record WHERE idem_key = #{idemKey}")
     int countByIdemKey(@Param("idemKey") String idemKey);
+
+    /**
+     * 该渠道流水号是否已入账 —— {@code uk_channel_trade(channel, trade_no)} 的回查面。
+     *
+     * <p>为什么撞键之后要回查它：一次重复通知会**同时**违反两个唯一键
+     * （{@code uk_channel_trade} 与 {@code uk_idem}），而 MySQL 只会报其中一个。
+     * 「是第三方把同一笔通知又发了一次」（回查命中 → 忽略）与「渠道给同一张单发来了第二笔扣款」
+     * （回查不命中 → 人工对账）必须靠这条回查分开，不能靠异常报文猜。
+     */
+    @Select("SELECT COUNT(*) FROM payment_record WHERE channel = #{channel} AND trade_no = #{tradeNo}")
+    int countByChannelTrade(@Param("channel") int channel, @Param("tradeNo") String tradeNo);
 }

@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li><b>分页参数必须是 {@code page}/{@code size}</b>（不是 MP 默认的 current/pageSize），
  *       {@code size} 夹在 1..50（与 {@code OrderController#list} 同一口径；MP 的
  *       {@code PaginationInnerInterceptor} 另有一道 {@code maxLimit=100} 兜底）；</li>
- *   <li>{@code type} 留空 = 查全部六类；给了就是单选（前端目前是单选下拉）；</li>
+ *   <li>{@code type} 留空 = 查全部七类；给了就是单选（前端目前是单选下拉）；</li>
  *   <li>{@code from}/{@code to} 形如 {@code 'YYYY-MM-DD HH:mm:ss'}（按 {@code LocalDateTime} 解析，
  *       另容忍纯日期与 ISO 两种写法，见 {@link LedgerQueryService#parseTime}）。</li>
  * </ul>
@@ -57,7 +57,7 @@ public class AdminLedgerController {
      * 包裹与 WMS 分支经 {@code delivery_order.order_id} 搭桥反查（视图的包裹分支没有 order_id）。
      * 所以「订单 29 的台账」用一条不带 type 的请求就能一次查全（含它的包裹与售后）。
      */
-    @Operation(summary = "台账分页查询（六类台账 UNION；type 留空查全部，bizId 支持订单/包裹/售后全链路）")
+    @Operation(summary = "台账分页查询（七类台账 UNION；type 留空查全部，bizId 支持订单/包裹/售后全链路与支付流水）")
     @GetMapping
     public Result<Page<LedgerRow>> list(@RequestParam(defaultValue = "1") long page,
                                         @RequestParam(defaultValue = "10") long size,

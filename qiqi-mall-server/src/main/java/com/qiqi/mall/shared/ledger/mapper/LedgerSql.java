@@ -5,22 +5,23 @@ package com.qiqi.mall.shared.ledger.mapper;
  *
  * <h3>为什么是常量类而不是 XML / Provider</h3>
  * 本仓库 mapper 目录零 XML，自定义 SQL 一律写在 {@code @Select} 注解里。
- * 但「六个分支」的列清单很长，直接塞进注解会让注解不可读 —— 所以拆成<b>编译期常量</b>：
+ * 但「七个分支」的列清单很长，直接塞进注解会让注解不可读 —— 所以拆成<b>编译期常量</b>：
  * 注解值允许常量表达式（JLS 9.7.1），拼接后仍是同一个 {@code @Select}，
  * 既不引入 XML，也不引入 {@code @SelectProvider}（SQL 在编译期就固定下来，能一眼看全）。
  *
- * <h3>六个分支（与前端 {@code LEDGER_TYPE_TEXT} 逐字对应）</h3>
+ * <h3>七个分支（与前端 {@code LEDGER_TYPE_TEXT} 逐字对应）</h3>
  * <ul>
  *   <li>{@code ORDER_STATUS} / {@code DELIVERY_STATUS} / {@code RETURN_STATUS} —— 查视图
  *       {@code v_biz_status_timeline}（三张状态台账 UNION ALL 的只读派生，状态中文名也在视图里）；</li>
  *   <li>{@code AUDIT} —— {@code admin_audit_log}（后台操作审计，带 target 单号快照）；</li>
  *   <li>{@code WMS} —— {@code wms_exchange_ledger}（REQ/ACK 两阶段）；</li>
- *   <li>{@code STOCK} —— {@code stock_ledger}（库存扣/补流水）。</li>
+ *   <li>{@code STOCK} —— {@code stock_ledger}（库存扣/补流水）；</li>
+ *   <li>{@code PAYMENT} —— {@code payment_record}（钱进/钱出：支付入账、退款入账）。</li>
  * </ul>
  *
  * <h3>「全部类型」用视图、「单类型」直查</h3>
  * 分支由 service 传入（{@code branches} 参数，一个或六个），UNION 只拼**传进来的**那些。
- * 所以「全部类型」= 六个分支 UNION；「单类型」= 只有一个分支 —— 视图那一支上
+ * 所以「全部类型」= 七个分支 UNION；「单类型」= 只有一个分支 —— 视图那一支上
  * MySQL 还会把 {@code biz_type = 'X'} 推到各 UNION 分支、另外两支判 {@code Impossible WHERE}
  * 直接不扫（EXPLAIN 实测），等价于直查对应的那张台账表。
  *
@@ -37,6 +38,11 @@ package com.qiqi.mall.shared.ledger.mapper;
  *   <li><b>{@code stock_ledger} 没有 operator 列</b>：这里如实写 {@code 'SYSTEM'}（记账动作由系统完成），
  *       并且**按 operatorType 过滤时 STOCK 分支不参与**（{@code 1 = 0}）——
  *       否则「筛管理员」会混进一堆没人手工碰过的系统记账行。</li>
+ *   <li><b>支付流水分支按 operatorType 过滤时同样整支不参与</b>（{@code 1 = 0}，与 STOCK 同一口径）：
+ *       钱是被渠道回调/系统记账写进来的，`payment_record.operator_*` 只是「当时是谁点的这个动作」
+ *       的上下文快照（买家点支付记 MEMBER、管理员点退货审核记 ADMIN），它**不是**「谁改了这笔钱的归属」。
+ *       所以「筛管理员」不该把支付/退款流水混进来 —— 要查钱就选类型「支付流水」再按订单ID 收敛。
+ *       （代价如实记在这里：按 operatorType 筛选时支付流水一行都不出现，这是有意的窄口径。）</li>
  *   <li><b>bizId 在每个分支里就是该台账自己的业务主键</b>（订单 id / 包裹 id / 售后 id /
  *       target_id / delivery_id / order_id）。跨分支的「这行属于哪张订单」两个状态分支<b>都读视图的
  *       {@code order_id} 真实列</b>：包裹分支读的是已登记冗余列
@@ -196,9 +202,53 @@ final class LedgerSql {
              WHERE 1 = 1
             """;
 
+    /**
+     * ============================================================ 支付流水分支（钱进 / 钱出）
+     *
+     * <p><b>为什么这一支不是「状态台账」</b>：{@code payment_record} 记的不是「从哪个状态到哪个状态」，
+     * 而是一次**资金事实**（付了多少 / 退了多少）。所以 {@code from_status}/{@code to_status} 如实给
+     * {@code NULL}（与审计 / WMS / 库存三支同口径，前端显示 {@code —}），中文语义放在 {@code reason}：
+     * {@code payment_record.type} 1 → 「支付入账」、2 → 「退款入账」。
+     *
+     * <p><b>为什么 {@code biz_sn} 读 {@code payment_record.order_sn} 而不是 JOIN {@code order}</b>：
+     * 这一列本身就是对账键（订单被物理删除后它仍要能读出来 —— 那正是这个字段存在的理由）。
+     * JOIN {@code order} 只是把「删单后仍可对账」这个性质主动放弃掉。
+     *
+     * <p><b>为什么 {@code biz_id} 可能为 NULL</b>：{@code order_id} 是回填列
+     * （历史 14 行回填自 order_sn，订单已被物理删除时为 NULL）。前端对 null 显示 {@code —}；
+     * 这种情况下「按订单ID 过滤」查不到它，只能按时间/单号 → 这是已知口径，见 {@code LedgerRow} 注释。
+     *
+     * <p>{@code reason_detail} 放渠道流水号（{@code trade_no}）：它是「这笔钱在第三方那里的身份证」，
+     * 对账争议时第一个要报的就是它。操作人三列照表取（可能为 NULL —— 历史行没有记录操作者，
+     * 这里不编一个 SYSTEM 出来）。
+     */
+    private static final String PAYMENT_BRANCH = """
+            SELECT 'PAYMENT' AS type,
+                   p.id AS id,
+                   p.order_id AS biz_id,
+                   p.order_sn AS biz_sn,
+                   CAST(NULL AS SIGNED) AS from_status,
+                   CAST(NULL AS SIGNED) AS to_status,
+                   CASE WHEN p.type = 2 THEN '退款入账' ELSE '支付入账' END AS reason,
+                   p.trade_no AS reason_detail,
+                   p.operator_type AS operator_type,
+                   p.operator_id AS operator_id,
+                   p.operator_name AS operator_name,
+                   p.ref_type AS ref_type,
+                   p.ref_id AS ref_id,
+                   CONCAT(IF(p.type = 2, '退款 -', '支付 +'), p.amount,
+                          '（订单 ', p.order_sn,
+                          IF(p.trade_no IS NULL, '', CONCAT('，流水号 ', p.trade_no)), '）',
+                          IF(p.origin_flow_id IS NULL, '', CONCAT('，原流水 #', p.origin_flow_id))) AS summary,
+                   p.created_at AS created_at
+              FROM payment_record p
+             WHERE 1 = 1
+            """;
+
     // ============================================================ 各分支的可选过滤条件
+
     // 写在分支内（而不是外层 WHERE）的原因：外层过滤发生在 UNION 结果上，MySQL 得先 materialize
-    // 六个分支再筛；写在分支里则每支各自走自己的索引（idx_biz / idx_order / idx_target /
+    // 七个分支再筛；写在分支里则每支各自走自己的索引（idx_biz / idx_order / idx_target /
     // idx_delivery / idx_sku），单类型查询就是一次普通索引扫描。
 
     /** 订单：bizId 就是订单 id */
@@ -262,6 +312,20 @@ final class LedgerSql {
                     + "<if test='to != null'> AND s.created_at &lt;= #{to} </if>";
 
     /**
+     * 支付流水：{@code bizId} = 订单 id（{@code payment_record.order_id}）。
+     *
+     * <p><b>按 operatorType 筛选时整支不参与</b>（{@code 1 = 0}，与 {@link #STOCK_FILTER} 同一口径）：
+     * {@code payment_record.operator_*} 是「谁点的这个动作」的上下文快照，不是「谁改动了这笔钱」——
+     * 退款是管理员点「退货审核通过」触发的，若照实过滤会让「筛管理员」里混进一堆资金流水，
+     * 而那些钱并不是管理员记的账。要查钱：类型选「支付流水」+ 业务ID（订单ID），两个条件足够收敛。
+     */
+    private static final String PAYMENT_FILTER =
+            "<if test='bizId != null'> AND p.order_id = #{bizId} </if>"
+                    + "<if test='operatorType != null'> AND 1 = 0 </if>"
+                    + "<if test='from != null'> AND p.created_at &gt;= #{from} </if>"
+                    + "<if test='to != null'> AND p.created_at &lt;= #{to} </if>";
+
+    /**
      * 分页查询的完整 SQL：{@code branches} 里每出现一个分支就拼一支，UNION ALL 成一个派生表，
      * 外层按 {@code (created_at, id)} 倒序（「最近发生的在最上面」；同一毫秒的多行按 id 定序，
      * 保证翻页稳定 —— 没有第二排序键时同一秒的行在页与页之间可能重复/丢失）。
@@ -279,6 +343,7 @@ final class LedgerSql {
                     + "<when test='\"AUDIT\".equals(branch)'>" + AUDIT_BRANCH + AUDIT_FILTER + "</when>"
                     + "<when test='\"WMS\".equals(branch)'>" + WMS_BRANCH + WMS_FILTER + "</when>"
                     + "<when test='\"STOCK\".equals(branch)'>" + STOCK_BRANCH + STOCK_FILTER + "</when>"
+                    + "<when test='\"PAYMENT\".equals(branch)'>" + PAYMENT_BRANCH + PAYMENT_FILTER + "</when>"
                     + "</choose></foreach>"
                     + ") t ORDER BY t.created_at DESC, t.id DESC"
                     + "</script>";

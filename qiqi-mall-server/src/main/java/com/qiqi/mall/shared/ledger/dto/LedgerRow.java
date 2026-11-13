@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
  *
  * <h3>字段是逐字契约（前端已定稿，别改名/别少字段）</h3>
  * <pre>
- * id, type(ORDER_STATUS|DELIVERY_STATUS|RETURN_STATUS|AUDIT|WMS|STOCK),
+ * id, type(ORDER_STATUS|DELIVERY_STATUS|RETURN_STATUS|AUDIT|WMS|STOCK|PAYMENT),
  * bizId, bizSn, fromStatus, toStatus, reason, reasonDetail,
  * operatorType(ADMIN|MEMBER|APIKEY|SYSTEM), operatorId, operatorName,
  * refType, refId, summary, createdAt
@@ -30,6 +30,8 @@ import java.time.LocalDateTime;
  *       <td>REQ|ACK / 回执结果</td></tr>
  *   <tr><td>STOCK</td><td>stock_ledger</td><td>订单 id / order_sn</td><td>null</td>
  *       <td>扣补原因 / 「落点桶 N」</td></tr>
+ *   <tr><td>PAYMENT</td><td>payment_record</td><td>订单 id / order_sn（对账键，删单后仍在）</td><td>null</td>
+ *       <td>「支付入账 / 退款入账」 / 渠道流水号 trade_no</td></tr>
  * </table>
  *
  * <h3>两个「如实返回、不做推断」的地方</h3>
@@ -37,7 +39,7 @@ import java.time.LocalDateTime;
  *   <li>{@code fromStatus}/{@code toStatus} 只对三个状态类型有值；审计 / WMS / 库存三类台账
  *       本来就不是状态机（没有「从哪到哪」），这里给 {@code null} 而不是硬编一个 0 —— 前端对
  *       null 显示 {@code —}。</li>
- *   <li>{@code id} 只在**同一张台账内**唯一（六支合并后可能重复）。前端只把它当行 key。</li>
+ *   <li>{@code id} 只在**同一张台账内**唯一（七支合并后可能重复）。前端只把它当行 key。</li>
  * </ul>
  *
  * <p>时间字段统一按 ISO-8601 返回（{@code LocalDateTime} 的默认序列化，形如
@@ -51,10 +53,10 @@ public class LedgerRow {
     /** 台账行主键（各台账自己的 id，不保证跨类型唯一） */
     private Long id;
 
-    /** 台账类型：ORDER_STATUS / DELIVERY_STATUS / RETURN_STATUS / AUDIT / WMS / STOCK */
+    /** 台账类型：ORDER_STATUS / DELIVERY_STATUS / RETURN_STATUS / AUDIT / WMS / STOCK / PAYMENT */
     private String type;
 
-    /** 业务对象 id（含义随 type：订单 id / 包裹 id / 售后 id / target_id / delivery_id / order_id） */
+    /** 业务对象 id（含义随 type：订单 id / 包裹 id / 售后 id / target_id / delivery_id / order_id；PAYMENT 为订单 id，历史行可能 null） */
     private Long bizId;
 
     /** 业务单号快照（订单号 / 包裹号 / 目标单号；对不上的时候为 null，前端显示 —） */
@@ -66,10 +68,10 @@ public class LedgerRow {
     /** 变更后状态码（仅三个状态类型有值） */
     private Integer toStatus;
 
-    /** 流转原因码 / 审计动作码 / WMS 方向 / 库存扣补原因 */
+    /** 流转原因码 / 审计动作码 / WMS 方向 / 库存扣补原因 / 支付流水的「支付入账 | 退款入账」 */
     private String reason;
 
-    /** 原因补充：状态台账的 reason_detail、审计里管理员填的原因、WMS 回执结果、库存的落点桶 */
+    /** 原因补充：状态台账的 reason_detail、审计里管理员填的原因、WMS 回执结果、库存的落点桶、支付流水的渠道流水号 */
     private String reasonDetail;
 
     /** 操作人类型：ADMIN / MEMBER / APIKEY / SYSTEM */

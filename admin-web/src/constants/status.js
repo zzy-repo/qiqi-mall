@@ -65,7 +65,11 @@ export const LEDGER_TYPE_TEXT = {
   RETURN_STATUS: '售后状态',
   AUDIT: '审计',
   WMS: 'WMS 回调',
-  STOCK: '库存'
+  STOCK: '库存',
+  // 支付流水（钱进/钱出）：来源是 payment_record，不是状态台账 ——
+  // 所以它的「前态→后态」永远是空（后端给 null，页面显示 — ），语义在「原因」列：
+  // 支付入账 / 退款入账，渠道流水号在原因下面那行小字里。
+  PAYMENT: '支付流水'
 }
 export const LEDGER_TYPE_TAG = {
   ORDER_STATUS: 'primary',
@@ -73,7 +77,8 @@ export const LEDGER_TYPE_TAG = {
   RETURN_STATUS: 'warning',
   AUDIT: 'info',
   WMS: 'info',
-  STOCK: 'danger'
+  STOCK: 'danger',
+  PAYMENT: 'success'
 }
 
 /* ---------------------------------------------------------------------------

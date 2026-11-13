@@ -17,7 +17,7 @@ import java.util.Locale;
  *
  * <h3>它只做三件事，且每件都必须做对</h3>
  * <ol>
- *   <li><b>类型白名单</b>：{@code type} 空 = 全部六类；给了就必须是六类之一，
+ *   <li><b>类型白名单</b>：{@code type} 空 = 全部七类；给了就必须是七类之一，
  *       拼错时<b>报错并列出可选值</b>，绝不「查不到就返回空数组」—— 空数组和「这段时间真没有记录」
  *       在页面上长得一模一样，等于让用户把「我选错类型了」误读成「系统没记录」。</li>
  *   <li><b>时间键的格式</b>：前端日期选择器只到天，会补成
@@ -78,7 +78,7 @@ public class LedgerQueryService {
     /**
      * 类型 → 要查的分支。
      *
-     * <p>空 = 六支全查（一次查全链路）；单类型 = 只拼那一支（视图那一支上 MySQL 还会把
+     * <p>空 = 七支全查（一次查全链路）；单类型 = 只拼那一支（视图那一支上 MySQL 还会把
      * {@code biz_type} 推到 UNION 各分支、另外两支判 {@code Impossible WHERE} 不扫）。
      */
     private static List<String> branchesOf(String type) {

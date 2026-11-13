@@ -112,4 +112,56 @@ public class PaymentRecordServiceImpl extends ServiceImpl<PaymentRecordMapper, P
                 ? orderSn + ":REFUND:" + (refId == null ? 0 : refId)
                 : orderSn + ":PAY";
     }
+
+    @Override
+    public boolean recordChannelNotice(String orderSn, BigDecimal amount, int type, int channel,
+                                       String tradeNo, Long orderId, String refType, Long refId,
+                                       Long originFlowId) {
+        if (tradeNo == null || tradeNo.isBlank()) {
+            // 渠道回调没有流水号 = 无法判断「是不是同一笔」→ 直接拒绝，不记一条「无身份证」的钱
+            throw new IllegalArgumentException("渠道回调缺少渠道流水号（trade_no），无法入账");
+        }
+        PaymentRecord record = new PaymentRecord();
+        record.setOrderSn(orderSn);
+        record.setAmount(amount == null ? BigDecimal.ZERO : amount);
+        record.setType(type);
+        record.setChannel(channel);
+        // ★ 与 record() 的唯一差别：流水号由**渠道**给，本地不改写、不加随机后缀。
+        //   改写了就永远撞不到 uk_channel_trade，「重复通知」这个场景也就永远造不出来。
+        record.setTradeNo(tradeNo);
+        record.setCreatedAt(LocalDateTime.now());
+        record.setOrderId(orderId);
+        record.setRefType(refType);
+        record.setRefId(refId);
+        record.setOriginFlowId(originFlowId);
+
+        String idemKey = null;
+        if (ledger.paymentTraceOn()) {
+            ActorResolver.Actor actor = ActorResolver.resolve();
+            record.setOperatorType(actor.type());
+            record.setOperatorId(actor.id());
+            record.setOperatorName(actor.name());
+            idemKey = idemKeyOf(orderSn, type, refId);
+            record.setIdemKey(idemKey);
+        }
+
+        try {
+            save(record);
+            return true;
+        } catch (DuplicateKeyException e) {
+            // 撞了唯一键 → 先问「是不是同一笔渠道流水」：是 → 第三方重复通知，钱已经记过，忽略。
+            if (getBaseMapper().countByChannelTrade(channel, tradeNo) > 0) {
+                log.info("渠道重复通知：channel={} trade_no={} 已入账（订单 {} 金额 {} 类型 {}），本次忽略",
+                        channel, tradeNo, orderSn, amount, type);
+                return false;
+            }
+            // 不是同一笔流水号，但同一幂等键已入账 = 同一张订单又来了一笔**新的**扣款通知。
+            // 这不是重放，是「疑似重复扣款」，必须让业务失败并留下可查的错误，而不是静默吞掉。
+            if (idemKey != null && getBaseMapper().countByIdemKey(idemKey) > 0) {
+                throw new IllegalStateException("订单 " + orderSn + " 已有入账流水（幂等键 " + idemKey
+                        + "），但本次渠道流水号 " + tradeNo + " 是新的 —— 疑似重复扣款，需人工对账");
+            }
+            throw e;
+        }
+    }
 }

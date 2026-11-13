@@ -1,136 +1,394 @@
-import { test } from '../../support/test.js'
-import { API, stamp } from '../../support/env.js'
+import { test, expect } from '../../support/test.js'
+import { API, ADMIN, stamp } from '../../support/env.js'
 import { queryDb } from '../../support/db.js'
-import { adminLoginHardened } from '../../support/admin-ui.js'
-import { adminTokenOf } from '../../support/assert.js'
-
-// 写实（去掉 fixme）时再补这些：
-//   expect / tid / tidPrefix                 —— support/test.js、support/tid.js（页面断言）
-//   memberRegisterAndLogin / addSpecToCart / submitCartOrder —— support/ui.js（买家侧支付）
-//   memberNickOf / receiverOf                —— support/fixtures.js
-//   memberLoginOf                            —— support/member-login.js
-//   memberApplyReturn / auditReturnApply     —— support/admin-ui-return.js（触发退款）
+import { tid, tidPrefix } from '../../support/tid.js'
+import { memberNickOf, receiverOf } from '../../support/fixtures.js'
+import { memberLoginOf } from '../../support/member-login.js'
+import {
+  adminLoginHardened,
+  adminAuditOrderPass,
+  returnApplyRow,
+  returnApplyStatusOf,
+  reloadReturnApplyList,
+  auditReturnApply,
+  expectToastSuccess,
+  memberApplyReturn,
+} from '../../support/admin-ui-return.js'
+import {
+  adminSetSkuStock,
+  adminSearchOrderRow,
+  openOrderDrawer,
+  clickDispatch,
+  clickWmsCallback,
+  memberRegisterAndLogin,
+  addSpecToCart,
+  submitCartOrder,
+} from '../../support/ui.js'
+import { adminTokenOf, getProductApi, getAdminOrderBySnApi } from '../../support/assert.js'
 
 /**
- * 03-商家-履约 / 15-支付流水加固（骨架，未写实）
+ * 03-商家-履约 / 15-支付流水加固
  *
  * 这个场景要证明的一件事：
  *   **钱进来的每一次、出去的每一次都能对上订单，也能对上前一笔 ——
  *     而且同一笔钱不会被记两次（渠道流水号 + 本地幂等键两道闸）。**
  *
- * 已经能确定的事实（payment_record 原地加固，不新建表）：
- *   · 每条流水记清：关联订单（订单号 + 订单ID）、金额、类型（支付 / 退款）、渠道、渠道流水号；
- *   · 退款那条必须带 origin_flow_id，指向它要退的那一笔支付流水；
- *   · ref_type / ref_id 记「触发它的单据」（例如退货申请），operator_* 记是谁做的；
- *   · 两道闸各管一件事：
- *       ① uk_channel_trade（渠道 + 渠道流水号）唯一 —— 挡住第三方重复通知；
- *       ② uk_idem（本地幂等键）唯一 —— 挡住自己连点与重试；
- *   · 订单被物理删除之后，流水里的 order_sn / order_id 仍然读得到（对账键不随订单消失）。
+ * ── 本文件此前为什么是 fixme（两个**真实缺口**，不是过期理由）────────────────
+ *   ① 台账查询的六类型里没有 PAYMENT（订单/包裹/售后/审计/WMS/库存），
+ *      于是「页面上看得见支付流水」这句话根本写不出来 —— 只有直查库的用例不算场景验证；
+ *   ② 没有可重放的渠道回调：模拟支付的 trade_no 是本地按时间戳生成的，
+ *      「第三方把同一笔通知又发了一次」这个场景造不出来，uk_channel_trade 只能是注释里的声明。
  *
- * ── 缺什么才能写实（四条，第一条是硬缺口）────────────────────────────────
- *   ① **支付流水没有 UI 入口**：台账页的六个类型里没有「支付」（只有订单状态 / 包裹状态 /
- *      售后状态 / 审计 / WMS 回调 / 库存），也没有独立的流水页。按套件口径「UI 触发 + 页面断言」，
- *      现在只能直查库 —— 那就不是场景验证。要写实，必须先定其中一条：
- *        · 给台账页加一个「支付」类型（后端补一个分支），或
- *        · 另开一页支付流水查询（列表 + 详情两张 testid）。两者都要先定 bizId 的过滤口径。
- *   ② 「第三方重复通知」造不出来：现在只有「模拟支付」，渠道流水号是本地生成的，
- *      没有可重放的渠道回调。要验「同一笔钱只入账一次」，得先有一个能带 trade_no 重放的
- *      支付回调入口（或测试用的模拟回调），否则第一道闸只能靠书面论证。
- *   ③ 退款流水的 origin_flow_id 只在「退货审核通过」时写。写实前要确认
- *      `qiqi.ledger.payment-trace-enabled` 在 e2e 环境是开的（默认开，但环境配错了会静默不写）。
- *   ④ 历史 14 行流水的 idem_key 全是 NULL（回填只做了 order_id）。
- *      所以「新流水必须有幂等键」这类断言必须按 created_at / id 收窄到本用例新造的那几条，
- *      不能对整表断言 —— 否则一上手就是假红。
+ *   本轮把两件事都补上了（后端 + 前端 + 开关），三条用例才写实：
+ *   · 台账 `GET /admin/ledgers?type=PAYMENT`（LedgerSql.PAYMENT_BRANCH）＋ 前端类型下拉「支付流水」；
+ *   · `POST /admin/payments/{id}/replay-channel-callback`（用原 trade_no 再走一遍渠道回调，
+ *     受 `qiqi.payment.sandbox-endpoints-enabled` 控制，默认 false，只有 dev/test/e2e 打开；
+ *     写权限 payment:write 不可授予 ⇒ API Key 403，只有人工 JWT 能调）。
  *
- * ── 另外（写实前先确认）──────────────────────────────────────────────────
- *   · type=2 的退款流水「必填 origin_flow_id」目前只是列注释里的口径，库上没有 CHECK。
- *     要把它变成可断言的规则，得先决定是加约束还是在服务层守卫（两者对用例写法不同）。
+ * ── 三条用例各钉住一件事 ─────────────────────────────────────────────────
+ *   ① 页面上看得见：台账页选「支付流水」+ 业务ID（订单ID）→ 那一行带着订单号、渠道流水号、操作人；
+ *   ② 重复通知被挡：重放渠道回调两次 → 都是「重复通知，已忽略」，库里仍 1 行、金额不变，
+ *      并且 uk_channel_trade 是**活闸**（直插同 channel+trade_no 会被库拒绝，不是代码自觉）；
+ *   ③ 退款可溯源：退款流水带 `{orderSn}:REFUND:{returnApplyId}` 幂等键，
+ *      origin_flow_id 指回原支付流水（退的是哪一笔钱，靠这一列回答）。
+ *
+ * ── 两条口径（写断言前先读）──────────────────────────────────────────────
+ *   · `payment_record` 与 `order` **没有外键**：order_sn 是唯一对账键，order_id 允许悬空；
+ *     删单时由 OrderPurgeService 按 order_sn 显式清理流水（不是级联），
+ *     所以本文件的清理要么走删单接口、要么按单号显式删。
+ *   · 台账按 operatorType 筛选时 PAYMENT 支**整支不参与**（与 STOCK 支同一口径）：
+ *     支付流水里的 operator_* 只是「谁点了这个动作」的快照，不是「谁改了这笔钱」。
  */
 
-const dbCount = (sql) => Number(queryDb(sql))
+// ---------------------------------------------------------------------------
+// 只读断言通道（直查库）
+// ---------------------------------------------------------------------------
 
-/** 该订单的支付流水（type=1）—— 「这笔单付过多少钱」 */
-const payFlowOf = (orderSn) => queryDb(
-  `select id from payment_record where order_sn = '${orderSn}' and type = 1 order by id limit 1`
+const dbOne = (sql) => queryDb(sql).split('\t')
+const dbNum = (sql) => Number(queryDb(sql) || 0)
+
+/** 该订单的支付流水（type=1，应当恰好一条） */
+const payFlowOf = (orderSn) => dbOne(
+  `select id, trade_no, operator_name, operator_type, channel, amount
+     from payment_record where order_sn = '${orderSn}' and type = 1 order by id limit 1`
 )
 
+/** 该订单在支付流水表里的行数 / 金额合计（「钱有没有被记两遍」的两个事实） */
+const flowCountOf = (orderSn) => dbNum(`select count(*) from payment_record where order_sn = '${orderSn}'`)
+const flowSumOf = (orderSn) =>
+  Number(queryDb(`select coalesce(sum(amount), 0) from payment_record where order_sn = '${orderSn}'`))
+
 /** 该订单的退款流水（type=2） */
-const refundFlowsOf = (orderSn) => queryDb(
-  `select group_concat(id order by id separator ',') from payment_record
-    where order_sn = '${orderSn}' and type = 2`
-).split(',').filter(Boolean).map(Number)
+const refundFlowsOf = (orderSn) => dbNum(
+  `select count(*) from payment_record where order_sn = '${orderSn}' and type = 2`
+)
+const refundFlowOf = (orderSn) => dbOne(
+  `select id, idem_key, ref_type, ref_id, origin_flow_id, amount
+     from payment_record where order_sn = '${orderSn}' and type = 2 order by id limit 1`
+)
 
-/** 本用例新造的那几条流水（按 id 收窄，避开历史 14 行 idem_key 为 NULL 的老数据） */
-const flowsSince = (fromId, orderSn) =>
-  dbCount(`select count(*) from payment_record where id > ${fromId} and order_sn = '${orderSn}'`)
+/** 退款申请 id（退货审核通过时写进退款流水 ref_id 的那张申请） */
+const returnApplyIdOf = (orderId) => dbNum(
+  `select id from return_apply where order_id = ${orderId} order by id limit 1`
+)
 
-/** 支付流水表当前最大 id：每段用例开始前记一下，用来只断言「自己造的那几条」 */
-const paymentMaxId = () => dbCount('select coalesce(max(id), 0) from payment_record')
+// ---------------------------------------------------------------------------
+// 台账页（UI 侧）
+// ---------------------------------------------------------------------------
+
+const gotoLedger = async (page) => {
+  await page.goto(`${ADMIN}/ledger`)
+  await expect(tid(page, 'ledger-list-table'), '台账查询页应打开（ledger-list-table）').toBeVisible({ timeout: 20_000 })
+}
+
+/**
+ * 用筛选区收敛到「支付流水 + 某订单ID」。
+ *
+ * 顺带断言类型下拉里**确实有**「支付流水」这一项 —— 这正是本轮前端改动（constants/status.js →
+ * LEDGER_TYPE_OPTIONS 自动长出这一项）的 DOM 证据：选得到才说明下拉加上了。
+ */
+const filterLedgerByPayment = async (page, orderId) => {
+  await tid(page, 'ledger-type-select').click()
+  const option = page.locator('.el-select-dropdown__item:visible').filter({ hasText: '支付流水' }).first()
+  await expect(option, '台账页的类型下拉里必须有「支付流水」（本轮新增的第七类）').toBeVisible({ timeout: 10_000 })
+  await option.click()
+  await tid(page, 'ledger-biz-id-input').fill(String(orderId))
+  await tid(page, 'ledger-search-submit').click()
+  await page.waitForTimeout(1200)
+}
+
+const ledgerRows = (page) => tidPrefix(page, 'ledger-row-')
+
+// ---------------------------------------------------------------------------
+// 数据构造（真实 UI 全链路，不碰接口推进状态）
+// ---------------------------------------------------------------------------
+
+/**
+ * 造一张「已支付」的订单：管理员备货 → 新买家注册 → 加购 → 结算支付。
+ *
+ * 结算页提交后会自动模拟支付（见 ui.js submitCartOrder），订单直接进「待审核(7)」，
+ * 同时写下一条 type=1 的支付流水 —— 这就是本条用例要证明「页面上看得见」的那笔钱。
+ *
+ * @returns {{ orderSn, orderId, username, totalAmount }}
+ */
+async function preparePaidOrder(page, request) {
+  const username = memberLoginOf(stamp())
+  let orderSn
+  let orderId
+  let totalAmount
+
+  await test.step('① 管理员先把 1 号商品首个 SKU 备到 50 件', async () => {
+    await adminSetSkuStock(page, 1, 0, 50)
+  })
+
+  await test.step('② 新买家注册 → 加购一件 → 结算（自动模拟支付）', async () => {
+    await memberRegisterAndLogin(page, username, '123456', memberNickOf(username))
+    const { skus } = await getProductApi(request, 1)
+    await addSpecToCart(page, 1, skus[0].specText, skus[0].id)
+    orderSn = await submitCartOrder(page, receiverOf(username))
+    // 订单 id / 金额从库里读：此时页面已经在买家端，admin 的 localStorage 取不到 admin token
+    orderId = dbNum(`select id from \`order\` where order_sn = '${orderSn}'`)
+    totalAmount = Number(queryDb(`select total_amount from \`order\` where order_sn = '${orderSn}'`))
+  })
+
+  return { orderSn, orderId, username, totalAmount }
+}
+
+/** 清理：删单会带走退货申请（外键级联）与支付流水（OrderPurgeService 按 order_sn 显式删） */
+async function cleanupSelfMadeOrder(request, { orderId, orderSn, token }) {
+  const id = orderId
+    || (orderSn ? Number(queryDb(`select id from \`order\` where order_sn = '${orderSn}'`) || 0) : 0)
+  if (!id) return
+  if (dbNum(`select count(*) from \`order\` where id = ${id}`) === 0) return
+  try {
+    // 删单守卫要求「没有在途包裹 / 待处理申请」，所以先把这些压平（只改自造数据）
+    queryDb(`delete from delivery_logistics where delivery_id in
+               (select id from delivery_order where order_id = ${id})`)
+    queryDb(`delete from return_apply where order_id = ${id}`)
+    queryDb(`update delivery_order set status = 0 where order_id = ${id} and status <> 9`)
+    const res = await request.delete(`${API}/admin/orders/${id}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    const body = await res.json()
+    if (body.code !== 0) console.warn(`[15-支付流水加固] 清理未完成（orderId=${id}）：${body.message}`)
+  } catch (e) {
+    console.warn(`[15-支付流水加固] 清理抛错（orderId=${id}）：${e.message}`)
+  }
+  // 兜底：payment_record 与 order 没有外键，万一删单路径没带走流水，这里按单号补一刀
+  if (orderSn) queryDb(`delete from payment_record where order_sn = '${orderSn}'`)
+}
+
+/** 重放一次渠道回调（人工 JWT）：返回 { status, body } */
+async function replayChannelCallback(request, token, paymentId) {
+  const res = await request.post(`${API}/admin/payments/${paymentId}/replay-channel-callback`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  return { status: res.status(), body: await res.json() }
+}
+
+// ---------------------------------------------------------------------------
 
 test.describe('03-商家-履约 › 15-支付流水加固', () => {
-  test('用例一（骨架）：付一条、退一条 —— 每条都带订单、触发单据、操作人与幂等键', async ({ page }) => {
-    test.fixme(true, '支付流水没有 UI 入口（台账页无「支付」类型）：页面断言写不出来，只有库断言的用例不算场景验证')
-
-    // ── 骨架（写实时要按这个顺序补满）────────────────────────────────────
-    // ① 新买家注册登录 → 加购 → 结算支付（走模拟支付）→ 记 fromId = paymentMaxId()
-    // ② 断言库（只看本用例新造的行）：1 条 type=1，金额＝订单总额，
-    //    order_sn 与 order_id 都对得上，idem_key 非空，渠道流水号非空
-    // ③ 后台审核通过 → 下发 → 出库 → 买家申请退货 → 后台审核通过（触发退款）
-    // ④ 断言库：新增 1 条 type=2，金额＝退款额，origin_flow_id 等于第②步那条支付流水的 id
-    //    （"退的是哪一笔钱"靠这一列回答，没有它只能拿金额和时间猜）
-    // ⑤ 断言库：退款那条的 ref_type / ref_id 指向那张退货申请（触发单据落得住）
-    // ⑥ 断言库：同一条流水不能被记两次 —— 对同一触发重放一次，行数不变（本地幂等键挡住）
-    // ⑦ 页面：写实后应能在（新增的）支付类型页面上筛出这两行，金额与类型看得见
+  test('用例一：台账页选「支付流水」能看到这笔钱 —— 订单号 / 渠道流水号 / 操作人都在行上', async ({ page, request }) => {
     let orderSn = null
+    let orderId = null
     let token = null
     try {
       await adminLoginHardened(page)
       token = await adminTokenOf(page)
-      orderSn = `骨架占位-${stamp()}`
+
+      const ctx = await preparePaidOrder(page, request)
+      orderSn = ctx.orderSn
+      orderId = ctx.orderId
+
+      const [payId, tradeNo, operatorName, operatorType, channel, amount] = payFlowOf(orderSn)
+      console.log(`[15-①] 订单 ${orderSn}(id=${orderId}) 支付流水 id=${payId} trade_no=${tradeNo} `
+        + `operator=${operatorName}/${operatorType} channel=${channel} amount=${amount}`)
+
+      await test.step('③ 库里先确认事实：一条 type=1 支付流水，带渠道流水号与操作人', async () => {
+        expect(flowCountOf(orderSn), '支付后应恰好有一条支付流水').toBe(1)
+        expect(tradeNo, '支付流水必须有渠道流水号（trade_no）').toBeTruthy()
+        expect(operatorName, '支付流水必须记下操作人（谁点的支付）').toBeTruthy()
+        expect(operatorType, '买家用 portal 支付 → 操作人类型是 MEMBER').toBe('MEMBER')
+        expect(Number(amount), '流水金额应等于订单总额').toBeCloseTo(ctx.totalAmount, 2)
+      })
+
+      await test.step('④ 页面上看得见：类型下拉「支付流水」+ 业务ID = 订单ID → 恰好一行，三样都在', async () => {
+        await gotoLedger(page)
+        await filterLedgerByPayment(page, orderId)
+
+        const table = tid(page, 'ledger-list-table')
+        // 类型列：这一行的类型标签就是「支付流水」
+        await expect(table, '筛选后表格里应有「支付流水」类型的行').toContainText('支付流水')
+        // 业务单号列：订单号快照 + ID
+        await expect(table, `行上必须能看到订单号 ${orderSn}`).toContainText(orderSn)
+        await expect(table, `行上必须能看到业务ID ${orderId}`).toContainText(`ID ${orderId}`)
+        // 原因列：中文语义（钱进/钱出），下面那行小字是渠道流水号
+        await expect(table, '原因列应显示「支付入账」').toContainText('支付入账')
+        await expect(table, `原因下面应能看到渠道流水号 ${tradeNo}`).toContainText(tradeNo)
+        // 操作人列：名字 + 类型标签
+        await expect(table, `操作人列应显示操作人 ${operatorName}`).toContainText(operatorName)
+        await expect(table, '操作人类型标签应是「会员」').toContainText('会员')
+        // 收敛到一行：这条单只有一笔支付
+        await expect(ledgerRows(page), '该订单应恰好一行支付流水').toHaveCount(1)
+      })
     } finally {
-      // 清理：买家账号 + 订单（订单删除会带走流水，那是产品口径；这里只保证不留自造数据）
-      // 写实时要在这里调用 cleanupSelfMadeOrder + cleanupSelfMadeMember（照 8-订单删除守卫 的写法）
+      await cleanupSelfMadeOrder(request, { orderId, orderSn, token })
     }
   })
 
-  test('用例二（骨架）：渠道重复通知不会变成两笔钱 —— 渠道流水号唯一是最后一道闸', async ({ page }) => {
-    test.fixme(true, '没有可重放的渠道回调（模拟支付不产生可复用的第三方流水号），造不出「重复通知」')
-
-    // ── 骨架（写实时要按这个顺序补满）────────────────────────────────────
-    // ① 造一笔支付（或直接用测试用的支付回调入口，带固定的渠道流水号 trade_no）
-    // ② 断言库：1 条流水
-    // ③ 用**同一个** trade_no 再通知一次（同渠道）
-    // ④ 断言库：仍 1 条 —— 撞 uk_channel_trade，第二次被唯一键挡在外面
-    //    （断言要落在「行数没变 + 金额总和没变」，只看接口返回码不够：
-    //      失败也可能被吞掉后照样返回成功）
-    // ⑤ 反向对照：换一个 trade_no 再通知，应当**成功**多一条（证明不是把正常通知也挡了）
+  test('用例二：渠道重复通知不会变成两笔钱 —— uk_channel_trade 是最后一道闸', async ({ page, request }) => {
+    test.setTimeout(180_000)
     let orderSn = null
-    try {
-      await adminLoginHardened(page)
-      orderSn = `骨架占位-${stamp()}`
-    } finally {
-      // 清理：删单 + 删本用例自造的买家账号（写实时按 8-订单删除守卫 的顺序断依据再删单）
-    }
-  })
-
-  test('用例三（骨架）：订单被物理删除后，流水里的订单号仍读得到 —— 对账不会凭空少一笔', async ({ page, request }) => {
-    test.fixme(true, '缺「删单后按订单号反查流水」的 UI 入口（台账页无支付类型），只能直查库')
-
-    // ── 骨架（写实时要按这个顺序补满）────────────────────────────────────
-    // ① 造单支付（产生 1 条支付流水）→ 记下订单号、流水 id、金额
-    // ② 断掉删单守卫的依据，真删这张单
-    // ③ 断言库：order 0 行；但 payment_record 里那条流水的 order_sn 仍等于原单号
-    //    （order_id 允许悬空 —— 列注释里写明「order 被物理删后可能悬空」，这是设计）
-    // ④ 断言库：按订单号汇总的金额与删单前一致（对账不会少）
-    // ⑤ 页面：写实后应能按订单号筛出这条流水
-    let orderSn = null
+    let orderId = null
     let token = null
     try {
       await adminLoginHardened(page)
       token = await adminTokenOf(page)
-      orderSn = `骨架占位-${stamp()}`
+
+      const ctx = await preparePaidOrder(page, request)
+      orderSn = ctx.orderSn
+      orderId = ctx.orderId
+
+      const [payId, tradeNo, , , channel] = payFlowOf(orderSn)
+      const rowsBefore = flowCountOf(orderSn)
+      const sumBefore = flowSumOf(orderSn)
+
+      await test.step('③ 重放渠道回调两次：都是 code=0「重复通知，已忽略」（重复是幂等的）', async () => {
+        const first = await replayChannelCallback(request, token, payId)
+        const second = await replayChannelCallback(request, token, payId)
+        console.log(`[15-②] 重放 #1 → HTTP ${first.status} ${JSON.stringify(first.body)}`)
+        console.log(`[15-②] 重放 #2 → HTTP ${second.status} ${JSON.stringify(second.body)}`)
+
+        for (const [i, r] of [first, second].entries()) {
+          expect(r.status, `第 ${i + 1} 次重放的 HTTP 状态`).toBe(200)
+          expect(r.body.code, `第 ${i + 1} 次重放：重复通知不是错误，code=0`).toBe(0)
+          expect(r.body.message, `第 ${i + 1} 次重放必须给出明确文案`).toBe('重复通知，已忽略')
+          expect(r.body.data?.outcome, '结果口径：DUPLICATE').toBe('DUPLICATE')
+          expect(r.body.data?.recorded, '这一次没有记账').toBe(false)
+          expect(r.body.data?.tradeNo, '回报里带着被重放的渠道流水号').toBe(tradeNo)
+        }
+      })
+
+      await test.step('④ 库里的事实：仍是 1 行、金额总和不变（只看返回码不够）', async () => {
+        expect(flowCountOf(orderSn), '重放两次之后仍然只有一条流水').toBe(rowsBefore)
+        expect(flowCountOf(orderSn), '前提：本来就只有一条').toBe(1)
+        expect(flowSumOf(orderSn), '金额总和也不许变（否则可能是「改了那一行」而不是「没多记」）')
+          .toBeCloseTo(sumBefore, 2)
+        expect(refundFlowsOf(orderSn), '重放支付通知不该产生退款流水').toBe(0)
+      })
+
+      await test.step('⑤ uk_channel_trade 是活闸：索引在库上，且直插同一个 (channel, trade_no) 会被拒', async () => {
+        const idx = queryDb(
+          `select group_concat(column_name order by seq_in_index) from information_schema.statistics
+            where table_schema = database() and table_name = 'payment_record'
+              and index_name = 'uk_channel_trade' and non_unique = 0`
+        )
+        expect(idx, 'payment_record 上必须有唯一索引 uk_channel_trade(channel, trade_no)').toBe('channel,trade_no')
+
+        // 直接 SQL 再插一条「同 channel + 同 trade_no、但换一个幂等键」→ 必须被库拒绝。
+        // 这一步排掉一种误判：上面两次重放也可能是被 uk_idem 挡的（两条唯一键会同时被撞），
+        // 换掉幂等键后还能被拒，说明 channel+trade_no 这道闸**自己**是活的。
+        // （这条 INSERT 注定失败，不会写进任何行；它只是把「约束存在」变成「约束在跑」。）
+        let probeError = null
+        try {
+          queryDb(`insert into payment_record (order_sn, order_id, amount, type, channel, trade_no, idem_key)
+                   values ('${orderSn}', ${orderId}, ${sumBefore}, 1, ${channel}, '${tradeNo}', '${orderSn}:PAY:E2E-PROBE')`)
+        } catch (e) {
+          probeError = `${e.message || ''} ${e.stderr || ''}`
+        }
+        console.log(`[15-②] 直插同 (channel=${channel}, trade_no=${tradeNo}) + 新幂等键 → ${probeError || '竟然成功了'}`)
+        expect(probeError, '同 (channel, trade_no) 直插必须被库拒绝（uk_channel_trade）').toBeTruthy()
+        expect(String(probeError), '撞的必须是 uk_channel_trade，而不是别的键').toContain('uk_channel_trade')
+        expect(flowCountOf(orderSn), '被拒之后仍然只有一条流水').toBe(1)
+      })
+
+      await test.step('⑥ 页面同样只看得见一行（钱没有被记两遍，人在页面上也能确认）', async () => {
+        await gotoLedger(page)
+        await filterLedgerByPayment(page, orderId)
+        await expect(ledgerRows(page), '台账页「支付流水」下仍然只有一行').toHaveCount(1)
+        await expect(tid(page, 'ledger-list-table'), '这一行仍然是那笔支付').toContainText(tradeNo)
+      })
     } finally {
-      // 清理：删单 + 删本用例自造的买家账号（写实时按 8-订单删除守卫 的顺序断依据再删单）
+      await cleanupSelfMadeOrder(request, { orderId, orderSn, token })
+    }
+  })
+
+  test('用例三：退款流水带 {orderSn}:REFUND:{returnApplyId} 幂等键，并把 origin_flow_id 指回原支付流水', async ({ page, request }) => {
+    test.setTimeout(180_000)
+    let orderSn = null
+    let orderId = null
+    let token = null
+    try {
+      await adminLoginHardened(page)
+      token = await adminTokenOf(page)
+
+      const ctx = await preparePaidOrder(page, request)
+      orderSn = ctx.orderSn
+      orderId = ctx.orderId
+      const [payId] = payFlowOf(orderSn)
+
+      await test.step('③ 审核通过 → 下发 → 模拟 WMS 出库（订单变已发货，才有退货入口）', async () => {
+        const row = await adminSearchOrderRow(page, orderSn)
+        await adminAuditOrderPass(page, row)
+        const deliveryTable = await openOrderDrawer(page, orderSn)
+        const dRow = deliveryTable.locator('.el-table__body tr').first()
+        await clickDispatch(page, dRow)
+        await clickWmsCallback(page, dRow, '出库', '已出库')
+        expect((await getAdminOrderBySnApi(request, token, orderSn)).status, '出库后订单应为已发货(2)').toBe(2)
+      })
+
+      await test.step('④ 买家申请退货 → 订单转退款中', async () => {
+        await memberApplyReturn(page, orderSn)
+        expect((await getAdminOrderBySnApi(request, token, orderSn)).status, '申请后订单应为退款中(5)').toBe(5)
+      })
+
+      await test.step('⑤ 后台审核通过 → 触发退款入账', async () => {
+        await auditReturnApply(page, orderSn, { result: '通过' })
+        await expectToastSuccess(page, '审核完成')
+        await reloadReturnApplyList(page)
+        const row = await returnApplyRow(page, orderSn)
+        expect(await returnApplyStatusOf(row), '申请应显示「已通过」').toBe('已通过')
+        expect((await getAdminOrderBySnApi(request, token, orderSn)).status, '审核通过后订单应为已退款(6)').toBe(6)
+      })
+
+      await test.step('⑥ 溯源字段：幂等键 + origin_flow_id + 触发单据三件都在', async () => {
+        const applyId = returnApplyIdOf(orderId)
+        expect(applyId, '库里应有这张退货申请').toBeGreaterThan(0)
+        expect(refundFlowsOf(orderSn), '审核通过后应恰好有一条退款流水').toBe(1)
+
+        const [refundId, idemKey, refType, refId, originFlowId, refundAmount] = refundFlowOf(orderSn)
+        console.log(`[15-③] 退款流水 id=${refundId} idem_key=${idemKey} ref=${refType}#${refId} `
+          + `origin_flow_id=${originFlowId}（原支付流水 id=${payId}）金额=${refundAmount}`)
+
+        // ① 幂等键口径：{orderSn}:REFUND:{退货申请id}
+        expect(idemKey, '退款幂等键必须带申请 id —— 同一张申请重放不该退第二条')
+          .toBe(`${orderSn}:REFUND:${applyId}`)
+        // ② 溯源：这笔退款退的是哪一笔钱
+        expect(Number(originFlowId), 'origin_flow_id 必须指回原支付流水')
+          .toBe(Number(payId))
+        expect(dbNum(`select count(*) from payment_record where id = ${originFlowId} and type = 1`),
+          'origin_flow_id 指向的那条支付流水必须真的在库里（不是悬空 id）').toBe(1)
+        // ③ 触发单据：谁让它退的
+        expect(refType, '退款流水的触发单据类型').toBe('RETURN_APPLY')
+        expect(Number(refId), '触发单据 id = 那张退货申请').toBe(applyId)
+        expect(Number(refundAmount), '退款金额应等于订单实付').toBeCloseTo(ctx.totalAmount, 2)
+        // ④ 支付那条没有被复制
+        expect(flowCountOf(orderSn), '一条支付 + 一条退款 = 2 行').toBe(2)
+      })
+
+      await test.step('⑦ 页面上同样读得到溯源：退款行摘要里带着「原流水 #<支付流水id>」', async () => {
+        await gotoLedger(page)
+        await filterLedgerByPayment(page, orderId)
+        const table = tid(page, 'ledger-list-table')
+        await expect(ledgerRows(page), '该订单应有支付 + 退款两行').toHaveCount(2)
+        await expect(table, '退款行的原因列应显示「退款入账」').toContainText('退款入账')
+        await expect(table, `退款行的摘要应能读回原支付流水 #${payId}（页面上也能溯源）`)
+          .toContainText(`原流水 #${payId}`)
+        await expect(table, '退款行的关联单据应显示 RETURN_APPLY').toContainText('RETURN_APPLY')
+      })
+    } finally {
+      await cleanupSelfMadeOrder(request, { orderId, orderSn, token })
     }
   })
 })

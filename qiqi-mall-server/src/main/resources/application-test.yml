@@ -136,6 +136,13 @@ qiqi:
     audit-enabled: true
     wms-enabled: true
     payment-trace-enabled: true
+  # ── 支付沙箱端点开关（qiqi.payment.*）─────────────────────────────────────
+  # sandbox-endpoints-enabled=true 才开放 POST /admin/payments/{id}/replay-channel-callback
+  #   （用库里那条流水的原 trade_no 再走一遍渠道回调，验证 uk_channel_trade 挡得住重复通知）。
+  # 默认 false（见 oms/config/PaymentSandboxProperties）—— 生产必须保持 false：
+  #   这个口子能让服务端主动去撞资金记账路径，留着就是拿钱赌运气。
+  payment:
+    sandbox-endpoints-enabled: true
   stock:
     # ── 两个开关：默认都 false = 与 baseline 完全一致（同一条扣减 SQL、同一条台账插入 SQL）──
     # 两个优化要分开归因，所以分两次镜像上线：
