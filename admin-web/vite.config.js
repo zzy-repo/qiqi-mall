@@ -1,8 +1,27 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import AutoImport from 'unplugin-auto-import/vite'
+import Components from 'unplugin-vue-components/vite'
+import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
+
+// 静态资源基址（前端 JS/CSS 上 CDN 的开关，见 scripts/upload-web-assets.sh）。
+//   不设 CDN_BASE          → base='/'，dist/index.html 引用 /assets/**，由容器自己提供
+//                            （本地 dev/e2e/回滚全都走这条，默认行为一个字没变）
+//   设 CDN_BASE=<绝对URL>  → base=该 URL，dist/index.html 里改成 CDN 绝对地址，
+//                            例：CDN_BASE=https://cdn.rose7.cn/qiqi-mall/admin-web/ npm run build
+// 只影响构建期产物里的引用形式，不改变运行时代码逻辑（没有动态注入）。
+// 末尾补斜杠：cdn.rose7.cn/qiqi-mall/admin-web + assets/x.js 会拼成 ...admin-webassets/x.js
+const CDN_BASE = process.env.CDN_BASE ? process.env.CDN_BASE.replace(/\/+$/, '') + '/' : '/'
 
 export default defineConfig(({ mode }) => ({
-  plugins: [vue()],
+  base: CDN_BASE,
+  plugins: [
+    vue(),
+    // Element Plus 按需引入：模板里的 <el-xxx> 由解析器自动 import 并按需注入样式，
+    // 这样 main.js 不再 app.use(ElementPlus) 整包注册，也不必引 element-plus/dist/index.css
+    AutoImport({ resolvers: [ElementPlusResolver()], dts: false }),
+    Components({ resolvers: [ElementPlusResolver()], dts: false })
+  ],
   server: {
     host: '0.0.0.0',
     port: Number(process.env.VITE_PORT || 5175),
