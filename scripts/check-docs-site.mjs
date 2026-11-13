@@ -2,21 +2,29 @@
 /**
  * check-docs-site.mjs —— 文档站重建后的「一次体检」（零依赖：node 内置 + 全局 fetch）
  *
- * 为什么要有它：站点每次重建要验 9 项（页面数、图/视频能否取到、图与 mermaid 源码是否配对、
+ * 为什么要有它：站点每次重建要验 11 项（页面数、图/视频能否取到、图与 mermaid 源码是否配对、
  * 业务场景是否「图+视频」齐全（无界面场景仅查图，见 NO_UI_SCENES）、内网信息有没有混进产物、
- * SVG 硬指标、图内禁词、侧边栏死链），
+ * SVG 硬指标、图内禁词、侧边栏死链、**私人文稿零泄漏**（口语稿 + build-material.mjs 的 PRIVATE_DOCS
+ * 那 12 篇私人笔记，产物里一个字节都不许有，见第 ⑩ 项）、**产物洁净度**（私密文件名/原始录屏/
+ * 绝对路径与主机名，见第 ⑪ 项）），
  * 人工 curl + 数数必漏，所以要一条命令给出 PASS/FAIL + 具体数字 + 可行动的失败清单。
  *
  * 用法：
  *   # dev 站（内网专用）：首页 README.md 就是内网索引页，本来就列着内网 IP/端口/测试账号，
  *   # 那是有意为之、不是泄露，所以 dev 站用 --internal-ok 让第 ⑥ 项豁免 README.md 这一个文件。
- *   node scripts/check-docs-site.mjs --root /root/docsify --base http://100.113.135.55:3027 --internal-ok
+ *   # dev 站还要加 --private-ok（口语稿/私人笔记/_deploy/_evidence 在 dev 都是刻意的，第 ⑩⑪ 项对 dev 豁免）。
+ *   node scripts/check-docs-site.mjs --root /root/docsify --base http://100.113.135.55:3027 --internal-ok --private-ok
  *   # prod 站（公网）：**绝对不要加 --internal-ok**，README.md 也必须过内网信息扫描。
  *   node scripts/check-docs-site.mjs --root /root/docsify/dist-prod --base https://docs.rose7.cn
- *   node scripts/check-docs-site.mjs --root /root/docsify --skip-http     # 只做静态检查，不发请求
+ *   node scripts/check-docs-site.mjs --root /root/docsify --skip-http --internal-ok --private-ok   # 只做静态检查
+ *   # 一句话：dev 站 = --internal-ok --private-ok；prod 站 = 不带任何豁免开关（带了就是把问题藏起来）。
  *
  * 参数：--root 站点产物目录（必填） / --base 站点基址（除非 --skip-http） / --skip-http 只查本地文件
  *       --internal-ok 仅 dev 站用：第 ⑥ 项豁免根目录 README.md（dev 索引页），其余文件照扫
+ *       --private-ok 仅 dev 站用：第 ⑩ 项（私人文稿零泄漏）+ 第 ⑪ 项（产物洁净度）整体豁免 ——
+ *       dev 站刻意含口语稿/私人笔记，也刻意保留 _deploy/_evidence（nginx deny 的内网材料）
+ *       --private-src 指定 build-material.mjs（第 ⑩ 项的 PRIVATE_DOCS 名单来源；默认自动在
+ *       --root 及其上一级找，找不到就降级成关键词扫描并判 FAIL）
  *       --docs 图素材源目录（默认 <repo>/docs） / --videos 视频素材源目录（默认 <repo>/e2e/report/videos）
  *       dev 站的 /_assets/{img,video} 是 nginx alias 到这两个源目录的，prod 站则真拷进产物，故两者都要知道。
  *       --floor scenes=10[,pages=20] 覆盖下方 FLOOR 的下限阈值（可多次给，也可用环境变量
@@ -31,8 +39,10 @@
  *     ✅ ⑨  侧边栏一致性  链接 0 个，死链 0
  *     结论：PASS      EXIT=0
  *   也就是**什么都没检查就放行**（fail-open）。publish.sh 用退出码当门禁，这种「空跑即通过」等于没有门禁。
- *   所以九项检查之后加一节「下限断言」：每个维度的实测数量必须 ≥ FLOOR 里的下限，
+ *   所以十一项检查之后加一节「下限断言」：每个维度的实测数量必须 ≥ FLOOR 里的下限，
  *   不达标就整条 FAIL、退出码 1 —— 宁可因为「扫到的东西太少」拦下来，也不要因为「问题数为 0」放过去。
+ *   第 ⑩⑪ 项同理：产物里连一个 .md/.html 都没扫到（--root 指错/产物被清空）时不许判 ✅，
+ *   所以它们也有 privacyScanned / privateDocs / cleanScanned 三条下限。
  *   阈值集中在下面唯一的 FLOOR_DEFAULTS / FLOOR 常量里，判定逻辑只读它，别处不许重复写数字。
  */
 import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs'
@@ -56,6 +66,9 @@ const SKIP_HTTP = argv.includes('--skip-http')
 // 第 ⑥ 项豁免它一个文件；prod 站不许带（prod 的 README.md 也必须过内网信息扫描）。
 const INTERNAL_OK = argv.includes('--internal-ok')
 const INTERNAL_OK_SKIP = 'README.md'
+// dev 站专用开关（第 ⑩⑪ 项）：dev 站是内网「完整版」，口语稿、那 12 篇私人笔记、_deploy/_evidence
+// 都是刻意保留的；prod 站（dist-prod → docs.rose7.cn）绝不许带。
+const PRIVATE_OK = argv.includes('--private-ok')
 const DOCS = resolve(opt('--docs') ?? join(REPO, 'docs'))
 const VIDEOS = resolve(opt('--videos') ?? join(REPO, 'e2e', 'report', 'videos'))
 
@@ -79,10 +92,14 @@ const FLOOR_DEFAULTS = {
   videos: 25,        // ③ 视频引用总数（实测 41）
   svgChecked: 40,    // ⑦⑧ 被检查的 svg 数 = 源 + 产物（实测 109）
   sidebarLinks: 30,  // ⑨ 侧边栏站内链接数（实测 53）
+  privacyScanned: 30, // ⑩ 被扫的产物文本文件数（md/html/txt/json，实测 57）：扫到 0 个 = 根本没查
+  privateDocs: 12,   // ⑩ 从 build-material.mjs 解析到的 PRIVATE_DOCS 条数（实测 12）：解析不到 = 无法证明没泄漏
+  cleanScanned: 100, // ⑪ 被扫的产物路径条目数（文件+目录，实测 245）：扫到 0 个 = 根目录指错/产物空
 }
 const FLOOR_LABEL = {
   scenes: '场景数', pages: '页面数', images: '图片引用',
   videos: '视频引用', svgChecked: '检查的 svg', sidebarLinks: '侧边栏链接',
+  privacyScanned: '私密扫描文本', privateDocs: '私人文档名单', cleanScanned: '洁净度扫描路径',
 }
 const FLOOR_KEYS = Object.keys(FLOOR_DEFAULTS)
 
@@ -464,9 +481,185 @@ if (!existsSync(sidebarPath)) {
 }
 push('⑨', '侧边栏一致性', deadLinks.length === 0, `链接 ${sidebarLinks} 个，死链 ${deadLinks.length}`, deadLinks)
 
+/* ============================================================== ⑩ 私人文稿零泄漏 */
+
+// 为什么单列这一项：口语稿（作者面试口述用的私人材料）和 build-material.mjs 里 PRIVATE_DOCS 那 12 篇
+// 业务笔记，都**只该在 dev 站出现**。prod 侧现在靠 build-material.mjs 的实现细节保证干净
+// （`if (MODE !== 'dev') return null` 不读口语稿、prod 分支不拷那 12 篇），但那是代码层约定、
+// 没有任何外部门禁：有人改那个 if、加一个新素材目录、或手工往 dist-prod 塞个文件，没人会拦。
+// 而一旦这些字节上了 OSS + 刷了 CDN，就是 30 天缓存留在公网（见 publish.sh 头部【六】），撤不干净。
+// 所以这里按「产物字节」判，不看代码怎么写的：
+//   a) 文件名：任何 口语稿* / *spoken* 文件 → 泄漏
+//   b) 内容：产物里的 .md/.html/.txt/.json grep 口语稿特征词 → 泄漏
+//   c) 私人文档：PRIVATE_DOCS 名单（唯一来源 build-material.mjs，不在这里另抄一份）里的
+//      原文件 / 页面链接 / 页面标题出现在产物里 → 泄漏；名单读不到就降级关键词扫描并判 FAIL（fail-closed）
+const SPOKEN_FILE_RE = /口语稿|(?:^|[-_./])spoken(?:[-_./]|$)/i
+// 长词在前：命中「一分钟口语稿」就不再重复报子串「口语稿」
+const SPOKEN_CONTENT_WORDS = ['一分钟口语稿', '面试可直接念', 'spoken-script', '口语稿']
+const PRI_TEXT_RE = /\.(?:md|html?|txt|json)$/i
+const priTextFiles = allFiles.filter((f) => PRI_TEXT_RE.test(f)).sort(zhSort)
+
+/** 取命中点附近一段（压平成一行、最多 120 字）：失败输出要能一眼看出「泄了什么」 */
+function excerpt(text, needle, width = 120) {
+  const i = text.indexOf(needle)
+  if (i < 0) return ''
+  const start = Math.max(0, i - 24)
+  const body = text.slice(start, start + width).replace(/\s+/g, ' ').trim()
+  return `${start > 0 ? '…' : ''}${body}${start + width < text.length ? '…' : ''}`
+}
+
+/** PRIVATE_DOCS 名单的唯一来源 = build-material.mjs；读不到就返回空名单（调用方降级 + 判 FAIL） */
+function readPrivateDocs() {
+  const explicit = opt('--private-src')
+  const candidates = [
+    ...(explicit ? [resolve(explicit)] : []),
+    join(ROOT, 'build-material.mjs'),          // dev 站：构建脚本就躺在 ROOT 里
+    join(ROOT, '..', 'build-material.mjs'),    // prod 站：ROOT=dist-prod，脚本在上一级
+  ]
+  const file = candidates.find((p) => isFile(p))
+  if (!file) return { file: null, names: [] }
+  const m = /const\s+PRIVATE_DOCS\s*=\s*\[([\s\S]*?)\]/.exec(readText(file))
+  const names = m ? [...m[1].matchAll(/'([^']+)'|"([^"]+)"/g)].map((x) => x[1] ?? x[2]) : []
+  return { file, names }
+}
+
+const PRI = readPrivateDocs()
+const priNameHits = []
+const priContentHits = []
+const priPrivateHits = []
+let priScanned = 0
+
+if (!PRIVATE_OK) {
+  // a) 文件名
+  for (const rel of allFiles) {
+    const m = SPOKEN_FILE_RE.exec(rel)
+    if (m) priNameHits.push(`${rel}  ⊃ 文件名命中「${m[0]}」`)
+  }
+  // b) 内容
+  for (const rel of priTextFiles) {
+    const text = readText(join(ROOT, rel))
+    priScanned++
+    for (const w of SPOKEN_CONTENT_WORDS) {
+      if (!text.includes(w)) continue
+      priContentHits.push(`${rel}  ⊃ 「${w}」×${text.split(w).length - 1}  「${excerpt(text, w)}」`)
+      break
+    }
+  }
+  // c) 私人文档
+  if (PRI.names.length) {
+    const priSet = new Set(PRI.names)
+    for (const rel of allFiles) {
+      const b = posix.basename(rel)
+      if (priSet.has(b)) priPrivateHits.push(`${rel}  ⊃ PRIVATE_DOCS 原文件（${b}）`)
+    }
+    const pages = priTextFiles.filter((f) => /\.(?:md|html?)$/i.test(f))
+    const texts = pages.map((rel) => [rel, readText(join(ROOT, rel))])
+    for (const name of PRI.names) {
+      const stem = name.replace(/\.md$/, '')
+      const srcAbs = join(dirname(PRI.file), name)
+      const title = isFile(srcAbs) ? ((readText(srcAbs).match(/^#{1,6}\s+(.+?)\s*$/m) ?? [])[1] ?? '') : ''
+      for (const [rel, text] of texts) {
+        if (text.includes(stem)) priPrivateHits.push(`${rel}  ⊃ 引用私人文档「${stem}」  「${excerpt(text, stem)}」`)
+        else if (title.length >= 4 && text.includes(title)) priPrivateHits.push(`${rel}  ⊃ 私人文档标题「${title}」  「${excerpt(text, title)}」`)
+      }
+    }
+  } else {
+    // 名单读不到 → 退化成关键词扫描，但照样判 FAIL：门禁不能因为「规则找不到」就放行
+    // （priScanned 已在上面 b) 的循环里统计过，这里不重复计数）
+    for (const rel of priTextFiles) {
+      const text = readText(join(ROOT, rel))
+      const m = /私人文档|私人笔记|PRIVATE_DOCS|PRIVATE/.exec(text)
+      if (m) priPrivateHits.push(`${rel}  ⊃ 「${m[0]}」  「${excerpt(text, m[0])}」`)
+    }
+  }
+}
+const priHits = [...priNameHits, ...priContentHits, ...priPrivateHits]
+const priSource = PRI.file
+  ? `${PRI.file}${PRI.names.length ? `（${PRI.names.length} 篇）` : '（未解析到 PRIVATE_DOCS，已降级关键词扫描）'}`
+  : '未找到 build-material.mjs（已降级关键词扫描）'
+push('⑩',
+  PRIVATE_OK ? '私人文稿零泄漏（dev 站豁免：内网完整版，刻意含口语稿/私人笔记）' : '私人文稿零泄漏',
+  PRIVATE_OK ? true : priHits.length === 0 && PRI.names.length > 0,
+  PRIVATE_OK
+    ? '已豁免（--private-ok）：本项不参与判定；prod 发布绝不允许带这个开关'
+    : `文件名扫 ${allFiles.length} 个 / 文本扫 ${priScanned} 个，私人名单 ${priSource}，命中 ${priHits.length}`,
+  PRIVATE_OK
+    ? ['⚠ dev 站豁免：口语稿 + 私人笔记是内网完整版的一部分；prod 产物里出现它们的任何字节都算泄漏']
+    : priHits)
+
+/* ============================================================== ⑪ 产物洁净度（私密文件名 / 原始录屏 / 绝对路径） */
+
+// 和 ⑩ 的分工：⑩ 管「已经登记过的私人文稿」（口语稿 + PRIVATE_DOCS 12 篇）不许漏进产物；
+// ⑪ 管「根本不该出现在产物里的东西」——**不需要逐篇登记**，靠名字/正文特征就能判死。
+// 为什么必须有这一项：下面这些现在全靠 build-material「不拷」这个约定（纯代码层），没有门禁；
+// 而 PRIVATE_DOCS 是逐篇登记的，新加一篇私人笔记忘了登记就会漏 —— ⑪ 是那条路的兜底。
+// 每条规则自带标签，失败输出必须指出**是哪条规则**命中的（规则表是唯一数据源，别在别处另写正则）。
+const CLEAN_NAME_RULES = [
+  { label: '面试周边', re: /简历|面试|复盘|口述|-笔记|\bJD\b/ },
+  { label: '凭据/配置', re: /\.env\b|credentials|\.pem$|id_rsa|\.git\/|\.DS_Store$|~$|\.bak/ },
+  { label: '录屏/垃圾', re: /node_modules\/|\.webm$|trace\.zip$|playwright-report/ },
+  { label: '内部目录', re: /(?:^|\/)_(?:deploy|evidence)\// },
+]
+// 正文规则：口径同 build-material 的 PROD_NEUTRAL（它把 /root//tmp/ 换成 /），但那只是构建期替换、
+// **没有独立门禁验证「替换后 0 命中」** —— 替换规则漏一个词就漏一个，所以这里独立扫一遍产物正文。
+const CLEAN_TEXT_RULES = [
+  { label: '内网 IP', re: /100\.113\.135\.55/ },
+  { label: '绝对路径', re: /\/root\/|\/tmp\// },
+  { label: '容器名', re: /qiqi-server-[12]|qiqi-mysql|qiqi-gateway/ },
+  { label: '编排命令', re: /docker\s+compose/i },
+]
+
+// 路径扫描必须**不复用 walk()**：walk() 正好把 _deploy/_evidence/.git/node_modules 这些 skip 掉了，
+// 而它们正是本项要抓的东西。命中目录时记一条就剪枝，避免 node_modules/.git 那种几千个文件刷屏。
+const cleanPathHits = []
+let cleanPaths = 0
+if (!PRIVATE_OK) {
+  ;(function scanClean(rel = '') {
+    let entries
+    try { entries = readdirSync(join(ROOT, rel), { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      const childRel = rel ? `${rel}/${e.name}` : e.name
+      if (childRel === 'dist-prod' && ROOT_BASE !== 'dist-prod') continue   // 同 walk()：两个独立待验目标
+      cleanPaths++
+      const hit = CLEAN_NAME_RULES.find((r) => r.re.test(childRel))
+      if (hit) {
+        cleanPathHits.push(`[${hit.label}] ${childRel}${e.isDirectory() ? '/' : ''}  ⊃ 名称命中 ${hit.re}`)
+        if (e.isDirectory()) continue    // 目录命中即剪枝，不往里刷
+      }
+      if (e.isDirectory()) scanClean(childRel)
+    }
+  })()
+}
+
+// 正文扫描：只用 .md/.html（含 .htm），与「公网能直接读到的那两种正文」口径一致
+const cleanTextHits = []
+const cleanTextFiles = priTextFiles.filter((f) => /\.(?:md|html?)$/i.test(f))
+if (!PRIVATE_OK) {
+  for (const rel of cleanTextFiles) {
+    const text = readText(join(ROOT, rel))
+    for (const r of CLEAN_TEXT_RULES) {
+      const m = r.re.exec(text)
+      if (m) cleanTextHits.push(`[${r.label}] ${rel}  ⊃ 「${m[0]}」×${text.split(m[0]).length - 1}  「${excerpt(text, m[0])}」`)
+    }
+  }
+}
+const cleanHits = [...cleanPathHits, ...cleanTextHits]
+const cleanCounts = [...CLEAN_NAME_RULES, ...CLEAN_TEXT_RULES]
+  .map((r) => `${r.label} ${cleanHits.filter((h) => h.startsWith(`[${r.label}]`)).length}`)
+  .join(' / ')
+push('⑪',
+  PRIVATE_OK ? '产物洁净度（dev 站豁免：内网完整版，刻意保留 _deploy/_evidence）' : '产物洁净度（私密名/原始录屏/绝对路径）',
+  PRIVATE_OK ? true : cleanHits.length === 0,
+  PRIVATE_OK
+    ? '已豁免（--private-ok）：本项不参与判定；prod 发布绝不允许带这个开关'
+    : `路径扫 ${cleanPaths} 个 / 正文扫 ${cleanTextFiles.length} 个，命中 ${cleanHits.length}（${cleanCounts}）`,
+  PRIVATE_OK
+    ? ['⚠ dev 站豁免：dev 站的 _deploy/_evidence 是内网材料（nginx deny），prod 产物里出现即泄漏']
+    : cleanHits)
+
 /* ============================================================== 下限断言（防止「扫不到东西 → 判通过」） */
 
-// 九项检查各自只看「扫到的东西对不对」，扫到 0 个就是 0 个问题 = 0 个失败 → 空跑即通过（fail-open）。
+// 十一项检查各自只看「扫到的东西对不对」，扫到 0 个就是 0 个问题 = 0 个失败 → 空跑即通过（fail-open）。
 // 这一节只看数量：每个维度的实测值必须 ≥ FLOOR 里的下限，否则整体 FAIL、退出码 1。
 const floorActual = {
   scenes: sceneList.length,
@@ -475,14 +668,23 @@ const floorActual = {
   videos: vidStat.total,
   svgChecked: svgTargets.length,
   sidebarLinks,
+  privacyScanned: priScanned,
+  privateDocs: PRI.names.length,
+  cleanScanned: cleanPaths,
 }
-const floorItems = FLOOR_KEYS.map((key) => ({
-  key,
-  label: FLOOR_LABEL[key],
-  actual: floorActual[key],
-  floor: FLOOR[key],
-  ok: floorActual[key] >= FLOOR[key],
-}))
+const floorItems = FLOOR_KEYS.map((key) => {
+  // dev 站整体豁免第 ⑩ 项（--private-ok），它那两条下限也随之不参与判定，但要显式打出来
+  if (PRIVATE_OK && (key === 'privacyScanned' || key === 'privateDocs' || key === 'cleanScanned')) {
+    return { key, label: FLOOR_LABEL[key], actual: '—', floor: FLOOR[key], ok: true, skipped: true }
+  }
+  return {
+    key,
+    label: FLOOR_LABEL[key],
+    actual: floorActual[key],
+    floor: FLOOR[key],
+    ok: floorActual[key] >= FLOOR[key],
+  }
+})
 const floorFailed = floorItems.filter((f) => !f.ok)
 
 /* ============================================================== 输出 */
@@ -498,7 +700,7 @@ console.log('')
 console.log('── 下限断言（防止空跑通过）──')
 for (const f of floorItems) {
   console.log(f.ok
-    ? `✅ ${f.label} ${f.actual} ≥ ${f.floor}（${f.key}）`
+    ? `✅ ${f.label} ${f.actual} ≥ ${f.floor}（${f.key}）${f.skipped ? '  ← dev 站豁免第 ⑩⑪ 项，不参与' : ''}`
     : `❌ ${f.label} ${f.actual} < ${f.floor}（${f.key}，差 ${f.floor - f.actual}）`)
 }
 
@@ -510,7 +712,9 @@ console.log(`页面 ${scenarioPages + diagramPages}（场景 ${scenarioPages} / 
   + `图片引用 ${imgStat.total}（${imgMode}: ${imgStat.ok}，失败 ${imgStat.fail}）  `
   + `视频引用 ${vidStat.total}（${vidMode}: ${vidStat.ok}，失败 ${vidStat.fail}）`)
 console.log(`孤儿图 ${mmdOnly.length + svgOnly.length}  场景缺件 ${sceneGaps.length}  `
-  + `泄露命中 ${leakHits.length}  SVG 不合规 ${svgBad.length}  死链 ${deadLinks.length}`)
+  + `泄露命中 ${leakHits.length}  SVG 不合规 ${svgBad.length}  死链 ${deadLinks.length}  `
+  + `私密命中 ${PRIVATE_OK ? 'n/a（dev 豁免）' : priHits.length}`
+  + `  洁净命中 ${PRIVATE_OK ? 'n/a（dev 豁免）' : cleanHits.length}`)
 // 失败原因先写下限（它解释的是「为什么上面的 ✅ 不算数」），再写常规项
 const reasons = []
 if (floorFailed.length) reasons.push(`下限断言：${floorFailed.map((f) => `${f.label} ${f.actual} < ${f.floor}`).join('、')}`)

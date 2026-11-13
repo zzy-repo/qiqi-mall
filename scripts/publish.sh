@@ -30,6 +30,8 @@
 #   6 build_frontend     portal-web / admin-web 各建一个 $VER 镜像
 #   7 rolling_frontend   两个前端一起换（静态资源，无状态，见下方缓存策略）
 #   8 build_docs         node build-material.mjs --mode=prod → dist-prod/
+#   8.5 docs_gate        ★文档产物硬门禁（scripts/check-docs-site.mjs 十一项，含「私人文稿零泄漏」+「产物洁净度」）：
+#                        不过就 die，一个字节都不上传 —— 详见【十二】
 #   9 publish_docs       oss2 同步 dist-prod → oss://qiqi-mall-docs/ + docs/**/*.mmd → _src/ + CDN 刷新（html/md/目录首页 + _vendor/ 的 js/css）
 #  10 smoke              线上 5 个探针 + 登录接口（失败只提示回滚，不自动回滚：先让人看一眼）
 #                        （登录在第 5 步已经当门禁用过了；这里是从网关再验一遍全链路，不是唯一防线）
@@ -177,6 +179,32 @@
 #           幂等：已编码的输入不会二次编码）；
 #         ② 提交后**必须回读校验**（抽 5 条 HEAD，看 X-Cache 从 HIT 变 MISS/EXPIRED）——
 #            这个接口错了也返回成功，没有回读就等于没有证据。
+#
+# 【十二】文档产物硬门禁 = 上传 OSS 之前必须整条 PASS（check-docs-site.mjs 十一项）
+#   历史教训：口语稿（作者面试口述稿）和 build-material.mjs 里 PRIVATE_DOCS 那 12 篇私人笔记
+#   属于「私人文稿」，**只能出现在 dev 站**。prod 侧原先只靠 build-material.mjs 的实现细节
+#   保证干净（`if (MODE !== 'dev') return null` 不读口语稿、prod 分支不拷那 12 篇）——
+#   那是代码层约定，**没有任何外部门禁**：谁改了那个 if、加一个新素材目录、或手工往 dist-prod
+#   塞一个文件，没有任何东西会拦下来，而它会被直接同步上 OSS。
+#   为什么后果特别重：html/md 是 no-cache（发版能刷），但 svg/mp4/_vendor 下的 js/css 是
+#   **30 天缓存**（见【六】）。私人笔记/口语稿一旦传上去，就算事后删了源对象、刷了 CDN，
+#   边缘节点上那份字节也要 30 天才会自然过期 —— 公网上撤不干净。
+#   所以：build_docs 之后、publish_docs 之前加一道 check_docs_gate：
+#     node scripts/check-docs-site.mjs --root dist-prod --skip-http
+#   十一项（页面数 / 图引用 / 视频引用 / 图-src 配对 / 场景齐全 / 内网信息 / SVG 硬指标 /
+#   图内禁词 / 侧边栏 / **⑩ 私人文稿零泄漏** / **⑪ 产物洁净度**）里有任何一项不过 → die，
+#   **一个字节都不上传**。
+#   上传前只做静态检查（--skip-http）：此刻公网还是上一版，探测公网既慢又没有意义。
+#   ⑩ 的口径是「按字节判」，不看代码怎么写的：产物里出现 ①「口语稿」/「spoken」文件名、
+#   ② 口语稿特征词（一分钟口语稿 / 面试可直接念 / spoken-script / 口语稿）、
+#   ③ PRIVATE_DOCS 那 12 篇的原文件、页面链接或标题 —— 任意一处命中即 FAIL。
+#   ⑪ 管「根本不该出现在产物里」的东西（不需要逐篇登记）：私密文件名（简历/面试/复盘/口述/-笔记/JD、
+#   .env/credentials/*.pem/id_rsa/.git/.DS_Store/*~/ *.bak、node_modules、*.webm/trace.zip/
+#   playwright-report、_deploy/_evidence）+ 正文里的内网 IP / 绝对路径 /root/ /tmp/ / 容器名 /
+#   docker compose。理由：这些原先全靠 build-material「不拷」这个约定，PRIVATE_DOCS 又是逐篇登记，
+#   新加一篇私人笔记忘了登记就漏 —— ⑪ 是那条路的兜底。
+#   ⚠ 门禁本身被绕过的方式只剩「改脚本」，所以 check-docs-site.mjs 的 --private-ok（dev 站豁免）
+#     绝不能出现在这里的命令行里。
 # =============================================================================
 
 set -uo pipefail
@@ -1008,6 +1036,39 @@ build_docs() {
   fi
 }
 
+# --------------------------------------------------- 8.5 文档产物硬门禁（十一项体检）
+# 见脚本头【十二】：口语稿 / PRIVATE_DOCS 那 12 篇私人笔记一旦上了 OSS + 刷了 CDN，
+# svg/mp4/_vendor 下 js/css 是 30 天缓存，**公网上撤不干净**。所以必须在 publish_docs 之前拦：
+# 这条门禁只看退出码，不看代码怎么写的（产物字节里有没有那些东西，由 check-docs-site.mjs 判）。
+check_docs_gate() {
+  step_begin "文档产物门禁（十一项体检：私人文稿零泄漏 + 产物洁净度）"
+  if [ "$SKIP_DOCS" -eq 1 ]; then info "--skip-docs：跳过"; step_end skip; return 0; fi
+
+  local checker="$REPO_ROOT/scripts/check-docs-site.mjs"
+  local dist="$DOCS_DIST"
+  # 仅演练用：--dry-run 时允许把门禁指向一份"手脚不干净"的副本，用来证明门禁真的会 die。
+  # 真实发布（DRY_RUN=0）**不认**这个变量，永远只看 $DOCS_DIST —— 门禁不能被环境变量骗过去。
+  if [ "$DRY_RUN" -eq 1 ] && [ -n "${DOCS_GATE_ROOT:-}" ]; then dist="$DOCS_GATE_ROOT"; fi
+
+  [ -f "$checker" ] || die "门禁脚本缺失：$checker（没有门禁就不许上传：宁可这次不发文档，也不发一份没验过的产物）"
+  command -v node >/dev/null 2>&1 || die "node 不可用，跑不了文档门禁（$checker）"
+  if [ ! -d "$dist" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then info "[dry-run] 没有产物目录 $dist，门禁无从跑起"; step_end dry; return 0; fi
+    die "产物目录不存在：$dist（文档构建没成功？拒绝在没产物的状态下继续发布文档）"
+  fi
+
+  # 上传前只做静态检查：--skip-http（此刻公网还是上一版，探测公网既慢又没意义）
+  drynote "node $checker --root $dist --skip-http    # 十一项全 PASS 才允许上传 OSS/刷 CDN"
+  local rc=0
+  node "$checker" --root "$dist" --skip-http 2>&1 | sed 's/^/      /' || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    die "文档产物门禁未通过（EXIT=$rc）→ 拒绝上传：dist-prod 里有不该上公网的东西（口语稿 / PRIVATE_DOCS 私人笔记 / 私密文件名 / 原始录屏 / 内网 IP 与绝对路径 等，见上面每条命中）。\
+一旦传上 OSS 再刷 CDN，svg/mp4/_vendor 是 30 天缓存，公网上撤不干净（见脚本头【十二】）"
+  fi
+  info "十一项体检全 PASS：没有口语稿/私人笔记，也没有私密文件名、原始录屏、绝对路径 ✓"
+  if [ "$DRY_RUN" -eq 1 ]; then step_end dry; else step_end ok; fi
+}
+
 # ------------------------------------------------------------------ 9. 发布文档（OSS + CDN）
 # 说明：上传/删除/刷新全部在下面的 python 里做；--plan 模式（dry-run）只读本地文件、不联网。
 publish_docs() {
@@ -1021,7 +1082,7 @@ publish_docs() {
     "$C_D" "$plan_flag" "$DOCS_DIST" "$DOCS_BUCKET" "$OSS_ENDPOINT" "$C_0"
   printf '    %s$ python3 <<oss2 备份>> %s %s/**/*.mmd → oss://%s/_src/%s\n' \
     "$C_D" "$plan_flag" "$DOCS_MMD_ROOT" "$DOCS_BUCKET" "$C_0"
-  printf '    %s$ python3 <<CDN 刷新>>   %s %s 的 html/md/目录首页 + _vendor/ 下的 js/css%s\n' \
+  printf '    %s$ python3 <<CDN 刷新>>   %s %s 的 html/md/目录首页 + _vendor/ 下的 js/css + svg/mp4 等 30 天缓存对象%s\n' \
     "$C_D" "$plan_flag" "$DOCS_DOMAIN" "$C_0"
 
   if ! python3 - "$DOCS_DIST" "$DOCS_BUCKET" "$OSS_ENDPOINT" "$DOCS_MMD_ROOT" "$plan_flag" "$CRED_FILE" <<'PY'
@@ -1183,14 +1244,24 @@ PY
     die "文档发布失败（前端/后端已发布，可单独重跑：--skip-backend --skip-frontend）"
   fi
 
-  # CDN：文件级刷新 html/md/目录首页（图/视频吃 30 天缓存，不刷）
+  # CDN：文件级刷新 html/md/目录首页 + _vendor/ + svg/mp4 等 30 天缓存对象
+  # ★ 坑（2026-11-13 修正）：早期只刷 html/md/_vendor，理由是"图/视频吃 30 天缓存，
+  #   刷了等于把 CDN 打空"。但 svg 架构图与 mp4 演示视频**文件名不带 content hash**，
+  #   重新生成后 URL 不变 ⇒ 不刷就永远吃 30 天旧缓存 ⇒ 典型的"发布接口全绿、线上还是旧图"。
+  #   现在把 LONG_TTL_EXT（svg/mp4/png/webp… 全部 30 天缓存对象）一并纳入默认清单。
+  #   代价是这批对象发布后会集中回源一次，可接受；正确性优先。
   # ★ 每条 ObjectPath 必须 percent-encode + 提交后回读校验（原因见脚本头【十一】）
   if ! python3 - "$DOCS_DIST" "$DOCS_DOMAIN" "$CDN_REGION" "$plan_flag" "$CRED_FILE" <<'PY'
 # -*- coding: utf-8 -*-
-"""RefreshObjectCaches(ObjectType=File)：html/md/目录首页 + _vendor/ 下所有 js/css，批次 100。
+"""RefreshObjectCaches(ObjectType=File)：html/md/目录首页 + _vendor/ 下所有 js/css
++ svg/mp4 等 30 天缓存对象，批次 100。
 
-为什么只用文件级刷新：图/视频 URL 不变且吃 30 天缓存，刷了等于把 CDN 缓存打空，
-下次全部回源；目录/全站刷新更会把 30 天规则一起打掉（RUNBOOK 六节）。
+★ svg/mp4 为什么必须刷（2026-11-13 修正）：它们的文件名没有 content hash，URL 恒定，
+  又吃 max-age=2592000 ⇒ 重新生成/重录后不刷就一直是旧版。早期"图/视频一律不刷"的
+  取舍会把这种情况变成"发布成功但线上还是旧图"，因此改为纳入默认清单。
+
+为什么仍只用文件级刷新：只刷本次实际发布的那批 URL；目录刷新/全站刷新会把 30 天缓存
+规则一起打掉（RUNBOOK 六节），代价远大于逐条 File 刷新。
 为什么 _vendor/ 必须刷：docsify 的 _vendor/*.js、*.css 文件名**没有 content hash**
 （永远叫 docsify.min.js / theme-simple.css），URL 不变 ⇒ 吃 30 天缓存 ⇒ 改了样式/换了插件
 不刷就永远看不到新版。所以每次发布都把它们全部刷一遍（运行时扫目录，不硬编码文件名，
@@ -1315,13 +1386,13 @@ for dirpath, _d, filenames in os.walk(vendor_dir):
             vendor_rels.append(rel)
 vendor_rels = sorted(set(vendor_rels))
 
-rels = sorted(set(site_rels) | set(vendor_rels))
+rels = sorted(set(site_rels) | set(vendor_rels) | set(long_ttl_rels))
 urls = [url_of(r) for r in rels]             # 交给接口的就是这一份（path 已编码）
 need_enc = [r for r in rels if encode_object_path(r) != plain_path(r)]
 
-print("    CDN 刷新清单 %d 条（html/md/目录首页 %d 条 + _vendor js/css %d 条；"
-      "其中含非 ASCII、必须编码的 %d 条）"
-      % (len(rels), len(site_rels), len(vendor_rels), len(need_enc)))
+print("    CDN 刷新清单 %d 条（html/md/目录首页 %d 条 + _vendor js/css %d 条 + "
+      "svg/mp4 等 30 天缓存对象 %d 条；其中含非 ASCII、必须编码的 %d 条）"
+      % (len(rels), len(site_rels), len(vendor_rels), len(long_ttl_rels), len(need_enc)))
 for r in rels[:5]:
     print("      %-58s%s" % (plain_path(r), encode_object_path(r) if
                               encode_object_path(r) != plain_path(r) else ""))
@@ -1735,6 +1806,7 @@ main() {
   build_frontend
   rolling_frontend
   build_docs
+  check_docs_gate     # ★硬门禁：产物里有口语稿/私人文稿就 die，一个字节都不上传
   publish_docs
 
   if ! smoke; then
