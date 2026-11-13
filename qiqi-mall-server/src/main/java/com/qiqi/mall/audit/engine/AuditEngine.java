@@ -24,9 +24,22 @@ import java.util.Map;
  *     5b 排除条件（本策略 POLICY 级 ∪ 全部 ALL_AUTO 级）任一成立 → 记 excluded_by
  *     5c 无排除 → AUTO_PASS
  * [6] 全都不中 → 若曾有策略「条件全满足、只被排除挡掉」→ MANUAL（被排除）；否则 NO_MATCH（逐条「差在哪」）
- * [7] 库存预检（仅 AUTO_PASS）：SUM(sku_bucket.stock) &gt;= 需求，不足 → MANUAL + STOCK_SHORT
- *     成本预检：毛利 ≤ 0 而成本价缺失 → MANUAL + COST_MISSING（风险③：不许沉默放行）
+ * [7a] AUTO 候选的预检（**可改结论**，AUTO_PASS 专用分支）：
+ *     库存 SUM(sku_bucket.stock) &gt;= 需求，不足 → MANUAL + STOCK_SHORT；
+ *     成本：毛利 ≤ 0 而成本价缺失 → MANUAL + COST_MISSING（风险③：不许沉默放行）
+ * [7b] NO_MATCH 的库存预检（**只写证据、不改结论**）：见 {@link #noMatchEvidence}
  * </pre>
+ *
+ * <h3>[7b] 为什么 NO_MATCH 也要查一次库存（但不许动结论）</h3>
+ * NO_MATCH 的单最终也是「人来看」，而人看的第一眼最容易被误导：订单页显示 sku.stock=999、
+ * 于是点「通过」，然后在扣减那一步才发现桶里只有 5 件。所以判定完 NO_MATCH 之后<b>再查一次库存</b>，
+ * 把「缺货」和「若人工审核通过将因缺货失败」写进 {@code evidence_json}，让下一个人一眼看见。
+ *
+ * <p>但这一步<b>绝不能</b>复用 [7a] 那个「库存不足 → 降级 MANUAL + STOCK_SHORT」的分支：
+ * 那条分支回答的是「本来该自动过审的单能不能放行」，命中它的单 result 会从 AUTO_PASS 变成 MANUAL、
+ * 打 STOCK_SHORT 挂起标。NO_MATCH 的单根本没进自动过审，没有「放行」可降级 —— 把它的 result
+ * 改写成 MANUAL/STOCK_SHORT 会让「不命中」这一类凭空少掉一笔（对外五类计数就此对不平），
+ * 而且会给一张连策略都没命中的单打上「库存不足」的业务标。所以 [7b] 只往证据里写字。
  *
  * <h3>为什么 [3][4] 之后还要跑 AUTO</h3>
  * 被拦截/冻结的单，运营第一句话是「那它本来会不会自动过？」。这个答案只能靠**再跑一遍但要丢弃结论**
@@ -154,10 +167,10 @@ public final class AuditEngine {
                 : misses.stream().map(m -> m.policyName() + "：" + String.join("；", m.reasons())).reduce((a, b) -> a + " | " + b).orElse("");
         return new AuditVerdict(AuditResult.NO_MATCH, null, List.of(), List.of(), misses,
                 null, List.of(), null, "无匹配：没有任何 AUTO 策略命中 —— " + detail,
-                evidence(ctx, s, "NO_MATCH", WouldBe.none(), null));
+                noMatchEvidence(ctx, s));
     }
 
-    // ================================================================== [7] 预检 + 结论
+    // ================================================================== [7a] 预检 + 结论（AUTO_PASS 专用）
 
     private AuditVerdict autoPassOrDowngrade(AuditContext ctx, AuditSetting setting, PolicyView policy,
                                              List<ConditionTrace> traces, List<PolicyMiss> misses) {
@@ -173,7 +186,7 @@ public final class AuditEngine {
         }
 
         // 库存预检：判据是 SUM(sku_bucket.stock)，不是 sku.stock 缓存（决策 D5）
-        if (ctx.stockAvailable() < ctx.itemQtyTotal()) {
+        if (stockShort(ctx)) {
             String text = "转人工：库存不足 —— 可用 " + ctx.stockAvailable() + " < 需求 " + ctx.itemQtyTotal()
                     + "（判据 SUM(sku_bucket.stock)=" + ctx.stockAvailable()
                     + "；sku.stock 缓存=" + (ctx.skuStockCache() == null ? "无值" : ctx.skuStockCache()) + "）";
@@ -197,6 +210,44 @@ public final class AuditEngine {
                 null, List.of(), null,
                 "自动过审：策略「" + policy.name() + "」全部条件满足 —— " + join(traces),
                 evidence(ctx, setting, "AUTO_PASS", WouldBe.none(), null));
+    }
+
+    // ================================================================== [7b] NO_MATCH 的只读库存预检
+
+    /**
+     * 判定链 [7b]：<b>不命中的单也查一次库存</b>，结论一个字不改（result 仍 NO_MATCH、
+     * downgrade_reason 仍 null、不推进状态、不打任何挂起标）。
+     *
+     * <p>与 [7a]（{@link #autoPassOrDowngrade}）的区别只在一个字：那条会<b>改结论</b>
+     * （AUTO_PASS → MANUAL + STOCK_SHORT），本条<b>只写证据</b>。所以这里不读
+     * {@link AuditSetting.StockGuard}：LENIENT 表示「缺口也允许放行」，而这里根本没有放行可言，
+     * 有缺口就是有缺口，照实写（档位仍原样记在 {@code stock.guard} 里，读证据的人自己判断）。
+     *
+     * <p>证据形状与 AUTO_PASS 那条链同口径（同一个 {@code stock} 段：bucket_sum / sku_stock_cache /
+     * demand / guard / short），多的只有 {@code stock.hint} 这句人话 —— 运营看的是同一块面板，
+     * 两处字段名不同就等于两套读法。
+     */
+    private Map<String, Object> noMatchEvidence(AuditContext ctx, AuditSetting setting) {
+        Map<String, Object> ev = evidence(ctx, setting, "NO_MATCH", WouldBe.none(), null);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> stock = (Map<String, Object>) ev.get("stock");
+        String hint;
+        if (stockShort(ctx)) {
+            hint = "库存预检：缺货 —— 可用 " + ctx.stockAvailable() + " < 需求 " + ctx.itemQtyTotal()
+                    + "（判据 SUM(sku_bucket.stock)），若人工审核通过将因缺货失败；"
+                    + "本单结论仍是 NO_MATCH（预检只写证据，不改判定、不打标）";
+        } else {
+            hint = "库存预检：可用 " + ctx.stockAvailable() + " ≥ 需求 " + ctx.itemQtyTotal()
+                    + "（判据 SUM(sku_bucket.stock)），人工审核不会因缺货失败";
+        }
+        stock.put("hint", hint);
+        return ev;
+    }
+
+    /** 库存是否不足以整单发出（[7a][7b] 共用的唯一判据，避免两处各写一遍比较） */
+    private static boolean stockShort(AuditContext ctx) {
+        return ctx.stockAvailable() < ctx.itemQtyTotal();
     }
 
     // ================================================================== 回填（只看不执行）
@@ -282,6 +333,8 @@ public final class AuditEngine {
         stock.put("sku_stock_cache", ctx.skuStockCache());
         stock.put("demand", ctx.itemQtyTotal());
         stock.put("guard", setting.stockGuard().name());
+        // 判定结论之外最容易被误读的一个事实：只写「桶里够不够」，由各分支自己决定怎么用
+        stock.put("short", stockShort(ctx));
         ev.put("stock", stock);
 
         Map<String, Object> cost = new LinkedHashMap<>();

@@ -21,6 +21,12 @@ public class AuditRun {
     /** 仅 SCHEDULE：{trigger}:{yyyyMMddHHmm}；MANUAL 一律 NULL */
     private String idemKey;
 
+    /**
+     * 本轮<b>候选范围</b>的单数 = 五类之和 + {@code skipped}（口径见 {@code RunResultDto}）。
+     *
+     * <p>注意：{@code skipped} 没有对应列（SKIPPED 不写决策行，也不需要一行），
+     * 所以它是 {@code total - (auto+manual+blocked+frozen+no_match)}，重放路径据此还原。
+     */
     private Integer total;
 
     private Integer autoPass;

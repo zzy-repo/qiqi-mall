@@ -51,7 +51,12 @@ public class OrderAuditController {
         this.orderService = orderService;
     }
 
-    /** 人工队列：每单最新一轮决策，可按 result 过滤（MANUAL/BLOCKED/FROZEN/NO_MATCH/AUTO_PASS/SKIPPED） */
+    /**
+     * 人工队列：每单最新一轮决策，可按 result 过滤（MANUAL/BLOCKED/FROZEN/NO_MATCH/AUTO_PASS）。
+     *
+     * <p>过滤参数仍接受任意 result 字符串（含历史数据里可能存在的 SKIPPED），但新跑的轮次不再产生
+     * SKIPPED 决策行（见 {@code AuditResult#SKIPPED}），所以按 SKIPPED 过滤通常为空集合。
+     */
     @GetMapping("/order-audit/queue")
     public Result<Map<String, Object>> queue(@RequestParam(required = false) String result,
                                              @RequestParam(defaultValue = "1") int page,

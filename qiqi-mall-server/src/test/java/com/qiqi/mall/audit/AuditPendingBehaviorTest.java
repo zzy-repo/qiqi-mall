@@ -9,9 +9,7 @@ import com.qiqi.mall.audit.engine.AuditResult;
 import com.qiqi.mall.audit.engine.AuditVerdict;
 import com.qiqi.mall.audit.service.AuditExecutor;
 import com.qiqi.mall.audit.service.AuditPolicyService;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -29,53 +27,59 @@ import java.math.RoundingMode;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * <b>明天要做的三处引擎修正的「期望行为」契约</b>（全部 {@code @Disabled}，今晚只固化断言、不实现）。
+ * <b>审核引擎三处修正的行为契约</b>（已实现，三条断言全绿；它们就是这三处修正的唯一验收口径）。
  *
- * <p>存在意义：这三处是今晚画图时发现的「设计缝」，只在对话里描述过一次。写成可执行的断言之后，
- * 明天实现时不用回读聊天记录，也不用靠记忆判断「这样做算不算做完了」——
- * 把三个 {@code @Disabled} 摘掉、跑到绿，就是做完。
+ * <p>存在意义：这三处是「设计缝」，只在对话里描述过一次。写成可执行的断言之后，实现时不用回读
+ * 聊天记录、也不用靠记忆判断「这样做算不算做完了」—— 把三条跑到绿，就是做完。
  *
  * <h3>① 不命中的单也要跑一次库存预检（只写证据，不改结论）</h3>
  * <pre>
- * 现状：库存预检（{@code AuditEngine#autoPassOrDowngrade}）只在「已经是过审候选」之后跑，
+ * 修前：库存预检（{@code AuditEngine#autoPassOrDowngrade}）只在「已经是过审候选」之后跑，
  *       NO_MATCH 的单压根不查库存。于是 QT-1006（淘宝 420 元 6 件、桶里合计 5 件）判 NO_MATCH
  *       后一直躺在待审核里，直到人工审核点「通过」才因缺货失败。
- * 期望：对 NO_MATCH 也跑一次库存预检，<b>只写进 evidence 作提示，不改变判定结果</b>
- *       （result 仍是 NO_MATCH、downgrade_reason 仍是 NULL，但 evidence_json 里出现 stock 段 +
- *        一条「若人工审核将因缺货失败」的提示）。
+ * 现在：判定链 [7b]（{@code AuditEngine#noMatchEvidence}）对 NO_MATCH 也跑一次库存预检，
+ *       <b>只写进 evidence 作提示，不改变判定结果</b>（result 仍是 NO_MATCH、downgrade_reason
+ *       仍是 NULL，但 evidence_json 里出现 stock 段 + 一条「若人工审核将因缺货失败」的提示）。
+ *       绝不复用 [7a]「库存不足 → 降级 MANUAL + STOCK_SHORT」那条分支（那是 AUTO_PASS 专用的）。
  * </pre>
  *
  * <h3>② 五种判定对外口径统一（STOCK_SHORT 只是 MANUAL 的 downgrade 子类）</h3>
  * <pre>
- * 现状：MANUAL 有三支来路 —— 被排除条件挡掉 / 一条策略都不满足(=NO_MATCH) / 库存不足降级(STOCK_SHORT)，
+ * 修前：MANUAL 有三支来路 —— 被排除条件挡掉 / 库存不足降级(STOCK_SHORT) / 成本缺失降级，
  *       对外混着数，用户「留人工 + 不命中」对不平。
- * 期望：口径统一为「自动过审 / 转人工(被排除) / 被阻止 / 被冻结 / 不命中」五类，
- *       「被阻止 + 被冻结」合称「被拦」；STOCK_SHORT 不单列，作为 MANUAL 的 downgrade_reason 表达。
- *       即：五类计数之和 == total（SKIPPED 不在五类里，见 ③ 的口径）。
+ * 现在：口径统一为「自动过审 / 转人工 / 被阻止 / 被冻结 / 不命中」五类，
+ *       「被阻止 + 被冻结」合称「被拦」；STOCK_SHORT 不单列（result 仍是 MANUAL，
+ *       靠 downgrade_reason 区分，**不新增枚举值**）。
+ *       即：五类计数之和 == 决策行数，且 total == 五类之和 + skipped（skipped 不写决策行，见 ③）。
  * </pre>
  *
- * <h3>③ SKIPPED 不再写决策行（冻结单不该每轮多一行）</h3>
+ * <h3>③ SKIPPED 不写决策行（冻结单不该每轮多一行）</h3>
  * <pre>
- * 现状：候选范围含「有 active FROZEN 标的单」，所以冻结单每跑一轮就写一行 SKIPPED 决策，
+ * 修前：候选范围含「有 active FROZEN 标的单」，所以冻结单每跑一轮就写一行 SKIPPED 决策，
  *       冻结久了 round_no 一直涨、证据表被无意义的行撑大。
- * 期望：SKIPPED <b>不写决策行</b>（或仅在状态/标记变化时写），但 run 的计数里仍要体现
- *       「本轮跳过 N 笔」（{@link RunResultDto#skipped()} 或 audit_run 字段），不占决策行。
+ * 现在：SKIPPED <b>不写决策行</b>，但 run 的计数里仍如实体现「本轮跳过了 N 笔」
+ *       （{@link RunResultDto#skipped()}，不占决策行）—— 冻结单连跑 3 轮，决策行数不增长且为 0。
  * </pre>
  *
  * <h3>与 {@link AuditRunIntegrationTest} 共用同一批单号（QT-100x）</h3>
- * 本类 {@code @BeforeAll} 自建自清全套数据（会员 / 商品 / SKU / 桶 / 7 笔单 / 7 条策略），
- * 因此<b>不要与 {@code AuditRunIntegrationTest} 同时跑</b>（两者都拥有 QT-100x 家族）。
- * 每个用例开头调 {@link #resetBaseline()}，把 7 笔单还原成「status=7、无决策行、无标」的干净基线，
+ * 本类自建自清全套数据（会员 / 商品 / SKU / 桶 / 7 笔单 / 7 条策略），因此<b>不要与
+ * {@code AuditRunIntegrationTest} 同时跑</b>（两者都拥有 QT-100x 家族）。
+ * 造数在<b>各用例体内按需触发</b>（{@link #seedIfNeeded()}），不在 {@code @BeforeAll} 里 ——
+ * {@code @BeforeAll} 在「三个用例全 {@code @Disabled}」时照样执行，会造数 + 清表，
+ * 等于一个不跑断言的破坏性副作用。放进用例体后，全 disabled 时一行 SQL 都不跑。
+ * 每个用例开头再调 {@link #resetBaseline()}，把 7 笔单还原成「status=7、无决策行、无标」的干净基线，
+ * 并把库里既有的其它待审核单临时挪到 8（{@link #parkForeignPendingOrders()}，用例结束还原）——
+ * 候选范围是全库的，不挪开它们 {@code total} 就会被历史数据顶多出两笔。
  * 这样三个用例彼此独立、可单独跑、也可连跑。
  *
- * <p>跑：{@code cd qiqi-mall-server && mvn -o test -Dtest=AuditPendingBehaviorTest}
- * → 期望 <b>3 skipped / 0 failed</b>（摘掉 @Disabled 之后才应变成 3 passed）。
+ * <p>跑：{@code cd qiqi-mall-server && mvn -o test -Dtest=AuditPendingBehaviorTest} → 期望 <b>3 passed</b>。
  */
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:mysql://127.0.0.1:3306/qiqi_mall_test"
@@ -111,13 +115,16 @@ class AuditPendingBehaviorTest {
     private final List<Long> skuSix = new ArrayList<>();   // QT-1006 的 6 个样，桶合计 5
     private Long returnReasonId;
 
+    /** 库里既有的其它待审核单（如 QQ2026…）：候选范围 = 「status=7 或已冻结」，它们会混进五类计数 */
+    private final Map<Long, Integer> parkedOrders = new LinkedHashMap<>();
+
     // ================================================================== 修正 ①
 
     @Test
     @Order(1)
-    @Disabled("待实现：NO_MATCH 也要跑一次库存预检，只写 evidence 提示、不改判定结果")
     @DisplayName("①QT-1006 判 NO_MATCH 也要查库存：结果仍 NO_MATCH，但 evidence 里有 stock 段 + 缺货提示，状态仍 7、台账 0 行")
     void noMatchStillRunsStockPrecheckForEvidenceOnly() {
+        seedIfNeeded();
         resetBaseline();
 
         // ---------------- 引擎层（纯函数）：结论不许被库存信息改动 ----------------
@@ -175,15 +182,18 @@ class AuditPendingBehaviorTest {
         assertThat(statusOf("QT-1006")).isEqualTo(7);
         assertThat(countTags("QT-1006")).as("NO_MATCH 不打任何挂起标（含 STOCK_SHORT）").isZero();
         assertThat(countLedger("QT-1006", "AUDIT%")).as("台账 0 行：NO_MATCH 不推进状态").isZero();
+
+        printRun("①", run);
+        printDecisions("①");
     }
 
     // ================================================================== 修正 ②
 
     @Test
     @Order(2)
-    @Disabled("待实现：对外口径统一成五类（自动过审/转人工/被阻止/被冻结/不命中），STOCK_SHORT 只作 MANUAL 的 downgrade 子类")
     @DisplayName("②一轮 run 的五类计数之和 == total；QT-1007 库存降级行 result==MANUAL 且 downgrade_reason==STOCK_SHORT")
     void fiveVerdictBucketsAddUpAndStockShortIsManualDowngrade() {
+        seedIfNeeded();
         resetBaseline();
 
         // 数据：用户原表六笔单 + 一笔「AUTO 条件全满足但桶不够」的单
@@ -237,15 +247,18 @@ class AuditPendingBehaviorTest {
 
         // 两条 MANUAL 的来路在 decision 行上可区分 —— 这是「口径统一」要保住的信息量
         assertThat(run.decisions().stream().filter(r -> "MANUAL".equals(r.result())).count()).isEqualTo(2);
+
+        printRun("②", run);
+        printDecisions("②");
     }
 
     // ================================================================== 修正 ③
 
     @Test
     @Order(3)
-    @Disabled("待实现：SKIPPED 不写决策行，跳过的单数改由 run 的 skipped 计数体现")
     @DisplayName("③已冻结单连跑 3 轮：该单决策行数不增长；每轮 run.skipped()==1")
     void skippedDoesNotAppendDecisionRow() {
+        seedIfNeeded();
         resetBaseline();
 
         // 只留一笔已冻结的单在候选范围里：status=7 + active FROZEN 标（其余 6 笔挪到 8）
@@ -278,32 +291,76 @@ class AuditPendingBehaviorTest {
         assertThat(countTags("QT-1005")).isEqualTo(1);
         assertThat(countLedger("QT-1005", "AUDIT%")).as("冻结/SKIPPED 都不写状态台账").isZero();
 
-        // 注：run.total() 的口径本轮<b>故意不断言</b>（候选数 vs 实际产出决策数，两种口径明天定），
-        //     只锁死「skipped 计数 + 决策行数不增长」这两条用户明确要的行为。
+        printRun("③run1", run1);
+        printRun("③run2", run2);
+        printRun("③run3", run3);
+        System.out.println("[③] QT-1005 决策行数 after1=" + rowsAfter1 + " after3=" + rowsAfter3);
+        printDecisions("③");
+
+        // 注：run.total() 的口径本轮<b>故意不断言</b>，只锁死「skipped 计数 + 决策行数不增长」这两条
+        //     用户明确要的行为。口径已定为 total = 五类之和 + skipped（= 本轮候选范围单数，
+        //     见 RunResultDto 的 Javadoc）：本轮 1 笔单全被跳过，所以 total=1、五类之和=0、
+        //     skipped=1、决策行 0 行 —— 四个数互相咬合，但断言仍不锁它（口径可变，行为不可变）。
     }
 
     // ================================================================== 造数 / 清理 / 工具
 
-    @BeforeAll
-    void seed() {
+    /** 造数只跑一次（三个用例共用同一批 QT-100x；PER_CLASS 生命周期下字段可复用） */
+    private boolean seeded;
+
+    /**
+     * 按需造数：每个用例开头调一次，第一个真正执行的用例造数，其余复用。
+     *
+     * <p>为什么不是 {@code @BeforeAll}：JUnit 在「本类所有用例都 {@code @Disabled}」时
+     * <b>照样执行</b> {@code @BeforeAll} —— 那会清表 + 造数，一个断言都不跑却改了库，
+     * 是纯粹的破坏性副作用（而且它与 {@code AuditRunIntegrationTest} 共用 QT-100x 单号，
+     * 谁先跑谁把对方的数清掉）。放进用例体后：全 disabled = 零 SQL。
+     */
+    private void seedIfNeeded() {
+        if (seeded) return;
         cleanOurData();
         seedCatalogAndMembers();
         seedSevenOrders();
         seedPolicies();
+        seeded = true;
         System.out.println("[准备] QT-1001..QT-1007 已就绪（7 条策略 / 7 笔单）");
     }
 
-    @AfterAll
-    void report() {
+    /**
+     * 用例结束还原被临时挪开的既有待审核单（{@code @AfterEach} 只在用例真的执行时才跑：
+     * 全 {@code @Disabled} 时一个 SQL 都不会执行，与本类「全 disabled 零副作用」的要求一致）。
+     */
+    @AfterEach
+    void restoreParkedOrders() {
+        parkedOrders.forEach((id, status) ->
+                jdbc.update("UPDATE `order` SET status = ? WHERE id = ?", status, id));
+        if (!parkedOrders.isEmpty()) {
+            System.out.println("[恢复] 既有待审核单状态已还原：" + parkedOrders.keySet());
+        }
+        parkedOrders.clear();
+    }
+
+    /**
+     * 把库里的「其它待审核单」临时挪到 8（只改 status 一列，用例结束还原）。
+     *
+     * <p>为什么必须这么做：候选范围是**全库**「status=7 或已冻结」，不是只有 QT-100x。
+     * 测试库里本来就有别的待审核单（QQ2026…），不挪开它们，{@code run.noMatch() / run.total()}
+     * 就会被它们顶多出两笔 —— 断言失败的原因跑到「历史数据」上，读报告的人得先猜一遍才明白
+     * 不是代码错了。与 {@code AuditRunIntegrationTest} 同一手法。
+     */
+    private void parkForeignPendingOrders() {
         List<Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT o.order_sn, d.round_no, d.result, d.matched_policy_name, d.downgrade_reason "
-                        + "FROM order_audit_decision d JOIN `order` o ON o.id = d.order_id "
-                        + "WHERE o.order_sn LIKE 'QT-100%' ORDER BY o.order_sn, d.round_no");
-        System.out.println("[决策行] 共 " + rows.size() + " 行：" + rows);
+                "SELECT id, status FROM `order` WHERE status = 7 AND order_sn NOT LIKE 'QT-100%'");
+        for (Map<String, Object> row : rows) {
+            Long id = ((Number) row.get("id")).longValue();
+            parkedOrders.putIfAbsent(id, ((Number) row.get("status")).intValue());
+            jdbc.update("UPDATE `order` SET status = 8 WHERE id = ?", id);
+        }
     }
 
     /** 把 7 笔单还原成「status=7、无决策行、无标、无台账」的干净基线，用例彼此独立 */
     private void resetBaseline() {
+        parkForeignPendingOrders();
         List<Long> ids = jdbc.queryForList("SELECT id FROM `order` WHERE order_sn LIKE 'QT-100%'", Long.class);
         for (Long id : ids) {
             jdbc.update("DELETE FROM stock_ledger WHERE order_id = ?", id);
@@ -451,6 +508,23 @@ class AuditPendingBehaviorTest {
     }
 
     // ------------------------------------------------------------------ 工具
+
+    /** 报告用：把一轮 run 的五类计数 + skipped 打出来（真库验证的原始输出） */
+    private void printRun(String tag, RunResultDto run) {
+        System.out.println("[run] " + tag + " runId=" + run.runId() + " total=" + run.total()
+                + " autoPass=" + run.autoPass() + " manual=" + run.manual() + " blocked=" + run.blocked()
+                + " frozen=" + run.frozen() + " noMatch=" + run.noMatch() + " skipped=" + run.skipped()
+                + " 五类之和=" + run.verdictSum() + " decisions=" + run.decisions().size());
+    }
+
+    /** 报告用：把当前 QT-100x 的决策行打出来（与报告里贴的 SQL 结果一致） */
+    private void printDecisions(String tag) {
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT o.order_sn, d.round_no, d.result, d.matched_policy_name, d.downgrade_reason "
+                        + "FROM order_audit_decision d JOIN `order` o ON o.id = d.order_id "
+                        + "WHERE o.order_sn LIKE 'QT-100%' ORDER BY o.order_sn, d.round_no");
+        System.out.println("[决策行 " + tag + "] 共 " + rows.size() + " 行：" + rows);
+    }
 
     private Map<String, Object> decision(String orderSn) {
         List<Map<String, Object>> rows = jdbc.queryForList(
