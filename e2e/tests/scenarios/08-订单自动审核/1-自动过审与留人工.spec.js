@@ -12,6 +12,9 @@ import {
   orderFactOf,
   decisionsOf,
   decisionJsonOf,
+  missGroupOf,
+  conditionOf,
+  unevaluatedConditions,
   ledgerRowsOf,
   activeTagsOf,
   POLICY_NAME
@@ -26,7 +29,11 @@ import {
   runAuditViaUi,
   filterByResultChip,
   clearResultFilter,
-  openWhyDrawer
+  openWhyDrawer,
+  whyGroupOf,
+  whyCondRow,
+  whyRowMiss,
+  whyRowUnevaluated
 } from '../../support/audit-ui.js'
 
 /**
@@ -78,7 +85,9 @@ test.describe('08-订单自动审核 › 1-自动过审与留人工', () => {
     // 策略 id 要在「去改这条策略」的跳转断言里用到 —— 从接口拿，不写死
     const bundle = await getAuditPolicies(request, token)
     const taobaoPolicy = bundle.policies.find((p) => p.name === POLICY_NAME.AUTO_TAOBAO)
+    const directPolicy = bundle.policies.find((p) => p.name === POLICY_NAME.AUTO_DIRECT)
     expect(taobaoPolicy, `策略集里应有「${POLICY_NAME.AUTO_TAOBAO}」`).toBeTruthy()
+    expect(directPolicy, `策略集里应有「${POLICY_NAME.AUTO_DIRECT}」`).toBeTruthy()
 
     /** 第 ② 步点出来的那一轮 run（后面的台账 ref_id 断言要用它的 id） */
     let run = null
@@ -131,8 +140,10 @@ test.describe('08-订单自动审核 › 1-自动过审与留人工', () => {
           .toContainText(`命中「${POLICY_NAME.AUTO_TAOBAO}」→ 自动过审`)
         await expect(reasonSubOf(row1), 'QT-1001 灰字原因应带具体数值差（应收 268.00 < 500.00）')
           .toContainText('应收金额 268.00 < 500.00')
-        await expect(reasonSubOf(row1), 'QT-1001 灰字原因应带种类数与件数口径')
-          .toContainText('商品种类数 2 ≤ 5')
+        // 口径提醒：QT-1001 是「1 个 SKU × 2 件」→ 种类数是 **1**（件数才是 2）。
+        // 后端单测 AuditRunIntegrationTest 逐字断的就是「商品种类数 1 ≤ 5」。
+        await expect(reasonSubOf(row1), 'QT-1001 灰字原因应带种类数口径（1 种，不是 2 件）')
+          .toContainText('商品种类数 1 ≤ 5')
         await expect(row1, 'QT-1001 应是第 1 轮判定').toContainText('第 1 轮')
         await expect(row1, 'QT-1001 的店铺/渠道列应显示 seed 里的「官方旗舰店」/「淘宝」').toContainText('官方旗舰店')
         await expect(row1, 'QT-1001 应收列应显示 ¥268.00').toContainText('268.00')
@@ -177,36 +188,56 @@ test.describe('08-订单自动审核 › 1-自动过审与留人工', () => {
         await expect(drawer.getByTestId('audit-why-source'), '抽屉应标明结论取自后端留痕（capability 已补齐）')
           .toContainText('结论取自后端留痕')
 
-        // ② 三态：既要有「← 差在哪」的不满足行，也要有灰色的「未求值」行
-        const missMarks = drawer.getByTestId('audit-why-mark')
-        await expect(missMarks, '抽屉里应至少有一行标出「← 差在哪」').not.toHaveCount(0)
-        const unevaluated = drawer.getByTestId('audit-why-unevaluated')
-        await expect(unevaluated, 'AND 链上首个不满足之后的条件应标「未求值」（不是「不满足」）').not.toHaveCount(0)
+        // ② 三态（按实测收紧）：这张单**恰好 2 条条件不满足** —— 直营-小单差客户标签、抖音-标准单差渠道；
+        //    而「首个不满足之后」的那几条（直营的应收 268<300、抖音的应收 268<500 与种类数 1≤5）实际都**满足**，
+        //    前端按 satisfied 优先渲染成「满足」，所以这张单的抽屉里**没有**「未求值」标签。
+        //    「未求值」出现在「首个不满足之后仍不满足」的条件上（见 3-不命中与差在哪 的 QT-1003）。
+        await expect(drawer.getByTestId('audit-why-mark'), '恰好 2 条条件标「← 差在哪」（客户标签、渠道）')
+          .toHaveCount(2)
+        await expect(whyRowMiss(drawer), '「不满足」的真实数据行恰好 2 行').toHaveCount(2)
+        // 按行级 class 数（不能数 testid：el-table 的 hidden-columns 会凭空克隆出一个「未求值」节点）
+        await expect(whyRowUnevaluated(drawer), '这张单不再决定结论的条件都是「满足」，不该有未求值行')
+          .toHaveCount(0)
 
         // ③ 具体数值差：直营-小单 的客户标签条件（实际「普通」≠ 期望「直营门店」）
         await expect(drawer, '抽屉里应写清直营-小单差在哪（客户标签 = 直营门店，实际 普通）')
           .toContainText('客户标签 = 直营门店')
         // 「后端留痕」那一行是引擎原话，expected 与 actual 都在里面（不是只给「不满足」两个字）
-        const directGroup = drawer.locator('[data-testid^="audit-why-policy-"]').filter({ hasText: POLICY_NAME.AUTO_DIRECT })
+        const directGroup = whyGroupOf(drawer, directPolicy.id)
         await expect(directGroup, '抽屉里应有「直营-小单」这一组').toBeVisible()
         await expect(directGroup.locator('.why-backend-lines'), '直营-小单 的留痕里应写出实际值「普通」')
           .toContainText('实际 普通')
+        // 字段级：客户标签那条是「差在哪」，应收 268<300 那条是「满足」→ 不该带标记
+        await expect(whyCondRow(directGroup, 'CUSTOMER_TAG').getByTestId('audit-why-mark'),
+          '客户标签那条（期望直营门店、实际 普通）应标「← 差在哪」').toHaveCount(1)
+        await expect(whyCondRow(directGroup, 'RECEIVABLE_AMOUNT').getByTestId('audit-why-mark'),
+          '应收 268 < 300 是满足的，不该被标成「差在哪」').toHaveCount(0)
+        await expect(whyCondRow(directGroup, 'RECEIVABLE_AMOUNT'), '该行仍要如实给出期望/实际（300 / 268）')
+          .toContainText('300')
 
         // ④ 全局排除单独一块（它不属于任何策略）：客服备注含「改」
         await expect(drawer.getByTestId('audit-why-global'), '抽屉里应有独立的「全局排除」块').toBeVisible()
-        await expect(drawer.getByTestId('audit-why-global'), '全局排除块应写出「客服备注 含「改」」')
-          .toContainText('客服备注 含「改」')
+        // 实测文案：这一块是**前端按条件行自己拼的**（condText），与引擎原话不同 ——
+        // 引擎原话是「客服备注 含「改」（实际 …）」，这里没有引号：`排除：客服备注 含 改`
+        await expect(drawer.getByTestId('audit-why-global'), '全局排除块应写出「排除：客服备注 含 改」')
+          .toContainText('排除：客服备注 含 改')
 
-        // ⑤「去改这条策略」：应带着 focusPolicy 跳到策略页并直接打开那条策略的编辑器
+        // ⑤「去改这条策略」：跳转目标是**第一条有「不满足」条件的策略**（不是「命中的那条」）。
+        //    QT-1002 三个 AUTO 组里，直营-小单差客户标签、抖音-标准单差渠道、淘宝-标准单全满足（只是被排除），
+        //    所以 focusPolicy = 直营-小单，且带上那条失败条件的 seq(=0) 供策略页高亮。
         await drawer.getByTestId('audit-why-goto-policy').click()
         await page.waitForURL(/\/audit-policy/, { timeout: 20_000 })
         const url = new URL(page.url())
-        expect(url.searchParams.get('type'), '跳转应带上策略类型 AUTO').toBe('AUTO')
-        expect(Number(url.searchParams.get('focusPolicy')), '跳转应指向「淘宝-标准单」的策略 id')
-          .toBe(taobaoPolicy.id)
+        expect(url.searchParams.get('type'), '跳转应带上策略类型 AUTO（MANUAL/NO_MATCH 都归 AUTO 类）').toBe('AUTO')
+        expect(Number(url.searchParams.get('focusPolicy')), '跳转应指向「直营-小单」（第一条真不满足的策略）')
+          .toBe(directPolicy.id)
+        expect(Number(url.searchParams.get('focusSeq')), '应带上那条失败条件的 seq=0（客户标签）').toBe(0)
         await expect(tid(page, 'policy-editor'), '策略页应直接打开编辑器（focusPolicy）').toBeVisible({ timeout: 20_000 })
-        await expect(tid(page, 'policy-form-name'), '编辑器里应是「淘宝-标准单」')
-          .toHaveValue(POLICY_NAME.AUTO_TAOBAO)
+        await expect(tid(page, 'policy-form-name'), '编辑器里应是「直营-小单」')
+          .toHaveValue(POLICY_NAME.AUTO_DIRECT)
+        // 反向证明「没跳错策略」：淘宝-标准单 的 id 不该出现在 focusPolicy 里
+        expect(Number(url.searchParams.get('focusPolicy')), '不该跳到「淘宝-标准单」（它没有不满足的条件）')
+          .not.toBe(taobaoPolicy.id)
       })
 
       // ================================================================ ⑥ 直查库（事实）
@@ -241,9 +272,23 @@ test.describe('08-订单自动审核 › 1-自动过审与留人工', () => {
         expect(activeTagsOf(id1), '自动过审不该给订单打任何标').toHaveLength(0)
 
         // 命中条件留痕（matched_condition_json 与 miss/excluded 同一形状：策略组 → 条件数组）
-        const matchedJson = decisionJsonOf(id1, 1, 'matched_condition_json')
-        expect(matchedJson, 'matched_condition_json 应记下逐条件留痕').toContain('RECEIVABLE_AMOUNT')
-        expect(matchedJson, 'matched_condition_json 的 reason 应含具体差值').toContain('应收金额 268.00 < 500.00')
+        // ⚠️ 必须 parse 后按字段断言：MySQL 输出 JSON 列时会规范化成 `"policy_name": "直营-小单"`（带空格），
+        //    任何「字符串 contains」式断言都是假的（实测踩过，故统一走 decisionJsonOf 的结构化出口）。
+        const matched = decisionJsonOf(id1, 1, 'matched_condition_json')
+        expect(Array.isArray(matched), 'matched_condition_json 应是「策略组 → 条件数组」').toBe(true)
+        const hitGroup = missGroupOf(matched, POLICY_NAME.AUTO_TAOBAO)
+        expect(hitGroup.conditions.every((c) => c.satisfied === true), 'AUTO_PASS 的命中条件应**全部** satisfied')
+          .toBe(true)
+        const hitAmount = conditionOf(hitGroup, 'RECEIVABLE_AMOUNT')
+        expect(hitAmount.opCode, '应收条件是「小于」').toBe('LT')
+        expect(hitAmount.expected, '应收门槛应是 500.00').toBe('500.00')
+        expect(hitAmount.actual, '实际应收应是 268.00').toBe('268.00')
+        expect(String(hitAmount.reason), '该条件的人话应含具体差值').toContain('应收金额 268.00 < 500.00')
+        const hitKinds = conditionOf(hitGroup, 'ITEM_KIND_COUNT')
+        expect(hitKinds.opCode, '种类数是「小于等于」').toBe('LTE')
+        expect(hitKinds.expected, '种类数门槛应是 5').toBe('5')
+        expect(hitKinds.actual, '实际种类数应是 1（1 个 SKU × 2 件：件数不是种类数）').toBe('1')
+        expect(String(hitKinds.reason), '人话只有一句，且用种类数口径').toBe('商品种类数 1 ≤ 5')
 
         // ---- QT-1002 ----
         const dec2 = decisionsOf(id2)
@@ -258,13 +303,32 @@ test.describe('08-订单自动审核 › 1-自动过审与留人工', () => {
         expect(ledgerRowsOf(id2), '留人工不推进状态 → 不该有状态台账行').toHaveLength(0)
         expect(activeTagsOf(id2), 'MANUAL（排除型）不该打挂起标 —— 只有库存/成本预检降级才打').toHaveLength(0)
 
-        const excludedJson = decisionJsonOf(id2, 1, 'excluded_by_json')
-        expect(excludedJson, 'excluded_by_json 应指出是 CS_REMARK 这条全局排除挡的').toContain('CS_REMARK')
-        expect(excludedJson, 'excluded_by_json 应带「客服备注 含「改」」的人话').toContain('客服备注 含「改」')
-        const missJson = decisionJsonOf(id2, 1, 'miss_reason_json')
-        expect(missJson, 'miss_reason_json 应同时记下「直营-小单」这类真没命中的策略').toContain('CUSTOMER_TAG')
-        expect(missJson, 'miss_reason_json 应含未求值标记 evaluated=false（AND 链首个不满足之后）')
-          .toContain('"evaluated":false')
+        const excluded = decisionJsonOf(id2, 1, 'excluded_by_json')
+        expect(Array.isArray(excluded), 'excluded_by_json 应是数组').toBe(true)
+        const exGroup = missGroupOf(excluded, POLICY_NAME.AUTO_TAOBAO)
+        expect(exGroup.policyId, '被排除的策略组应是「淘宝-标准单」（就是它被挡下的）').toBeTruthy()
+        const csRemark = conditionOf(exGroup, 'CS_REMARK')
+        expect(csRemark.opCode, '全局排除用的是「含」').toBe('CONTAINS')
+        expect(String(csRemark.expected), '排除条件的期望值是「改」').toBe('改')
+        expect(String(csRemark.actual), '实际值应是完整客服备注').toContain('客户改地址')
+        expect(csRemark.satisfied, '这条排除确实成立（所以才转人工）').toBe(true)
+        expect(String(exGroup.reasons), '被排除的组应有「被排除：…」的人话').toContain('被排除')
+
+        const miss = decisionJsonOf(id2, 1, 'miss_reason_json')
+        expect(Array.isArray(miss), 'miss_reason_json 应是数组（逐策略一条）').toBe(true)
+        const missDirect = missGroupOf(miss, POLICY_NAME.AUTO_DIRECT)
+        const missTag = conditionOf(missDirect, 'CUSTOMER_TAG')
+        expect(missTag.satisfied, '直营-小单 的客户标签条件是**不**满足的（普通 ≠ 直营门店）').toBe(false)
+        expect(missTag.expected, '期望值应是「直营门店」').toBe('直营门店')
+        expect(missTag.actual, '实际值应是「普通」').toBe('普通')
+        // AND 链三态：首个不满足之后的条件标 evaluated=false（值照实给出，只是不再决定结论）
+        const unevalDirect = unevaluatedConditions([missDirect])
+        expect(unevalDirect.length, '直营-小单：客户标签之后的那条应收应标 evaluated=false').toBe(1)
+        expect(unevalDirect[0].fieldCode, '被标未求值的应是应收金额（268 < 300 其实满足）').toBe('RECEIVABLE_AMOUNT')
+        expect(unevalDirect[0].satisfied, '它其实是「满足」的 —— 所以页面上显示满足而不是未求值').toBe(true)
+        const missDouyin = missGroupOf(miss, POLICY_NAME.AUTO_DOUYIN)
+        expect(unevaluatedConditions([missDouyin]).length, '抖音-标准单：渠道之后的两条（应收/种类数）都标 evaluated=false')
+          .toBe(2)
       })
 
       // ================================================================ ⑦ 接口回读
@@ -276,8 +340,13 @@ test.describe('08-订单自动审核 › 1-自动过审与留人工', () => {
         // 关键：服务端把 *_json 列解析成了**结构**；前端据此才走「结论取自后端留痕」这一路（不是本地对撞）
         expect(Array.isArray(row.miss_reasons), 'miss_reasons 应是数组（服务端已解析 JSON 列）').toBe(true)
         expect(row.miss_reasons.length, 'miss_reasons 里应有未命中的策略组').toBeGreaterThan(0)
+        const apiDirect = missGroupOf(row.miss_reasons, POLICY_NAME.AUTO_DIRECT)
+        expect(conditionOf(apiDirect, 'CUSTOMER_TAG').satisfied, '接口里的留痕也要能判别「不满足」').toBe(false)
+        expect(unevaluatedConditions(row.miss_reasons).length, '接口应带回 evaluated=false（三态依据）')
+          .toBeGreaterThan(0)
         expect(Array.isArray(row.excluded_by), 'excluded_by 应是数组').toBe(true)
-        expect(JSON.stringify(row.excluded_by), 'excluded_by 应含客服备注这条全局排除').toContain('CS_REMARK')
+        expect(conditionOf(missGroupOf(row.excluded_by, POLICY_NAME.AUTO_TAOBAO), 'CS_REMARK').satisfied,
+          'excluded_by 里客服备注那条排除应是「成立」').toBe(true)
         // 队列行的原因文本在接口里叫 reason_text（SQL 别名；前端 mapQueueRow 同时认 reason / reason_text）
         expect(row.reason_text, '接口里的原因应含具体差值（不是空的）').toContain('客服备注 含「改」')
       })

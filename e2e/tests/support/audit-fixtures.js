@@ -58,11 +58,47 @@ const one = (sql) => queryDb(sql)
 /** 计数查询（无结果返回 0） */
 const countOf = (sql) => Number(one(sql) || 0)
 
-/** 多行查询 → 二维数组（每行按 \t 切开；无行返回 []） */
-const rowsOf = (sql) => queryDb(sql)
-  .split('\n')
-  .filter(Boolean)
-  .map((line) => line.split('\t'))
+/**
+ * 多列查询的行尾哨兵（由 rowsOf 自动加，调用方不用管）。
+ *
+ * 为什么非要有它（真实踩过）：support/db.js 的 queryDb 用 `mysql -N -B`（制表符分隔）并对输出
+ * 做了 `.trim()`。当**最后一列是空串/NULL** 时，末尾那个制表符正好被 trim 掉，`split('\t')`
+ * 于是少一格 → 最后一个字段变成 undefined。
+ * 实测：QT-1001 的 `order.cs_remark` 是 NULL → `orderFactOf('QT-1001').csRemark === undefined`
+ * （不是 null），断言「QT-1001 不应有客服备注」拿到 undefined 而红。
+ * 在**最外层**补一个恒非空的哨兵列后，空尾列不会再被吃掉；解析时弹掉哨兵并校验它确实在
+ * （形状不对就当场抛，绝不静默少列）。
+ */
+const EOR = '{EOR}'
+
+/**
+ * 多行查询 → 二维数组（每行按 \t 切开；无行返回 []）。
+ *
+ * 实现：把调用方的 SELECT **包进一层派生表**，在最外层拼哨兵列 ——
+ *   `SELECT *, '{EOR}' FROM (<你的 SQL>) AS _e2e_row`
+ * 为什么不直接把 `, '{EOR}'` 拼在语句末尾：调用方的语句常带 `WHERE … LIMIT 1` / `ORDER BY`，
+ * 拼在末尾会变成 `LIMIT 1, '{EOR}'` 直接语法错误（实测踩过）。
+ * 派生表要求列名唯一 —— 本文件所有 SELECT 的列名/表达式名都互不相同，满足要求。
+ */
+const rowsOf = (sql) => {
+  const text = queryDb(`SELECT *, '${EOR}' FROM (${sql}) AS _e2e_row`)
+  if (!text) return []
+  return text.split('\n').filter(Boolean).map((line) => {
+    const cells = line.split('\t')
+    const tail = cells.pop()
+    if (tail !== EOR) {
+      throw new Error(`行尾哨兵缺失（mysql 输出形状异常 / 少一列）：${line.slice(0, 160)}`)
+    }
+    return cells
+  })
+}
+
+/** 单行多列：多行里取第一行，取不到直接抛（定位不到行的话，后面所有断言都在测空气） */
+const rowOf = (sql, what) => {
+  const rows = rowsOf(sql)
+  if (!rows.length) throw new Error(`查不到 ${what}（SQL 返回 0 行）`)
+  return rows[0]
+}
 
 /* ------------------------------------------------------------------ ① 造数：铺 seed 基线 */
 
@@ -229,11 +265,13 @@ export function orderIdsOf(sns = DEMO_ORDER_SNS) {
 
 /** 订单上的判定输入事实 + 当前状态 */
 export function orderFactOf(orderSn) {
-  const [id, status, statusSeq, channel, shopName, totalAmount, grossProfit, csRemark] = one(
+  // 必须走 rowOf（带行尾哨兵）：cs_remark 为 NULL 时末列为空串，直接 split 会把最后一列吃掉
+  const [id, status, statusSeq, channel, shopName, totalAmount, grossProfit, csRemark] = rowOf(
     `SELECT id, status, status_seq, IFNULL(channel, ''), IFNULL(shop_name, ''), `
     + `IFNULL(total_amount, ''), IFNULL(gross_profit, ''), IFNULL(cs_remark, '') `
-    + `FROM \`order\` WHERE order_sn = ${q(orderSn)} LIMIT 1`
-  ).split('\t')
+    + `FROM \`order\` WHERE order_sn = ${q(orderSn)} LIMIT 1`,
+    `订单 ${orderSn}`
+  )
   return {
     id: Number(id),
     status: Number(status),
@@ -252,10 +290,11 @@ export function orderFactOf(orderSn) {
  */
 export function orderItemStatsOf(orderSn) {
   const orderId = orderIdOf(orderSn)
-  const [kinds, qty, lines] = one(
+  const [kinds, qty, lines] = rowOf(
     `SELECT COUNT(DISTINCT product_sku_id), COALESCE(SUM(product_quantity), 0), COUNT(*) `
-    + `FROM order_item WHERE order_id = ${orderId}`
-  ).split('\t')
+    + `FROM order_item WHERE order_id = ${orderId}`,
+    `订单 ${orderSn} 的明细统计`
+  )
   return { orderId, kinds: Number(kinds), qty: Number(qty), lines: Number(lines) }
 }
 
@@ -288,11 +327,64 @@ export function latestDecisionOf(orderId) {
   return all.length ? all[all.length - 1] : null
 }
 
-/** 决策行上的三段 JSON 留痕（原样字符串；断言用 includes / JSON.parse 都行） */
+/**
+ * 决策行上的三段 JSON 留痕，**已 parse 成结构**（不是字符串）。
+ *
+ * 为什么必须是结构：MySQL 的 JSON 列在 SELECT 出来时会被规范化输出成
+ * `{"policy_name": "直营-小单"}`（键与值之间有空格、键序也按长度重排），
+ * 所以「字符串 contains `"policy_name":"直营-小单"`」这种断言一定红（实测踩过）。
+ * 结构化的好处是断言能落到字段上：`ev.would_be.policy_name === '直营-小单'`、
+ * `cond.expected === '300.00'`、`cond.satisfied === false`、`cond.evaluated === true`。
+ *
+ * @param column miss_reason_json | matched_condition_json | excluded_by_json | evidence_json
+ * @returns {object|Array} 解析后的对象；列为 NULL 时抛（不是静默返回 null，免得断言空转）
+ */
 export function decisionJsonOf(orderId, roundNo, column = 'miss_reason_json') {
   const allowed = ['miss_reason_json', 'matched_condition_json', 'excluded_by_json', 'evidence_json']
   if (!allowed.includes(column)) throw new Error(`decisionJsonOf 不支持列 ${column}`)
-  return one(`SELECT IFNULL(${column}, '') FROM order_audit_decision WHERE order_id = ${orderId} AND round_no = ${roundNo}`)
+  const text = one(
+    `SELECT IFNULL(${column}, '') FROM order_audit_decision WHERE order_id = ${orderId} AND round_no = ${roundNo}`
+  )
+  if (!text) throw new Error(`订单 ${orderId} 第 ${roundNo} 轮的 ${column} 是空的（这条决策没留痕？）`)
+  try {
+    return JSON.parse(text)
+  } catch (e) {
+    throw new Error(`订单 ${orderId} 第 ${roundNo} 轮的 ${column} 不是合法 JSON：${e.message}`)
+  }
+}
+
+/* ------------------------------------------------------------------ ⑤b 结构化留痕的取用小工具
+ *
+ * 三段 JSON 的公共形状是「策略组 → 条件数组」：
+ *   [{ policyId, policyName, reasons: [人话…], conditions: [{ seq, fieldCode, fieldLabel, opCode,
+ *      expected, actual, satisfied, evaluated, reason }] }]
+ * 断言只要「某策略的某字段那条条件」，别写字符串匹配。
+ */
+
+/** 取某个策略组（按策略名；找不到直接抛，带出现过的策略名便于排查） */
+export function missGroupOf(groups, policyName) {
+  const list = Array.isArray(groups) ? groups : [groups]
+  const hit = list.find((g) => String(g.policyName || g.policy_name) === policyName)
+  if (!hit) {
+    throw new Error(`留痕里没有策略「${policyName}」，实际有：${list.map((g) => g.policyName || g.policy_name).join('、')}`)
+  }
+  return hit
+}
+
+/** 取策略组里某个字段的那条条件（按 fieldCode） */
+export function conditionOf(group, fieldCode) {
+  const hit = (group.conditions || []).find((c) => String(c.fieldCode || c.field) === fieldCode)
+  if (!hit) {
+    throw new Error(`策略「${group.policyName || ''}」的留痕里没有字段 ${fieldCode}，实际有：`
+      + (group.conditions || []).map((c) => c.fieldCode || c.field).join('、'))
+  }
+  return hit
+}
+
+/** 所有组里 evaluated=false 的条件（AND 链首个不满足之后的那几条） */
+export function unevaluatedConditions(groups) {
+  const list = Array.isArray(groups) ? groups : [groups]
+  return list.flatMap((g) => (g.conditions || []).filter((c) => c.evaluated === false))
 }
 
 /** 订单状态台账（按记账顺序） */

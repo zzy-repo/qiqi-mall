@@ -12,6 +12,7 @@ import {
   orderFactOf,
   decisionsOf,
   decisionJsonOf,
+  conditionOf,
   ledgerRowsOf,
   activeTagsOf,
   allTagsOf,
@@ -122,14 +123,24 @@ test.describe('08-订单自动审核 › 2-阻止与冻结', () => {
         expect(ledgerRowsOf(f.id), '阻止不写状态台账（拦是结论，不是动作）').toHaveLength(0)
         expect(activeTagsOf(f.id), '阻止不打任何标（冻结才是标）').toHaveLength(0)
 
-        // would-be 的完整形态：命中方式和真过审完全一样，只是结论被丢弃（证据在 evidence_json 里）
+        // would-be 的完整形态：命中方式和真过审完全一样，只是结论被丢弃（证据在 evidence_json 里）。
+        // ⚠️ 按**结构**断言：MySQL 输出 JSON 列时是 `"policy_name": "直营-小单"`（键值之间有空格），
+        //    任何「字符串 contains `"policy_name":"直营-小单"`」都必红（实测踩过）。
         const evidence = decisionJsonOf(f.id, 1, 'evidence_json')
-        expect(evidence, 'evidence_json.would_be.policy_name 应是「直营-小单」')
-          .toContain(`"policy_name":"${POLICY_NAME.AUTO_DIRECT}"`)
-        expect(evidence, 'would_be 的条件留痕应带上门槛 300（应收 199 < 300 才会命中）')
-          .toContain('RECEIVABLE_AMOUNT')
-        expect(evidence, 'evidence_json 应记下这次命中的是谁（reason 里的具体差值）')
-          .toContain('毛利 −12.00 ≤ 0')
+        expect(evidence.result, 'evidence.result 应是 BLOCKED').toBe('BLOCKED')
+        expect(evidence.would_be?.policy_name, 'evidence.would_be.policy_name 应是「直营-小单」')
+          .toBe(POLICY_NAME.AUTO_DIRECT)
+        expect(evidence.would_be?.policy_id, 'would_be 应带上策略 id（不是只有名字）').toBeTruthy()
+        // would_be 的条件留痕：命中方式和真过审完全一样，门槛与实值都在
+        const wouldBeConds = evidence.would_be?.conditions || []
+        expect(Array.isArray(wouldBeConds), 'would_be.conditions 应是条件数组').toBe(true)
+        const wbAmount = conditionOf({ policyName: '直营-小单', conditions: wouldBeConds }, 'RECEIVABLE_AMOUNT')
+        expect(wbAmount.expected, 'would_be 的应收门槛应是 300.00（应收 199 < 300 才会命中）').toBe('300.00')
+        expect(wbAmount.actual, '该单实际应收 199.00').toBe('199.00')
+        expect(wbAmount.satisfied, 'would_be 的条件当然是满足的（否则它也不叫 would-be）').toBe(true)
+        expect(evidence.cost?.gross_profit, 'evidence.cost.gross_profit 应是 −12').toBe(-12)
+        expect(String(evidence.reason), 'evidence_json 的 reason 应含具体数值差')
+          .toContain('毛利 −12.00 ≤ 0.00')
       })
 
       await test.step('④ 接口回显：队列行带回 would_be_auto_policy_name（页面暂不展示 —— 已登记前端缺口）', async () => {

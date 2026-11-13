@@ -18,11 +18,14 @@ import {
   orderItemStatsOf,
   decisionsOf,
   decisionJsonOf,
+  missGroupOf,
+  conditionOf,
+  unevaluatedConditions,
   ledgerRowsOf,
   activeTagsOf,
   POLICY_NAME
 } from '../../support/audit-fixtures.js'
-import { getQueueRowOf } from '../../support/audit-api.js'
+import { getQueueRowOf, getPolicyOf } from '../../support/audit-api.js'
 import {
   gotoAuditQueue,
   auditQueueRow,
@@ -31,7 +34,11 @@ import {
   reasonSubOf,
   runAuditViaUi,
   openWhyDrawer,
-  closeWhyDrawer
+  closeWhyDrawer,
+  whyGroupOf,
+  whyCondRow,
+  whyRowMiss,
+  whyRowUnevaluated
 } from '../../support/audit-ui.js'
 
 /**
@@ -76,6 +83,10 @@ test.describe('08-订单自动审核 › 3-不命中与差在哪', () => {
     await adminLoginHardened(page)
     const token = await adminTokenOf(page)
 
+    // 抽屉里的策略组按 id 精确取（前缀选择器会同时命中组标题的 audit-why-policy-name-<id>）
+    const taobaoPolicy = await getPolicyOf(request, token, POLICY_NAME.AUTO_TAOBAO)
+    const douyinPolicy = await getPolicyOf(request, token, POLICY_NAME.AUTO_DOUYIN)
+
     try {
       await test.step('① 复位基线：两笔单的判定输入事实（金额 / 种类数 / 件数）', async () => {
         resetAuditDemoBaseline()
@@ -119,9 +130,16 @@ test.describe('08-订单自动审核 › 3-不命中与差在哪', () => {
         await expect(badgeOf(row3), 'QT-1003 徽标应是 NO_MATCH').toHaveAttribute('data-result', 'NO_MATCH')
         await expect(badgeOf(row3), 'QT-1003 徽标文案应是「不命中」').toHaveText('不命中')
         await expect(reasonMainOf(row3), '原因首句应是「没有任何自动策略命中」').toContainText('没有任何自动策略命中')
+        // 灰字是引擎原话：逐条策略、只列**真不满足**的条件（实测文案：直营-小单 客户标签+应收<300；
+        // 淘宝-标准单 渠道+应收<500；抖音-标准单 应收<500 —— 种类数 1≤5 满足，故一句都不出现）
         await expect(reasonSubOf(row3), '灰字原因应逐条列出差在哪，含「应收金额 1580.00 < 500.00」')
           .toContainText('应收金额 1580.00 < 500.00')
-        await expect(reasonSubOf(row3), 'QT-1003 的灰字原因里**不该**有种类数那句').not.toContainText('商品种类数')
+        await expect(reasonSubOf(row3), '淘宝-标准单 差在渠道：期望淘宝、实际抖音').toContainText('渠道 = 淘宝（实际 抖音）')
+        await expect(reasonSubOf(row3), '直营-小单 差在客户标签').toContainText('客户标签 = 直营门店（实际 普通）')
+        await expect(reasonSubOf(row3), '直营-小单 也差应收门槛 300（1580 < 300 同样是假）')
+          .toContainText('应收金额 1580.00 < 300.00')
+        await expect(reasonSubOf(row3), 'QT-1003 的灰字原因里**不该**有种类数那句（1 ≤ 5 满足）')
+          .not.toContainText('商品种类数')
         await expect(row3, 'QT-1003 应是第 1 轮').toContainText('第 1 轮')
         await expect(row3, 'QT-1003 应收列应显示 1580.00').toContainText('1580.00')
 
@@ -132,8 +150,19 @@ test.describe('08-订单自动审核 › 3-不命中与差在哪', () => {
           .toContainText('没有任何自动策略命中')
         await expect(reasonSubOf(row6), 'QT-1006 灰字原因应含「商品种类数 6 ≤ 5」')
           .toContainText('商品种类数 6 ≤ 5')
-        await expect(reasonSubOf(row6), 'QT-1006 灰字原因也应列出渠道/客户标签这两条真差的条件')
-          .toContainText('渠道 = 淘宝')
+        // 实测原文：直营-小单：客户标签 = 直营门店（实际 普通）；应收金额 420.00 < 300.00
+        //           | 淘宝-标准单：商品种类数 6 ≤ 5
+        //           | 抖音-标准单：渠道 = 抖音（实际 淘宝）；商品种类数 6 ≤ 5
+        await expect(reasonSubOf(row6), '抖音-标准单 差在渠道：期望抖音、实际淘宝（不是「渠道 = 淘宝」）')
+          .toContainText('渠道 = 抖音（实际 淘宝）')
+        await expect(reasonSubOf(row6), '直营-小单 差在客户标签').toContainText('客户标签 = 直营门店（实际 普通）')
+        await expect(reasonSubOf(row6), '直营-小单 也差应收门槛 300（420 < 300）')
+          .toContainText('应收金额 420.00 < 300.00')
+        // **满足的条件一句都不出现**：淘宝-标准单 的渠道/应收都满足，文案里不该有它们
+        await expect(reasonSubOf(row6), '淘宝-标准单 的渠道是满足的，不该出现在「差在哪」里')
+          .not.toContainText('渠道 = 淘宝（实际 淘宝）')
+        await expect(reasonSubOf(row6), '淘宝-标准单 的应收 420 < 500 是满足的，不该出现在「差在哪」里')
+          .not.toContainText('应收金额 420.00 < 500.00')
       })
 
       await test.step('④ 差在哪抽屉（QT-1003）：逐策略逐条件 expected vs actual，未求值 ≠ 不满足', async () => {
@@ -147,8 +176,10 @@ test.describe('08-订单自动审核 › 3-不命中与差在哪', () => {
         // 三条 AUTO 策略各差一条：直营-小单（客户标签）、淘宝-标准单（渠道）、抖音-标准单（应收）
         const marks = drawer.getByTestId('audit-why-mark')
         await expect(marks, '三条 AUTO 策略各有一行标「← 差在哪」').toHaveCount(3)
-        const unevaluated = drawer.getByTestId('audit-why-unevaluated')
-        await expect(unevaluated, '首个不满足之后的条件应标「未求值」（本单有 2 条落在这一点上）')
+        await expect(whyRowMiss(drawer), '「不满足」的真实数据行恰好 3 行（每个策略各一条）').toHaveCount(3)
+        // 未求值按**行级 class** 数：真实是 2 行（直营的应收 1580<300、淘宝的应收 1580<500）。
+        // 不能数 testid —— el-table 的 hidden-columns 每张策略表会多克隆一个「未求值」节点（实测数出 5 个）。
+        await expect(whyRowUnevaluated(drawer), '首个不满足之后仍不满足的条件应标「未求值」（2 行）')
           .toHaveCount(2)
 
         // 具体差值：抽屉里的「后端留痕」行原样保留引擎的文案
@@ -159,10 +190,20 @@ test.describe('08-订单自动审核 › 3-不命中与差在哪', () => {
         await expect(drawer, '抽屉里应写出淘宝-标准单差在哪（渠道 = 淘宝，实际 抖音）')
           .toContainText('渠道 = 淘宝')
         // 种类数这条在抖音-标准单里是「满足」的（1 ≤ 5），所以它不该出现在那条策略的「差在哪」文案里
-        const douyinGroup = drawer.locator('[data-testid^="audit-why-policy-"]').filter({ hasText: POLICY_NAME.AUTO_DOUYIN })
+        const douyinGroup = whyGroupOf(drawer, douyinPolicy.id)
         await expect(douyinGroup, '抽屉里应有「抖音-标准单」这一组').toBeVisible()
         await expect(douyinGroup.locator('.why-backend-lines'), '抖音-标准单 的「差在哪」文案里不该有种类数那句')
           .not.toContainText('商品种类数')
+        // 字段级三态（这一条是本用例的核心）：渠道满足 → 无标记；应收不满足 → 标「差在哪」；种类数满足 → 无标记
+        await expect(whyCondRow(douyinGroup, 'CHANNEL').getByTestId('audit-why-mark'),
+          '抖音-标准单 的渠道条件满足（抖音=抖音），不该标「差在哪」').toHaveCount(0)
+        await expect(whyCondRow(douyinGroup, 'CHANNEL'), '该行要写清期望与实际（抖音 / 抖音）').toContainText('抖音')
+        await expect(whyCondRow(douyinGroup, 'RECEIVABLE_AMOUNT').getByTestId('audit-why-mark'),
+          '应收 1580 < 500 不满足，必须标「← 差在哪」').toHaveCount(1)
+        await expect(whyCondRow(douyinGroup, 'RECEIVABLE_AMOUNT'), '该行期望 500、实际 1580')
+          .toContainText('1580')
+        await expect(whyCondRow(douyinGroup, 'ITEM_KIND_COUNT').getByTestId('audit-why-mark'),
+          '种类数 1 ≤ 5 满足，不该标「差在哪」').toHaveCount(0)
 
         await closeWhyDrawer(page)
       })
@@ -174,11 +215,19 @@ test.describe('08-订单自动审核 › 3-不命中与差在哪', () => {
         await expect(marks, '应至少有一行标「← 差在哪」（种类数 6 ≤ 5）').not.toHaveCount(0)
         await expect(drawer, '抽屉里应原样写出「商品种类数 6 ≤ 5」').toContainText('商品种类数 6 ≤ 5')
         // 淘宝-标准单 的三个条件里，种类数是最后一条：它不满足 → 同组内没有「未求值」行
-        const taobaoGroup = drawer.locator('[data-testid^="audit-why-policy-"]').filter({ hasText: POLICY_NAME.AUTO_TAOBAO })
+        const taobaoGroup = whyGroupOf(drawer, taobaoPolicy.id)
         await expect(taobaoGroup, '抽屉里应有「淘宝-标准单」这一组').toBeVisible()
-        await expect(taobaoGroup.getByTestId('audit-why-unevaluated'), '这条策略的三个条件都被求值过，不该有未求值行')
+        await expect(whyRowUnevaluated(taobaoGroup), '这条策略的三个条件都被求值过，不该有未求值行')
           .toHaveCount(0)
         await expect(taobaoGroup.getByTestId('audit-why-mark'), '差在种类数这一条（6 > 5）').toHaveCount(1)
+        // 字段级：渠道满足、应收 420<500 满足、种类数 6>5 不满足
+        await expect(whyCondRow(taobaoGroup, 'CHANNEL').getByTestId('audit-why-mark'),
+          '淘宝-标准单 的渠道条件满足（淘宝=淘宝），不该标「差在哪」').toHaveCount(0)
+        await expect(whyCondRow(taobaoGroup, 'RECEIVABLE_AMOUNT').getByTestId('audit-why-mark'),
+          '应收 420 < 500 满足，不该标「差在哪」').toHaveCount(0)
+        await expect(whyCondRow(taobaoGroup, 'ITEM_KIND_COUNT').getByTestId('audit-why-mark'),
+          '种类数 6 > 5 不满足，必须标「← 差在哪」').toHaveCount(1)
+        await expect(whyCondRow(taobaoGroup, 'ITEM_KIND_COUNT'), '该行期望 5、实际 6').toContainText('6')
 
         await closeWhyDrawer(page)
       })
@@ -200,10 +249,46 @@ test.describe('08-订单自动审核 › 3-不命中与差在哪', () => {
           expect(activeTagsOf(f.id), `${sn} 不该打标`).toHaveLength(0)
           // miss_reason_json 是「逐条策略差在哪」的结构化留痕（不是一句人话）
           const miss = decisionJsonOf(f.id, 1, 'miss_reason_json')
-          expect(miss, `${sn} 的 miss_reason_json 应含策略名与条件码`).toContain('policyName')
-          expect(miss, `${sn} 的 miss_reason_json 应含 expected/actual 两列`).toContain('"actual"')
-          expect(miss, `${sn} 的 miss_reason_json 应带 evaluated 三态依据`).toContain('"evaluated"')
+          expect(Array.isArray(miss), `${sn} 的 miss_reason_json 应是数组`).toBe(true)
+          const groups = miss.map((g) => String(g.policyName))
+          expect(groups, `${sn} 的留痕应逐条列出三条 AUTO 策略`)
+            .toEqual(expect.arrayContaining([POLICY_NAME.AUTO_DIRECT, POLICY_NAME.AUTO_TAOBAO, POLICY_NAME.AUTO_DOUYIN]))
         }
+
+        // ---- 逐字段：把「差在哪一条、期望多少、实际多少、有没有被求值」钉死 ----
+        const id3 = orderFactOf('QT-1003').id
+        const id6 = orderFactOf('QT-1006').id
+
+        // QT-1003：抖音-标准单 渠道满足、应收 1580<500 不满足、种类数 1≤5 满足但 evaluated=false
+        const miss3 = decisionJsonOf(id3, 1, 'miss_reason_json')
+        const douyin3 = missGroupOf(miss3, POLICY_NAME.AUTO_DOUYIN)
+        const channel3 = conditionOf(douyin3, 'CHANNEL')
+        expect(channel3.satisfied, 'QT-1003 渠道=抖音，抖音-标准单 的渠道条件应满足').toBe(true)
+        const amount3 = conditionOf(douyin3, 'RECEIVABLE_AMOUNT')
+        expect(amount3.opCode, '应收是「小于」').toBe('LT')
+        expect(amount3.expected, '应收门槛 500.00').toBe('500.00')
+        expect(amount3.actual, '实际应收 1580.00').toBe('1580.00')
+        expect(amount3.satisfied, '1580 < 500 不成立').toBe(false)
+        const kinds3 = conditionOf(douyin3, 'ITEM_KIND_COUNT')
+        expect(kinds3.satisfied, '种类数 1 ≤ 5 其实是满足的').toBe(true)
+        expect(kinds3.evaluated, '但它在首个不满足之后 → evaluated=false（这就是「未求值」的来源）').toBe(false)
+        expect(String(douyin3.reasons.join('|')), '抖音-标准单 的人话里只该有应收那句').toContain('应收金额 1580.00 < 500.00')
+        expect(String(douyin3.reasons.join('|')), '抖音-标准单 的人话里不该有种类数那句')
+          .not.toContain('商品种类数')
+
+        // QT-1006：淘宝-标准单 渠道/应收满足、种类数 6>5 不满足（三个条件都被求值过）
+        const miss6 = decisionJsonOf(id6, 1, 'miss_reason_json')
+        const taobao6 = missGroupOf(miss6, POLICY_NAME.AUTO_TAOBAO)
+        expect(conditionOf(taobao6, 'CHANNEL').satisfied, 'QT-1006 渠道=淘宝，该条件满足').toBe(true)
+        expect(conditionOf(taobao6, 'RECEIVABLE_AMOUNT').satisfied, '420 < 500 满足').toBe(true)
+        const kinds6 = conditionOf(taobao6, 'ITEM_KIND_COUNT')
+        expect(kinds6.opCode).toBe('LTE')
+        expect(kinds6.expected, '种类数门槛 5').toBe('5')
+        expect(kinds6.actual, '实际 6 个样').toBe('6')
+        expect(kinds6.satisfied, '6 ≤ 5 不成立').toBe(false)
+        expect(unevaluatedConditions([taobao6]).length, '这条策略的三个条件都被求值过，没有 evaluated=false').toBe(0)
+        expect(String(taobao6.reasons.join('|')), '淘宝-标准单 的人话里应只有种类数那句')
+          .toContain('商品种类数 6 ≤ 5')
       })
 
       await test.step('⑦ 接口回读：种类数口径来自服务端（QT-1003=1 / QT-1006=6）', async () => {

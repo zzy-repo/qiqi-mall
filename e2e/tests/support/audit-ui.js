@@ -108,6 +108,41 @@ export const closeWhyDrawer = async (page) => {
   }
 }
 
+/* ------------------------------------------------------------------ 「差在哪」的三态行
+ *
+ * ⚠️ 为什么按**行级 class** 数，而不是数 testid：
+ * Element Plus 的 el-table 会把每一列的内容克隆一份到 `hidden-columns` 里（用于列宽测量）。
+ * 「结论」列是 `v-if 满足 / v-else-if 不满足 / v-else 未求值` 的三分支，克隆时用的是 dummy row
+ * （status 既不是 satisfied 也不是 unsatisfied），于是**必然落进 v-else** →
+ * 每张策略表都会凭空多出一个 `data-testid="audit-why-unevaluated"` 节点。
+ * 实测：QT-1003 的抽屉里真实未求值行 2 行，但 `getByTestId('audit-why-unevaluated')` 数出 5 个
+ * （2 行 + 3 张策略表各 1 个克隆）。
+ * 行级 class 由 `:row-class-name` 写在 <tr> 上，只有真实数据行才有：
+ *   `.why-row-miss`（不满足，右侧标「← 差在哪」）/ `.why-row-unevaluated`（未求值）。
+ */
+
+/** 抽屉里「不满足」的真实数据行（每行右侧有「← 差在哪」） */
+export const whyRowMiss = (root) => root.locator('.el-table__body tr.why-row-miss')
+
+/** 抽屉里「未求值」的真实数据行（灰色，不是「不满足」） */
+export const whyRowUnevaluated = (root) => root.locator('.el-table__body tr.why-row-unevaluated')
+
+/**
+ * 抽屉里的「某一条策略」那一组（按**精确** testid 取：`audit-why-policy-${policyId}`）。
+ *
+ * ⚠️ 不要用前缀选择器 `[data-testid^="audit-why-policy-"]`：前端除了组容器
+ * `audit-why-policy-<id>`，还给组标题加了 `audit-why-policy-name-<id>`，前缀会把两者都匹配上
+ * → strict mode violation（实测踩过）。按 id 精确取，一个组只有一个节点。
+ */
+export const whyGroupOf = (drawer, policyId) => drawer.getByTestId(`audit-why-policy-${policyId}`)
+
+/**
+ * 「差在哪」抽屉里某个策略组内、某个字段的那一行。
+ * 字段列同时显示中文名与字段码（`.mono`），用**字段码**过滤最稳（中文名可能重复）。
+ */
+export const whyCondRow = (group, fieldCode) =>
+  group.locator('.el-table__body tr').filter({ hasText: fieldCode })
+
 /* ------------------------------------------------------------------ 单笔抽屉（审核轨迹） */
 
 /**
