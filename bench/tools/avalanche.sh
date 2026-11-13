@@ -55,7 +55,10 @@ MYCPU_PID=""; DIG_PID=""
 cleanup() {
   for p in "$CG_PID" "$ENV_PID" "$DS_PID" "$WD_PID" "$MY_PID" "$DUMP_PID" "$MYCPU_PID" "$DIG_PID"; do [ -n "$p" ] && kill "$p" 2>/dev/null; done
   if [ -n "$GEN_PID" ] && kill -0 "$GEN_PID" 2>/dev/null; then kill "$GEN_PID" 2>/dev/null; fi
-  [ -x "$LOCK" ] && "$LOCK" release >>"$LOG" 2>&1 || true
+  # ⚠️ 只释放**自己拿到**的锁：acquire 失败时也走 EXIT trap，无条件 release 会把
+  #    **别人正在跑的**锁释放掉（本轮实测踩过：一轮 acquire 失败 → release 了别人的锁 →
+  #    下一轮立刻"成功"拿到锁 → 两个压测并发跑，两轮数据同时作废）。见 LOCK_HELD。
+  if [ "${LOCK_HELD:-0}" = "1" ] && [ -x "$LOCK" ]; then "$LOCK" release >>"$LOG" 2>&1 || true; fi
 }
 trap cleanup EXIT INT TERM
 
@@ -64,9 +67,11 @@ log "=== 0. 前置检查 ==="
 PW=$(ps -eo pid,cmd | grep -i playwright | grep -v grep | grep -v 'bash -c' || true)
 if [ -n "$PW" ]; then log "✗ 有人在跑 e2e（playwright），退出：$PW"; exit 3; fi
 log "✅ 无 e2e 在跑"
+LOCK_HELD=0
 if ! "$LOCK" acquire "avalanche-$LABEL" >>"$LOG" 2>&1; then
   echo "✗ 压测锁被占：$("$LOCK" status 2>&1 | head -2)" >&2; exit 3
 fi
+LOCK_HELD=1
 log "✅ 已持压测独占锁"
 for c in $CONTAINERS; do
   st=$(docker inspect "$c" --format '{{.State.Health.Status}}' 2>/dev/null)

@@ -616,6 +616,11 @@ python3 bench/tools/poolcmp.py bench/results/2026-11-14-avalanche-pool{10-r1,10-
 | `tools/QpsProbe.java` | 单文件 Java 探针：N 条连接闭环保压 `SELECT 1`，输出 qps/p50/p99 | 要一个**与业务代码无关**的外部常量（QPS_cap），否则「改吞吐 + 改每单条数」是自证 |
 | `tools/qpscap.sh` | 两段式测 QPS_cap：①机器空闲裸能力 ②**450 rps 下单负载跑着时**的探针 | ①证明机器没变；②才是「业务饱和时 MySQL 还剩多少语句能力」 |
 | `tools/sqlmerge.py` | 多轮 A/B 并列表 + 每臂拐区起点/饱和点 + 因果检验（预测 vs 实测） | 单轮数字分不出 ±3% 的差别 |
+| `tools/jdbc-url.sh` + `bench/jdbc-url.override.yml` | 只改 **JDBC URL 参数**（`SPRING_DATASOURCE_URL` 注入，完整 URL 透传），A/B 两臂连注入路径都一致 | 本轮要验 `useLocalSessionState`，而任务禁止改代码/重建镜像 —— 一个环境变量就是全部改动，`docker inspect` 可直接取证 |
+| `tools/probecheck.sh` | 小负荷跑一段 + DIGEST 做差 → **每单语句数 / 探针条数**（改动是否生效的语句级证据） | 吞吐会被 JIT/热机/GC 污染，语句级观察不会 |
+| `tools/localsess.py` | 本轮判读：两臂各轮 ok/s 逐轮值+中位、探针/单、预测 vs 实测误差、`ok×语句/单`自证 | 中位数要能看见逐轮原始值；冷启动/饱和两条判据要写进代码 |
+| `tools/audit-data.sql` + `audit-data.sh` | 压测后数据正确性：订单↔明细↔台账、金额、桶守恒、唯一性、负库存 | 「快但记错账」是灾难，TPS 不能当验收 |
+| `tools/audit-flow.sh` | 真实 HTTP 业务链审计：下单 → 库存不足回滚 → 支付 → 重复支付幂等 → 三方一致扫描 | `mvn test` 跑的是**没带该参数**的配置，补不了这一块 |
 | `tools/jar-deploy.sh` + `bench/jar-mount.override.yml` | 把 mvn 出来的 jar **只读挂**到 `/app/app.jar` 再重建容器 | 任务要求改业务代码，又禁止重建镜像：挂 jar 是唯一同时满足两者的做法，且 A/B 两臂除 jar 内容外完全同构（同一镜像 digest、同一 JAVA_OPTS、同一 Hikari 10） |
 
 `avalanche.sh` 顺手挂上了这三个采样器（`MYSQL_CGROUP` / `SQLPROFILE` 默认开），
@@ -834,3 +839,135 @@ MEMBER_PASS='<自选>' STEPS=380,400,420,450 STEP_DURATION=75 WARMUP=90 WARMUP_R
 python3 bench/tools/sqlprofile.py bench/results/<日期>-avalanche-sqlmerge-r1
 python3 bench/tools/sqlmerge.py --a results/<改前…r1> results/<改前…r2> --b results/<改后…r1> results/<改后…r2>
 ```
+
+---
+
+## 14. 最后一个变量：`useLocalSessionState=true` 能不能换到预测的 627？—— **不能（+10.5%），但该开**
+
+上一轮 §13.7 把「关掉 7 条 `SELECT @@SESSION.transaction_read_only` 探针」列为性价比最高的下一步，
+并按不变式预测 ok/s ≈ 8215 ÷ 13.1 ≈ **627**。本轮把这个变量单独拿出来做对照。
+
+### 14.1 结论先行
+
+| 问题 | 答案 |
+| --- | --- |
+| 安全吗？ | **安全**。全仓 grep 无一处"绕过驱动改会话状态"（§14.3），且在开着参数的容器上跑通了回滚/支付/幂等（§14.5） |
+| 生效了吗？ | **生效**。探针 **5.80 条/单 → 0 条/单**（DIGEST 整条消失），每单语句数 18.2~18.9 → 12.2~12.7（§14.4） |
+| 吞吐到 627 了吗？ | **没有**。天花板 **447.6 → 494.4 ok/s（+10.5%，峰值 501.4）**，实测 vs 预测 627 差 **−21%** |
+| 该开吗？ | **该开**（一行配置、零代码、数据零差异、+10%）；但**不要**拿 627 做容量规划 |
+| 不变式还成立吗？ | **作为预测工具不成立**：`ok/s × 语句/单` 这个"常量"从 7.9k~8.4k 掉到 5.2k~6.2k，它随语句数一起变（§14.6） |
+
+完整报告：`results/2026-11-14-avalanche-localsession/REPORT.md`。
+
+### 14.2 怎么只改这一个变量（不重建镜像、不改代码、不改池）
+
+```bash
+# A 臂：合并版 jar + 与 yml 等价的完整 URL（不带参数）
+bench/tools/jdbc-url.sh apply false /tmp/loadgen/jar/b/app.jar
+# B 臂：同一个 jar + 同一个 URL + 只多 &useLocalSessionState=true
+bench/tools/jdbc-url.sh apply true  /tmp/loadgen/jar/b/app.jar
+# 还原发行态（拆 URL 注入 + jar 挂载 + GC 日志）
+bench/tools/jdbc-url.sh off
+```
+
+原理：`bench/jdbc-url.override.yml` 只做**透传**，把完整 JDBC URL 通过 `SPRING_DATASOURCE_URL` 环境变量注入
+（Spring Boot 宽松绑定，优先级高于 `application-test.yml`）。两臂的**注入路径完全一致**，只差那一个参数；
+`docker inspect` 打印的容器内变量是生效证据，**语句级证据**是 `tools/probecheck.sh`（见 §14.4）。
+
+### 14.3 安全证据：grep 全仓（这决定能不能做）
+
+```bash
+# 全部命中与逐条结论：results/2026-11-14-avalanche-localsession/security-grep.txt
+```
+
+| 模式 | 命中 | 结论 |
+| --- | --- | --- |
+| `SET autocommit` / `SET SESSION` / `SET TRANSACTION` / `SET @@` / `SET GLOBAL` | 代码中 **0**（唯一 1 处是本文档自己的画像表格） | 无绕过驱动改状态 |
+| `setTransactionIsolation(` / `setReadOnly(` / `@Transactional(isolation` / `isolation =` | **0** | `src/main` 里 37 处 `@Transactional` 注解只有 `rollbackFor`(35)/`REQUIRES_NEW`(2)，无一处隔离级别 |
+| `connection-init-sql` / `sessionVariables` / `SET NAMES` / `SET time_zone` / `SET sql_mode` | **0** | 连接池不在借出/归还时执行 SET |
+| `setAutoCommit(` | **3**，全在 `src/test` | **安全**：走驱动自己的 API，`useLocalSessionState` 正是"以 API 设定值为准"，本地视图同步更新 |
+| `getConnection(` / `DataSource`/`JdbcTemplate` 注入 | 生产 `src/main` **0**（3 处在 test，1 处是我们自己的 `QpsProbe`） | 不存在绕过 Spring 事务的原生 JDBC 路径 |
+| `TransactionTemplate` | `PaymentRecordServiceImpl`（REQUIRES_NEW）+ test | 仍走 `DataSourceTransactionManager`，事务边界由驱动 API 控制 |
+| `SET @x`（**用户变量**） | 78 处（seed/reset 脚本、`_rollback/migrate-*.sql`、`V2__channel_sync_idem.sql`） | **安全**：用户变量不属于驱动缓存的三样会话状态（autocommit/isolation/read-only）；且脚本是**另一个 mysql 会话** |
+
+### 14.4 生效的硬证据（不要只看吞吐）
+
+```bash
+MEMBER_PASS='<自选>' bench/tools/probecheck.sh armA 300 40    # → 探针 5.80 条/单
+MEMBER_PASS='<自选>' bench/tools/probecheck.sh armB 300 40    # → 探针 0.00 条/单
+```
+
+| 300rps 档 | A（默认 false） | B（true） |
+| --- | --: | --: |
+| 每单语句数 | 17.38 | 11.43 |
+| `SELECT @@SESSION.transaction_read_only` | **5.80 条/单**（占全部语句 33.4%） | **0**（DIGEST 整条消失） |
+| `SET autocommit = ?` | 1.93 | 1.90（**没变**：这个参数只省"问服务器"） |
+| driver 类合计 | 8.69 | 2.85 |
+
+### 14.5 阶梯对照（420/450/480/520/560/600，75s/档，预热 90s@378，3 轮取中位）
+
+| λ | A ok/s 中位 | B ok/s 中位 | Δ | A 语句/单 | B 语句/单 | B 探针/单 |
+| --: | --: | --: | --: | --: | --: | --: |
+| 420 | 419.9 | 419.9 | +0.0%（都压满目标） | 18.91 | 12.42 | 0.00 |
+| 450 | 449.9 | 449.9 | +0.0%（都压满目标） | 18.20 | 12.70 | 0.00 |
+| 480 | 434.0 | **479.9** | **+10.6%** | 18.79 | 12.49 | 0.00 |
+| 520 | 431.6 | **501.4** | **+16.2%** | 18.36 | 12.25 | 0.00 |
+| 560 | 445.2 | 484.6 | +8.9% | 18.58 | 12.33 | 0.00 |
+| 600 | 447.6 | 494.4 | +10.5% | 18.76 | 12.47 | 0.00 |
+
+```bash
+python3 bench/tools/localsess.py --a results/…-localsessA-r{1,2,3} --b results/…-localsessB-r{1,2,3}
+```
+
+### 14.6 为什么没到 627：`QPS_cap` 不是常量
+
+`ok/s × 语句/单`（上一轮说的"语句预算"）：A 臂 7,922~8,398 ／ B 臂 **5,216~6,165**。掉 27%，而语句数掉 33%
+⇒ 它几乎与每单语句数成正比 ⇒ 它其实是同一条方程的另一种写法：
+
+```
+吞吐 = 20 条数据库连接 ÷ 每单事务墙钟时长
+     ⇒ ok/s × 语句/单 = 20/T × 语句/单      （T 基本不变 ⇒ "常量"必然跟着语句数变）
+```
+
+实测把这个方程钉住（600 档）：每单语句时间 22.1~25.2ms → 20.7~21.3ms；派生 T = **44.7~47.5ms → 40.5ms**；
+600 档 ok/s **447.6 → 494.4**（+10.5%，与 T 下降 10~15% 同量级）。
+旁证：600 档 SIGQUIT，**191/202、187/202** 个 http-nio 线程停在 `HikariPool.getConnection`（真跑 SQL 的只有 8~9 个）；
+MySQL 只用 1.26~1.45 核、`nr_throttled=0`；行锁 213/s、平均等 25ms；fsync 900~960/s —— **两臂 DB 画像几乎重合**。
+
+### 14.7 数据正确性（不能只看 TPS）
+
+```bash
+bench/tools/probecheck.sh auditload-B 450 60      # 留一批数据在库里（这个工具不清场）
+bench/tools/audit-data.sh                         # 31,496 单：行数/金额/台账/桶守恒/唯一性
+OUT=…/flow-audit bench/tools/audit-flow.sh        # 真实 HTTP：下单→库存不足回滚→支付→重复支付幂等
+```
+
+结果全绿：订单↔明细↔出生台账一一对应、`total_amount` = Σ明细（0 例外）、每单 1 条 `ORDER_CREATE` 且 `Σdelta=-Σqty`、
+**桶守恒精确相等**（10,468,504 + 31,496 = 10,500,000）、`sku.stock` 缓存偏差 0、重复键 0、负库存桶 0；
+库存不足下单**一行不留**（回滚正确）、支付后 `payment_record`+1 且库存不重复扣、重复支付被幂等拒绝。
+外加 `mvn -B clean test`：**246 tests, 0 failures, 0 errors, BUILD SUCCESS**。
+
+### 14.8 本轮踩的坑（都修了）
+
+1. **`avalanche.sh` 无条件释放压测锁（真 bug）**：`cleanup()` 在 EXIT trap 里总是 `release`，
+   于是「acquire 失败 → exit 3」也会把**别人正在跑的锁**释放掉 → 下一轮立刻"成功"拿到锁 → **两个压测并发跑**。
+   已改成只在 `LOCK_HELD=1` 时释放。**后果如实记录**：两轮作废，目录名写明原因
+   （`results/INVALID-localsessA-r1-concurrent/`、`INVALID-localsessA-r3-concurrent/`、`INVALID-localsessA-r2-lockbusy/`）。
+2. **`nohup ./chain.sh &` 串行跑多轮会被作业回收牵连**（子轮起跑几分钟后消失）→ 改成 `setsid nohup … & disown`，每轮独立起。
+3. **冷启动门禁的绝对阈值不能跨臂复用**：`SQL/s < 7500 ⇒ 判冷` 是按「19~20 条/单」标定的；
+   B 臂只有 12.4 条/单，它的墙在 5.1k~6.3k，套绝对阈值会把每一档都误判成冷。
+   `localsess.py` 改成两条：① `SQL/s < 本臂中位 × 0.85` ⇒ 冷；② `没达成目标且有丢弃` ⇒ **饱和**（不是冷）。
+4. **`mysql.csv` 的 epoch 是秒、档窗口是毫秒**（`localsess.py` 里踩了一次，`avalanche.py` 早有换算）。
+
+### 14.9 生产取舍（开这个参数意味着什么）
+
+驱动从此**相信自己的本地视图**（autocommit / transaction isolation / read-only），不再每条语句问服务器。
+出问题的形态不是"崩"，而是**静默做错账**。四条硬约束：
+
+1. **禁止**业务代码/SQL 里出现 `SET SESSION` / `SET TRANSACTION` / `SET autocommit` / `setReadOnly(` /
+   `setTransactionIsolation(`（现状 0 命中，建议加 CI grep 门禁防回潮）；
+2. **禁止**给 Hikari 配 `connection-init-sql`（要初始化会话就用 `SET GLOBAL` 改服务器默认值）；
+3. **禁止**在该参数开启的前提下前置**连接多路复用**型代理（ProxySQL multiplexing / MySQL Router 连接复用）——
+   别人的 `SET` 会落到你的会话上，本地状态整体不可信；
+4. 配置**写进 `application-prod.yml`**，别用环境变量 `SPRING_DATASOURCE_URL`：环境变量会覆盖 yml，
+   "某台机器上有人另设了一个 URL"就能悄悄把这个参数关掉（或反过来在没验证过的服务上打开）。

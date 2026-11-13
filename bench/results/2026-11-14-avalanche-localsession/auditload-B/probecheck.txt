@@ -1,0 +1,6 @@
+== probecheck auditload-B ==
+url=jdbc:mysql://mysql:3306/qiqi_mall_test?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useLocalSessionState=true
+jar_md5=2e1a77ab7cdaa91be4881762f749c553
+rps=450 secs=60
+  语句总数 327083 → **每单 12.12 条**（driver 80989 / read 80993 / write 165101）
+    档      λ     ok     语句/单  driver   read  write    SQL/s

@@ -1,0 +1,108 @@
+
+########## tmp.oUJ4Xqvkfy ##########
+
+=== 档 0（λ=420/s, ok=31003, 窗口 1794607138968~1794607218023）===
+  语句总数 373641 → **每单 12.05 条**（driver 93093 / read 93119 / write 187429）
+      /单     占比       次数       总ms    均ms  语句
+    2.00  16.6%    62067    5691.5  0.092  SET `autocommit` = ?
+    1.00   8.3%    31056   10058.3  0.324  SELECT `id` ; `order_id` ; `product_id` ; `product_sku_id` ; `product_name` ; `product_price` ; 
+    1.00   8.3%    31033  442247.1 14.251  UPDATE `sku_bucket` SET `stock` = `stock` - ? WHERE `sku_id` = ? AND `bucket_no` = ? AND `stock`
+    1.00   8.3%    31033   11880.7  0.383  INSERT IGNORE INTO `stock_ledger` ( `order_id` ; `sku_id` ; `delta` ; `reason` ; `ref_type` ; `r
+    1.00   8.3%    31033   11764.1  0.379  INSERT INTO `order_item` ( `order_id` ; `product_id` ; `product_sku_id` ; `product_name` ; `prod
+    1.00   8.3%    31032   12311.6  0.397  INSERT INTO `order_status_ledger` ( `order_id` ; `from_status` ; `to_status` ; `reason` ; `reaso
+    1.00   8.3%    31031   13317.2  0.429  UPDATE `stock_ledger` SET `bucket_no` = COALESCE ( `bucket_no` ; ? ) WHERE `idem_key` = ?
+    1.00   8.3%    31031   12994.6  0.419  INSERT INTO `order` ( `order_sn` ; `member_id` ; `total_amount` ; STATUS ; `pay_type` ; `receive
+    1.00   8.3%    31028    7238.1  0.233  SELECT `id` ; NAME ; DESCRIPTION ; `category_id` ; `type_id` ; `publish_status` ; `pic` ; `versi
+    1.00   8.3%    31028    7072.4  0.228  SELECT `id` ; `product_id` ; `price` ; `stock` ; `pic` ; `cost_price` ; `version` FROM `sku` WHE
+    1.00   8.3%    31026  125458.0  4.044  COMMIT
+    0.04   0.3%     1236    9612.4  7.777  UPDATE `sku` `s` JOIN ( SELECT `sku_id` ; SUM ( `stock` ) AS `total` FROM `sku_bucket` WHERE `sk
+
+=== 档 1（λ=450/s, ok=33743, 窗口 1794607214707~1794607292930）===
+  语句总数 429345 → **每单 12.72 条**（driver 106802 / read 106856 / write 215687）
+      /单     占比       次数       总ms    均ms  语句
+    2.11  16.6%    71205    7417.7  0.104  SET `autocommit` = ?
+    1.06   8.3%    35641   12775.7  0.358  SELECT `id` ; `order_id` ; `product_id` ; `product_sku_id` ; `product_name` ; `product_price` ; 
+    1.06   8.3%    35611   17282.1  0.485  INSERT INTO `order` ( `order_sn` ; `member_id` ; `total_amount` ; STATUS ; `pay_type` ; `receive
+    1.06   8.3%    35610   17152.5  0.482  INSERT IGNORE INTO `stock_ledger` ( `order_id` ; `sku_id` ; `delta` ; `reason` ; `ref_type` ; `r
+    1.06   8.3%    35610    9254.9  0.260  SELECT `id` ; `product_id` ; `price` ; `stock` ; `pic` ; `cost_price` ; `version` FROM `sku` WHE
+    1.06   8.3%    35605    9412.5  0.264  SELECT `id` ; NAME ; DESCRIPTION ; `category_id` ; `type_id` ; `publish_status` ; `pic` ; `versi
+    1.06   8.3%    35603   15679.7  0.440  INSERT INTO `order_item` ( `order_id` ; `product_id` ; `product_sku_id` ; `product_name` ; `prod
+    1.06   8.3%    35600   17036.3  0.479  INSERT INTO `order_status_ledger` ( `order_id` ; `from_status` ; `to_status` ; `reason` ; `reaso
+    1.06   8.3%    35599   17849.7  0.501  UPDATE `stock_ledger` SET `bucket_no` = COALESCE ( `bucket_no` ; ? ) WHERE `idem_key` = ?
+    1.05   8.3%    35598  420163.8 11.803  UPDATE `sku_bucket` SET `stock` = `stock` - ? WHERE `sku_id` = ? AND `bucket_no` = ? AND `stock`
+    1.05   8.3%    35597  144810.6  4.068  COMMIT
+    0.06   0.5%     2066   14586.8  7.060  UPDATE `sku` `s` JOIN ( SELECT `sku_id` ; SUM ( `stock` ) AS `total` FROM `sku_bucket` WHERE `sk
+
+=== 档 2（λ=480/s, ok=35992, 窗口 1794607290454~1794607367864）===
+  语句总数 443497 → **每单 12.32 条**（driver 110440 / read 110392 / write 222665）
+      /单     占比       次数       总ms    均ms  语句
+    2.05  16.6%    73642    7576.6  0.103  SET `autocommit` = ?
+    1.02   8.3%    36822    9549.8  0.259  SELECT `id` ; `product_id` ; `price` ; `stock` ; `pic` ; `cost_price` ; `version` FROM `sku` WHE
+    1.02   8.3%    36818    9830.6  0.267  SELECT `id` ; NAME ; DESCRIPTION ; `category_id` ; `type_id` ; `publish_status` ; `pic` ; `versi
+    1.02   8.3%    36816   18252.4  0.496  INSERT IGNORE INTO `stock_ledger` ( `order_id` ; `sku_id` ; `delta` ; `reason` ; `ref_type` ; `r
+    1.02   8.3%    36814   17982.5  0.488  INSERT INTO `order` ( `order_sn` ; `member_id` ; `total_amount` ; STATUS ; `pay_type` ; `receive
+    1.02   8.3%    36813   16974.6  0.461  INSERT INTO `order_status_ledger` ( `order_id` ; `from_status` ; `to_status` ; `reason` ; `reaso
+    1.02   8.3%    36811   19696.6  0.535  UPDATE `stock_ledger` SET `bucket_no` = COALESCE ( `bucket_no` ; ? ) WHERE `idem_key` = ?
+    1.02   8.3%    36810  440177.8 11.958  UPDATE `sku_bucket` SET `stock` = `stock` - ? WHERE `sku_id` = ? AND `bucket_no` = ? AND `stock`
+    1.02   8.3%    36805   16631.0  0.452  INSERT INTO `order_item` ( `order_id` ; `product_id` ; `product_sku_id` ; `product_name` ; `prod
+    1.02   8.3%    36798  155214.3  4.218  COMMIT
+    1.02   8.3%    36752   13403.0  0.365  SELECT `id` ; `order_id` ; `product_id` ; `product_sku_id` ; `product_name` ; `product_price` ; 
+    0.05   0.4%     1796   12313.1  6.856  UPDATE `sku` `s` JOIN ( SELECT `sku_id` ; SUM ( `stock` ) AS `total` FROM `sku_bucket` WHERE `sk
+
+=== 档 3（λ=520/s, ok=35667, 窗口 1794607365348~1794607448023）===
+  语句总数 450152 → **每单 12.62 条**（driver 112288 / read 112244 / write 225620）
+      /单     占比       次数       总ms    均ms  语句
+    2.10  16.6%    74869    7841.9  0.105  SET `autocommit` = ?
+    1.05   8.3%    37442    9558.4  0.255  SELECT `id` ; `product_id` ; `price` ; `stock` ; `pic` ; `cost_price` ; `version` FROM `sku` WHE
+    1.05   8.3%    37436    9719.4  0.260  SELECT `id` ; NAME ; DESCRIPTION ; `category_id` ; `type_id` ; `publish_status` ; `pic` ; `versi
+    1.05   8.3%    37436   17949.7  0.479  INSERT INTO `order` ( `order_sn` ; `member_id` ; `total_amount` ; STATUS ; `pay_type` ; `receive
+    1.05   8.3%    37432  458438.3 12.247  UPDATE `sku_bucket` SET `stock` = `stock` - ? WHERE `sku_id` = ? AND `bucket_no` = ? AND `stock`
+    1.05   8.3%    37432   18020.7  0.481  INSERT IGNORE INTO `stock_ledger` ( `order_id` ; `sku_id` ; `delta` ; `reason` ; `ref_type` ; `r
+    1.05   8.3%    37431   19969.7  0.534  UPDATE `stock_ledger` SET `bucket_no` = COALESCE ( `bucket_no` ; ? ) WHERE `idem_key` = ?
+    1.05   8.3%    37429   16484.4  0.440  INSERT INTO `order_item` ( `order_id` ; `product_id` ; `product_sku_id` ; `product_name` ; `prod
+    1.05   8.3%    37424   17421.8  0.466  INSERT INTO `order_status_ledger` ( `order_id` ; `from_status` ; `to_status` ; `reason` ; `reaso
+    1.05   8.3%    37419  158540.8  4.237  COMMIT
+    1.05   8.3%    37366   13773.7  0.369  SELECT `id` ; `order_id` ; `product_id` ; `product_sku_id` ; `product_name` ; `product_price` ; 
+    0.03   0.2%     1036    8097.0  7.816  UPDATE `sku` `s` JOIN ( SELECT `sku_id` ; SUM ( `stock` ) AS `total` FROM `sku_bucket` WHERE `sk
+
+=== 档 4（λ=560/s, ok=36890, 窗口 1794607445155~1794607523800）===
+  语句总数 448503 → **每单 12.16 条**（driver 111928 / read 111910 / write 224665）
+      /单     占比       次数       总ms    均ms  语句
+    2.02  16.6%    74624    8238.5  0.110  SET `autocommit` = ?
+    1.01   8.3%    37316   18528.6  0.497  INSERT INTO `order` ( `order_sn` ; `member_id` ; `total_amount` ; STATUS ; `pay_type` ; `receive
+    1.01   8.3%    37315   10266.4  0.275  SELECT `id` ; NAME ; DESCRIPTION ; `category_id` ; `type_id` ; `publish_status` ; `pic` ; `versi
+    1.01   8.3%    37313    9902.2  0.265  SELECT `id` ; `product_id` ; `price` ; `stock` ; `pic` ; `cost_price` ; `version` FROM `sku` WHE
+    1.01   8.3%    37311   18508.6  0.496  INSERT IGNORE INTO `stock_ledger` ( `order_id` ; `sku_id` ; `delta` ; `reason` ; `ref_type` ; `r
+    1.01   8.3%    37305  457094.1 12.253  UPDATE `sku_bucket` SET `stock` = `stock` - ? WHERE `sku_id` = ? AND `bucket_no` = ? AND `stock`
+    1.01   8.3%    37305   17730.4  0.475  INSERT INTO `order_status_ledger` ( `order_id` ; `from_status` ; `to_status` ; `reason` ; `reaso
+    1.01   8.3%    37304   19783.0  0.530  UPDATE `stock_ledger` SET `bucket_no` = COALESCE ( `bucket_no` ; ? ) WHERE `idem_key` = ?
+    1.01   8.3%    37304  160175.3  4.294  COMMIT
+    1.01   8.3%    37300   16494.2  0.442  INSERT INTO `order_item` ( `order_id` ; `product_id` ; `product_sku_id` ; `product_name` ; `prod
+    1.01   8.3%    37282   14543.1  0.390  SELECT `id` ; `order_id` ; `product_id` ; `product_sku_id` ; `product_name` ; `product_price` ; 
+    0.02   0.2%      824    5971.1  7.246  UPDATE `sku` `s` JOIN ( SELECT `sku_id` ; SUM ( `stock` ) AS `total` FROM `sku_bucket` WHERE `sk
+
+=== 档 5（λ=600/s, ok=37010, 窗口 1794607521185~1794607601845）===
+  语句总数 458971 → **每单 12.40 条**（driver 114521 / read 114589 / write 229861）
+      /单     占比       次数       总ms    均ms  语句
+    2.06  16.6%    76356    8073.5  0.106  SET `autocommit` = ?
+    1.03   8.3%    38230   14610.8  0.382  SELECT `id` ; `order_id` ; `product_id` ; `product_sku_id` ; `product_name` ; `product_price` ; 
+    1.03   8.3%    38184    9970.3  0.261  SELECT `id` ; `product_id` ; `price` ; `stock` ; `pic` ; `cost_price` ; `version` FROM `sku` WHE
+    1.03   8.3%    38182   18502.1  0.485  INSERT INTO `order` ( `order_sn` ; `member_id` ; `total_amount` ; STATUS ; `pay_type` ; `receive
+    1.03   8.3%    38180   17637.9  0.462  INSERT INTO `order_item` ( `order_id` ; `product_id` ; `product_sku_id` ; `product_name` ; `prod
+    1.03   8.3%    38179   17842.8  0.467  INSERT INTO `order_status_ledger` ( `order_id` ; `from_status` ; `to_status` ; `reason` ; `reaso
+    1.03   8.3%    38176   19893.2  0.521  INSERT IGNORE INTO `stock_ledger` ( `order_id` ; `sku_id` ; `delta` ; `reason` ; `ref_type` ; `r
+    1.03   8.3%    38175   10166.2  0.266  SELECT `id` ; NAME ; DESCRIPTION ; `category_id` ; `type_id` ; `publish_status` ; `pic` ; `versi
+    1.03   8.3%    38174  459603.9 12.040  UPDATE `sku_bucket` SET `stock` = `stock` - ? WHERE `sku_id` = ? AND `bucket_no` = ? AND `stock`
+    1.03   8.3%    38173   20152.6  0.528  UPDATE `stock_ledger` SET `bucket_no` = COALESCE ( `bucket_no` ; ? ) WHERE `idem_key` = ?
+    1.03   8.3%    38165  163168.0  4.275  COMMIT
+    0.02   0.2%      797    5569.2  6.988  UPDATE `sku` `s` JOIN ( SELECT `sku_id` ; SUM ( `stock` ) AS `total` FROM `sku_bucket` WHERE `sk
+
+  → /tmp/tmp.oUJ4Xqvkfy/sqlprofile.csv
+
+    档      λ     ok     语句/单  driver   read  write    SQL/s
+    0    420  31003    12.05    3.00   3.00   6.05     4982
+    1    450  33743    12.72    3.17   3.17   6.39     5725
+    2    480  35992    12.32    3.07   3.07   6.19     5913
+    3    520  35667    12.62    3.15   3.15   6.33     6002
+    4    560  36890    12.16    3.03   3.03   6.09     5980
+    5    600  37010    12.40    3.09   3.10   6.21     6120

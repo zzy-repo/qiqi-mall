@@ -1,0 +1,23 @@
+
+########## probecheck-armB ##########
+
+=== 档 0（λ=300/s, ok=8751, 窗口 1794606949961~1794606993375）===
+  语句总数 100046 → **每单 11.43 条**（driver 24957 / read 24913 / write 50176）
+      /单     占比       次数       总ms    均ms  语句
+    1.90  16.6%    16641    1412.3  0.085  SET `autocommit` = ?
+    0.95   8.3%     8329    1632.1  0.196  SELECT `id` ; `product_id` ; `price` ; `stock` ; `pic` ; `cost_price` ; `version` FROM `sku` WHE
+    0.95   8.3%     8328    1626.8  0.195  SELECT `id` ; NAME ; DESCRIPTION ; `category_id` ; `type_id` ; `publish_status` ; `pic` ; `versi
+    0.95   8.3%     8325    2464.9  0.296  INSERT IGNORE INTO `stock_ledger` ( `order_id` ; `sku_id` ; `delta` ; `reason` ; `ref_type` ; `r
+    0.95   8.3%     8325    2600.9  0.312  INSERT INTO `order_status_ledger` ( `order_id` ; `from_status` ; `to_status` ; `reason` ; `reaso
+    0.95   8.3%     8323   18687.8  2.245  INSERT INTO `order` ( `order_sn` ; `member_id` ; `total_amount` ; STATUS ; `pay_type` ; `receive
+    0.95   8.3%     8319  116700.9 14.028  UPDATE `sku_bucket` SET `stock` = `stock` - ? WHERE `sku_id` = ? AND `bucket_no` = ? AND `stock`
+    0.95   8.3%     8318    2766.5  0.333  UPDATE `stock_ledger` SET `bucket_no` = COALESCE ( `bucket_no` ; ? ) WHERE `idem_key` = ?
+    0.95   8.3%     8316   20448.9  2.459  COMMIT
+    0.95   8.3%     8315    2301.6  0.277  INSERT INTO `order_item` ( `order_id` ; `product_id` ; `product_sku_id` ; `product_name` ; `prod
+    0.94   8.3%     8256    2116.6  0.256  SELECT `id` ; `order_id` ; `product_id` ; `product_sku_id` ; `product_name` ; `product_price` ; 
+    0.03   0.3%      251    2145.7  8.549  UPDATE `sku` `s` JOIN ( SELECT `sku_id` ; SUM ( `stock` ) AS `total` FROM `sku_bucket` WHERE `sk
+
+  → /root/qiqi-mall/bench/results/2026-11-14-avalanche-localsession/probecheck-armB/sqlprofile.csv
+
+    档      λ     ok     语句/单  driver   read  write    SQL/s
+    0    300   8751    11.43    2.85   2.85   5.73     2501

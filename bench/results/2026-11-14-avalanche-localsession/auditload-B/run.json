@@ -1,0 +1,27 @@
+{
+  "label": "auditload-B",
+  "url": "http://127.0.0.1:18080/portal/orders",
+  "method": "POST",
+  "mode": "open-loop-fixed-rate",
+  "steps": [
+    450
+  ],
+  "step_duration_s": 60,
+  "warmup_s": 20,
+  "warmup_rps": 225,
+  "start_iso": "2026-11-13T22:29:57.731Z",
+  "end_iso": "2026-11-13T22:31:17.781Z",
+  "measure_wall_s": 60.044,
+  "fired": 31500,
+  "completed": 31500,
+  "dropped": 0,
+  "ok": 26996,
+  "fail": 4,
+  "token_pool": 488174,
+  "token_exhausted": false,
+  "client_cpu_pct": 32.15,
+  "loadavg_1m": 15,
+  "errors": {
+    "HTTP200 code=1 msg=已存在相同记录，请检查唯一字段": 4
+  }
+}

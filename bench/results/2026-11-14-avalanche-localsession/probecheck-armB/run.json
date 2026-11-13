@@ -1,0 +1,28 @@
+{
+  "label": "armB",
+  "url": "http://127.0.0.1:18080/portal/orders",
+  "method": "POST",
+  "mode": "open-loop-fixed-rate",
+  "steps": [
+    300
+  ],
+  "step_duration_s": 40,
+  "warmup_s": 20,
+  "warmup_rps": 150,
+  "start_iso": "2026-11-13T21:55:26.517Z",
+  "end_iso": "2026-11-13T21:56:35.557Z",
+  "measure_wall_s": 45.357,
+  "fired": 11753,
+  "completed": 11753,
+  "dropped": 3247,
+  "ok": 8751,
+  "fail": 2,
+  "token_pool": 488174,
+  "token_exhausted": false,
+  "client_cpu_pct": 18.75,
+  "loadavg_1m": 33,
+  "errors": {
+    "HTTP502 code=? msg=-": 290,
+    "HTTP200 code=1 msg=已存在相同记录，请检查唯一字段": 2
+  }
+}

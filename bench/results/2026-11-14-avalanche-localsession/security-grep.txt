@@ -1,0 +1,123 @@
+################################################################
+# 第一步安全证据：全仓 grep「绕过驱动改会话状态」的全部命中
+# 生成：2026-11-14 05:51:56  git HEAD=d4295fb90d2656ffc2de8cfa6a653f1d35660e72  git dirty=1 行
+# 范围：仓库根，源码/配置/脚本/MD（排除 .git/node_modules/target/dist/.venv；另滤掉 bench/results 压测产物）
+# 工具：grep -rniIE（ERE、大小写不敏感）
+################################################################
+
+=== pattern: SET[[:space:]]+autocommit ===
+./bench/README.md:646:| 2 | `SET autocommit = ?` | **2.01** | **10.0%** | 0.12ms | driver |
+--- 命中行数 = 1 ---
+
+=== pattern: SET[[:space:]]+SESSION ===
+(无命中)
+--- 命中行数 = 0 ---
+
+=== pattern: SET[[:space:]]+TRANSACTION ===
+(无命中)
+--- 命中行数 = 0 ---
+
+=== pattern: SET[[:space:]]+@@ ===
+(无命中)
+--- 命中行数 = 0 ---
+
+=== pattern: SET[[:space:]]+@[a-z_] ===
+./bench/tools/prepare.sh:222:set @sku_id = $SKU_ID;
+./sql/seed-order-audit-demo.sql:33:SET @db := DATABASE();
+./sql/seed-order-audit-demo.sql:44:SET @p := (SELECT `id` FROM `audit_policy` WHERE `type` = 'AUTO' AND `name` = '直营-小单' LIMIT 1);
+./sql/seed-order-audit-demo.sql:56:SET @p := (SELECT `id` FROM `audit_policy` WHERE `type` = 'AUTO' AND `name` = '淘宝-标准单' LIMIT 1);
+./sql/seed-order-audit-demo.sql:71:SET @p := (SELECT `id` FROM `audit_policy` WHERE `type` = 'AUTO' AND `name` = '抖音-标准单' LIMIT 1);
+./sql/seed-order-audit-demo.sql:86:SET @p := (SELECT `id` FROM `audit_policy` WHERE `type` = 'BLOCK' AND `name` = '毛利不为正' LIMIT 1);
+./sql/seed-order-audit-demo.sql:95:SET @p := (SELECT `id` FROM `audit_policy` WHERE `type` = 'BLOCK' AND `name` = '双地址' LIMIT 1);
+./sql/seed-order-audit-demo.sql:105:SET @p := (SELECT `id` FROM `audit_policy` WHERE `type` = 'EXCEPTION' AND `name` = '退款申请冻结' LIMIT 1);
+./sql/seed-order-audit-demo.sql:115:SET @p := (SELECT `id` FROM `audit_policy` WHERE `type` = 'EXCEPTION' AND `name` = '平台备注冻结' LIMIT 1);
+./sql/seed-order-audit-demo.sql:137:SET @m_user  := (SELECT `id` FROM `member` WHERE `username` = 'audit_demo_member' LIMIT 1);
+./sql/seed-order-audit-demo.sql:138:SET @m_store := (SELECT `id` FROM `member` WHERE `username` = 'audit_demo_store' LIMIT 1);
+./sql/seed-order-audit-demo.sql:145:SET @prod := (SELECT `id` FROM `product` WHERE `name` = '自动审核演示商品' LIMIT 1);
+./sql/seed-order-audit-demo.sql:167:SET @sku_taobao := (SELECT `id` FROM `sku` WHERE `product_id` = @prod ORDER BY `id` LIMIT 1);
+./sql/seed-order-audit-demo.sql:168:SET @sku_douyin := (SELECT `id` FROM `sku` WHERE `product_id` = @prod ORDER BY `id` LIMIT 1 OFFSET 1);
+./sql/seed-order-audit-demo.sql:169:SET @sku_direct := (SELECT `id` FROM `sku` WHERE `product_id` = @prod ORDER BY `id` LIMIT 1 OFFSET 2);
+./sql/seed-order-audit-demo.sql:170:SET @sku_x1 := (SELECT `id` FROM `sku` WHERE `product_id` = @prod ORDER BY `id` LIMIT 1 OFFSET 3);
+./sql/seed-order-audit-demo.sql:171:SET @sku_x2 := (SELECT `id` FROM `sku` WHERE `product_id` = @prod ORDER BY `id` LIMIT 1 OFFSET 4);
+./sql/seed-order-audit-demo.sql:172:SET @sku_x3 := (SELECT `id` FROM `sku` WHERE `product_id` = @prod ORDER BY `id` LIMIT 1 OFFSET 5);
+./sql/seed-order-audit-demo.sql:173:SET @sku_x4 := (SELECT `id` FROM `sku` WHERE `product_id` = @prod ORDER BY `id` LIMIT 1 OFFSET 6);
+./sql/seed-order-audit-demo.sql:174:SET @sku_x5 := (SELECT `id` FROM `sku` WHERE `product_id` = @prod ORDER BY `id` LIMIT 1 OFFSET 7);
+--- 命中行数 = 78 ---
+
+=== pattern: SET[[:space:]]+GLOBAL ===
+(无命中)
+--- 命中行数 = 0 ---
+
+=== pattern: setAutoCommit[[:space:]]*\( ===
+./qiqi-mall-server/src/test/java/com/qiqi/mall/oms/OptimisticLockIntegrationTest.java:1863:            conn.setAutoCommit(false);
+./qiqi-mall-server/src/test/java/com/qiqi/mall/oms/PaymentIdemKeyTest.java:687:            conn.setAutoCommit(true);
+./qiqi-mall-server/src/test/java/com/qiqi/mall/oms/PaymentIdemKeyTest.java:710:            conn.setAutoCommit(true);
+--- 命中行数 = 3 ---
+
+=== pattern: setTransactionIsolation[[:space:]]*\( ===
+(无命中)
+--- 命中行数 = 0 ---
+
+=== pattern: setReadOnly[[:space:]]*\( ===
+(无命中)
+--- 命中行数 = 0 ---
+
+=== pattern: @Transactional[[:space:]]*\([^)]*isolation ===
+(无命中)
+--- 命中行数 = 0 ---
+
+=== pattern: isolation[[:space:]]*= ===
+(无命中)
+--- 命中行数 = 0 ---
+
+=== pattern: getConnection[[:space:]]*\( ===
+./bench/README.md:486:  at com.zaxxer.hikari.pool.HikariPool.getConnection(HikariPool.java:162)
+./bench/tools/QpsProbe.java:40:                try (Connection c = DriverManager.getConnection(url, user, pass);
+./qiqi-mall-server/src/test/java/com/qiqi/mall/oms/OptimisticLockIntegrationTest.java:1862:            Connection conn = dataSource.getConnection();
+./qiqi-mall-server/src/test/java/com/qiqi/mall/oms/PaymentIdemKeyTest.java:686:        try (Connection conn = dataSource.getConnection()) {
+./qiqi-mall-server/src/test/java/com/qiqi/mall/oms/PaymentIdemKeyTest.java:709:        try (Connection conn = dataSource.getConnection()) {
+--- 命中行数 = 5 ---
+
+=== pattern: DriverManager ===
+./bench/tools/QpsProbe.java:40:                try (Connection c = DriverManager.getConnection(url, user, pass);
+--- 命中行数 = 1 ---
+
+=== pattern: TransactionTemplate ===
+./qiqi-mall-server/src/test/java/com/qiqi/mall/oms/PaymentIdemKeyTest.java:32:import org.springframework.transaction.support.TransactionTemplate;
+./qiqi-mall-server/src/test/java/com/qiqi/mall/oms/PaymentIdemKeyTest.java:511:            TransactionTemplate tx = new TransactionTemplate(txManager);   // PROPAGATION_REQUIRED
+./qiqi-mall-server/src/main/java/com/qiqi/mall/oms/service/impl/PaymentRecordServiceImpl.java:15:import org.springframework.transaction.support.TransactionTemplate;
+./qiqi-mall-server/src/main/java/com/qiqi/mall/oms/service/impl/PaymentRecordServiceImpl.java:72:     * 代码看起来「已经修了」，行为却没变。用 TransactionTemplate 是显式的，绕
+./qiqi-mall-server/src/main/java/com/qiqi/mall/oms/service/impl/PaymentRecordServiceImpl.java:74:    private final TransactionTemplate newTransaction;
+./qiqi-mall-server/src/main/java/com/qiqi/mall/oms/service/impl/PaymentRecordServiceImpl.java:78:        this.newTransaction = new TransactionTemplate(txManager);
+--- 命中行数 = 6 ---
+
+=== pattern: DataSourceUtils ===
+(无命中)
+--- 命中行数 = 0 ---
+
+=== pattern: connection-init-sql|connectionInitSql|sessionVariables ===
+(无命中)
+--- 命中行数 = 0 ---
+
+=== pattern: SET[[:space:]]+NAMES|SET[[:space:]]+time_zone|SET[[:space:]]+sql_mode ===
+(无命中)
+--- 命中行数 = 0 ---
+
+=== pattern: @@session|@@global ===
+./bench/README.md:645:| 1 | `SELECT @@SESSION.transaction_read_only` | **7.04** | **35.0%** | 0.14ms | driver |
+./bench/README.md:657:  `SELECT @@session.transaction_read_only`（`useLocalSessionState=false` 的默认行为）。
+./bench/README.md:787:  1. **关掉那 7 条 `SELECT @@session.transaction_read_only`**：Connector/J 的
+--- 命中行数 = 3 ---
+
+=== （用户变量）命中按文件汇总 —— 见下，逐条结论写进报告 ===
+     26 ./sql/seed-order-audit-demo.sql
+     14 ./sql/reset-sku-bucket-N.sql
+      9 ./sql/_rollback/migrate-ledger.sql
+      6 ./sql/reset-sku-bucket.sql
+      6 ./qiqi-mall-server/src/main/resources/db/migration/V2__channel_sync_idem.sql
+      5 ./sql/_rollback/migrate-ledger-verify.sql
+      4 ./sql/_rollback/migrate-order-audit.sql
+      3 ./sql/_rollback/migrate-sku-bucket.sql
+      3 ./sql/_rollback/migrate-ledger-idem-shard.sql
+      1 ./sql/_rollback/migrate-optimistic-lock.sql
+      1 ./bench/tools/prepare.sh

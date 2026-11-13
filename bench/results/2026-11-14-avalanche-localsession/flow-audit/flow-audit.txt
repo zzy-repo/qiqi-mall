@@ -1,0 +1,37 @@
+== 业务链审计 2026-11-14 06:31:59 ==
+  容器 URL: jdbc:mysql://mysql:3306/qiqi_mall_test?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useLocalSessionState=true
+  会员: lg_bench_002 id=108   网关: http://127.0.0.1:18080
+
+① 正常下单（SKU 1 × 2）
+  HTTP: HTTP=200   body: {"code":0,"message":"ok","data":{"order":{"id":3232493,"orderSn":"QQ20261114063200938365","memberId":108,"totalAmount":3999.98,"status":0,"payType":0,"paymentTi
+  订单 id=3232493
+  对账： order_rows=1 total=3999.98 items=1 item_sum=3999.98 birth_ledger=1 stock_ledger=1 delta=-2
+
+② 库存不足下单（把 SKU 21 的桶临时清零，下 1 件，应当失败且不落任何行）
+  HTTP: HTTP=200   body: {"code":1,"message":"库存不足：苹果 iPad mini 平板电脑 星光色","data":null}
+  回滚对账：order 31513 → 31513（应不变）   stock_ledger 31499 → 31499（应不变）
+
+③ 支付订单 3232493（payType=1）
+  HTTP: HTTP=200   body: {"code":0,"message":"ok","data":{"order":{"id":3232493,"orderSn":"QQ20261114063200938365","memberId":108,"totalAmount":3999.98,"status":7,"payType":1,"paymentTime":"2026-11-14 06:32:00","receiverName"
+  支付对账：payment_record 0 → 1（应 +1）  状态台账 1 → 2（应 +1）
+  订单状态：status=7 pay_type=1 payment_time=2026-11-14 06:32:01
+  库存在支付时不重复扣：stock_ledger_rows=1 delta_sum=-2
+
+④ 重复支付（应当幂等拒绝 / 不产生第二条流水）
+  HTTP: HTTP=200   body: {"code":1,"message":"当前订单状态不可支付","data":null}
+  幂等对账：payment_record 仍为 1 行
+
+⑤ 三方一致性扫描（支付流水 ↔ 订单状态 ↔ 库存台账，圈定压测会员）
++--------------------------------+---+
+| k                              | v |
++--------------------------------+---+
+| paid_orders                    | 2 |
+| paid_but_no_payment_row        | 0 |
+| payment_row_but_never_paid     | 0 |
+| payment_amount_mismatch        | 0 |
+| paid_but_stock_ledger_missing  | 0 |
+| paid_but_no_paid_status_ledger | 0 |
++--------------------------------+---+
+
+== 说明：② 里把 SKU 21 的桶清零是**临时数据改动**，跑完由 sql/reset-sku-bucket.sql 复位；不动 DDL。==
+== 产物：/root/qiqi-mall/bench/results/2026-11-14-avalanche-localsession/flow-audit/flow-audit.txt ==

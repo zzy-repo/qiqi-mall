@@ -1,0 +1,23 @@
+
+########## auditload-B ##########
+
+=== 档 0（λ=450/s, ok=26996, 窗口 1794609017698~1794609078035）===
+  语句总数 327083 → **每单 12.12 条**（driver 80989 / read 80993 / write 165101）
+      /单     占比       次数       总ms    均ms  语句
+    2.00  16.5%    53994    7866.0  0.146  SET `autocommit` = ?
+    1.00   8.3%    26998    9451.7  0.350  SELECT `id` ; `product_id` ; `price` ; `stock` ; `pic` ; `cost_price` ; `version` FROM `sku` WHE
+    1.00   8.3%    26996   10083.1  0.374  SELECT `id` ; NAME ; DESCRIPTION ; `category_id` ; `type_id` ; `publish_status` ; `pic` ; `versi
+    1.00   8.3%    26995   17166.5  0.636  UPDATE `stock_ledger` SET `bucket_no` = COALESCE ( `bucket_no` ; ? ) WHERE `idem_key` = ?
+    1.00   8.3%    26995   16001.7  0.593  INSERT INTO `order` ( `order_sn` ; `member_id` ; `total_amount` ; STATUS ; `pay_type` ; `receive
+    1.00   8.3%    26995  113299.2  4.197  COMMIT
+    1.00   8.3%    26993   15478.2  0.573  INSERT IGNORE INTO `stock_ledger` ( `order_id` ; `sku_id` ; `delta` ; `reason` ; `ref_type` ; `r
+    1.00   8.3%    26992   15526.6  0.575  INSERT INTO `order_status_ledger` ( `order_id` ; `from_status` ; `to_status` ; `reason` ; `reaso
+    1.00   8.3%    26991  255801.4  9.477  UPDATE `sku_bucket` SET `stock` = `stock` - ? WHERE `sku_id` = ? AND `bucket_no` = ? AND `stock`
+    1.00   8.3%    26990   12553.4  0.465  SELECT `id` ; `order_id` ; `product_id` ; `product_sku_id` ; `product_name` ; `product_price` ; 
+    1.00   8.3%    26989   13468.1  0.499  INSERT INTO `order_item` ( `order_id` ; `product_id` ; `product_sku_id` ; `product_name` ; `prod
+    0.12   1.0%     3146   20876.0  6.636  UPDATE `sku` `s` JOIN ( SELECT `sku_id` ; SUM ( `stock` ) AS `total` FROM `sku_bucket` WHERE `sk
+
+  → /root/qiqi-mall/bench/results/2026-11-14-avalanche-localsession/auditload-B/sqlprofile.csv
+
+    档      λ     ok     语句/单  driver   read  write    SQL/s
+    0    450  26996    12.12    3.00   3.00   6.12     5451

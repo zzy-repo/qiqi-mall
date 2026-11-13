@@ -1,0 +1,18 @@
+== provenance（本次运行）==
+started_at=2026-11-14 06:52:26
+git_HEAD=73575b157e4d06fcb89dc7379f0d9549a48cfba0
+server_image=sha256:935feb000f5d356515c6d3d29197e34f928a6e0844ef7c873a8a24996d9b39d9
+qiqi-server-1 java_opts=JAVA_OPTS=-XX:MaxRAMPercentage=75 -Xlog:gc*:file=/tmp/gc.log:time,uptimemillis,level,tags:filecount=0
+qiqi-server-1 hikari_env=SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE=10
+qiqi-server-1 ip=172.21.0.4
+qiqi-server-1 jar=2e1a77ab7cdaa91be4881762f749c553 mount=/tmp/loadgen/jar/b/app.jar->/app/app.jar 
+qiqi-server-2 java_opts=JAVA_OPTS=-XX:MaxRAMPercentage=75 -Xlog:gc*:file=/tmp/gc.log:time,uptimemillis,level,tags:filecount=0
+qiqi-server-2 hikari_env=SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE=10
+qiqi-server-2 ip=172.21.0.5
+qiqi-server-2 jar=2e1a77ab7cdaa91be4881762f749c553 mount=/tmp/loadgen/jar/b/app.jar->/app/app.jar 
+mysql_conns_per_client（连接池是否真的生效的硬证据：pool N → 每实例 N 条）:
+  172.21.0.1 -> 21 条
+  172.21.0.4 -> 10 条
+  localhost -> 2 条
+  172.21.0.5 -> 10 条
+steps=420,450,480,520,560,600 step_duration=75s warmup=90s@378rps dump_at=无

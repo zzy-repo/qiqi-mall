@@ -1,0 +1,27 @@
+{
+  "label": "armA",
+  "url": "http://127.0.0.1:18080/portal/orders",
+  "method": "POST",
+  "mode": "open-loop-fixed-rate",
+  "steps": [
+    300
+  ],
+  "step_duration_s": 40,
+  "warmup_s": 20,
+  "warmup_rps": 150,
+  "start_iso": "2026-11-13T21:53:25.878Z",
+  "end_iso": "2026-11-13T21:54:35.336Z",
+  "measure_wall_s": 45.253,
+  "fired": 11634,
+  "completed": 11634,
+  "dropped": 3366,
+  "ok": 8727,
+  "fail": 0,
+  "token_pool": 488174,
+  "token_exhausted": false,
+  "client_cpu_pct": 18.32,
+  "loadavg_1m": 28.82,
+  "errors": {
+    "HTTP502 code=? msg=-": 294
+  }
+}

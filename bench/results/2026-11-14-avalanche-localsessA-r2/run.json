@@ -1,0 +1,32 @@
+{
+  "label": "localsessA-r2",
+  "url": "http://127.0.0.1:18080/portal/orders",
+  "method": "POST",
+  "mode": "open-loop-fixed-rate",
+  "steps": [
+    420,
+    450,
+    480,
+    520,
+    560,
+    600
+  ],
+  "step_duration_s": 75,
+  "warmup_s": 90,
+  "warmup_rps": 378,
+  "start_iso": "2026-11-13T23:04:39.796Z",
+  "end_iso": "2026-11-13T23:13:54.549Z",
+  "measure_wall_s": 464.68,
+  "fired": 231981,
+  "completed": 231981,
+  "dropped": 29289,
+  "ok": 197906,
+  "fail": 55,
+  "token_pool": 488174,
+  "token_exhausted": false,
+  "client_cpu_pct": 21.12,
+  "loadavg_1m": 34.53,
+  "errors": {
+    "HTTP200 code=1 msg=已存在相同记录，请检查唯一字段": 59
+  }
+}

@@ -1,0 +1,6 @@
+== probecheck armA ==
+url=jdbc:mysql://mysql:3306/qiqi_mall_test?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+jar_md5=2e1a77ab7cdaa91be4881762f749c553
+rps=300 secs=40
+  语句总数 151668 → **每单 17.38 条**（driver 75825 / read 25146 / write 50697）
+    档      λ     ok     语句/单  driver   read  write    SQL/s
