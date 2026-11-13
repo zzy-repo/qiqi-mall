@@ -31,20 +31,25 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 而「口径自洽」（五类计数之和 == 决策行数）恰恰是规则集之间的优先级与叠加态属性 ——
  * 单点断言测不到，只有把组合摆进一张表里逐行钉死才测得到。
  *
- * <h3>表里每一行断言什么（五个字段，缺一不可）</h3>
+ * <h3>表里每一行断言什么（六个字段，缺一不可）</h3>
  * <ol>
  *   <li>{@code result} —— 落哪一类（五类之一，或 SKIPPED 这个「没参与本轮」）；</li>
  *   <li>{@code matched_policy_name} —— 决策行会快照的策略名（哪条规则把它定下来的）；</li>
  *   <li>{@code downgrade_reason} —— MANUAL 三支来路（被排除 / STOCK_SHORT / COST_MISSING）靠它区分；</li>
  *   <li>{@code advancesStatus} —— 状态是否推进（只有 AUTO_PASS 推；这是「结论」与「动作」的分界）；</li>
- *   <li>{@code would_be_auto_policy_name} —— 被拦/冻结时回填「本来会不会自动过」。</li>
+ *   <li>{@code would_be_auto_policy_name} —— 被拦/冻结时回填「本来会不会自动过」；</li>
+ *   <li>{@code other_gates} —— 被拦/冻结时回填「<b>另一类</b>闸门里也命中的那些」：判定链整段跑、
+ *       命中即 return，[3] 一旦命中 [4] 就没跑过，所以「这单还挂着一笔退款申请」只能靠回填进证据。
+ *       期望值为空 = <b>整个 {@code other_gates} 键不出现</b>（不是空数组）。</li>
  * </ol>
  * 另外每行还要过三条<b>不变量</b>（写在用例体里，不逐行抄进表，免得表变成噪音）：
  * <pre>
  *  · 非 SKIPPED 的证据里一定有 stock 段，且 stock.short 永远如实反映「桶里够不够」——
  *    与结论无关（这正是修正①的全部意义：事实写进证据，结论不许被它改写）；
  *  · stock.hint 只在 NO_MATCH 上出现（判定链 [7b]：只写证据、不改结论的那条支路）；
- *  · stock.warning 只在「LENIENT 档 + 真的缺货 + 仍然 AUTO_PASS」时出现。
+ *  · stock.warning 只在「LENIENT 档 + 真的缺货 + 仍然 AUTO_PASS」时出现；
+ *  · other_gates 只在 BLOCKED / FROZEN 上可能出现，且一条也没有时整个键不出现
+ *    （「有没有别的闸门」的判据是一条布尔判断，不该逼前端区分「空数组」与「缺失」两种空）。
  * </pre>
  *
  * <h3>期望值怎么来的：先读实现，再如实写</h3>
@@ -111,11 +116,13 @@ class AuditVerdictMatrixTest {
                                 .grossProfit("0.00").itemQty(2).itemKinds(1).stock(100, 100).build(),
                         AuditResult.BLOCKED, AuditScenario.POLICY_BLOCK_PROFIT, null, false, AuditScenario.POLICY_AUTO_TAOBAO),
 
-                row("M09", "异常命中（有退款申请）× 阻止也命中（毛利 −5）",
-                        "【实现事实：BLOCK 在 EXCEPTION 之前】[3] 先于 [4] → BLOCKED（不是 FROZEN）",
+                rowWithGates("M09", "异常命中（有退款申请）× 阻止也命中（毛利 −5）",
+                        "【实现事实：BLOCK 在 EXCEPTION 之前】[3] 先于 [4] → BLOCKED（不是 FROZEN）；"
+                                + "但 [4] 那段没跑过，必须靠 other_gates 回填「这单还挂着一笔退款申请」",
                         builder(1204L, "QT-1204", 7, "淘宝", "268.00")
                                 .grossProfit("-5.00").itemQty(2).itemKinds(1).hasReturnApply(true).stock(100, 100).build(),
-                        AuditResult.BLOCKED, AuditScenario.POLICY_BLOCK_PROFIT, null, false, AuditScenario.POLICY_AUTO_TAOBAO),
+                        AuditResult.BLOCKED, AuditScenario.POLICY_BLOCK_PROFIT, null, false, AuditScenario.POLICY_AUTO_TAOBAO,
+                        "EXCEPTION:" + AuditScenario.POLICY_EXCEPTION_RETURN),
 
                 row("M10", "异常命中（有退款申请）× 需库存预检（桶 5 < 需求 8）",
                         "【冻结优先于预检】[4] 在 [7a][7b] 之前 → FROZEN；证据里仍如实写 short=true（事实与结论分离）",
@@ -190,12 +197,33 @@ class AuditVerdictMatrixTest {
                 // M09 那行两条策略 priority 相同（都是 10），区分不出「类型顺序」与「全局 priority」。
                 // 这一行让 EXCEPTION 的 priority 数字更小（10 < 20）：若按全局 priority 排 → FROZEN；
                 // 实得 BLOCKED，说明跨类型比的是**类型顺序**，priority 只在同类内有效。
-                row("M21", "阻止命中（双地址 prio 20）× 异常命中（退款申请 prio 10）—— 异常那条的数字更小",
+                rowWithGates("M21", "阻止命中（双地址 prio 20）× 异常命中（退款申请 prio 10）—— 异常那条的数字更小",
                         "【跨类型只认类型顺序，不认 priority 数字】[3] 整段在 [4] 之前 → BLOCKED（不是 FROZEN）",
                         builder(1213L, "QT-1213", 7, "淘宝", "268.00")
                                 .grossProfit("62.00").itemQty(2).itemKinds(1)
                                 .addressMulti(true).hasReturnApply(true).stock(100, 100).build(),
-                        AuditResult.BLOCKED, AuditScenario.POLICY_BLOCK_ADDRESS, null, false, AuditScenario.POLICY_AUTO_TAOBAO)
+                        AuditResult.BLOCKED, AuditScenario.POLICY_BLOCK_ADDRESS, null, false, AuditScenario.POLICY_AUTO_TAOBAO,
+                        "EXCEPTION:" + AuditScenario.POLICY_EXCEPTION_RETURN),
+
+                // ---------------- ⑥ 另一道闸门：被拦时把「也命中的那一类」写进证据 ----------------
+                rowWithGates("M22", "阻止命中（毛利 −12）× 异常也命中（平台备注 2 小时内被改）",
+                        "结论仍 BLOCKED（[3] 先于 [4]），但证据要回答「还有哪道闸门也踩了」→"
+                                + " other_gates 一条：EXCEPTION/平台备注冻结（[4] 那段此刻根本没跑）",
+                        builder(1214L, "QT-1214", 7, "淘宝", "268.00")
+                                .grossProfit("-12.00").itemQty(2).itemKinds(1)
+                                .platformRemark("改成朝阳区xx路2号", AuditScenario.NOW.minusHours(2))
+                                .stock(100, 100).build(),
+                        AuditResult.BLOCKED, AuditScenario.POLICY_BLOCK_PROFIT, null, false, AuditScenario.POLICY_AUTO_TAOBAO,
+                        "EXCEPTION:" + AuditScenario.POLICY_EXCEPTION_PLATFORM_REMARK),
+
+                row("M23", "异常命中（平台备注 2 小时内被改）× 阻止不命中（毛利 62）",
+                        "【对称的反面】FROZEN 且没有任何 BLOCK 命中 → other_gates 整个键不存在"
+                                + "（按链序 [3] 整段先于 [4]，所以 FROZEN 时它永远为空）",
+                        builder(1215L, "QT-1215", 7, "淘宝", "268.00")
+                                .grossProfit("62.00").itemQty(2).itemKinds(1)
+                                .platformRemark("改成朝阳区xx路2号", AuditScenario.NOW.minusHours(2))
+                                .stock(100, 100).build(),
+                        AuditResult.FROZEN, AuditScenario.POLICY_EXCEPTION_PLATFORM_REMARK, null, false, AuditScenario.POLICY_AUTO_TAOBAO)
         );
     }
 
@@ -203,7 +231,7 @@ class AuditVerdictMatrixTest {
 
     @ParameterizedTest(name = "[{index}] {0}")
     @MethodSource("matrix")
-    @DisplayName("判定矩阵：每行把 result / matched_policy_name / downgrade_reason / advancesStatus / would_be 一次钉死")
+    @DisplayName("判定矩阵：每行把 result / matched_policy_name / downgrade_reason / advancesStatus / would_be / other_gates 一次钉死")
     void verdictMatrix(Row row) {
         AuditVerdict v = ENGINE.evaluate(row.ctx(), row.policies(), row.setting());
 
@@ -217,6 +245,9 @@ class AuditVerdictMatrixTest {
                 row.id(), row.combo()).isEqualTo(row.advancesStatus());
         assertThat(nameOf(v.wouldBePolicy())).as("[%s] %s → would_be_auto_policy_name",
                 row.id(), row.combo()).isEqualTo(row.wouldBePolicyName());
+
+        // ---------------- 第六个字段：other_gates（另一类闸门也命中时才有） ----------------
+        assertOtherGates(v, row);
 
         // ---------------- 不变量一：证据里的 stock 段与结论无关 ----------------
         boolean shortByFacts = row.ctx().stockAvailable() < row.ctx().itemQtyTotal();
@@ -271,7 +302,8 @@ class AuditVerdictMatrixTest {
                 + " || 期望 " + row.result() + "/" + nz(row.matchedPolicyName()) + "/" + nz(row.downgradeReason())
                 + "/推进=" + (row.advancesStatus() ? "是" : "否") + "/would_be=" + nz(row.wouldBePolicyName())
                 + " ⇒ 实得 " + v.result() + "/" + nz(nameOf(v.matchedPolicy())) + "/" + nz(v.downgradeReason())
-                + "/推进=" + (v.advancesStatus() ? "是" : "否") + "/would_be=" + nz(nameOf(v.wouldBePolicy())));
+                + "/推进=" + (v.advancesStatus() ? "是" : "否") + "/would_be=" + nz(nameOf(v.wouldBePolicy()))
+                + "/other_gates=" + (row.otherGates().isEmpty() ? "无" : row.otherGates()));
     }
 
     /**
@@ -331,9 +363,61 @@ class AuditVerdictMatrixTest {
                         && AuditScenario.POLICY_AUTO_DIRECT.equals(r.matchedPolicyName()));
         assertThat(rows).as("必须有「停用策略不参与」")
                 .anyMatch(r -> r.policies().stream().anyMatch(p -> !p.enabled()));
+        assertThat(rows).as("必须有「阻止命中 × 异常也命中 → BLOCKED 且声明了 other_gates」的行")
+                .anyMatch(r -> r.result() == AuditResult.BLOCKED && !r.otherGates().isEmpty());
+        assertThat(rows).as("必须有「异常命中 × 阻止不命中 → FROZEN 且 other_gates 不出现」的行")
+                .anyMatch(r -> r.result() == AuditResult.FROZEN && r.otherGates().isEmpty());
+        assertThat(rows).as("other_gates 只允许出现在被闸门拦下的两类结论上（BLOCKED / FROZEN）")
+                .allMatch(r -> r.otherGates().isEmpty()
+                        || r.result() == AuditResult.BLOCKED || r.result() == AuditResult.FROZEN);
         assertThat(rows).as("必须有三种事实叠加的行（两个以上闸门同时适用）")
                 .anyMatch(r -> r.ctx().frozen() && r.ctx().grossProfit() != null
                         && r.ctx().grossProfit().signum() <= 0 && r.result() == AuditResult.SKIPPED);
+    }
+
+    /**
+     * 验收口径的两条（与表同源，但把<b>形状与文案</b>逐字钉死 —— 表只管「有没有、哪一条」）。
+     *
+     * <p>为什么单独两条：{@code other_gates} 是给前端直接渲染的数据，键名（{@code type} /
+     * {@code policy_name} / {@code text}）与文案格式一旦漂移，前端不会报错，只会少显示一行。
+     */
+    @Test
+    @DisplayName("other_gates 形状：阻止命中 × 异常也命中 → 一条 EXCEPTION/退款申请冻结，文案是条件人话")
+    void otherGatesShapeWhenBlockedAndExceptionAlsoHits() {
+        AuditContext ctx = builder(1216L, "QT-1216", 7, "淘宝", "268.00")
+                .grossProfit("-12.00").itemQty(2).itemKinds(1).hasReturnApply(true).stock(100, 100).build();
+        AuditVerdict v = ENGINE.evaluate(ctx, AuditScenario.policies(), AuditScenario.strict());
+
+        assertThat(v.result()).as("结论不被回填改写").isEqualTo(AuditResult.BLOCKED);
+        assertThat(v.matchedPolicy().name()).isEqualTo(AuditScenario.POLICY_BLOCK_PROFIT);
+        assertThat(v.evidence()).containsKey("other_gates");
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> gates = (List<Map<String, Object>>) v.evidence().get("other_gates");
+        assertThat(gates).hasSize(1);
+        Map<String, Object> gate = gates.get(0);
+        assertThat(gate).containsOnlyKeys("type", "policy_name", "text");
+        assertThat(gate.get("type")).isEqualTo("EXCEPTION");
+        assertThat(gate.get("policy_name")).isEqualTo(AuditScenario.POLICY_EXCEPTION_RETURN);
+        assertThat(gate.get("text")).as("与 matched_condition 同格式的条件人话")
+                .isEqualTo("有退款申请 = 是（实际 是）");
+        // 回填不改判定：状态不推进、不打标（执行层的事由 AuditExecutor 的用例覆盖）
+        assertThat(v.advancesStatus()).isFalse();
+    }
+
+    @Test
+    @DisplayName("other_gates 缺席：异常命中且阻止不命中 → 整个键不存在（不是空数组）")
+    void otherGatesAbsentWhenOnlyExceptionHits() {
+        AuditVerdict v = ENGINE.evaluate(AuditScenario.qt1005Round1(), AuditScenario.policies(), AuditScenario.strict());
+
+        assertThat(v.result()).isEqualTo(AuditResult.FROZEN);
+        assertThat(v.evidence()).doesNotContainKey("other_gates");
+        assertThat(v.evidence().get("other_gates")).as("空数组也是一种「有」，会把前端判据搅浑").isNull();
+
+        // 对照：同样被拦、但一条异常闸门也没踩的单，也不该有这一段
+        AuditVerdict blockedOnly = ENGINE.evaluate(AuditScenario.qt1004(), AuditScenario.policies(), AuditScenario.strict());
+        assertThat(blockedOnly.result()).isEqualTo(AuditResult.BLOCKED);
+        assertThat(blockedOnly.evidence()).as("QT-1004 毛利 −12 但没有退款申请/备注改动").doesNotContainKey("other_gates");
     }
 
     // ================================================================== 表的零件
@@ -352,16 +436,23 @@ class AuditVerdictMatrixTest {
      * @param downgradeReason   期望 downgrade_reason（null = 必须为空）
      * @param advancesStatus    期望「状态是否推进」
      * @param wouldBePolicyName 期望 would_be_auto_policy_name（null = 必须为空）
+     * @param otherGates        期望 evidence.other_gates 的条目，形如 {@code "EXCEPTION:退款申请冻结"}
+     *                          （空 = 该键必须<b>不存在</b>）
      */
     record Row(String id, String combo, String why, AuditContext ctx, List<PolicyView> policies,
                AuditSetting setting, AuditResult result, String matchedPolicyName, String downgradeReason,
-               boolean advancesStatus, String wouldBePolicyName) {
+               boolean advancesStatus, String wouldBePolicyName, List<String> otherGates) {
+
+        Row {
+            otherGates = otherGates == null ? List.of() : List.copyOf(otherGates);
+        }
 
         @Override
         public String toString() {
             return id + " " + combo + " → " + result
                     + "（命中=" + nz(matchedPolicyName) + "，downgrade=" + nz(downgradeReason)
-                    + "，would_be=" + nz(wouldBePolicyName) + "，推进状态=" + (advancesStatus ? "是" : "否") + "）";
+                    + "，would_be=" + nz(wouldBePolicyName) + "，推进状态=" + (advancesStatus ? "是" : "否")
+                    + "，other_gates=" + (otherGates.isEmpty() ? "无" : otherGates) + "）";
         }
     }
 
@@ -370,7 +461,7 @@ class AuditVerdictMatrixTest {
                            String matchedPolicyName, String downgradeReason, boolean advancesStatus,
                            String wouldBePolicyName) {
         return new Row(id, combo, why, ctx, AuditScenario.policies(), AuditScenario.strict(), result,
-                matchedPolicyName, downgradeReason, advancesStatus, wouldBePolicyName);
+                matchedPolicyName, downgradeReason, advancesStatus, wouldBePolicyName, List.of());
     }
 
     /** 行工厂（只换档位，策略集默认） */
@@ -378,7 +469,7 @@ class AuditVerdictMatrixTest {
                            AuditResult result, String matchedPolicyName, String downgradeReason,
                            boolean advancesStatus, String wouldBePolicyName) {
         return new Row(id, combo, why, ctx, AuditScenario.policies(), setting, result,
-                matchedPolicyName, downgradeReason, advancesStatus, wouldBePolicyName);
+                matchedPolicyName, downgradeReason, advancesStatus, wouldBePolicyName, List.of());
     }
 
     /** 行工厂（策略集与档位都可换） */
@@ -386,7 +477,15 @@ class AuditVerdictMatrixTest {
                            AuditSetting setting, AuditResult result, String matchedPolicyName,
                            String downgradeReason, boolean advancesStatus, String wouldBePolicyName) {
         return new Row(id, combo, why, ctx, policies, setting, result, matchedPolicyName, downgradeReason,
-                advancesStatus, wouldBePolicyName);
+                advancesStatus, wouldBePolicyName, List.of());
+    }
+
+    /** 行工厂（默认策略集 + STRICT 档 + 声明 other_gates 期望：形如 "EXCEPTION:退款申请冻结"） */
+    private static Row rowWithGates(String id, String combo, String why, AuditContext ctx, AuditResult result,
+                                    String matchedPolicyName, String downgradeReason, boolean advancesStatus,
+                                    String wouldBePolicyName, String... otherGates) {
+        return new Row(id, combo, why, ctx, AuditScenario.policies(), AuditScenario.strict(), result,
+                matchedPolicyName, downgradeReason, advancesStatus, wouldBePolicyName, List.of(otherGates));
     }
 
     private static AuditScenario.Builder builder(Long id, String sn, int status, String channel, String amount) {
@@ -421,6 +520,41 @@ class AuditVerdictMatrixTest {
                         p.action(), p.conditions())
                         : p)
                 .toList();
+    }
+
+    /**
+     * {@code evidence.other_gates}：被拦/冻结时「另一类闸门里也命中的那些」。
+     *
+     * <p>两个方向都断言：声明了期望的行必须<b>逐条</b>出现（type / policy_name / text 三个键齐），
+     * 没声明的行必须<b>整个键不存在</b>（不是空数组）—— 后者才是前端判「还有没有别的闸门」的依据。
+     */
+    @SuppressWarnings("unchecked")
+    private static void assertOtherGates(AuditVerdict v, Row row) {
+        Object raw = v.evidence().get("other_gates");
+
+        if (row.otherGates().isEmpty()) {
+            assertThat(v.evidence()).as("[%s] 没有另一类闸门也命中 → other_gates 整个键不出现（不是空数组）", row.id())
+                    .doesNotContainKey("other_gates");
+            return;
+        }
+
+        assertThat(raw).as("[%s] 另一类闸门也命中 → evidence.other_gates 应是数组", row.id())
+                .isInstanceOf(List.class);
+        List<Map<String, Object>> gates = (List<Map<String, Object>>) raw;
+        assertThat(gates).extracting(g -> g.get("type") + ":" + g.get("policy_name"))
+                .as("[%s] other_gates 的 type / policy_name", row.id())
+                .containsExactlyInAnyOrderElementsOf(row.otherGates());
+        assertThat(gates).allSatisfy(g -> {
+            assertThat(g).as("[%s] 每条 gate 三个键齐", row.id())
+                    .containsKeys("type", "policy_name", "text");
+            assertThat(String.valueOf(g.get("type"))).as("[%s] type 只可能是这两类闸门", row.id())
+                    .isIn("EXCEPTION", "BLOCK");
+            // 与 matched_condition 里条件人话同格式（ConditionTrace.text()）：相等/包含类写
+            // 「有退款申请 = 是（实际 是）」，关系比较类写「平台备注更新距今(小时) 2 ≤ 24」；
+            // 两种形状都由同一个 ConditionTrace 产出，这里只钉「不是空、不是占位 null」
+            assertThat(String.valueOf(g.get("text"))).as("[%s] text 是条件人话（非空、无 null 占位）", row.id())
+                    .isNotBlank().doesNotContain("null");
+        });
     }
 
     @SuppressWarnings("unchecked")

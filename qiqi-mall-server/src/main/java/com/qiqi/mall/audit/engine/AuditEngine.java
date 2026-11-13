@@ -19,6 +19,8 @@ import java.util.Map;
  * [3] BLOCK 命中（同类内 priority 升序）→ BLOCKED（原因带具体数值差）
  * [4] EXCEPTION 命中                   → FROZEN（打标 + 冻结）
  *     [3][4] 命中后**仍继续跑 [5]，只看不执行**，回填 would_be_auto_policy
+ *     [3] 命中后另对 [4] 整段做一次**只读求值**（[4] 命中后对 [3] 整段同理），
+ *         把「也命中的另一类闸门」写进 evidence.other_gates（不改判定）
  * [5] AUTO（priority 升序）逐条：
  *     5a MATCH 条件没全满足 → 记 miss_reason（哪条、expected vs actual）
  *     5b 排除条件（本策略 POLICY 级 ∪ 全部 ALL_AUTO 级）任一成立 → 记 excluded_by
@@ -95,10 +97,13 @@ public final class AuditEngine {
             List<ConditionTrace> traces = evalMatches(ctx, policy);
             if (allSatisfied(traces)) {
                 WouldBe wouldBe = wouldBe(ctx, active, globalExclusions);
+                Map<String, Object> ev = evidence(ctx, s, "BLOCKED", wouldBe, null);
+                // [3] return 之后 [4] 根本没跑 → 「这单还挂着一笔退款申请」只有回填才能被看见
+                putOtherGates(ev, ctx, active, PolicyType.EXCEPTION);
                 return new AuditVerdict(AuditResult.BLOCKED, policy, traces, List.of(), List.of(),
                         wouldBe.policy(), wouldBe.conditions(), null,
                         "拦截：策略「" + policy.name() + "」命中 —— " + join(traces),
-                        evidence(ctx, s, "BLOCKED", wouldBe, null));
+                        ev);
             }
         }
 
@@ -108,10 +113,14 @@ public final class AuditEngine {
             if (allSatisfied(traces)) {
                 WouldBe wouldBe = wouldBe(ctx, active, globalExclusions);
                 ActionSpec action = policy.action() == null ? ActionSpec.freeze("异常策略命中：" + policy.name()) : policy.action();
+                Map<String, Object> ev = evidence(ctx, s, "FROZEN", wouldBe, action);
+                // 对称回填（按当前链序 [3] 整段先于 [4]，所以这里实际上永远为空 —— 保留是为了
+                // 「将来若调整链序，证据不会静默少一份」；见 putOtherGates 的说明）
+                putOtherGates(ev, ctx, active, PolicyType.BLOCK);
                 return new AuditVerdict(AuditResult.FROZEN, policy, traces, List.of(), List.of(),
                         wouldBe.policy(), wouldBe.conditions(), null,
                         "冻结：策略「" + policy.name() + "」命中 —— " + join(traces),
-                        evidence(ctx, s, "FROZEN", wouldBe, action));
+                        ev);
             }
         }
 
@@ -268,6 +277,52 @@ public final class AuditEngine {
             return new WouldBe(policy, traces);
         }
         return WouldBe.none();
+    }
+
+    // ================================================================== 回填「另一类闸门也命中」
+
+    /**
+     * 只读回填 {@code evidence.other_gates}：把<b>另一类</b>闸门里也命中的策略列出来，一个字都不改结论。
+     *
+     * <h3>为什么需要它</h3>
+     * 判定链是「整段跑、命中即返回」：[3] 一旦 BLOCK 命中就 return，[4] 那一段<b>根本没跑</b>。
+     * 于是运营看到 BLOCKED 时，无从知道这单其实还挂着一笔待处理退款申请（后端此刻自己也不知道）——
+     * 而这两条事实的处理动作完全不同：阻止要「联系客户确认」，冻结要「等客服处理退款」。
+     *
+     * <h3>为什么不直接跑那一段</h3>
+     * 跑 [4] 会改变判定（BLOCKED 会变成 FROZEN），这是踩判定链顺序的红线。所以这里做的是
+     * <b>只读求值</b>：遍历那一类的策略，只看「MATCH 条件是否全成立」，成立就收进证据 ——
+     * 与 {@link #wouldBe} 回填 AUTO 段完全是同一个手法（命中方式一样，结论只进证据）。
+     *
+     * <h3>三个口径</h3>
+     * <ul>
+     *   <li><b>只跨类型</b>：BLOCKED 回填 EXCEPTION 段，FROZEN 回填 BLOCK 段。同类里「第二条也命中」
+     *       是 priority 竞争的问题（哪条更优先已在 {@code matched_policy} 里答了），不属于「另一道闸门」；</li>
+     *   <li><b>空就不写键</b>：一条也没有时 {@code other_gates} <b>整个键不存在</b>，不是空数组 ——
+     *       前端判「有没有别的闸门」只需 {@code !!evidence.other_gates}，不必再区分「空数组/缺失」两种空；</li>
+     *   <li><b>按当前链序，[4] 命中时这一列必为空</b>：[3] 整段在 [4] 之前，能走到 [4] 就说明没有任何
+     *       BLOCK 命中。代码仍然对称地算一遍（不写死成「必然为空」），是为了将来调链序时证据不会静默
+     *       少一份 —— 那种缺失没有任何断言会红，只会让运营少看到一句话。</li>
+     * </ul>
+     *
+     * <p>{@code text} 与 {@code matched_condition_json} 里的条件人话同格式（{@link ConditionTrace#text()}，
+     * 多条按「；」连起来），所以前端可以直接复用同一套渲染。
+     */
+    private static void putOtherGates(Map<String, Object> ev, AuditContext ctx,
+                                      List<PolicyView> active, PolicyType type) {
+        List<Map<String, Object>> gates = new ArrayList<>();
+        for (PolicyView policy : sorted(active, type)) {
+            List<ConditionTrace> traces = evalMatches(ctx, policy);
+            if (!allSatisfied(traces)) continue;        // 只收「整条策略也命中」的，半命中不算闸门
+            Map<String, Object> gate = new LinkedHashMap<>();
+            gate.put("type", type.name());
+            gate.put("policy_name", policy.name());
+            gate.put("text", join(traces));
+            gates.add(gate);
+        }
+        if (!gates.isEmpty()) {
+            ev.put("other_gates", gates);
+        }
     }
 
     // ================================================================== 工具
