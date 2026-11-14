@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 /**
- * mock 平台服务（淘宝 / 抖音）—— **独立单文件、零依赖、不进 docker compose**。
+ * mock 平台服务（淘宝 / 抖音）—— **独立单文件、零依赖**。
+ *
+ * 两种跑法，共用这一份代码：
+ *   · 宿主机进程（e2e 分片）：e2e spec 自己 spawn，端口 19090（**宿主机 19090 只归 e2e**）；
+ *   · docker compose 服务（测试/演示栈）：服务名 `mock-platform`，端口 19090，
+ *     只接在 qiqi-net 内部（**不映射宿主机 19090**，否则就去抢 e2e 的端口了）。
  *
  * 它是「外部电商平台」的替身，给接入层两件事：
  *   GET  /mock/{taobao|douyin}/orders?since=...   拉单（平台格式 JSON）
@@ -20,6 +25,7 @@
  *
  * 环境变量：
  *   MOCK_PORT       监听端口，默认 19090（**独立端口**，与后端/前端/容器栈都不冲突）
+ *   MOCK_HOST       监听地址，默认 127.0.0.1；进容器必须给 0.0.0.0（见下方 HOST 注释）
  *   MOCK_RUN_ID     批次标识，默认进程启动时间戳；拼进平台单号，保证每次启动是「一批新单」
  *   MOCK_SKU_IDS    平台商品编码用到的本地 sku.id 列表（逗号分隔），默认 "1,2,3"
  *   MOCK_TAOBAO_ORDERS / MOCK_DOUYIN_ORDERS   两个平台各生成几单，默认 2 / 1
@@ -27,6 +33,12 @@
 import http from 'node:http'
 
 const PORT = Number(process.env.MOCK_PORT || 19090)
+/**
+ * 监听地址。默认 127.0.0.1 —— e2e 在**宿主机**上 spawn 本进程，只让本机访问是刻意的。
+ * 进了 docker compose（服务名 mock-platform）时必须给 0.0.0.0：容器里的 127.0.0.1 只有
+ * 容器自己能连，server-1/-2（另一个容器）要按服务名连进来就得监听在 0.0.0.0 上。
+ */
+const HOST = process.env.MOCK_HOST || '127.0.0.1'
 const RUN_ID = process.env.MOCK_RUN_ID || String(Date.now())
 const SKU_IDS = (process.env.MOCK_SKU_IDS || '1,2,3')
   .split(',')
@@ -253,8 +265,8 @@ const server = http.createServer(async (req, res) => {
   return json(res, 405, { ok: false, code: 'METHOD_NOT_ALLOWED', message: `${method} ${path}` })
 })
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`[mock-platform] listening on http://127.0.0.1:${PORT} runId=${RUN_ID}`)
+server.listen(PORT, HOST, () => {
+  console.log(`[mock-platform] listening on http://${HOST}:${PORT} runId=${RUN_ID}`)
   console.log(`[mock-platform] taobao batch: ${BATCHES.taobao.map((o) => o.platformSn).join(', ')}`)
   console.log(`[mock-platform] douyin batch: ${BATCHES.douyin.map((o) => o.platformSn).join(', ')}`)
 })

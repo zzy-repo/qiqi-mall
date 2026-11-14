@@ -122,6 +122,31 @@ class ChannelAdapterContractTest {
     // ------------------------------------------------------------------ 适配器（真跑一次本地 HTTP）
 
     @Test
+    @DisplayName("平台不可达的文案：保留「哪个地址不可达」，但不许把 ConnectException 这类 Java 异常名露给运营")
+    void unreachableMessageStaysHumanReadable() throws Exception {
+        // 先占一个空端口再放掉：这样「没人监听」是确定的，不用赌 19090 上有没有东西
+        int freePort;
+        try (java.net.ServerSocket probe = new java.net.ServerSocket(0)) {
+            freePort = probe.getLocalPort();
+        }
+        String base = "http://127.0.0.1:" + freePort;
+        MockPlatformAdapter adapter = new MockPlatformAdapter(
+                new com.qiqi.mall.channel.adapter.HttpJson(MAPPER), MAPPER, base, "TAOBAO_MOCK", "taobao");
+
+        assertThatThrownBy(() -> adapter.pullOrders("TB-001", LocalDateTime.now().minusDays(1)))
+                .isInstanceOf(ChannelException.class)
+                // 人话：说清「不可达 + 地址」，这是运营排障需要的信息
+                .hasMessageContaining("平台不可达")
+                .hasMessageContaining(base)
+                // 技术噪音：异常类名与 query string 一个都不许出现
+                .hasMessageNotContaining("Exception")
+                .hasMessageNotContaining("shopCode")
+                .satisfies(e -> assertThat(((ChannelException) e).getDetail())
+                        // 但技术细节不能丢：它要落在 sync_log 的报文列里
+                        .contains("Exception"));
+    }
+
+    @Test
     @DisplayName("MockPlatformAdapter：拉单解析正确；平台 503 抛 ChannelException 且带回原始报文")
     void mockAdapterTalksHttp() throws Exception {
         AtomicInteger failNext = new AtomicInteger(0);

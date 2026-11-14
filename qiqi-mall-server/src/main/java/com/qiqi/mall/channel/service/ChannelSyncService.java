@@ -112,12 +112,15 @@ public class ChannelSyncService {
             orders = adapter.pullOrders(shop.getShopCode(), since);
         } catch (ChannelException e) {
             long latency = elapsedMs(t0);
+            String reason = "拉单失败：" + e.getMessage();
             // 外呼失败：水位原地不动（这些单下次还要拉），只记一行 FAIL
             logWriter.write(shop.getId(), ChannelSyncLog.ACTION_PULL, "SHOP", shop.getId(),
-                    request, e.getRawResponse(), ChannelSyncLog.RESULT_FAIL,
-                    "拉单失败：" + e.getMessage(), 1, latency);
-            log.warn("[channel] 拉单失败 shop={}({})：{}", shop.getShopName(), shop.getPlatformType(), e.getMessage());
-            throw new IllegalStateException("拉单失败：" + e.getMessage());
+                    request, failurePayload(e), ChannelSyncLog.RESULT_FAIL, reason, 1, latency);
+            // 技术细节（ConnectException / 完整 URL）只进服务端日志：运营看 reason，排障看这里
+            log.warn("[channel] 拉单失败 shop={}({})：{}（技术细节：{}）",
+                    shop.getShopName(), shop.getPlatformType(), e.getMessage(), technicalDetailOf(e));
+            // toast 带上「哪家店」：三家店三个按钮，只说「拉单失败」等于让运营自己去猜是哪家
+            throw new IllegalStateException("拉单失败：" + shop.getShopName() + " " + e.getMessage());
         }
         long latency = elapsedMs(t0);
 
@@ -285,8 +288,11 @@ public class ChannelSyncService {
                 lastError = e.getHttpStatus() > 0
                         ? ("HTTP " + e.getHttpStatus() + "：" + e.getMessage())
                         : e.getMessage();
+                // 报文列存响应体；连接层失败（没有响应体）时存技术细节 —— 那一列就是排查用的证据
                 logWriter.write(shop.getId(), ChannelSyncLog.ACTION_SHIP_PUSH, "DELIVERY", pkg.getId(),
-                        request, e.getRawResponse(), ChannelSyncLog.RESULT_FAIL, lastError, attempt, latency);
+                        request, failurePayload(e), ChannelSyncLog.RESULT_FAIL, lastError, attempt, latency);
+                log.warn("[channel] 回传发货外呼失败 order={} 包裹 {}：{}（技术细节：{}）",
+                        pkg.getOrderId(), pkg.getDeliverySn(), e.getMessage(), technicalDetailOf(e));
             }
             if (attempt < MAX_ATTEMPTS) {
                 log.warn("[channel] 回传失败（第 {} 次），重试一次：{}", attempt, lastError);
@@ -302,6 +308,27 @@ public class ChannelSyncService {
         // 只有最终失败才把错误带出来；成功的（哪怕重试过）不挂旧错误，避免「成功了却显示报错」
         row.put("lastError", ok ? null : lastError);
         return row;
+    }
+
+    /**
+     * 失败行的「报文」列：平台有响应体就存响应体；连接层失败（没有响应体）就把技术细节存进去。
+     *
+     * <p>这一列是排查用的证据，所以这里**必须**留得住那点技术细节 —— 人话（reason）给运营，
+     * 细节（errorDetail）给排障，两者都存在同一行上，谁也不用去翻服务端日志。
+     */
+    private static Object failurePayload(ChannelException e) {
+        if (e.getRawResponse() != null && !e.getRawResponse().isBlank()) {
+            return e.getRawResponse();
+        }
+        if (e.getDetail() == null || e.getDetail().isBlank()) {
+            return null;
+        }
+        return Map.of("errorDetail", e.getDetail());
+    }
+
+    /** 服务端日志里的技术细节（没有就写「无」，别打出空括号让人猜） */
+    private static String technicalDetailOf(ChannelException e) {
+        return e.getDetail() == null || e.getDetail().isBlank() ? "无（平台有响应体，见同步日志报文）" : e.getDetail();
     }
 
     private static long elapsedMs(long startNanos) {

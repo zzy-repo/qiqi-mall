@@ -105,6 +105,17 @@ app:
   # 进程外 KV：memory(单实例) | redis(多实例共享验证码/幂等令牌)
   kv-store: ${KV_STORE:memory}
 
+# 多平台接入（channel）：mock 平台地址。
+#   mock-platform/server.mjs 是「外部电商平台」的替身，两个 mock 店铺（淘宝/抖音）的
+#   拉单与回传发货都打这个地址。注意它**不按店铺存库**（channel_shop 没有 base_url 列），
+#   一个进程一份配置，三家店铺共用。
+channel:
+  mock:
+    # dev（宿主机后端，含 e2e 分片 8091~8094）= 宿主机上的 mock 进程：
+    #   e2e spec 自己 spawn 一份在 127.0.0.1:19090（见 09 接入 spec 的 MOCK_PORT），
+    #   手工起也是这个默认端口（mock-platform/README.md）。所以这里必须留 127.0.0.1。
+    base-url: ${CHANNEL_MOCK_BASE_URL:http://127.0.0.1:19090}
+
 # 库存分桶（详见 sql/migrate-sku-bucket.sql 与 SkuBucketService）
 #   为什么分桶：热点 SKU 的所有并发都挤在 `UPDATE sku ... WHERE id=?` 那一把行锁上，
 #   TPS 上限 = 单行行锁吞吐。把同一份库存物理拆成 N 行（sku_bucket），并发就分散到 N 把锁。

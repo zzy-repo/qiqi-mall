@@ -66,11 +66,11 @@ public class MockPlatformAdapter implements ChannelAdapter {
         HttpJson.Response response;
         try {
             response = http.get(url);
-        } catch (RuntimeException e) {
-            throw new ChannelException("mock 平台不可达（" + baseUrl + "）：" + e.getMessage(), 0, "");
+        } catch (HttpJson.CallFailure e) {
+            throw unreachable(e);
         }
         if (!response.ok()) {
-            throw new ChannelException("mock 平台返回 " + response.status(), response.status(), response.body());
+            throw new ChannelException("平台返回 HTTP " + response.status(), response.status(), response.body());
         }
         return PlatformJson.parseOrders(mapper, response.body(), platformType, shopCode);
     }
@@ -87,14 +87,27 @@ public class MockPlatformAdapter implements ChannelAdapter {
         HttpJson.Response response;
         try {
             response = http.postJson(baseUrl + "/mock/" + pathSegment + "/ship", body);
-        } catch (RuntimeException e) {
-            throw new ChannelException("mock 平台不可达（" + baseUrl + "）：" + e.getMessage(), 0, "");
+        } catch (HttpJson.CallFailure e) {
+            throw unreachable(e);
         }
         if (!response.ok()) {
-            throw new ChannelException("mock 平台返回 " + response.status(), response.status(), response.body());
+            throw new ChannelException("平台返回 HTTP " + response.status(), response.status(), response.body());
         }
         PlatformJson.ParsedShip parsed = PlatformJson.parseShip(mapper, response.body(), response.status());
         return new PushResult(true, parsed.code(), parsed.message(), response.status(), response.body());
+    }
+
+    /**
+     * 连接层失败 → {@link ChannelException}。
+     *
+     * <p>message 是给运营看的人话：「平台不可达（连接失败，地址 http://mock-platform:19090）」——
+     * 保留「哪个平台不可达 + 打的是哪个地址」这个排障必需信息，但**不放 Java 异常类名**、
+     * 也不放 since/shopCode 那串 query（运营不看，还把 toast 撑爆）。
+     * 异常类名等细节走 {@link HttpJson.CallFailure#detail()} → {@code ChannelException.getDetail()}，只落日志。
+     */
+    private ChannelException unreachable(HttpJson.CallFailure e) {
+        return new ChannelException(
+                "平台不可达（" + e.friendly() + "，地址 " + e.endpoint() + "）", 0, "", e.detail());
     }
 
     private static String enc(String v) {

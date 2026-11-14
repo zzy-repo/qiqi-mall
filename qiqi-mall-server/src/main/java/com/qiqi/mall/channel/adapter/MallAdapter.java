@@ -65,11 +65,11 @@ public class MallAdapter implements ChannelAdapter {
         HttpJson.Response response;
         try {
             response = http.get(url);
-        } catch (RuntimeException e) {
-            throw new ChannelException("商城开放接口不可达：" + e.getMessage(), 0, "");
+        } catch (HttpJson.CallFailure e) {
+            throw unreachable(e);
         }
         if (!response.ok()) {
-            throw new ChannelException("商城开放接口返回 " + response.status(), response.status(), response.body());
+            throw new ChannelException("商城开放接口返回 HTTP " + response.status(), response.status(), response.body());
         }
         return PlatformJson.parseOrders(mapper, response.body(), PLATFORM, shopCode);
     }
@@ -86,15 +86,24 @@ public class MallAdapter implements ChannelAdapter {
         HttpJson.Response response;
         try {
             response = http.postJson(baseUrl + "/channel-api/shipments", body);
-        } catch (RuntimeException e) {
-            throw new ChannelException("商城开放接口不可达：" + e.getMessage(), 0, "");
+        } catch (HttpJson.CallFailure e) {
+            throw unreachable(e);
         }
         if (!response.ok()) {
-            throw new ChannelException("商城发货回写返回 " + response.status(), response.status(), response.body());
+            throw new ChannelException("商城发货回写返回 HTTP " + response.status(), response.status(), response.body());
         }
         // 平台返回的 code 原样带回去：业务层只认 DUPLICATE（幂等命中 → SKIP），其余按 ok 处理
         PlatformJson.ParsedShip parsed = PlatformJson.parseShip(mapper, response.body(), response.status());
         return new PushResult(true, parsed.code(), parsed.message(), response.status(), response.body());
+    }
+
+    /**
+     * 连接层失败 → {@link ChannelException}（人话进 toast/日志 reason，技术细节只进日志）。
+     * 与 {@code MockPlatformAdapter#unreachable} 同口径：保留「哪个接口 + 哪个地址」，去掉异常类名与 query。
+     */
+    private ChannelException unreachable(HttpJson.CallFailure e) {
+        return new ChannelException(
+                "商城开放接口不可达（" + e.friendly() + "，地址 " + e.endpoint() + "）", 0, "", e.detail());
     }
 
     private static String enc(String v) {

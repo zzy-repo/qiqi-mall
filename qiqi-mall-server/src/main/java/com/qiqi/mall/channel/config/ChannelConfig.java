@@ -18,8 +18,16 @@ import org.springframework.context.annotation.Configuration;
  * 注册表（{@code ChannelAdapterRegistry}）按 {@code platformType()} 取适配器，
  * 两个平台必须是**两个 bean**，否则后注册的会覆盖前一个。
  *
- * <p>{@code channel.mock.base-url} 默认 {@code http://127.0.0.1:19090}
- * （mock 服务独立端口，不进 docker compose；启动方式见 mock-platform/README.md）。
+ * <p>{@code channel.mock.base-url} 是**进程级**配置（{@code channel_shop} 表没有 base_url 列，
+ * 三家店铺共用一份），各 profile 的取值见 application-*.yml：
+ * <ul>
+ *   <li>dev（宿主机后端，含 e2e 分片）= {@code http://127.0.0.1:19090}：
+ *       mock 是 e2e spec 自己 spawn 的宿主机进程；</li>
+ *   <li>test（容器栈 = 测试/演示环境）= {@code http://mock-platform:19090}：
+ *       mock 是 compose 里的服务，走 qiqi-net 内部 DNS。**不能写 127.0.0.1** ——
+ *       容器里的 127.0.0.1 是容器自己，那是「点拉单必然连接失败」的老 bug。</li>
+ * </ul>
+ * 两处都可用环境变量 {@code CHANNEL_MOCK_BASE_URL} 覆盖。启动方式见 mock-platform/README.md。
  */
 @Configuration
 public class ChannelConfig {

@@ -41,10 +41,10 @@
             <div class="meta-row">
               <span class="meta-label">今日成功 / 失败</span>
               <span class="meta-value">
-                <span class="ok-num">{{ shop.todayOk ?? 0 }}</span>
-                <span class="sep">/</span>
-                <span class="fail-num">{{ shop.todayFail ?? 0 }}</span>
-                <span class="skip-num">（跳过 {{ shop.todaySkip ?? 0 }}）</span>
+                <el-text tag="b" type="success">{{ shop.todayOk ?? 0 }}</el-text>
+                <el-text type="info">/</el-text>
+                <el-text tag="b" type="danger">{{ shop.todayFail ?? 0 }}</el-text>
+                <el-text size="small" type="info" class="skip-num">（跳过 {{ shop.todaySkip ?? 0 }}）</el-text>
               </span>
             </div>
           </div>
@@ -180,6 +180,27 @@ const actionText = { PULL: '拉单', SHIP_PUSH: '回传发货' }
 const resultText = { OK: '成功', FAIL: '失败', SKIP: '跳过' }
 const resultTag = { OK: 'success', FAIL: 'danger', SKIP: 'warning' }
 
+/**
+ * 页面提示（toast）的统一出口。
+ *
+ * 三件必须在这里解决的事（都来自截图里的真实观感：两条红 toast 糊在页头与卡片标题上）：
+ *  ① **不许压顶栏**：ElMessage 默认 offset=20px，而顶栏（面包屑 / 环境标）高 56px，
+ *     所以默认位置正好盖在顶栏上。这里把偏移放到顶栏之下（56 + 12）。
+ *  ② **不许横着铺满一行**：ElMessage 默认水平居中，长文案会被拉到近全宽，
+ *     于是盖住左边的卡片标题「多平台接入」。这里用 customClass 把它收到右上角
+ *     （见文件末尾的 .channel-toast 规则），标题与店铺卡都不再被它盖住。
+ *  ③ **不许越叠越高**：grouping=true 让同一条提示连续出现时合并计数；
+ *     失败停留时间给长一点 —— 里面带「哪个平台、哪个地址」，要留得住看得完。
+ *
+ * 注意：只改**位置**，不改内容。失败就是失败，页面上必须看得见（不 catch 掉、不改写成成功）。
+ */
+const MESSAGE_OFFSET = 68
+const MESSAGE_CLASS = 'channel-toast'
+const toastSuccess = (message) =>
+  ElMessage({ type: 'success', message, offset: MESSAGE_OFFSET, grouping: true, duration: 3000, customClass: MESSAGE_CLASS })
+const toastError = (message) =>
+  ElMessage({ type: 'error', message, offset: MESSAGE_OFFSET, grouping: true, duration: 6000, customClass: MESSAGE_CLASS })
+
 const shops = ref([])
 const shopsLoading = ref(false)
 const pulling = ref(null)
@@ -234,12 +255,14 @@ const pull = async (shop) => {
   pulling.value = shop.id
   try {
     const r = await pullChannelShop(shop.id)
-    ElMessage.success(
+    toastSuccess(
       `${shop.shopName}：拉回 ${r.total} 单（新建 ${r.created} / 跳过 ${r.skipped} / 失败 ${r.failed}）`
     )
     await Promise.all([loadShops(), loadLogs()])
   } catch (e) {
-    ElMessage.error(e.message || '拉单失败')
+    // 后端已经把失败翻译成人话（店铺名 + 平台不可达 + 地址，见 ChannelSyncService）；
+    // 这里原样显示，**不吞、不改写**：失败就是失败，页面上必须看得见。
+    toastError(e.message || '拉单失败')
   } finally {
     pulling.value = null
   }
@@ -252,9 +275,16 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+/* el-message 是 teleport 到 body 的，scoped 选择器命中不了它 —— 所以用 :global + 专属 class 限定，
+   只影响本页发出的提示（别的页面仍旧是默认居中样式）。只写位置与宽度，颜色/字号走 Element Plus 令牌。 */
+:global(.channel-toast.el-message) {
+  left: auto;
+  right: 16px;
+  transform: none;
+  max-width: min(520px, calc(100vw - 32px));
+}
+
 .channel { display: flex; flex-direction: column; gap: 12px; }
-.card-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.header-tip { color: #909399; font-size: 12px; font-weight: normal; }
 .filters { display: flex; gap: 8px; align-items: center; }
 
 .shop-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
@@ -267,15 +297,11 @@ onMounted(async () => {
 .meta-row { display: flex; justify-content: space-between; gap: 8px; }
 .meta-label { color: #909399; }
 .meta-value { color: #303133; }
-.ok-num { color: #67c23a; font-weight: 600; }
-.fail-num { color: #f56c6c; font-weight: 600; }
-.sep { color: #c0c4cc; margin: 0 4px; }
-.skip-num { color: #909399; margin-left: 6px; font-size: 12px; }
+.skip-num { margin-left: 6px; }
 .shop-actions { margin-top: 12px; display: flex; align-items: center; gap: 8px; }
 .action-hint { color: #c0c4cc; font-size: 12px; }
 
 .log-card { margin-bottom: 12px; }
-.pager { display: flex; justify-content: flex-end; margin-top: 12px; }
-.reason-text { color: #f56c6c; }
+.reason-text { color: var(--el-color-danger); }
 .muted { color: #c0c4cc; }
 </style>
