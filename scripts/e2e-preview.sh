@@ -121,8 +121,23 @@ for s in "${SHARDS[@]}"; do
   for app in portal admin; do
     if [[ "$app" == "portal" ]]; then port=$((pport+PORT_OFFSET)); else port=$((aport+PORT_OFFSET)); fi
     if [[ "$(health "$port")" != "000" ]]; then
-      echo "· shard $name $app 已在 $port 上跑着，跳过"
-      continue
+      # 端口上已经有人应声：必须分清「我们自己的 preview」还是「别人的东西」。
+      # 无脑跳过是危险的 —— 若是别的进程占着这个端口，preview 起不来、e2e 却照样打得通（打到错的服务上），
+      # 结果是一整片看不出原因的红/绿。所以这里按 PID 反查命令行，只认 preview-server.mjs。
+      _pid="$(pid_on "$port")"
+      _cmd="$(tr '\0' ' ' < "/proc/${_pid:-0}/cmdline" 2>/dev/null || true)"
+      if [[ -n "${_pid:-}" ]] && [[ "$_cmd" == *preview-server.mjs* ]]; then
+        echo "· shard $name $app 已在 $port 上跑着（preview-server，pid $_pid），复用"
+        continue
+      fi
+      {
+        echo "✗ shard $name $app 的端口 $port 已被**别的进程**占用，preview 起不来。"
+        echo "  占用者：pid ${_pid:-（拿不到 PID，可能是别的用户/容器/网络命名空间里的进程）}"
+        echo "  cmd   ：${_cmd:-（不可读）}"
+        echo "  处理：按上面这个 PID 精确停掉（不要 pkill -f 宽匹配，这台机器上有别人的作业），"
+        echo "        或者换一套端口跑：E2E_PREVIEW_PORT_OFFSET=200 bash scripts/e2e-run.sh ..."
+      } >&2
+      exit 3
     fi
     unit="$(unit_of "$name" "$app")"
     LOG="$LOG_DIR/e2e-preview-$app-$name.log"
@@ -152,3 +167,14 @@ for i in $(seq 1 30); do
   sleep 2
 done
 "${BASH_SOURCE[0]}" status
+# 等完了还没起来 → 明确失败退出（让 e2e-run.sh 的 `if ! start` 拦住跑批），
+# 否则 playwright 会打到空端口上，全片都是「连接被拒」的假红。
+down=0
+for s in "${SHARDS[@]}"; do
+  IFS=: read -r name pport aport backend <<< "$s"
+  for port in $((pport+PORT_OFFSET)) $((aport+PORT_OFFSET)); do
+    [[ "$(health "$port")" != "000" ]] || { echo "✗ shard $name 的 preview 端口 $port 60s 内没起来（看 ${LOG_DIR}/e2e-preview-*-$name.log）" >&2; down=1; }
+  done
+done
+[[ "$down" == "1" ]] && exit 4
+exit 0

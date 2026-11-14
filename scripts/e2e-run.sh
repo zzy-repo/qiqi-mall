@@ -9,7 +9,10 @@
 #   scripts/e2e-run.sh --no-reset                        # 不重置库（调试单条时快一些）
 #   E2E_SHARDS=1 scripts/e2e-run.sh                      # 降级：单 shard 单后端
 #   E2E_WORKERS=2 scripts/e2e-run.sh                     # 每个 shard 内再开 2 个 worker
-#   E2E_FRONT_MODE=build scripts/e2e-run.sh              # 前端打**构建产物**（preview-server）而不是 vite dev
+#   E2E_FRONT_MODE=dev scripts/e2e-run.sh                # 回退：前端打 4 套 vite dev server（旧默认）
+#
+# 前端模式默认已是 build（前端打**构建产物** + preview-server，实测墙钟 −15%，代价是构建 +20s）。
+# 直接跑 `scripts/e2e-run.sh` 拿到的就是快的那一版；只有需要「改前端源码即时生效」时才用 E2E_FRONT_MODE=dev。
 #
 # ⚠️ 跑 e2e **不要**传 ADMIN_PASSWORD：e2e 分片库的 admin 口令是种子默认的 123456，
 #    ADMIN_PASSWORD 是容器栈 demo 录制用的强口令，混进来会让 ui.js 拿强口令登 e2e 库 →
@@ -93,23 +96,26 @@ unset ADMIN_PASSWORD
 # ════════════════════════════════════════════════════════════════════════════
 # E2E_FRONT_MODE：前端打 dev server 还是**构建产物**
 #
-#   dev   （默认，向后兼容）：scripts/start-e2e-frontends.sh 那 4 套 vite，
-#                            端口 5183/5185/5193/5195（一个 shard 一套 portal+admin）
-#   build ：`npm run build` 出的 dist + e2e/support/preview-server.mjs
+#   build （**默认**）：`npm run build` 出的 dist + e2e/support/preview-server.mjs
 #           （静态 + /portal|/admin → 该 shard 后端、/qiqi-mall → MinIO 反代，
 #            端口 +100 = 5283/5285/5293/5295，**与 dev 那套可以同时存在**，
 #            切模式不用先停别人正在用的 dev 栈）
+#   dev   （**回退开关**，E2E_FRONT_MODE=dev）：scripts/start-e2e-frontends.sh 那 4 套 vite，
+#          端口 5183/5185/5193/5195（一个 shard 一套 portal+admin）。
+#          只在「改了前端源码想立刻看到效果、不想等构建」时用。
 #
 # 为什么要它：dev server 每次页面导航都要现编译模块、拉几百个请求（实测 778ms / 500 请求），
 # 产物只要 525ms / 50 请求。spec 与断言一行不用改 —— 前端请求本来就是相对路径
 # （portal 走 /portal、admin 走 /admin，见各 src/api/request.js 的 baseURL），
 # 换的只是「谁来 serve 这堆静态文件、谁来反代这两个前缀」。
 #
-# 构建新鲜度：dist 比源码旧就**自动重建**（默认）。显式 E2E_SKIP_BUILD=1 时若 dist 仍旧则直接 die，
-# 理由和 preflight 的字节码锚一样：跑旧产物的结论是假结论，宁可不跑。
+# 构建新鲜度（默认 build 模式每次跑都重建，几十秒换「产物 = 当前工作区」这条确定的锚；
+# 显式 E2E_SKIP_BUILD=1 时若 dist 比源码旧则直接 die —— 理由和 preflight 的字节码锚一样：
+# 跑旧产物的结论是假结论，宁可不跑）。
+# 构建失败**明确报错退出**，绝不静默回落到 dev（静默回落 = 假快）。
 # ════════════════════════════════════════════════════════════════════════════
 fmt_epoch0() { [[ "${1:-0}" == "0" ]] && echo "-" || date -d "@$1" '+%F %T'; }
-FRONT_MODE="${E2E_FRONT_MODE:-dev}"
+FRONT_MODE="${E2E_FRONT_MODE:-build}"
 case "$FRONT_MODE" in
   dev)   PORT_OFFSET=0 ;;
   build) PORT_OFFSET="${E2E_PREVIEW_PORT_OFFSET:-100}" ;;
@@ -223,6 +229,9 @@ fi
 # ════════════════════════════════════════════════════════════════════════════
 # build 模式下的前端：构建 dist → 起 4 个 preview（精确到 systemd unit），退出时精确停
 # ════════════════════════════════════════════════════════════════════════════
+# 这一行无条件打出来（--list 之外也打）：不看文档、直接跑默认的人要能一眼看见「这次跑的是哪一版前端」。
+# build 是默认值，若哪天默认被人改回 dev，这里会立刻显示 dev，而不是让结论默默变了。
+echo "▶ front: $FRONT_MODE$([[ "$FRONT_MODE" == "build" ]] && echo "（port+$PORT_OFFSET, dist+preview-server）" || echo "（vite dev）")"
 if [[ "$FRONT_MODE" == "build" ]]; then
   dist_epoch() { [[ -f "$1" ]] && stat -c %Y "$1" || echo 0; }
   D_PORTAL="$REPO_DIR/portal-web/dist/index.html"
@@ -249,16 +258,26 @@ if [[ "$FRONT_MODE" == "build" ]]; then
     # 每次都重建：vite build 只要几十秒，换来「产物 = 当前工作区」这条确定的锚
     echo "▶ [build] 构建两个前端（不带 CDN_BASE，产物引用本地 /assets）"
     _bt0=$(date +%s)
-    bash "$REPO_DIR/scripts/e2e-preview.sh" build
+    if ! bash "$REPO_DIR/scripts/e2e-preview.sh" build; then
+      echo "✗ [build] 前端构建失败 —— 不跑（日志 ${E2E_LOG_DIR:-/tmp}/e2e-build-{portal,admin}.log）" >&2
+      echo "  **不会**回落到 dev：那样等于把「dev 的结论」冒充成「build 的结论」（静默回落 = 假快）。" >&2
+      echo "  排查完重跑即可；要临时用 dev 请显式 E2E_FRONT_MODE=dev。" >&2
+      exit 8
+    fi
     _bt1=$(date +%s)
     echo "▶ [build] 构建耗时 $((${_bt1}-${_bt0}))s"
   fi
 
   echo "▶ [build] 起 preview（shard a → 5283/5285，b → 5293/5295；反代 /portal|/admin|/qiqi-mall）"
-  bash "$REPO_DIR/scripts/e2e-preview.sh" start
-  # 退出（正常/失败/中断）都精确停这 4 个 unit —— 不用 pkill -f，别碰别人
+  # 退出（正常/失败/中断）都精确停这 4 个 unit —— 不用 pkill -f，别碰别人。
+  # trap 必须在 start **之前**挂：start 中途失败（端口被占/单元起不来）时已经起来的那些
+  # preview 也要被收掉，否则留下孤儿占着 5283/5285/5293/5295，下一次跑就会「跳过别人的进程」。
   cleanup_preview() { bash "$REPO_DIR/scripts/e2e-preview.sh" stop >/dev/null 2>&1 || true; }
   trap cleanup_preview EXIT
+  if ! bash "$REPO_DIR/scripts/e2e-preview.sh" start; then
+    echo "✗ [build] preview 没起来（端口被占或 dist 不对，错误见上）—— 不跑，免得打到空端口上出一片假红。" >&2
+    exit 8
+  fi
 fi
 
 # 前置：两个 shard 的服务必须在跑，否则测试会指着空气打
