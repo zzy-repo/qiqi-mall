@@ -33,4 +33,3 @@ app.use(createPinia()).use(router)
 // 等价于原先 app.use(ElementPlus, { locale: zhCn }) 里的 locale 注入（global=true 同 installer）
 provideGlobalConfig({ locale: zhCn }, app, true)
 app.mount('#app')
-console.log('qiqi-mall env:', import.meta.env.VITE_APP_ENV)

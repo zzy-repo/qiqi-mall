@@ -7,7 +7,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --registry=https://registry.npmmirror.com
 
 COPY . .
-# 构建模式由 compose 传入：development / test（test = 测试环境，加载 .env.test）
+# 构建模式由 compose 传入：development / test。模式本身只决定加载哪个 .env 文件；
+# 目前 .env.development 与 .env.test 内容一致（都只有 VITE_API_BASE=/portal）。
 ARG BUILD_MODE=test
 # 静态资源基址（前端 JS/CSS 上 CDN 的开关，见 scripts/upload-web-assets.sh）。
 # 空 = 现状：index.html 引用 /assets/**，由容器自己提供（本地/e2e/回滚零影响）。

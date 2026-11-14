@@ -92,9 +92,6 @@
           </el-breadcrumb>
         </div>
         <div class="header-right">
-          <el-tag :type="env === 'test' ? 'danger' : 'success'" size="small" effect="dark">
-            {{ env === 'test' ? '测试环境' : '开发环境' }}
-          </el-tag>
           <el-dropdown>
             <span class="user-info">
               <el-avatar :size="28">{{ avatarText }}</el-avatar>
@@ -142,7 +139,6 @@ import ConflictDialog from '../components/ConflictDialog.vue'
 const route = useRoute()
 const router = useRouter()
 const isCollapse = ref(false)
-const env = import.meta.env.VITE_APP_ENV
 
 const user = getUser()
 const displayName = computed(() => user.nickname || user.username || '管理员')
