@@ -155,7 +155,8 @@ async function cleanupSelfMadeOrder(request, { orderId, orderSn, token }) {
   }
 }
 
-/** 清掉用例三自造的买家账号（页面无删除入口，只能走接口；只删本用例建的那个登录名） */
+/** 清掉用例三自造的买家账号（走接口删更快也更稳；页面操作列第四个其实也有删除入口，
+ *  但那是给用户的高危确认流程，收尾不需要走 UI。只删本用例建的那个登录名） */
 async function cleanupSelfMadeMember(request, token, username) {
   if (!username) return
   try {

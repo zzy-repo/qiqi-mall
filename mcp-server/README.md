@@ -224,7 +224,7 @@ node scripts/mcp-coverage.mjs --write    # 重新生成并写回本文件（人�
 用仓库根的 `scripts/init-ai-key.sh`（它拿 admin 的 JWT 去建 key，**不是** key 自己建自己）：
 
 ```bash
-# 默认：http://127.0.0.1:8081（dev 库），key 名「本地开发-全权」，9 个 scope 全开、永不过期
+# 默认：http://127.0.0.1:8081（dev 库），key 名「本地开发-全权」，全部可授予 scope（当前 13 个 = 9 读 + 4 写）全开、永不过期
 bash scripts/init-ai-key.sh
 
 # 测试环境（18080 / qiqi_mall_test）：
@@ -246,7 +246,7 @@ bash scripts/init-ai-key.sh --force
 - 建出来的 key 一把可管多库吗？不行 —— key 属于某个库的 `ai_api_key` 表，dev 的 key 到 test 库只会 401。
 - ⚠️ **`scripts/reset-test-db.sh` 会 DROP `ai_api_key`**，复位后测试环境的 key 就没了，需要重跑上面的
   `BASE_URL=http://127.0.0.1:18080 ... bash scripts/init-ai-key.sh`。
-- 现在测试环境的那把在 `/tmp/test-env-ai-key.txt`（名字「测试环境-全权」，9 个 scope 全开）。
+- 现在测试环境的那把在 `/tmp/test-env-ai-key.txt`（名字「测试环境-全权」，全部可授予 scope（当前 13 个）全开）。
 
 ### 配上 MALL_API_KEY
 

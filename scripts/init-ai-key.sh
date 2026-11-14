@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 初始化一把「本地开发-全权」API Key（全 9 个 scope，永不过期），供 MCP / AI 调用后端接口用。
+# 初始化一把「本地开发-全权」API Key（全部可授予 scope，永不过期；清单从后端接口取，不写死），供 MCP / AI 调用后端接口用。
 #
 # 设计要点：
 #   1) 幂等：按 name 查列表，已经存在就**不新建**（明文只在创建时出现一次，脚本不会再造一个重复 key）；
@@ -29,7 +29,10 @@ OUT_FILE="${OUT_FILE:-/tmp/qiqi-mall-ai-key.txt}"
 FORCE=0
 [ "${1:-}" = "--force" ] && FORCE=1
 
-SCOPES='["order:read","order:write","catalog:read","catalog:write","member:read","member:write","config:read","config:write","dashboard:read"]'
+# SCOPES 不写死：登录后从 GET /admin/api-keys/scopes 取 grantable（见下方「取权限目录」）
+# 写死一份清单就是「抄一遍必然走散」——后端 2026-11-13 加了 ledger/stock/audit/channel 四个只读域后，
+# 这里那句「9 个」就再也没对过。
+SCOPES=''
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "缺少依赖：$1" >&2; exit 1; }; }
 need curl
@@ -65,6 +68,16 @@ if [ -z "$TOKEN" ]; then
 fi
 echo "    登录成功（JWT 已获取）"
 
+# ---- 取权限目录（唯一真相源是后端，不在本脚本里维护清单）----
+CATALOG=$(curl -sS -H "Authorization: Bearer $TOKEN" "${BASE}/admin/api-keys/scopes" 2>/dev/null)
+SCOPES=$(echo "$CATALOG" | jq -c '.data.grantable // empty' 2>/dev/null)
+if [ -z "$SCOPES" ] || [ "$SCOPES" = "null" ]; then
+  echo "✗ 取权限目录失败（GET /admin/api-keys/scopes）—— 本脚本不写死 scope 清单，取不到就停" >&2
+  echo "  响应片段：$(echo "$CATALOG" | head -c 200)" >&2
+  exit 1
+fi
+echo "    权限目录：$(echo "$SCOPES" | jq 'length') 个可授予 scope"
+
 echo "==> 查同名 key：$KEY_NAME"
 EXISTING=$(api GET /admin/api-keys | jq -c --arg n "$KEY_NAME" '[.data[]? | select(.name == $n)]')
 EXISTING_ID=$(echo "$EXISTING" | jq -r '.[0].id // empty')
@@ -81,7 +94,7 @@ if [ -n "$EXISTING_ID" ]; then
   api DELETE "/admin/api-keys/$EXISTING_ID" >/dev/null
 fi
 
-echo "==> 新建 key（9 个 scopes，永不过期）"
+echo "==> 新建 key（$(echo "$SCOPES" | jq "length") 个 scopes，永不过期）"
 CREATED=$(api POST /admin/api-keys "{\"name\":\"$KEY_NAME\",\"scopes\":$SCOPES}")
 PLAIN=$(echo "$CREATED" | jq -r '.data.key // empty')
 if [ -z "$PLAIN" ]; then
