@@ -1,8 +1,8 @@
 // 工具统一注册入口：按域 import 各自的 register 函数。
 //
-// ┌─ 场景验收判据（07-AI集成）─────────────────────────────────────────────
+// ┌─ 场景验收判据（业务/AI集成）─────────────────────────────────────────────
 // │ MCP 场景没有网页 UI，Playwright 不适用，所以 e2e 判据就是本仓库的 MCP 测试全套：
-// │     MCP 场景的场景验收判据 = test/*.mjs 全套两轮全绿；视频见 e2e/report/videos/07-AI集成/
+// │     MCP 场景的场景验收判据 = test/*.mjs 全套两轮全绿；视频见 e2e/report/videos/业务/AI集成/
 // │ 具体口径：`npm test`（= loop.mjs + catalog.mjs + order-read.mjs + optimistic-lock.mjs
 // │          + delivery.mjs + returns.mjs + config.mjs + member.mjs + misc.mjs）
 // │ 连跑两轮，**第二轮不 reset 数据库**，两轮都必须 0 失败。测试自带「造数据 + 清数据」，

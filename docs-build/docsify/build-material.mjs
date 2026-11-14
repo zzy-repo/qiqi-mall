@@ -27,7 +27,7 @@
  *   - 缺稿不报错：渐进式，先有图的场景/图页照常出页，稿子补上后重跑即出现在末尾。
  *   - 出页门禁：**图是硬要求，视频不是**。有图就出页；缺视频时正文显式渲染一行提示，
  *     并在构建日志里汇总「哪些页面待补视频」——绝不像旧版那样静默吞掉页面。
- *   - 展示顺序 = 下面 DIAGRAM_GROUPS / SCENE_GROUPS 的书写顺序（不靠文件名数字排序）；
+ *   - 展示顺序 = 下面 DIAGRAM_GROUPS / SCENE_BUCKETS 的书写顺序（名字里没有编号可排）；
  *     文件名保留 `N-` 前缀（与素材目录同构），但侧边栏文案与页面 H1 一律不显示数字。
  *
  * 素材定位（严格按目录，不做跨目录模糊匹配）：
@@ -48,7 +48,7 @@
  * 页面清单、标题、顺序、图/视频引用关系完全一致（页面数不变）。
  *
  * ── --target=rspress 为什么不新写一个生成器 ──────────────────────────────
- * 分组/顺序/编号的唯一真相源是下面 SCENE_GROUPS / DIAGRAM_GROUPS 两张表（门禁 ⑫ 抓的就是它），
+ * 分组/顺序的唯一真相源是下面 SCENE_BUCKETS / DIAGRAM_GROUPS 两张表（门禁 ⑫ 抓的就是它），
  * 「缺视频」两种语义（HINTS）要与 check-docs-site.mjs 的 NO_UI_SCENES 对齐、
  * 页面模板与 assertStrict（正文 ≤25 字）必须两边同口径 —— 复制一份解析逻辑必然漂移。
  * 所以这里只在**输出端**分叉：页面正文/素材定位/口语稿条件编译全部复用，
@@ -222,76 +222,101 @@ const DIAGRAM_GROUPS = [
 //   缺视频不再阻断出页（见 HINT_PENDING / HINT_NO_UI）；缺图仍不出页。
 //   顺序即业务使用顺序（先基础数据、再登录、再履约），与文件名数字无关；
 //   n 与 name 必须和素材目录 <N-场景> 对齐（三层同构）。
-const SCENE_GROUPS = [
-  { dir: '01-买家侧', label: '买家侧', items: [
-    { n: 1, name: '注册与登录' },
-    { n: 2, name: '商品浏览与搜索' },
-    { n: 3, name: '购物车' },
-    { n: 4, name: '结算下单与支付' },
-    { n: 5, name: '我的订单与收货' },
-    { n: 6, name: '售后退货' },
-    { n: 7, name: '收货地址' },
-    { n: 8, name: '支付并发冲突' },
-    { n: 9, name: '确认收货并发' },
-    { n: 10, name: '同商品多人抢购库存' },
+/**
+ * 一、功能场景：**桶 →（子分类）→ 场景**。
+ *
+ * 2026-11-14 结构重构后的唯一形状（别再往回改）：
+ *   · 顺序只由本表的书写顺序决定 —— **文件名/URL 里一个编号都没有**，所以不存在「编号连续性」这回事，
+ *     少一个场景不会让 URL 露馅，只能靠「侧边栏顺序 == 本表顺序」的门禁去抓（见 scripts/check-sidebar-continuity.mjs）。
+ *   · 目录三层同构（文档目录 / 视频目录 / spec 目录共用同一段 rel 路径）：
+ *       文档  docs/flows/02-业务场景/<桶>/[<子分类>/]<场景名>/
+ *       视频  e2e/report/videos/<桶>/[<子分类>/]<场景名>/<段序>-<段名>.mp4
+ *       spec  e2e/tests/scenarios/<桶>/[<子分类>/]<场景名>.spec.js
+ *   · 没有子分类的桶（压测与容量）直接写 items，rel 就少一层。
+ *   · name 必须与真实目录名逐字相同（含空格与否），因为它是路径的一段，不再是「显示名」。
+ */
+const SCENE_BUCKETS = [
+  { dir: '业务', label: '业务', subs: [
+    { dir: '买家侧', label: '买家侧', items: [
+      '注册与登录', '商品浏览与搜索', '购物车', '结算下单与支付',
+      '我的订单与收货', '售后退货', '收货地址',
+    ] },
+    { dir: '商家-商品管理', label: '商家 · 商品管理', items: [
+      '商品类型与属性', '商品分类', '商品维护', '图片上传与预览',
+    ] },
+    { dir: '商家-履约', label: '商家 · 履约', items: [
+      '订单审核与发货', '跨仓拆单', '发货单调整', '退货处理', '订单删除守卫',
+    ] },
+    { dir: '商家-基础配置', label: '商家 · 基础配置', items: [
+      '仓库管理', '订单设置', '退货原因字典',
+    ] },
+    { dir: '账号与会员', label: '账号与会员', items: [
+      '管理员登录与验证码', '管理员账号', '会员管理',
+    ] },
+    { dir: '数据概览', label: '数据概览', items: ['概览页'] },
+    { dir: 'AI集成', label: 'AI 集成', items: [
+      'MCP最小闭环', '工具能力矩阵', '令牌管理',
+    ] },
+    { dir: '订单-自动审核', label: '订单 · 自动审核', items: [
+      '判定链与四结局', '六笔单走查',
+    ] },
+    { dir: '渠道-多平台接入', label: '渠道 · 多平台接入', items: ['接入主链路'] },
   ] },
-  { dir: '02-商家-商品管理', label: '商家 · 商品管理', items: [
-    { n: 1, name: '商品类型与属性' },
-    { n: 2, name: '商品分类' },
-    { n: 3, name: '商品维护' },
-    { n: 4, name: 'SKU 与规格' },
-    { n: 5, name: '图片上传与预览' },
-    { n: 6, name: '商品编辑并发冲突' },
-    { n: 7, name: 'SKU编辑并发冲突' },
+  // 库存没有子分类（3+1 个主题横向并列）。场景名里出现「「」」是因为它就是目录名 ——
+  // 目录名 == 场景名 == spec 文件名 == 视频目录名，四处同构，改名必须四处一起改。
+  // 不含全角冒号：「库存台账与对账」原来的目录名带「：三数相等」，全角冒号进路径既难打也易错，
+  // 2026-11-14 收口成不带冒号的目录名（页面上的标题仍可写全）。
+  { dir: '库存', label: '库存', items: [
+    'SKU与规格',
+    '一条SQL吃掉「读、判、写」',
+    // '库存分桶',   // ← 新页：正文、图、口语稿、视频都还没写，先不登记（清单里不挂空页）
+    '库存台账与对账',
   ] },
-  { dir: '03-商家-履约', label: '商家 · 履约', items: [
-    { n: 1, name: '订单审核与发货' },
-    { n: 2, name: '跨仓拆单' },
-    { n: 3, name: '发货单调整' },
-    { n: 4, name: '退货处理' },
-    { n: 5, name: '订单审核并发' },
-    { n: 6, name: '发货单与仓库回传并发' },
-    { n: 7, name: '退货审核并发' },
-    { n: 8, name: '订单删除守卫' },
-    { n: 9,  name: '库存台账与对账' },
-    { n: 10, name: '订单状态台账' },
-    { n: 11, name: '后台操作审计' },
-    { n: 12, name: '包裹状态台账' },
-    { n: 13, name: '售后台账' },
-    { n: 14, name: 'WMS交换台账' },
-    { n: 15, name: '支付流水加固' },
+  { dir: '并发与竞态', label: '并发与竞态', subs: [
+    { dir: '版本冲突', label: '版本冲突', items: [
+      '商品编辑并发', 'SKU编辑并发', '会员资料编辑并发', 'AI端并发',
+    ] },
+    { dir: '状态竞态', label: '状态竞态', items: [
+      '确认收货并发', '订单审核并发', '退货审核并发',
+    ] },
+    { dir: '重复提交与幂等', label: '重复提交与幂等', items: [
+      '支付并发冲突', '平台重推与503重试',
+    ] },
+    { dir: '双向竞态', label: '双向竞态', items: ['发货单与仓库回传'] },
   ] },
-  { dir: '04-商家-基础配置', label: '商家 · 基础配置', items: [
-    { n: 1, name: '仓库管理' },
-    { n: 2, name: '订单设置' },
-    { n: 3, name: '退货原因字典' },
+  { dir: '台账与取证', label: '台账与取证', subs: [
+    { dir: '台账七类', label: '台账七类', items: [
+      '订单状态台账', '后台操作审计', '包裹状态台账',
+      '售后台账', 'WMS交换台账', '支付流水',
+    ] },
+    { dir: '取证链与证据对齐', label: '取证链与证据对齐', items: [
+      '状态与证据对齐', '与内部系统的边界',
+    ] },
   ] },
-  { dir: '05-账号与会员', label: '账号与会员', items: [
-    { n: 1, name: '管理员登录与验证码' },
-    { n: 2, name: '管理员账号' },
-    { n: 3, name: '会员管理' },
-    { n: 4, name: '会员资料编辑并发' },
-  ] },
-  { dir: '06-数据概览', label: '数据概览', items: [
-    { n: 1, name: '概览页' },
-  ] },
-  { dir: '07-AI集成', label: 'AI 集成', items: [
-    { n: 1, name: 'MCP 最小闭环' },
-    { n: 2, name: '并发冲突（AI端）' },
-    { n: 3, name: '工具能力矩阵' },
-    { n: 4, name: '令牌管理' },
-  ] },
-  { dir: '08-订单自动审核', label: '订单 · 自动审核', items: [
-    { n: 1, name: '判定链与四结局' },
-    { n: 2, name: '六笔单走查' },
-    { n: 3, name: '状态与证据对齐' },
-  ] },
-  { dir: '09-多平台接入', label: '渠道 · 多平台接入', items: [
-    { n: 1, name: '接入主链路' },
-    { n: 2, name: '幂等与失败重试' },
-    { n: 3, name: '与内部系统的边界' },
-  ] },
+  // ── 性能与容量：**暂不登记**（2026-11-14 裁决）────────────────────────────────
+  // 这 6 个场景（雪崩点400 / 每单19条SQL / 会话探针 / 开环与闭环压测 /
+  // 分页替代全量列表 / 复合索引消filesort）正文与素材都还没写，先不进清单：
+  // 清单里挂着不存在的页，读者点进去就是空的。等正文、图、口语稿一起落盘，再取消注释加回来。
+  // { dir: '性能与容量', label: '性能与容量', items: [
+  //   '雪崩点400', '每单19条SQL', '会话探针',
+  //   '开环与闭环压测', '分页替代全量列表', '复合索引消filesort',
+  // ] },
 ]
+
+/**
+ * 场景表展平成有序清单（顺序 = SCENE_BUCKETS 的书写顺序，这是全站唯一的顺序真相源）：
+ *   { bucket, bucketLabel, sub, subLabel, name, rel }
+ * rel = 三层同构的那段路径（'业务/买家侧/注册与登录'、'压测与容量/雪崩点400'）。
+ */
+const SCENES = SCENE_BUCKETS.flatMap((b) => {
+  const subs = b.subs ?? [{ dir: null, label: null, items: b.items ?? [] }]
+  return subs.flatMap((s) => (s.items ?? []).map((name) => ({
+    bucket: b.dir, bucketLabel: b.label,
+    sub: s.dir, subLabel: s.label,
+    name,
+    rel: [b.dir, s.dir, name].filter(Boolean).join('/'),
+  })))
+})
 
 /* ------------------------------------------------------------------ 素材解析 */
 
@@ -427,46 +452,50 @@ function pickArt(cands) {
   return cands.find(preferSvg)
 }
 
-/** 场景条目的文件名前缀候选（`5-我的订单与收货` 这种，含/不含空格两种写法） */
-const scenePrefixes = (item) => [...new Set([`${item.n}-${item.name}`, `${item.n}-${slug(item.name)}`])]
+/**
+ * 场景素材全部按**目录**定位，不再拼 `N-` 前缀：
+ *   图/口语稿/实测数字  docs/flows/02-业务场景/<rel>/…
+ *   视频               e2e/report/videos/<rel>/<段序>-<段名>.mp4
+ * rel 就是 SCENES 里那段（'业务/商家-履约/订单审核与发货'）。
+ * 编号已在 2026-11-14 从文件名里去掉了：目录名就是身份，改名字只需改本脚本的清单与目录本身。
+ */
+const docDirOf = (scene) => `${SCENE_IMG_ROOT}/${scene.rel}`
+const videoDirOf = (scene) => scene.rel
 
-/** 在 files 里筛出属于 <groupDir>/<N-场景> 的文件（严格按目录与前缀，不做跨目录模糊匹配） */
-function sceneFiles(files, groupDir, item, ext) {
-  const head = `${groupDir}/`
-  return files.filter((p) => {
-    if (!p.startsWith(head) || !hasExt(p, ext)) return false
-    const rel = p.slice(head.length)
-    return scenePrefixes(item).some((pre) => rel.startsWith(pre))
-  })
-}
+/** 场景目录（文档侧）的绝对路径 */
+const sceneAbs = (scene) => join(SRC_DOCS, docDirOf(scene))
+/** 场景目录（视频侧）的相对路径前缀，带结尾斜杠 */
+const videoHead = (scene) => `${videoDirOf(scene)}/`
 
-/** 场景图：只看 flows/02-业务场景/<类别>/<N-场景>…，根目录平铺老图（2-场景N-*.png）永不命中 */
-function sceneImages(groupDir, item) {
-  const head = `${SCENE_IMG_ROOT}/${groupDir}/`
-  const pool = DOC_FILES
-    .filter((p) => p.startsWith(head) && isImage(p))
-    .filter((p) => scenePrefixes(item).some((pre) => p.slice(head.length).startsWith(pre)))
-  return pool
-    .filter(preferSvg)                     // 有 .svg 就只取 .svg，PNG 不进页面
+/**
+ * 场景图：只看本场景目录下的图（`<rel>/1-库存台账图.svg`），别处的图永不命中。
+ * 同主名同时有 .svg 与 .png 时只取 .svg（PNG 原图留在仓库做回滚，不进页面）。
+ */
+function sceneImages(scene) {
+  const head = `${docDirOf(scene)}/`
+  return DOC_FILES
+    .filter((p) => p.startsWith(head) && isImage(p))   // 只看本场景目录这一层，不递归子目录
+    .filter((p) => !p.slice(head.length).includes('/'))
+    .filter(preferSvg)                                  // 有 .svg 就只取 .svg，PNG 不进页面
     .sort((a, b) => base(a).localeCompare(base(b), 'zh', { numeric: true }))
 }
 
 /**
- * 场景视频：videos/<类别>/ 下的 <N-场景>.mp4 与 <N-场景>-<序号>-<分段名>.mp4 全都要。
- * 返回 [{ path, part, label }]，按 part 升序；单段（无 -序号-）label 为 null。
+ * 场景视频：`videos/<rel>/<段序>-<段名>.mp4`，同一场景内的多段按段序升序全部嵌入。
+ * 段序是**这一页第几段**（1 起），不是场景编号 —— 场景在侧边栏里的位置由 SCENE_BUCKETS 决定，
+ * 所以视频文件名里只有段序，没有场景编号可对。
+ * 认不出的文件名（缺段序 / 不是 mp4）一律不猜、不静默当素材用：交给构建报告去数。
  */
-function sceneVideos(groupDir, item) {
+function sceneVideos(scene) {
+  const head = videoHead(scene)
   const out = []
-  for (const p of sceneFiles(VIDEO_FILES, groupDir, item, FINISHED_VIDEO_EXT)) {
-    const stem = base(p).replace(/\.mp4$/i, '')
-    for (const pre of scenePrefixes(item)) {
-      if (!stem.startsWith(pre)) continue
-      const rest = stem.slice(pre.length)
-      const m = rest.match(/^-(\d+)-(.*)$/)
-      if (m) out.push({ path: p, part: Number(m[1]), label: m[2].trim() || null })
-      else if (rest === '') out.push({ path: p, part: 1, label: null })
-      break
-    }
+  for (const p of VIDEO_FILES) {
+    if (!p.startsWith(head) || !hasExt(p, FINISHED_VIDEO_EXT)) continue
+    const rel = p.slice(head.length)
+    if (rel.includes('/')) continue                       // 场景目录下不该再有子目录
+    const m = rel.match(/^(\d+)-(.*)\.mp4$/i)
+    if (!m) continue
+    out.push({ path: p, part: Number(m[1]), label: (m[2] || '').trim() || null })
   }
   return out.sort((a, b) => a.part - b.part)
 }
@@ -482,15 +511,12 @@ function sceneVideos(groupDir, item) {
 const SPOKEN_FILE = '口语稿.txt'
 const SPOKEN_SUMMARY = '🎤 一分钟口语稿（面试可直接念）'
 
-function readSpokenScript(groupDir, item) {
+function readSpokenScript(scene) {
   if (MODE !== 'dev') return null            // prod：不读、不插
-  for (const pre of scenePrefixes(item)) {
-    const abs = join(SRC_DOCS, SCENE_IMG_ROOT, groupDir, pre, SPOKEN_FILE)
-    if (!existsSync(abs)) continue
-    const text = readFileSync(abs, 'utf8').trim().replace(/\s*\n+\s*/g, ' ')
-    return text || null
-  }
-  return null
+  const abs = join(sceneAbs(scene), SPOKEN_FILE)
+  if (!existsSync(abs)) return null
+  const text = readFileSync(abs, 'utf8').trim().replace(/\s*\n+\s*/g, ' ')
+  return text || null
 }
 
 /**
@@ -538,6 +564,93 @@ function spokenBlock(text) {
   ].join('\n')
 }
 
+/* ------------------------------------------------------------------ 实测数字（数据类场景的证据） */
+
+/**
+ * 数据类内容（台账 / 对账口径 / 表结构与索引 / 矩阵）的证据形式是「图 + SQL + 数字」，**不录视频**：
+ * 能鼠标记账的东西才值得录屏，一张表的两端对不对平只有 SQL 说得清。
+ *
+ * 每页的数字写在场景目录下的 `实测数字.sql` —— 同一个文件两种用法：
+ *   1) 人跑：把整个文件丢给 mysql 客户端就能重跑（纯 select，只读）；
+ *   2) 构建期解析成页面上的「实测数字」清单（下面 ①②③ 三段，素材之后、口语稿之前）。
+ * 语法（只有这四条，别自创）：
+ *   `-- 库: …` / 其它文件头注释  → 页面顶部那行出处（哪套库、什么时候实测的）
+ *   `-- @@ 断言一句话`           → 一条实测的标题
+ *   （中间是 SQL，可多行，只能是 select / with / show / explain）
+ *   `-- => 实测输出`             → 该条 SQL 的真实输出（多行就写多行）
+ * 只读是硬约束：SQL 段里出现写语句直接让构建失败 —— 一份「实测数字」绝不能顺手改库。
+ */
+const MEASURED_FILE = '实测数字.sql'
+const MEASURED_START = '<!-- measured:start -->'
+const MEASURED_END = '<!-- measured:end -->'
+const MEASURED_TITLE = '📊 实测数字（只读 SQL）'
+const MEASURED_WRITE_RE = /\b(insert|update|delete|drop|truncate|alter|create|replace|grant|set\s+\w+\s*=)\b/i
+const MEASURED_ALLOW_RE = /^\s*(select|with|show|explain|describe|desc)\b/i
+
+/** 解析 `实测数字.sql`：{ head:[…], cases:[{ claim, sql:[…], out:[…] }] } */
+function parseMeasured(text) {
+  const head = []
+  const cases = []
+  let cur = null
+  let mode = 'head'                     // head | sql | out
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/\s+$/, '')
+    if (line.startsWith('-- @@')) {
+      cur = { claim: line.slice('-- @@'.length).trim(), sql: [], out: [] }
+      cases.push(cur)
+      mode = 'sql'
+      continue
+    }
+    if (line.startsWith('-- =>')) {
+      if (!cur) throw new Error(`${MEASURED_FILE}: 「-- =>」出现在任何「-- @@」之前`)
+      cur.out.push(line.slice('-- =>'.length).trim())
+      mode = 'out'
+      continue
+    }
+    if (mode === 'out') continue          // 实测输出区之后的内容只是注释，不参与渲染
+    if (mode === 'head') {
+      if (line.startsWith('--')) {
+        const t = line.replace(/^--\s?/, '').trim()
+        if (t) head.push(t)
+      }
+      continue
+    }
+    cur.sql.push(raw)
+  }
+  return { head, cases: cases.filter((c) => c.sql.join('').trim()) }
+}
+
+/** 读场景目录下的 `实测数字.sql`；缺文件返回 null（渐进式：先有图/视频的页照出） */
+function readMeasured(scene) {
+  const abs = join(sceneAbs(scene), MEASURED_FILE)
+  if (!existsSync(abs)) return null                 // 缺文件 = 这页还没补实测数字，不渲染这一块
+  const parsed = parseMeasured(readFileSync(abs, 'utf8'))
+  // 只读硬约束：任何一条 SQL 段不是 select/with/show/explain，构建直接失败（不静默跳过）
+  for (const c of parsed.cases) {
+    const sql = c.sql.join('\n')
+    if (MEASURED_WRITE_RE.test(sql) || !MEASURED_ALLOW_RE.test(sql)) {
+      throw new Error(`${MEASURED_FILE}（${scene.rel}）「${c.claim}」的 SQL 不是只读语句——实测数字只许 select`)
+    }
+  }
+  return parsed.cases.length ? parsed : null
+}
+
+/** 实测数字块：一张「断言 → 实测」表 + 每条自己的只读 SQL（正文之上一条分隔线，不加解释性段落） */
+function measuredBlock(measured) {
+  const lines = [MEASURED_START, `## ${MEASURED_TITLE}`, '']
+  for (const h of measured.head) lines.push(`> ${h}`)
+  if (measured.head.length) lines.push('')
+  measured.cases.forEach((c, i) => {
+    const n = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧'][i] ?? `${i + 1}.`
+    lines.push(`### ${n} ${c.claim}`, '')
+    lines.push('```sql', ...c.sql.filter((l) => l.trim()), '```', '')
+    const out = c.out.length ? c.out.join(' ｜ ') : '（空结果集）'
+    lines.push(`实测：\`${out.replace(/`/g, "'")}\``, '')
+  })
+  lines.push(MEASURED_END)
+  return lines.join('\n')
+}
+
 /* ------------------------------------------------------------------ 渲染 */
 
 const relPrefix = (pagePath) => {
@@ -559,43 +672,67 @@ const relPrefix = (pagePath) => {
 const HINT_PENDING = '> ⏳ 视频待补：本场景的录屏尚未完成'
 const HINT_NO_UI = '> 🔍 本场景无界面操作，验收方式：mcp-server 测试套件 195 条断言（两轮全绿）。'
 /** 渠道/台账类的纯概念页：验收方式不是 mcp-server 套件，别把 MCP 那句照抄过来（那是另一种假账） */
-const HINT_NO_UI_LEDGER = '> 🔍 本场景无界面操作，验收方式：09/1 接入主链路的视频已覆盖同一张表（后台「多平台接入 → 同步日志」）。'
-const HINTS = new Set([HINT_PENDING, HINT_NO_UI, HINT_NO_UI_LEDGER])
+const HINT_NO_UI_LEDGER = '> 🔍 本场景无界面操作：内容是「平台同步日志」与「仓库交换台账」的逐行对照，没有专属界面；验收按本页的字段对照表 + 两侧台账的只读 SQL 实测算，不借任何邻居场景的录屏。'
+/**
+ * 「能演却没演」的场景：**有真界面、点得动、调得通，只是这一轮还没录**。
+ * 原来 07/1、07/2 被写成「无界面操作（验收 = mcp-server 195 条断言）」，那是偷懒的一种：
+ * MCP 调试器（scripts/start-inspector.sh 起的就是它）能列工具 → 调工具 → 看返回，是真界面。
+ * 所以这两页现在按「视频待补」出页（⏳），并写清欠的是什么 —— 欠 UI 测试 + 录屏，不是「不适用」。
+ */
+const HINT_PENDING_UI_VIDEO = '> ⏳ 待补 UI 测试与视频：本场景可点可调（MCP 调试器，scripts/start-inspector.sh 启动），属「能演未演」，不是「无界面」。'
+const HINTS = new Set([HINT_PENDING, HINT_NO_UI, HINT_NO_UI_LEDGER, HINT_PENDING_UI_VIDEO])
 
 /**
  * 无界面产品能力的场景：
- *   ① 07-AI集成/ 下、且不是「令牌管理」（那是后台真实 UI 页面，属正常场景）；
- *   ② 09-多平台接入/3-与内部系统的边界 —— 纯概念页：内容是「平台同步日志」与「仓库交换台账」逐行对照，
- *      没有专属界面；证据已由 09/1 的视频覆盖（同步日志页）。
+ *   ① 业务/AI集成/ 下、且不是「令牌管理」（那是后台真实 UI 页面，属正常场景），
+ *      也不是下面 PENDING_UI_VIDEO_SCENES 里那两个「能演未演」的场景；
+ *   ② 台账与取证/取证链与证据对齐/与内部系统的边界 —— 纯概念页：内容是「平台同步日志」与「仓库交换台账」逐行对照，
+ *      没有专属界面；它的验收口径写在 HINT_NO_UI_LEDGER 里，**不依赖邻居场景的视频**。
  *
  * ⚠ 本清单必须与 qiqi-mall/scripts/check-docs-site.mjs 的 NO_UI_SCENES 保持一致。
  *   两边的语义分工：体检那边按「无界面场景免视频」放行，这边要同步标「无界面」。只改一边的后果是
  *   **页面印着「视频待补」而体检是绿的** —— 那是假账，比缺件更糟。
  *   现在先靠这段注释 + 一致性提醒（跨仓库共享常量不值当，见 2026-11-14 裁决）。
  *
- * 注意：item.name 是**去掉序号后的标题**（如「与内部系统的边界」），不是目录名，
- * 所以先按 `${n}-${name}` 拼回目录名再比对，保证与 NO_UI_SCENES 里的路径字符串逐字相同。
+ * 键就是场景的 rel 路径（'台账与取证/取证链与证据对齐/与内部系统的边界'），
+ * 与 check-docs-site.mjs 的 NO_UI_SCENES 逐字相同 —— 两边都是目录路径，不再拼编号。
  */
 const NO_UI_SCENE_HINTS = new Map([
-  ['09-多平台接入/3-与内部系统的边界', HINT_NO_UI_LEDGER],
+  ['台账与取证/取证链与证据对齐/与内部系统的边界', HINT_NO_UI_LEDGER],
+])
+
+/**
+ * 「能演未演」清单（**不是**无界面清单）：这两页有真界面（MCP 调试器），视频欠着。
+ * 与 NO_UI_SCENE_HINTS 的区别是语义，不是措辞：这里缺的是**该录还没录**，会进构建结束的「待补视频」汇总；
+ * 体检 ⑤ 那边把这两个从 NO_UI_SCENES 摘掉后，缺件数 +2 —— 那是把真缺口露出来，不是放松门禁。
+ */
+const PENDING_UI_VIDEO_SCENES = new Set([
+  '业务/AI集成/MCP最小闭环',
+  '并发与竞态/版本冲突/AI端并发',
 ])
 
 /**
  * 本场景「没有视频」时该印哪一行说明；返回 null 表示「有界面、只是还没录」→ 走 HINT_PENDING。
- * 无界面场景各写各的验收方式（MCP 走套件、渠道边界走 09/1 的视频），不共用一句文案。
+ * 无界面场景各写各的验收方式（MCP 能力矩阵走套件、渠道边界走本页字段对照），不共用一句文案。
  */
-const noUiHintOf = (group, item) => {
-  if (group.dir.startsWith('07-AI集成') && item.name !== '令牌管理') return HINT_NO_UI
-  return NO_UI_SCENE_HINTS.get(`${group.dir}/${item.n}-${item.name}`) ?? null
+// 键就是 scene.rel（一段目录路径）—— 名字与目录逐字相同，不存在「带不带空格」两种写法了
+const noUiHintOf = (scene) => {
+  if (PENDING_UI_VIDEO_SCENES.has(scene.rel)) return HINT_PENDING_UI_VIDEO
+  // AI集成桶里除「令牌管理」（后台真实页面）之外都是能力类场景：没有界面，视频不适用
+  if (scene.bucket === '业务' && scene.sub === 'AI集成' && scene.name !== '令牌管理') return HINT_NO_UI
+  return NO_UI_SCENE_HINTS.get(scene.rel) ?? null
 }
-const isNoUiScene = (group, item) => noUiHintOf(group, item) !== null
+/** 「无界面」与「能演未演」要分开：前者视频不适用（不进待补），后者是欠账（进待补汇总） */
+const isPendingUiVideo = (scene) => PENDING_UI_VIDEO_SCENES.has(scene.rel)
+const isNoUiScene = (group, item) => noUiHintOf(group, item) !== null && !isPendingUiVideo(group, item)
 
 /**
  * 页面严格模板：H1 + 可选一行说明 + 可选一行「缺视频」提示
- * +（多段视频：每段上面一行它自己的名字）+ 图。
+ * +（多段视频：每段上面一行它自己的名字）+ 图
+ * +（数据类场景）实测数字块 +（dev）口语稿折叠块。
  * 不加任何背景/取舍/总结/TODO/注意事项。
  */
-function renderPage({ title, desc, hint, videos, images, pagePath, spoken }) {
+function renderPage({ title, desc, hint, videos, images, pagePath, spoken, measured }) {
   // docsify：页面在 material/**，素材在站点根的 _assets/，用相对上跳；
   // rspress：素材在 doc/public/_assets/（构建后落站点根 /_assets/），页面深两三层，
   //          直接用站点绝对路径最稳（Rspress 会把 img src 转百分号编码，绝对路径对得上门禁的 decode）
@@ -609,27 +746,34 @@ function renderPage({ title, desc, hint, videos, images, pagePath, spoken }) {
     lines.push(`<video src="${up}_assets/video/${v.path}" controls width="800"></video>`, '')
   }
   for (const img of images) lines.push(`![${title}](${up}_assets/img/${img})`, '')
+  // 实测数字：素材之后、口语稿之前（读者看完图/视频，紧接着看「这些数字对得上」）
+  if (measured) lines.push(measuredBlock(measured), '')
   // 口语稿固定放在图/视频**之后**（读者先看素材，想讲的时候再展开）
   if (spoken) lines.push(spokenBlock(spoken), '')
   return `${lines.join('\n')}\n`
 }
 
-/** 断言：标题之外只有 说明/分段名 + video + img（+ dev 口语稿折叠块）；正文总字数 ≤25；标题不得带数字前缀 */
+/** 断言：标题之外只有 说明/分段名 + video + img（+ 实测数字块 + dev 口语稿折叠块）；正文总字数 ≤25；标题不得带数字前缀 */
 function assertStrict(pagePath, page) {
   const [h1, ...allRest] = page.split('\n')
   if (!/^# \S/.test(h1)) throw new Error(`${pagePath}: H1 缺失`)
   if (/^# \d+-/.test(h1)) throw new Error(`${pagePath}: H1 不应带数字前缀`)
-  // 口语稿折叠块（只在 dev 出现）整段摘掉再量正文：它是一份一分钟的口播稿，
-  // 天生远超 25 字，属于「给作者念的材料」而不是「页面正文」，不占用正文额度。
-  // 位置固定在图/视频之后，形态固定为 <details class="spoken-script">…</details>。
+  // 两块「素材之外的材料」整段摘掉再量正文，不占 25 字额度：
+  //   ① 口语稿折叠块（只在 dev 出现）—— 一分钟口播稿，是给作者念的，不是页面正文；
+  //   ② 实测数字块（MEASURED_START…MEASURED_END）—— SQL 与实测输出是数据类证据本身，
+  //      它天然远超 25 字；但它**必须留在页面上**（数据类场景没它就是偷懒），所以只摘出正文计量。
   const rest = []
   let inSpoken = false
+  let inMeasured = false
   for (const line of allRest) {
     if (line.startsWith('<details class="spoken-script">')) { inSpoken = true; continue }
     if (inSpoken) { if (line.trim() === '</details>') inSpoken = false; continue }
+    if (line.startsWith(MEASURED_START)) { inMeasured = true; continue }
+    if (inMeasured) { if (line.trim() === MEASURED_END) inMeasured = false; continue }
     rest.push(line)
   }
   if (inSpoken) throw new Error(`${pagePath}: 口语稿折叠块未闭合（缺 </details>）`)
+  if (inMeasured) throw new Error(`${pagePath}: 实测数字块未闭合（缺 ${MEASURED_END}）`)
   // 「缺视频」提示行是 blockquote：只允许出现一次，且必须是两种标准文案之一；
   // 它不算「正文」（否则 25 字上限会被一句固定提示吃光），但仍受模板约束。
   const hints = rest.filter((l) => l.trim().startsWith('>'))
@@ -648,6 +792,7 @@ const written = []
 const changed = []
 const sceneStats = []
 const spokenEmbedded = []      // dev：真正嵌入了口语稿的场景（prod 恒为空，因为压根不读）
+const measuredEmbedded = []    // 真正渲染了「实测数字」块的场景（场景目录下有 实测数字.sql）
 
 function emit(pagePath, content, meta) {
   const abs = join(OUT_ROOT, pagePath)
@@ -672,7 +817,8 @@ for (const group of DIAGRAM_GROUPS) {
       .sort((a, b) => a.length - b.length)
     const image = pickArt(cands)              // 有 .svg 就取 .svg（prod 也一律 SVG）
     if (!image) continue                       // 素材缺失 → 不生成空页
-    const pagePath = `material/diagrams/${group.dir}/${item.n}-${slug(item.name)}.md`
+    // 图页文件名同样不带编号（顺序只由 DIAGRAM_GROUPS 的书写顺序决定）
+    const pagePath = `material/diagrams/${group.dir}/${slug(item.name)}.md`
     // 一分钟口语稿：与场景页同一套机制（prod 完全不读）。图页的图是平铺文件、没有「一张图一个目录」，
     // 所以稿件按「图所在的目录 + 图文件名」定位，见 readDiagramSpoken。
     const spoken = readDiagramSpoken(image)
@@ -686,35 +832,48 @@ for (const group of DIAGRAM_GROUPS) {
 
 /* ------------------------------------------------------------------ 生成场景页 */
 
-for (const group of SCENE_GROUPS) {
-  for (const item of group.items) {
-    if (!passOnly(item.name)) continue
-    const videos = sceneVideos(group.dir, item)
-    const images = sceneImages(group.dir, item)
+for (const scene of SCENES) {
+  {
+    if (!passOnly(scene.name)) continue
+    const videos = sceneVideos(scene)
+    const images = sceneImages(scene)
     // 出页门禁：**图是硬要求，视频不是**。
     //   缺图        → 不出页（图是页面主体，无图的场景页没意义）；
     //   有图缺视频  → 照出页，摘要下方显式渲染一行提示（分「无界面操作」/「视频待补」两种语义），
     //                 绝不静默吞掉 —— 旧版两者缺一就 skip，能力矩阵页 / 令牌页直接消失且不报错。
+    const sceneLabel = scene.subLabel ? `${scene.bucketLabel}/${scene.subLabel}/${scene.name}` : `${scene.bucketLabel}/${scene.name}`
     if (!images.length) {
       const why = videos.length ? '缺图（未生成）' : '缺素材（未生成）'
-      sceneStats.push({ scene: `${group.label}/${item.name}`, status: why,
+      sceneStats.push({ scene: sceneLabel, status: why,
         videos: videos.length, images: images.length })
       continue
     }
-    const noUiHint = videos.length ? null : noUiHintOf(group, item)
-    const hint = videos.length ? null : (noUiHint ?? HINT_PENDING)
+    const pendingUi = isPendingUiVideo(scene)
+    const noUiHint = videos.length || pendingUi ? null : noUiHintOf(scene)
+    const hint = videos.length ? null : (pendingUi ? HINT_PENDING_UI_VIDEO : (noUiHint ?? HINT_PENDING))
     const status = !videos.length ? (noUiHint ? '已生成·无界面' : '已生成·视频待补') : '已生成'
-    const pagePath = `material/scenarios/${group.dir}/${item.n}-${slug(item.name)}.md`
+    // 页面路径 = 场景的 rel 直接当文件名：material/scenarios/<桶>/[<子分类>/]<场景名>.md
+    // （rel 的末段就是场景名，别再拼一次 —— 拼了就得到 …/购物车/购物车.md，门禁 ① 也按这个口径查）
+    const pagePath = `material/scenarios/${scene.rel}.md`
     // 一分钟口语稿：只有 dev 会读到这里（readSpokenScript 在 prod 直接返回 null）
-    const spoken = readSpokenScript(group.dir, item)
-    if (spoken) spokenEmbedded.push(`${group.label}/${item.name}`)
-    emit(pagePath, renderPage({ title: item.name, desc: item.desc, hint, videos, images, pagePath, spoken }), {
-      kind: 'scene', group: group.label, label: item.name, hint,
+    const spoken = readSpokenScript(scene)
+    if (spoken) spokenEmbedded.push(sceneLabel)
+    // 实测数字：场景目录下的 `实测数字.sql`（只读 select + 实测输出），缺文件就不渲染这一块
+    const measured = readMeasured(scene)
+    if (measured) measuredEmbedded.push(sceneLabel)
+    emit(pagePath, renderPage({ title: scene.name, desc: null, hint, videos, images, pagePath, spoken, measured }), {
+      kind: 'scene', group: scene.bucketLabel, bucket: scene.bucket, sub: scene.sub,
+      label: scene.name, hint, rel: scene.rel,
       imageFiles: images, videoFiles: videos.map((v) => v.path), hasSpoken: Boolean(spoken),
+      hasMeasured: Boolean(measured),
     })
-    sceneStats.push({ scene: `${group.label}/${item.name}`, status, pagePath,
-      hint: hint ? (noUiHint ? '无界面操作（视频不适用）' : '视频待补') : null,
+    sceneStats.push({ scene: sceneLabel, status, pagePath,
+      hint: hint
+        ? (pendingUi ? '待补 UI 测试与视频（能演未演）'
+          : (noUiHint ? '无界面操作（视频不适用）' : '视频待补'))
+        : null,
       videos: videos.length, images: images.length, spoken: Boolean(spoken),
+      measured: Boolean(measured),
       videoFiles: videos.map((v) => v.path), imageFiles: images })
   }
 }
@@ -822,12 +981,24 @@ const businessTree = () => [
 
 function buildNavTree({ includeBusiness }) {
   const tree = [navPage('首页', '/'), ]
-  // 顺序 = SCENE_GROUPS / DIAGRAM_GROUPS 的书写顺序（显式顺序表），不按文件名数字排序
-  const sceneGroups = []
-  for (const group of SCENE_GROUPS) {
-    const pages = byKind('scene').filter((w) => w.group === group.label)
-    if (!pages.length) continue                 // 该分组素材未到，先不出空分组
-    sceneGroups.push(navGroup(group.label, pages.map((p) => navPage(p.label, p.pagePath))))
+  // 顺序 = SCENE_BUCKETS / DIAGRAM_GROUPS 的书写顺序（显式顺序表），没有编号可排
+  // 场景树 = 桶 →（子分类）→ 场景页；顺序完全由 SCENE_BUCKETS/SCENES 决定，
+  // byKind('scene') 的插入顺序就是 SCENES 的顺序，所以这里只做「按桶/子分类分组」，不再排序。
+  const sceneTree = []
+  for (const bucket of SCENE_BUCKETS) {
+    const pages = byKind('scene').filter((w) => w.bucket === bucket.dir)
+    if (!pages.length) continue                 // 该桶素材全未到，先不出空桶
+    if (bucket.subs) {
+      const subGroups = []
+      for (const sub of bucket.subs) {
+        const subPages = pages.filter((p) => p.sub === sub.dir)
+        if (!subPages.length) continue
+        subGroups.push(navGroup(sub.label, subPages.map((p) => navPage(p.label, p.pagePath))))
+      }
+      sceneTree.push(navGroup(bucket.label, subGroups))
+    } else {
+      sceneTree.push(navGroup(bucket.label, pages.map((p) => navPage(p.label, p.pagePath))))
+    }
   }
   const diagramGroups = DIAGRAM_GROUPS.map((group) => {
     const pages = byKind('diagram').filter((w) => w.group === group.label)
@@ -836,7 +1007,7 @@ function buildNavTree({ includeBusiness }) {
       : [{ type: 'pending', text: '（素材未到）' }])
   })
   tree.push(navSection('项目材料', [
-    navGroup('一、功能场景（图 + 视频）', sceneGroups),
+    navGroup('一、功能场景（图 + 视频）', sceneTree),
     ...diagramGroups,
   ]))
   if (includeBusiness) tree.push(navSection('业务逻辑', businessTree(), true))
@@ -889,11 +1060,37 @@ function renderRspressSidebar(tree) {
 const NAV = buildNavTree({ includeBusiness: MODE !== 'prod' })
 const sidebarText = renderDocsifySidebar(NAV)
 
+/**
+ * 顺序清单（`material/_nav-manifest.json`）：把 SCENE_BUCKETS / DIAGRAM_GROUPS 的书写顺序**物化**一份，
+ * 供门禁 ⑫ 拿它跟 _sidebar.md 逐条比对（顺序一致 + 无重复 + 无遗漏）。
+ *
+ * 为什么需要它：编号从文件名里去掉以后，「少一个场景」在 URL 上再也看不出来（以前靠 7→9 断档发现），
+ * 而侧边栏是生成物，自己跟自己对永远一致。所以判据必须是「生成物 == 清单」，清单必须由构建落盘，
+ * 不能靠门禁去解析 build-material.mjs 的源码（那是靠正则猜代码，改一行注释就误判）。
+ * 内容只有路径与显示名（无内网信息、无时间戳），因此 prod 产物里留着也安全，且保证幂等。
+ */
+const navManifest = {
+  version: 1,
+  scenes: written.filter((w) => w.kind === 'scene').map((w) => ({
+    bucket: w.bucket, sub: w.sub, label: w.label, page: w.pagePath,
+  })),
+  diagrams: written.filter((w) => w.kind === 'diagram').map((w) => ({
+    group: w.group, label: w.label, page: w.pagePath,
+  })),
+}
+const manifestText = `${JSON.stringify(navManifest, null, 2)}\n`
+
 if (TARGET === 'docsify') {
   const sidebarPath = join(OUT_ROOT, '_sidebar.md')
   const oldSidebar = existsSync(sidebarPath) ? readFileSync(sidebarPath, 'utf8') : null
   if (oldSidebar !== sidebarText) { writeFileSync(sidebarPath, sidebarText); changed.push('_sidebar.md') }
   chmodSync(sidebarPath, 0o644)
+  // 顺序清单：与 _sidebar.md 同一份数据渲染出来的，放一处（material/ 下）给门禁 ⑫ 读
+  const manifestPath = join(OUT, '_nav-manifest.json')
+  mkdirSync(OUT, { recursive: true })
+  const oldManifest = existsSync(manifestPath) ? readFileSync(manifestPath, 'utf8') : null
+  if (oldManifest !== manifestText) { writeFileSync(manifestPath, manifestText); changed.push('material/_nav-manifest.json') }
+  chmodSync(manifestPath, 0o644)
 }
 
 
@@ -1247,6 +1444,8 @@ if (TARGET === 'rspress') {
   // 与 docsify 的 dist-prod/_sidebar.md 完全同构：门禁 ⑨⑫ 用默认取源（<root>/_sidebar.md）
   // 就能验到「这个产物自己的那份侧边栏」，不需要靠 --sidebar 指到源码目录（也不会指错模式）。
   put(join(RSPRESS_DOC, 'public', '_sidebar.md'), sidebarText)
+  // 顺序清单同样放进 public/ → 构建后落在产物根 /material/_nav-manifest.json（与 docsify 侧同路径）
+  put(join(RSPRESS_DOC, 'public', 'material', '_nav-manifest.json'), manifestText)
 
   // 5) prod guard：产物内容里不许残留口语稿的任何字节。
   //    这不是重复劳动 —— 它拦的是「有人跳过 npm run build、直接 rspress build 复用 dev 内容」这条路，
@@ -1277,9 +1476,10 @@ const scenes = byKind('scene')
 const maxBody = Math.max(0, ...written.map((w) => w.bodyChars))
 
 console.log(`图页      : ${diagrams.length}  (${DIAGRAM_GROUPS.map((g) => byKind('diagram').filter((w) => w.group === g.label).length).join(' / ')})`)
-console.log(`场景页    : ${scenes.length}  / 清单 ${SCENE_GROUPS.reduce((a, g) => a + g.items.length, 0)}`)
+console.log(`场景页    : ${scenes.length}  / 清单 ${SCENES.length}`)
 // 口语稿：一份一行，dev 嵌入数 / prod 恒不嵌入（prod 不读文件，产物里不会有它的任何字节）
 console.log(`ℹ 口语稿：dev 嵌入 ${spokenEmbedded.length} 份 / prod 不嵌入`)
+console.log(`ℹ 实测数字：${measuredEmbedded.length} 个场景带「图 + SQL + 数字」证据块${measuredEmbedded.length ? '：' + measuredEmbedded.join('、') : '（下一轮补台账七页）'}`)
 console.log(`正文上限  : 实测最大 ${maxBody} 字（上限 ${BODY_LIMIT}）`)
 if (permFixed) console.log(`权限补读  : ${permFixed} 个素材条目（仅加 o+rX，属主/内容不变）`)
 console.log(`本次写入  : ${changed.length} 个文件${changed.length ? '（' + changed.join(', ') + '）' : '（无变化，幂等）'}`)

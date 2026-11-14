@@ -7,7 +7,7 @@
 #   SKIP_BACKEND_RESTART=1 ./scripts/reset-e2e-db.sh ...   # 只重置库、不重启（⚠ 只给对照实验用，会红）
 #
 # ⚠ reset 库会让被测服务 JVM 里缓存的主数据（如平台买家 member_id）变悬空，所以 reset 之后
-#   必须重启后端；否则连续两次跑批会在 09-多平台接入/1-接入最小闭环 上红一次（code=1，fk_order_member）。
+#   必须重启后端；否则连续两次跑批会在 业务/渠道-多平台接入/接入主链路 上红一次（code=1，fk_order_member）。
 #   本脚本默认就把这两件事绑在一起做（见文件末尾「步骤 5」），不是为了"顺手"，是因为只做一半必红。
 #
 # 结构从哪来：Flyway（qiqi-mall-server/src/main/resources/db/migration/V*.sql）。
@@ -156,7 +156,7 @@ done
 #   那个 member 跟着没了 ⇒ 缓存里的 31 成了**悬空外键** ⇒ INSERT order 撞 fk_order_member
 #   ⇒ 「MALL 拉单接口应返回成功」code=1。证据：不重启后端重跑 13.1s 同样失败；
 #   `restart-e2e-backends.sh --only b` 清掉缓存后重跑 1 passed。
-#   所以：**reset 之后必须重启后端**，否则第二次跑批会在 09-多平台接入/1-接入最小闭环 上红。
+#   所以：**reset 之后必须重启后端**，否则第二次跑批会在 业务/渠道-多平台接入/接入主链路 上红。
 #
 # 边界（都不越过铁律）：
 #   · 只用 systemd unit 名重启（restart-e2e-backends.sh 内部只 systemctl restart），不 pkill -f；
@@ -190,7 +190,7 @@ if [[ "$SKIP_BACKEND_RESTART" == "1" ]]; then
 ████████████████████████████████████████████████████████████████████████
 ⚠  SKIP_BACKEND_RESTART=1：库已重置，但**后端没重启** —— 这是一条已知会红的半成品路径。
    JVM 里缓存的主数据（如 ChannelOrderImporter.platformBuyerId 的 member_id）现在指向刚被
-   DROP 掉的 member，下一次拉单会撞 fk_order_member ⇒ 09-多平台接入/1-接入最小闭环 红（code=1）。
+   DROP 掉的 member，下一次拉单会撞 fk_order_member ⇒ 业务/渠道-多平台接入/接入主链路 红（code=1）。
    只有"故意要复现这个红"的对照实验才该这么用；正常跑批请去掉这个开关（默认就是重启）。
 ████████████████████████████████████████████████████████████████████████
 

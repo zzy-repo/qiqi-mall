@@ -1,8 +1,21 @@
 # 七七商城 E2E 测试
 
-基于 Playwright 的端到端测试，场景来自 `docs/flows/`。用例按业务域分 **9 个类别**
-（`tests/scenarios/01-买家侧/` … `09-多平台接入/`），对应 `docs/flows/02-业务场景/` 下的 **50 个场景文档**；
-当前 **47 个 spec 文件 / 121 个用例**，另有 6 个上一代 spec（10 个用例）仍在跑，见「用例与文档对应」。
+基于 Playwright 的端到端测试，场景来自 `docs/flows/`。用例按 **5 个桶**分（`tests/scenarios/业务/`、
+`并发与竞态/`、`台账与取证/`、`库存/`，`性能与容量/` 暂无用例），对应 `docs/flows/02-业务场景/` 下的
+**50 个场景文档**；当前 **48 个 spec 文件 / 122 个用例**，另有 6 个上一代 spec（10 个用例）仍在跑，
+见「用例与文档对应」。
+
+**三棵树共用同一段 rel 路径**（2026-11-14 结构重构后的唯一形状，别再往回改）：
+
+```
+文档  docs/flows/02-业务场景/<桶>/[<子分类>/]<场景名>/
+spec  e2e/tests/scenarios/<桶>/[<子分类>/]<场景名>.spec.js
+视频  e2e/report/videos/<桶>/[<子分类>/]<场景名>/<段序>-<段名>.mp4
+```
+
+`<桶>` 只有 4 个在用：`业务` / `并发与竞态` / `台账与取证` / `库存`（`性能与容量` 整桶还没启用，
+压测在仓库根 `benchmark/`）。文件名/URL 里**一个编号都没有** —— 顺序只由
+`/root/docsify/build-material.mjs` 的 `SCENE_BUCKETS` 书写顺序决定。
 
 **所有业务动作都由真实 UI 点击驱动**（注册、登录、加购、下单、支付、审核、发货单下发、WMS 回传、
 确认收货、申请退货、退货审核），接口只用于只读断言（`GET` 查询服务端事实），不用接口推进业务状态。
@@ -29,20 +42,22 @@
 e2e/
 ├── playwright.config.js                testDir = tests/scenarios（递归匹配 *.spec.js）
 ├── tests/
-│   ├── scenarios/                      用例：9 个业务类别目录 + 上一代 spec
-│   │   ├── 01-买家侧/                   10 个 spec（注册登录 / 浏览搜索 / 购物车 / 结算支付 / 订单收货 /
-│   │   │                                售后 / 地址 / 支付并发 / 确认收货并发 / 抢购库存）
-│   │   ├── 02-商家-商品管理/             7 个（类型属性 / 分类 / 维护 / SKU / 图片 / 两类编辑并发）
-│   │   ├── 03-商家-履约/                15 个（审核发货 / 拆单 / 发货单 / 退货 / 各类并发 /
-│   │   │                                删除守卫 / 七类台账 / 支付流水加固 …）
-│   │   ├── 04-商家-基础配置/             3 个（仓库 / 订单设置 / 退货原因）
-│   │   ├── 05-账号与会员/               4 个（登录验证码 / 管理员 / 会员 / 会员编辑并发）
-│   │   ├── 06-数据概览/                 1 个
-│   │   ├── 07-AI集成/                   1 个（令牌管理）
-│   │   ├── 08-订单自动审核/              5 个（自动过审 / 阻止冻结 / 不命中 / 审核轨迹 / 防回归）
-│   │   ├── 09-多平台接入/               1 个（接入最小闭环）
-│   │   ├── scenario1-browse.spec.js … scenario5-split.spec.js
-│   │   └── image-chain.spec.js          上一代 spec（6 文件 / 10 用例，仍被 testDir 匹配，仍在跑）
+│   ├── scenarios/                      用例：4 个桶 ×（子分类）× 场景
+│   │   ├── 业务/                        30 个 spec / 85 用例（9 个子分类）
+│   │   │   ├── 买家侧/                  7 个（注册登录 / 浏览搜索 / 购物车 / 结算支付 / 订单收货 / 售后 / 地址）
+│   │   │   ├── 商家-商品管理/            4 个（类型属性 / 分类 / 维护 / 图片上传预览）
+│   │   │   ├── 商家-履约/                5 个（审核发货 / 拆单 / 发货单调整 / 退货处理 / 删除守卫）
+│   │   │   ├── 商家-基础配置/            3 个（仓库 / 订单设置 / 退货原因）
+│   │   │   ├── 账号与会员/               3 个（登录验证码 / 管理员账号 / 会员管理）
+│   │   │   ├── 数据概览/                 1 个
+│   │   │   ├── AI集成/                  1 个（令牌管理；另两篇是能力/边界说明，无 UI 用例）
+│   │   │   ├── 订单-自动审核/            5 个（判定链四种结局 / 六笔单走查）
+│   │   │   └── 渠道-多平台接入/           1 个（接入主链路）
+│   │   ├── 并发与竞态/                   9 个 spec / 10 用例（4 个子分类：版本冲突 / 状态竞态 /
+│   │   │                                重复提交与幂等 / 双向竞态）
+│   │   ├── 台账与取证/                   6 个 spec / 19 用例（台账七类 6 个；取证链与证据对齐是纯概念页）
+│   │   ├── 库存/                         3 个 spec / 8 用例（SKU与规格 / 一条SQL吃掉「读、判、写」/ 库存台账与对账）
+│   │   └── _legacy/                     上一代 spec（6 文件 / 10 用例，仍被 testDir 匹配，仍在跑）
 │   └── support/                        共用工具（25 个文件，规则写在各自头部注释里）
 │       ├── env.js                      BASE 地址（PORTAL/ADMIN/API）与唯一后缀 stamp()
 │       ├── test.js                     共享 test/expect：挂「组件静默失效」守卫（console-guard.js）
@@ -67,14 +82,14 @@ e2e/
 cd e2e
 npm test                              # 全部用例（testDir=tests/scenarios，递归匹配 *.spec.js）
 npm run test:iso                      # 同上，但 BASE 地址钉到 shard a（5183/5185/8091）
-npx playwright test "tests/scenarios/03-商家-履约/15-支付流水加固.spec.js"                 # 只跑单个 spec（换路径即可）
-npx playwright test "tests/scenarios/03-商家-履约/15-支付流水加固.spec.js" -g "用例四"     # 只跑其中一个用例
+npx playwright test "tests/scenarios/库存/库存台账与对账.spec.js"                        # 只跑单个 spec（换路径即可）
+npx playwright test "tests/scenarios/台账与取证/台账七类/支付流水.spec.js" -g "用例四"   # 只跑其中一个用例
 npm run report                        # 查看 HTML 报告（report/html）
 ```
 
 要**全量 / 并行**跑请走仓库根目录的 `scripts/e2e-run.sh`（分片 × 独立库 × 独立后端，整体关进
 `qiqi-e2e.slice`，不至于把宿主拖垮）：`scripts/e2e-run.sh`、`scripts/e2e-run.sh --affected`、
-`E2E_SHARDS=1 scripts/e2e-run.sh "tests/scenarios/03-商家-履约/15-支付流水加固.spec.js"`。
+`E2E_SHARDS=1 scripts/e2e-run.sh "tests/scenarios/并发与竞态/重复提交与幂等/平台重推与503重试.spec.js"`。
 
 目标环境可用环境变量覆盖（默认跑本地开发栈）：
 
@@ -99,12 +114,12 @@ npm test
 | 产物 | `test-results/` | `/tmp/pwout-demo-<pid>`（`report/videos/raw/` 只在不传 `--output` 时） |
 
 ```bash
-npm run demo -- "tests/scenarios/03-商家-履约/15-支付流水加固.spec.js"                  # 打容器栈录一条
-npm run demo -- "tests/scenarios/04-商家-基础配置/3-退货原因字典.spec.js" --grep "字典维护页面"
+npm run demo -- "tests/scenarios/业务/商家-履约/退货处理.spec.js"                       # 打容器栈录一条
+npm run demo -- "tests/scenarios/业务/商家-基础配置/退货原因字典.spec.js" --grep "字典项进入买家退货下拉"
 
-# 录完把 webm 归并成 mp4（collect-demo 现在按「一次录制 → 一段或多段片」工作，不再有全流程合并片）
+# 录完把 webm 归并成 mp4（collect-demo 按「一次录制 → 一段或多段片」工作，没有全流程合并片）
 node scripts/collect-demo.mjs --from /tmp/pwout-demo-<pid> \
-  --out report/videos/03-商家-履约/15-支付流水加固.mp4
+  --out report/videos/业务/商家-履约/退货处理/1-审核通过.mp4
 ```
 
 `npm run demo` 的参数原样透传给 `npx playwright test`（`--grep` / `--project` 都行），没给 `--output`
@@ -134,31 +149,30 @@ docker 按内容缓存也不会重建镜像，会一直判过期，此时用 `do
 
 ## 用例与文档对应
 
-**口径**：`docs/flows/02-业务场景/` 下按业务域分 9 个目录、共 50 个场景；`tests/scenarios/` 用**同名目录**
-一一对应，目录内的 spec 文件名也与文档场景目录同名（`3-商品维护` ↔ `3-商品维护.spec.js`）。
+**口径**：`docs/flows/02-业务场景/` 下按 4 个桶（`业务` 再分 9 个子分类）共 **50 个场景**；
+`tests/scenarios/` 用**同一段 rel 路径**一一对应 —— 目录名、场景目录名、spec 文件名逐字相同
+（`业务/买家侧/购物车` ↔ `tests/scenarios/业务/买家侧/购物车.spec.js`）。
 一个场景若拆成多条用例（正常态 / 边界 / 并发 / 防回归），都放在同一个 spec 文件里。
 
-| 类别 | 场景数 | spec 目录 | 文档目录 |
+| 桶 | 场景数 | spec 目录 | 文档目录 |
 |---|---|---|---|
-| 01-买家侧 | 10 | `tests/scenarios/01-买家侧/`（10 spec / 35 用例） | `docs/flows/02-业务场景/01-买家侧/` |
-| 02-商家-商品管理 | 7 | `tests/scenarios/02-商家-商品管理/`（7 spec / 21 用例） | `docs/flows/02-业务场景/02-商家-商品管理/` |
-| 03-商家-履约 | 15 | `tests/scenarios/03-商家-履约/`（15 spec / 41 用例） | `docs/flows/02-业务场景/03-商家-履约/` |
-| 04-商家-基础配置 | 3 | `tests/scenarios/04-商家-基础配置/`（3 spec / 4 用例） | `docs/flows/02-业务场景/04-商家-基础配置/` |
-| 05-账号与会员 | 4 | `tests/scenarios/05-账号与会员/`（4 spec / 9 用例） | `docs/flows/02-业务场景/05-账号与会员/` |
-| 06-数据概览 | 1 | `tests/scenarios/06-数据概览/`（1 spec / 2 用例） | `docs/flows/02-业务场景/06-数据概览/` |
-| 07-AI集成 | 4 | `tests/scenarios/07-AI集成/`（1 spec / 1 用例：令牌管理） | `docs/flows/02-业务场景/07-AI集成/` |
-| 08-订单自动审核 | 3 | `tests/scenarios/08-订单自动审核/`（5 spec / 7 用例） | `docs/flows/02-业务场景/08-订单自动审核/` |
-| 09-多平台接入 | 3 | `tests/scenarios/09-多平台接入/`（1 spec / 1 用例：接入最小闭环） | `docs/flows/02-业务场景/09-多平台接入/` |
+| 业务 | 29 | `tests/scenarios/业务/`（30 spec / 85 用例，9 个子分类） | `docs/flows/02-业务场景/业务/` |
+| 并发与竞态 | 10 | `tests/scenarios/并发与竞态/`（9 spec / 10 用例，4 个子分类） | `docs/flows/02-业务场景/并发与竞态/` |
+| 台账与取证 | 8 | `tests/scenarios/台账与取证/`（6 spec / 19 用例，2 个子分类） | `docs/flows/02-业务场景/台账与取证/` |
+| 库存 | 3 | `tests/scenarios/库存/`（3 spec / 8 用例，无子分类） | `docs/flows/02-业务场景/库存/` |
+| 性能与容量 | 0 | 暂无 spec（压测在 `benchmark/1-防超卖与死锁/`） | 暂无文档（整桶在构建脚本里注释掉） |
 
 **数与数不等的地方（有意为之，别当成漏写）**：
 
-- 07：文档 4 篇是能力/边界说明（MCP 最小闭环、并发冲突、工具能力矩阵、令牌管理），
-  E2E 只覆盖「令牌管理」这一条能端到端走通的链路。
-- 08：文档 3 篇按「判定链 → 六笔单走查 → 状态与证据对齐」讲，spec 按**结局**拆成 5 个
-  （自动过审 / 阻止 / 冻结 / 不命中 / 审核轨迹 + 防回归）。
-- 09：文档 3 篇（接入主链路 / 幂等与失败重试 / 内部系统边界），E2E 只钉住最小闭环。
+- 业务 29 篇文档 vs 30 个 spec：`AI集成` 下 3 篇里只有「令牌管理」能端到端走通（MCP 最小闭环 /
+  工具能力矩阵是能力与边界说明）；`订单-自动审核` 2 篇按「判定链 → 六笔单走查」讲，spec 按**结局**
+  拆成 5 个（自动过审 / 阻止 / 冻结 / 不命中 / 审核轨迹 + 防回归）。
+- 并发与竞态 10 篇 vs 9 个 spec：`版本冲突/AI端并发` 是「能演未演」（界面 = MCP 调试器，
+  `scripts/start-inspector.sh` 起），录屏与 UI 用例都还欠着，站上标 ⏳。
+- 台账与取证 8 篇 vs 6 个 spec：`取证链与证据对齐` 两篇是纯概念页（字段对照表 + 只读 SQL），没有专属界面。
+- 库存 3 篇 = 3 个 spec，一篇一个文件。
 
-**跨类别的机制时序图**在 `docs/flows/03-机制时序/`，用例里出现「为什么会这样」的问题时看这几张：
+**跨桶的机制时序图**在 `docs/flows/03-机制时序/`，用例里出现「为什么会这样」的问题时看这几张：
 
 | 机制 | 文档 |
 |---|---|
@@ -168,10 +182,10 @@ docker 按内容缓存也不会重建镜像，会一直判过期，此时用 `do
 | 审核与跨仓拆单（拆单、审核并发） | `docs/flows/03-机制时序/7-审核与跨仓拆单.mmd` |
 | 下发与仓库回传（发货单、WMS 台账） | `docs/flows/03-机制时序/8-下发与仓库回传.mmd` |
 
-**上一代 spec（`scenario1-browse` … `scenario5-split`、`image-chain`）**：仍在 `tests/scenarios/` 根目录、
-仍被 `testDir` 递归匹配并在跑（6 文件 / 10 用例），内容已被上面 01~09 的目录覆盖并扩写；
-新用例一律写进类别目录，不再往根目录加文件。（这些文件头部注释里写的 `docs/flows/3-场景1-商品浏览.mmd`
-一类路径是重组前的旧文档，**对应关系以本表为准**。）
+**上一代 spec（`tests/scenarios/_legacy/`：`scenario1-browse` … `scenario5-split`、`image-chain`）**：
+仍被 `testDir` 递归匹配并在跑（6 文件 / 10 用例），内容已被上面 4 个桶覆盖并扩写；新用例一律写进桶目录，
+不再往 `_legacy/` 加文件。（这些文件头部注释里写的 `docs/flows/3-场景1-商品浏览.mmd` 一类路径是重组前的
+旧文档，**对应关系以本表为准**。）
 
 ## 测试设计说明
 
@@ -187,7 +201,7 @@ docker 按内容缓存也不会重建镜像，会一直判过期，此时用 `do
 
 ## 结果
 
-用例总数：**47 个 spec / 121 个用例**（9 个业务类别）+ **6 个上一代 spec / 10 个用例**。
+用例总数：**48 个 spec / 122 个用例**（4 个桶）+ **6 个上一代 spec / 10 个用例**。
 本文件不再维护「某次运行全绿的用例表」——那张表里的数字每加/减一个用例就过期一次，
 也是这份 README 第三次被审计判「过期」的原因。本次运行的事实看两处：
 
@@ -196,4 +210,6 @@ npm run report                       # HTML 报告（report/html），逐条 pas
 npm test -- --reporter=list          # 控制台逐条结果（含耗时）
 ```
 
-库存超卖 / 死锁压测与复现脚本见 `benchmark/1-防超卖与死锁/README-超卖与死锁.md`。
+文档站侧的页面数 / 图数 / 视频数与两套门禁，以 `node scripts/check-docs-site.mjs` 与
+`node scripts/check-sidebar-continuity.mjs` 的输出为准，同样不在本文件维护（每次重建都会变）。
+库存超卖 / 死锁压测与复现脚本见 `benchmark/1-防超卖与死锁/`（`race-超卖复现.sh` / `deadlock-死锁复现.sh`）。

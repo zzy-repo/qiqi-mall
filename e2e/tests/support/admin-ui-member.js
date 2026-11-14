@@ -1,5 +1,5 @@
 /**
- * 商家侧 05-账号与会员（admin-web /member 及两个子页）真实 UI 操作 + 该场景需要的只读查询。
+ * 商家侧 · 业务/账号与会员（admin-web /member 及两个子页）真实 UI 操作 + 该场景需要的只读查询。
  *
  * 规则与 support/admin-ui.js、ui.js 一致：业务动作只走真实点击；
  * 唯一例外是 deleteMemberApi()——会员列表**页面上没有删除入口**（操作列只有

@@ -53,7 +53,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * 支付幂等键 {@code payment_record.uk_idem} 的**真库**集成测试。
  *
  * <h3>为什么必须单开一个类（这是原来 e2e 的盲区）</h3>
- * 既有 e2e「支付并发冲突」场景（{@code e2e/tests/scenarios/01-买家侧/8-支付并发冲突.spec.js}）
+ * 既有 e2e「支付并发冲突」场景（{@code e2e/tests/scenarios/并发与竞态/重复提交与幂等/支付并发冲突.spec.js}）
  * 走的是**两道业务闸**，根本到不了 {@code payment_record}：
  * <pre>
  * ① 状态守卫 PortalOrderController#pay（status != 0 → code=1「当前订单状态不可支付」）

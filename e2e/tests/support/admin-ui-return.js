@@ -1,5 +1,5 @@
 /**
- * 03-商家-履约 / 4-退货处理 场景专用 helper。
+ * 业务/商家-履约/退货处理 场景专用 helper。
  *
  * 为什么要单独一个文件：support/admin-ui.js 由别的并行任务在改，
  * support/ui.js 与 support/portal-ui.js 也各有归属，本场景的新 helper 全部放这里，

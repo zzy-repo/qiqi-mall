@@ -7,7 +7,7 @@
  * SVG 硬指标、图内禁词、侧边栏死链、**私人文稿零泄漏**（口语稿 + build-material.mjs 的 PRIVATE_DOCS
  * 那 12 篇私人笔记，产物里一个字节都不许有，见第 ⑩ 项）、**产物洁净度**（私密文件名/原始录屏/
  * 绝对路径与主机名，见第 ⑪ 项）、**侧边栏编号连续性**（显示名不带编号，少一个场景肉眼看不出，
- * 但 URL 会露馅 7→9，见第 ⑫ 项）），
+ * 顺序与清单不一致也看不出，见第 ⑫ 项（判「侧边栏 == 构建落盘的顺序清单」）），
  * 人工 curl + 数数必漏，所以要一条命令给出 PASS/FAIL + 具体数字 + 可行动的失败清单。
  *
  * 用法：
@@ -54,7 +54,7 @@
 import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs'
 import { join, dirname, resolve, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseSidebar, checkContinuity } from './check-sidebar-continuity.mjs'
+import { parseSidebar, checkAgainstManifest } from './check-sidebar-continuity.mjs'
 
 /* ============================================================== 参数与路径 */
 
@@ -174,15 +174,19 @@ for (let i = 0; i < argv.length; i++) {
 // 无界面场景：产品本身没有 UI（MCP / AI 工具能力），
 // 用户口径是"不做视频级验证"，验收方式 = mcp-server 测试套件断言。
 // 豁免的只是"必须有视频"，图仍然必须有。
-// 注意：只列「产品没有页面 UI」的场景。07-AI集成/4-令牌管理 有后台真实 UI 页面，**不豁免**。
+// 注意：只列「产品没有页面 UI」的场景。业务/AI集成/令牌管理 有后台真实 UI 页面，**不豁免**。
 // 唯一数据源：判定逻辑只查下面的 Set，不要在别处重复写场景名。
 const NO_UI_SCENES = [
-  '07-AI集成/1-MCP最小闭环',
-  '07-AI集成/2-并发冲突（AI端）',
-  '07-AI集成/3-工具能力矩阵',
-  // 纯概念页：内容是「平台同步日志」与「仓库交换台账」逐行对照，没有专属界面；
-  // 证据已由 09/1 的视频覆盖（同步日志页）。按「无界面场景免视频」处理。
-  '09-多平台接入/3-与内部系统的边界',
+  // 键 = 场景目录的 rel 路径（桶/子分类/场景名），与 build-material.mjs 的 NO_UI_SCENE_HINTS 逐字相同。
+  // 名单里的场景只免「必须有视频」，图与口语稿照旧必查（豁免不等于免检）。
+  //
+  // 业务/AI集成/MCP最小闭环 与 并发与竞态/版本冲突/AI端并发 **不在本名单里**（2026-11-14 摘掉）：
+  // MCP 调试器（scripts/start-inspector.sh）能列工具 → 调工具 → 看返回，是真界面，
+  // 「无界面」是错的口径。摘掉后 ⑤ 的缺件数 +2 —— 这是把真缺口露出来，不是放松门禁。
+  '业务/AI集成/工具能力矩阵',
+  // 纯概念页：内容是「平台同步日志」与「仓库交换台账」逐行对照，没有专属界面。
+  // 验收口径见 build-material 的 HINT_NO_UI_LEDGER（本页字段对照 + 两侧台账只读 SQL），不借邻居场景的录屏。
+  '台账与取证/取证链与证据对齐/与内部系统的边界',
 ]
 const NO_UI_SET = new Set(NO_UI_SCENES)
 
@@ -197,9 +201,26 @@ const NO_UI_SET = new Set(NO_UI_SCENES)
 //   · 清单长度 ≤ PENDING_VIDEO_MAX（防止长成垃圾桶）；
 //   · 清单里的 path 必须真的存在（场景改名/删了却没清清单 → FAIL）；
 //   · 清单里的场景**已经有视频了** → FAIL（提示「可从未补清单移除」），防清单长期不清。
-// 空数组是**合法状态**（当前即如此：13/15 已补录完成）：⑤ 只按「缺件 0」判定，不假定清单非空。
+// 空数组是**合法状态**：⑤ 只按「缺件 0」判定，不假定清单非空。
 const PENDING_VIDEO_MAX = 3
-const PENDING_VIDEO = []
+const PENDING_VIDEO = [
+  // 场景改名/搬桶后（2026-11-14 五桶结构）这里只剩两条真待补。两条都是「能演未演」：
+  // 页面、图、口语稿都在，缺的是 UI 测试 + 录屏 —— 已在任务 A10 里排队补录。
+  {
+    path: '业务/AI集成/MCP最小闭环',
+    reason: 'MCP Inspector 可点可调（scripts/start-inspector.sh 起的就是它），属**能演未演**，不是「无界面」；'
+      + '这一轮只做了图与运行期断言，没录屏，也还没有 UI 级用例。',
+    plan: 'A10：补 UI 测试（用 Inspector 的 list-tools / call-tool 接口做工具清单与调用结果的断言），'
+      + '再录一段「列工具 → 调工具 → 看返回」的闭环视频，落 videos/业务/AI集成/MCP最小闭环/1-全流程.mp4。',
+  },
+  {
+    path: '并发与竞态/版本冲突/AI端并发',
+    reason: 'AI 端并发（同一份商品/会员数据被 AI 工具与后台同时改）有真实界面可演，属**能演未演**；'
+      + '这一轮只做了图与运行期断言，没录屏，也还没有 UI 级用例。',
+    plan: 'A10：补 UI 测试（两个会话并发改同一实体 → 断言后写者拿到 version 冲突提示、不覆盖先写者），'
+      + '再录一段双窗并发视频，落 videos/并发与竞态/版本冲突/AI端并发/1-全流程.mp4。',
+  },
+]
 const PENDING_VIDEO_MAP = new Map(PENDING_VIDEO.map((p) => [p.path, p]))
 
 /* ============================================================== 通用小工具 */
@@ -309,40 +330,67 @@ const diagramPages = countPage('material/diagrams/')
 /* ============================================================== ⑤ 场景素材齐全（先算，①要引用它的结论） */
 
 const SCENES = join(DOCS, 'flows', '02-业务场景')
-const sceneGaps = []
-const sceneList = []
-if (existsSync(SCENES)) {
-  for (const cat of readdirSync(SCENES, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort(zhSort)) {
-    const catDir = join(SCENES, cat)
-    const scenes = readdirSync(catDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort(zhSort)
-    for (const scene of scenes) {
-      // 图：<类>/<N-场景>/ 下的 .svg 或 .png；旧结构允许 <类>/<N-场景>.svg|png
-      const scenePath = `${cat}/${scene}`
-      const imgs = readdirSync(join(catDir, scene)).filter((f) => /\.(svg|png)$/i.test(f))
-      for (const ext of ['.svg', '.png']) if (existsSync(join(catDir, scene + ext))) imgs.push(scene + ext)
-      // 视频：<类>/<N-场景>.mp4 或 <类>/<N-场景>-<序号>-<分段名>.mp4（与 build-material 的匹配口径一致）
-      let vids = []
-      try {
-        vids = readdirSync(join(VIDEOS, cat)).filter((f) => f.endsWith('.mp4')
-          && (f === `${scene}.mp4` || f.startsWith(`${scene}-`)))
-      } catch { /* 没有视频目录 = 0 个 */ }
-      const noUi = NO_UI_SET.has(scenePath)
-      const missing = []
-      // 图：无论是否无界面场景都必须有（豁免不等于免检，缺图照旧 FAIL）
-      if (imgs.length === 0) missing.push('图')
-      // 视频：仅对白名单内的无界面场景跳过这一条，名单外缺视频照旧算缺件
-      if (!noUi && vids.length === 0) missing.push('视频')
-      sceneList.push({ path: scenePath, imgs: imgs.length, vids: vids.length, noUi })
-      if (missing.length) sceneGaps.push({ path: scenePath, missing })
+
+/**
+ * 场景目录的**发现规则**（2026-11-14 结构重构后）：递归扫 02-业务场景，凡「目录里直接有 .mmd」的就是一个场景。
+ *
+ * 为什么不再写死两层（<类别>/<N-场景>）：新结构是 桶/子分类/场景名 三层，压测与容量那类桶还没有子分类
+ * （两层）。写死层数的门禁在结构一变就扫到 0 个场景，然后「0 个场景、缺件 0」判 ✅ —— fail-open。
+ * 用「目录里有 .mmd」当身份，桶目录/子分类目录本身不含文件，天然不会被误当场景。
+ *
+ * 每个场景的三元组（这就是「齐全」的定义，缺哪项就点名哪项）：
+ *   ① 图：本目录下的 .svg/.png，且 .mmd 源码要在（图与源码配对由 ④ 全量查，这里只要求「有」）
+ *   ② 视频：e2e/report/videos/<同名 rel>/ 下至少一个 <段序>-<段名>.mp4（无界面场景白名单免）
+ *   ③ 口语稿：本目录下的 口语稿.txt（一页一份，图和视频共用）
+ */
+function findSceneDirs() {
+  const out = []
+  if (!existsSync(SCENES)) return out
+  const stack = ['']
+  while (stack.length) {
+    const rel = stack.pop()
+    const abs = join(SCENES, rel)
+    const entries = readdirSync(abs, { withFileTypes: true })
+    const files = entries.filter((e) => e.isFile()).map((e) => e.name)
+    if (rel && files.some((f) => f.endsWith('.mmd'))) out.push({ rel, files })
+    for (const e of entries) {
+      if (!e.isDirectory()) continue
+      const childRel = rel ? `${rel}/${e.name}` : e.name
+      // dist/回滚/参考目录不参与（_rollback 是本目录下的历史备份）
+      if (e.name.startsWith('_') || e.name === 'node_modules') continue
+      stack.push(childRel)
     }
   }
+  return out.sort((a, b) => zhSort(a.rel, b.rel))
+}
+
+function listDirSafe(dir, re) {
+  try { return readdirSync(dir).filter((f) => re.test(f)) } catch { return [] }
+}
+
+const sceneGaps = []
+const sceneList = []
+for (const { rel, files } of findSceneDirs()) {
+  const imgs = files.filter((f) => /\.(svg|png)$/i.test(f))
+  const mmds = files.filter((f) => /\.mmd$/i.test(f))
+  const spoken = files.includes('口语稿.txt')
+  // 视频：videos/<rel>/<段序>-<段名>.mp4（段序只表示「本页第几段」，与场景编号无关）
+  const vids = listDirSafe(join(VIDEOS, rel), /^\d+-.+\.mp4$/i)
+  const noUi = NO_UI_SET.has(rel)
+  const missing = []
+  if (imgs.length === 0) missing.push('图')
+  if (mmds.length === 0) missing.push('图源码(mm)')
+  if (!noUi && vids.length === 0) missing.push('视频')
+  if (!spoken) missing.push('口语稿')
+  sceneList.push({ path: rel, imgs: imgs.length, mmds: mmds.length, vids: vids.length, spoken, noUi })
+  if (missing.length) sceneGaps.push({ path: rel, missing })
 }
 const completeScenes = sceneList.length - sceneGaps.length
 
 {
   // ① 判「两类页面都产出了」。源素材比产物新（还没重建）时页数会少于齐全场景数，那是「等重建」不算坏，只提示
   const pageSet = new Set(pageFiles)
-  const noPage = sceneList.filter((s) => !s.missing && !pageSet.has(`material/scenarios/${s.path}.${PAGE_EXT}`))
+  const noPage = sceneList.filter((s) => !sceneGaps.some((g) => g.path === s.path) && !pageSet.has(`material/scenarios/${s.path}.${PAGE_EXT}`))
   const lines = []
   if (noPage.length) {
     lines.push(`提示：源侧图+视频齐全场景 ${completeScenes} 个，其中 ${noPage.length} 个在产物里没有页面（重建后应补齐）`)
@@ -443,7 +491,7 @@ for (const p of PENDING_VIDEO) {
 }
 
 push('⑤', '场景图+视频齐全', hardGaps.length === 0 && pendingProblems.length === 0,
-  `场景 ${sceneList.length} 个，缺件 ${sceneGaps.length}`
+  `场景 ${sceneList.length} 个（递归发现），缺件 ${sceneGaps.length}`
   + (hardGaps.length
     ? `（其中 ${hardGaps.length} 项未登记进「待补视频」清单 → 判红）`
     : (pendingHits.length ? '（均在「待补视频」清单内，已登记原因与计划）' : ''))
@@ -461,7 +509,7 @@ push('⑤', '场景图+视频齐全', hardGaps.length === 0 && pendingProblems.l
       : ['（待补清单为空：无待补视频）']),
     ...pendingProblems.map((x) => `待补清单自检不通过：${x}`),
     // 被豁免的场景逐个打印出来，不悄悄跳过
-    ...noUiList.map((s) => `无界面场景免视频：${s.path}（图 ${s.imgs} 个，已在⑦⑧校验）`),
+    ...noUiList.map((s) => `无界面场景免视频：${s.path}（图 ${s.imgs} 个 / 口语稿 ${s.spoken ? '有' : '无'}，图已在⑦⑧校验）`),
     ...noUiStale.map((n) => `提示：NO_UI_SCENES 里的 ${n} 未匹配到任何场景目录（名单已过期？）`),
   ])
 const pendingCount = pendingHits.length
@@ -768,36 +816,49 @@ push('⑪',
     ? ['⚠ dev 站豁免：dev 站的 _deploy/_evidence 是内网材料（nginx deny），prod 产物里出现即泄漏']
     : cleanHits)
 
-/* ============================================================== ⑫ 侧边栏编号连续性 */
+/* ============================================================== ⑫ 侧边栏顺序一致性 */
 
-// 为什么单列一项（而不塞进 ⑨）：⑨ 判的是「链接指向的文件在不在」，断档时那些链接**全都在**，
-// ⑨ 一定是绿的。而侧边栏显示名不带编号（见 build-material.mjs 顶部约定），少一个场景肉眼也看不出，
-// 只有 URL 里的编号会露馅：……/7-收货地址.md 后面直接跟 ……/9-确认收货并发.md。
-// 2026-11-14 就断过这么一次（「8-支付并发冲突」测过、素材落盘，但 SCENE_GROUPS 没登记 →
-// 不生成页面 → 侧边栏 7→9），当时 ①页面数/⑤缺件/⑨死链 全绿，因为缺的那项压根不在清单里。
-// 既不并进 ⑨ 的 detail 字符串（那会改动 ⑨ 的既有口径），也放在 ⑪ 之后输出，前 11 项的
-// 判定口径与显示顺序完全不变。解析逻辑与门禁脚本共用一份（parseSidebar），不在这里另抄。
-const CONTINUITY_MIN_GROUPS = 10   // 分组数下限：目前 14 组。扫到 0 组 = _sidebar.md 指错/产物空，不许判通过
-const CONTINUITY_MIN_LINKS = 30    // 带编号条目下限：目前 74 条（场景 50 + 图页 24）
+// 为什么单列一项（而不塞进 ⑨）：⑨ 判的是「链接指向的文件在不在」，顺序错了、少一条时那些链接**全都还在**，
+// ⑨ 一定是绿的。侧边栏显示名里没有编号，少一个场景肉眼也看不出。
+//
+// 2026-11-14 口径变更：编号已从文件名/URL/目录名里整个去掉（顺序只由 build-material 的 SCENE_BUCKETS 决定），
+// 旧判据「URL 编号 1..N 连续」失效。新判据对着**构建落盘的顺序清单**判三件事：
+//   ① 侧边栏的场景页序列 == 清单序列（顺序逐条相同）  ② 无重复  ③ 无遗漏（含「多出来的野页面」）
+// 清单 = <root>/material/_nav-manifest.json（build-material.mjs 每次构建写，与 _sidebar.md 同源同批）。
+// 清单缺失 = 判不了 → 判红（fail-closed），绝不因为「没东西可判」而放行。
+const CONTINUITY_MIN_SCENES = 20   // 场景页下限：目前 50。扫到太少 = 源指错/产物空，不许判通过
+const CONTINUITY_MIN_LINKS = 30    // 场景页+图页下限：目前 74（场景 50 + 图页 24）
+const navManifestPath = ['material/_nav-manifest.json', '_nav-manifest.json']
+  .map((rel) => join(ROOT, rel))
+  .find((p) => existsSync(p))
 const numbering = (() => {
-  if (!existsSync(sidebarPath)) return { groups: [], numbered: 0, lines: ['_sidebar.md 不存在，无法校验编号连续性'] }
-  const { groups, numbered } = parseSidebar(readText(sidebarPath))
-  const { lines } = checkContinuity(groups)
-  return { groups, numbered, lines }
+  if (!existsSync(sidebarPath)) return { bad: ['_sidebar.md 不存在'], lines: ['_sidebar.md 不存在，无法校验顺序一致性'], scenes: 0, total: 0, source: null }
+  if (!navManifestPath) {
+    return { bad: ['顺序清单缺失'], lines: [`找不到 material/_nav-manifest.json（先跑 build-material.mjs 重建站点）`], scenes: 0, total: 0, source: null }
+  }
+  const { order, total } = parseSidebar(readText(sidebarPath))
+  let manifest
+  try {
+    manifest = JSON.parse(readText(navManifestPath))
+  } catch (e) {
+    return { bad: [`顺序清单不是合法 JSON：${e.message}`], lines: [`${navManifestPath} 解析失败`], scenes: 0, total, source: navManifestPath }
+  }
+  const { bad, lines } = checkAgainstManifest(order, manifest)
+  return { bad, lines, scenes: (manifest.scenes ?? []).length, total, source: navManifestPath }
 })()
-const numberingBad = numbering.groups.length
-  ? numbering.lines.filter((l) => l.startsWith('❌'))
-  : []
-const numberingVacuous = numbering.groups.length < CONTINUITY_MIN_GROUPS || numbering.numbered < CONTINUITY_MIN_LINKS
+const numberingBad = numbering.lines.filter((l) => l.startsWith('❌'))
+const numberingVacuous = numbering.total < CONTINUITY_MIN_LINKS || numbering.scenes < CONTINUITY_MIN_SCENES
 push('⑫',
-  '侧边栏编号连续性',
-  numberingBad.length === 0 && !numberingVacuous,
+  '侧边栏顺序一致性',
+  numberingBad.length === 0 && !numbering.bad.length && !numberingVacuous,
   numberingVacuous
-    ? `分组 ${numbering.groups.length} 个（下限 ${CONTINUITY_MIN_GROUPS}）/ 编号条目 ${numbering.numbered} 条（下限 ${CONTINUITY_MIN_LINKS}）—— 扫到的太少，不能判通过`
-    : `分组 ${numbering.groups.length} 个，编号条目 ${numbering.numbered} 条，不连续 ${numberingBad.length} 个`,
-  numberingVacuous
-    ? [`❌ 不是「全连续」而是「根本没扫到东西」：检查 _sidebar.md 是否指对、产物是否为空`]
-    : numberingBad.map((l) => l.replace(/^❌ /, '断档 ')))
+    ? `侧边栏 ${numbering.total} 条（下限 ${CONTINUITY_MIN_LINKS}）/ 清单场景 ${numbering.scenes} 个（下限 ${CONTINUITY_MIN_SCENES}）—— 扫到的太少，不能判通过`
+    : `侧边栏 ${numbering.total} 条，清单场景 ${numbering.scenes} 个，不一致 ${numberingBad.length + numbering.bad.length} 处`,
+  [
+    ...(numbering.source ? [] : ['❌ 判据是「侧边栏 == 顺序清单」，清单缺失就不能判通过']),
+    ...numbering.lines,
+    ...numbering.bad,
+  ])
 
 /* ============================================================== 下限断言（防止「扫不到东西 → 判通过」） */
 

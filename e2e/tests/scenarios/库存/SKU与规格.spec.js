@@ -1,0 +1,197 @@
+import { test, expect } from '../../support/test.js'
+import { PORTAL, API, stamp } from '../../support/env.js'
+import { adminLogin } from '../../support/ui.js'
+import { openProducts, addProduct, openSkus, openSkusById, addSku, editSku } from '../../support/catalog-ui.js'
+import { expectImageLoaded } from '../../support/images.js'
+import { dangerWillDo, confirmDanger, confirmDangerExpectError, dismissDanger } from '../../support/admin-ui.js'
+import { adminTokenOf, getAdminProductsApi, getAdminSkusApi } from '../../support/assert.js'
+import { tid, tidPrefix } from '../../support/tid.js'
+import { attributeValues, newestByName, productNameOf, realGalleryImages, realSkuImages } from '../../support/fixtures.js'
+
+/**
+ * 库存 / SKU与规格
+ *
+ * 覆盖：按类型属性生成 SKU（规格值取自该类型的属性）/ 规格值整组替换（编辑时改规格）/
+ *       价格与库存编辑 / SKU 图上传与列表展示 / 必填校验 / 删除：被订单明细或购物车引用时
+ *       后端拒删并回显中文原因，新建的无引用 SKU 可删
+ * 断言依据：admin/product/skus.vue（规格行 = 属性下拉 + 值输入，提交时整组替换 specs）、
+ *          SkuController（保存 sku + specs）
+ */
+
+/** 造一个「手机」类型的新商品，返回商品行 */
+async function newProduct(page, request, token, name) {
+  await openProducts(page)
+  await addProduct(page, { name, categoryName: '手机数码', typeName: '手机' })
+  const saved = newestByName(await getAdminProductsApi(request, token, name), name)
+  expect(saved, '商品应创建成功').toBeTruthy()
+  return saved
+}
+
+test.describe('库存 › SKU与规格', () => {
+  test('按类型属性生成 SKU → 改价格库存 → 规格值整组替换', async ({ page, request }) => {
+    await adminLogin(page)
+    const token = await adminTokenOf(page)
+    const name = productNameOf(`${stamp()}-sku`)
+    const product = await newProduct(page, request, token, name)
+
+    await openSkus(page, name)
+    await addSku(page, { specs: [{ attrName: '颜色', value: attributeValues[0] }, { attrName: '内存', value: '256G' }], price: 1999, stock: 100 })
+
+    let skus = await getAdminSkusApi(request, token, product.id)
+    expect(skus.length, '应有 1 个 SKU').toBe(1)
+    expect(Number(skus[0].price), '价格应落库').toBe(1999)
+    expect(skus[0].stock, '库存应落库').toBe(100)
+    expect(skus[0].specText, '规格文本应由两个属性拼出').toContain(`颜色:${attributeValues[0]}`)
+    expect(skus[0].specText).toContain('内存:256G')
+
+    // 改价格 / 库存
+    await editSku(page, attributeValues[0], { price: 1888, stock: 66 })
+    skus = await getAdminSkusApi(request, token, product.id)
+    expect(Number(skus[0].price), '改价应落库').toBe(1888)
+    expect(skus[0].stock, '改库存应落库').toBe(66)
+    await expect(tid(page, 'sku-list-table').locator('.el-table__body tr').first(), '列表应展示新价格').toContainText('1888.00')
+
+    // 规格值整组替换：把内存改成 512G
+    await editSku(page, attributeValues[0], {})
+    // 上一步只做校验会直接保存；这里重新打开编辑改规格值
+    const row = page.locator('.el-table__body tr').filter({ hasText: attributeValues[0] }).first()
+    await row.getByTestId('sku-row-edit').click()
+    const dialog = tid(page, 'sku-form-dialog')
+    await expect(dialog).toBeVisible()
+    const specRows = tid(page, 'sku-form-spec-row')
+    await expect(specRows, '编辑时应回填 2 行规格值').toHaveCount(2)
+    await specRows.nth(1).getByTestId('sku-form-spec-value').fill('512G')
+    await tid(page, 'sku-form-submit').click()
+    await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
+    await page.waitForTimeout(1000)
+
+    skus = await getAdminSkusApi(request, token, product.id)
+    expect(skus[0].specText, '规格值应被整组替换').toContain('内存:512G')
+    expect(skus[0].specText).not.toContain('256G')
+
+    // C 端：该 SKU 的规格与价格对得上
+    const cProduct = (await (await request.get(`${API}/portal/products/${product.id}`)).json()).data
+    expect(cProduct.skus.length).toBe(1)
+    expect(Number(cProduct.skus[0].price)).toBe(1888)
+    expect(cProduct.skus[0].specText).toContain('内存:512G')
+
+    await page.goto(`${PORTAL}/product/${product.id}`)
+    await page.waitForTimeout(1000)
+    await expect(tidPrefix(page, 'product-detail-sku-'), 'C 端应显示该规格').toContainText('内存:512G')
+  })
+
+  test('SKU 图：上传后列表与 C 端都能显示', async ({ page, request }) => {
+    const seed = `${stamp()}-pic`
+    {
+      await adminLogin(page)
+      const token = await adminTokenOf(page)
+      const name = productNameOf(seed)
+      const product = await newProduct(page, request, token, name)
+      // 用种子真图：SKU 图取 sku 池，商品主图取封面池
+      const { cover } = realGalleryImages(seed)
+      const skuPic = realSkuImages(seed)      // sku 池 9 张都验证过可加载
+
+      // 商品主图（C 端展示用）
+      await openProducts(page)
+      await page.locator('.el-table__body tr').filter({ hasText: name }).first()
+        .getByTestId('product-row-edit').click()
+      await tid(page, 'product-form-cover').locator('input[type="text"]').fill(cover)
+      await tid(page, 'product-form-submit').click()
+      await page.waitForTimeout(1000)
+
+      // SKU + SKU 图
+      await openProducts(page)
+      await openSkus(page, name)
+      await tid(page, 'sku-create').click()
+      const dialog = tid(page, 'sku-form-dialog')
+      await expect(dialog).toBeVisible()
+      await tid(page, 'sku-form-pic').locator('input[type="text"]').fill(skuPic)
+      await expectImageLoaded(tid(page, 'sku-form-pic').locator('.preview img'), 'SKU 图预览')
+      await tid(page, 'sku-form-spec-add').click()
+      await page.waitForTimeout(300)
+      const specRow = tid(page, 'sku-form-spec-row').first()
+      await specRow.getByTestId('sku-form-spec-attr').click()
+      await page.waitForTimeout(400)
+      await page.locator('.el-select-dropdown__item:visible').first().click()
+      await specRow.getByTestId('sku-form-spec-value').fill('默认款')
+      await tid(page, 'sku-form-price').locator('input').first().fill('888')
+      await tid(page, 'sku-form-stock').locator('input').first().fill('10')
+      await tid(page, 'sku-form-submit').click()
+      await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
+      await page.waitForTimeout(1200)
+
+      const skus = await getAdminSkusApi(request, token, product.id)
+      expect(skus.length).toBe(1)
+      expect(skus[0].pic, 'sku.pic 应为相对路径').toBe(skuPic)
+      await expectImageLoaded(tid(page, 'sku-row-thumb').first().locator('img'), 'SKU 列表缩略图')
+
+      // C 端详情页能打开（主图真实加载）
+      await page.goto(`${PORTAL}/product/${product.id}`)
+      await page.waitForTimeout(1200)
+      await expectImageLoaded(tid(page, 'product-detail-cover').locator('img'), 'C 端主图')
+    }
+  })
+
+  test('必填校验：价格/库存不填不让保存', async ({ page, request }) => {
+    await adminLogin(page)
+    const token = await adminTokenOf(page)
+    const name = productNameOf(`${stamp()}-req`)
+    await newProduct(page, request, token, name)
+    await openSkus(page, name)
+
+    await tid(page, 'sku-create').click()
+    const dialog = tid(page, 'sku-form-dialog')
+    await expect(dialog).toBeVisible()
+    // 价格/库存清空（默认是 0，先清掉再提交，触发必填）
+    const priceInput = tid(page, 'sku-form-price').locator('input').first()
+    const stockInput = tid(page, 'sku-form-stock').locator('input').first()
+    await priceInput.fill('')
+    await stockInput.fill('')
+    await tid(page, 'sku-form-submit').click()
+    await page.waitForTimeout(600)
+    const errors = dialog.locator('.el-form-item__error')
+    await expect(errors.first(), '价格/库存应有必填提示').toBeVisible()
+    await expect(dialog, '校验不通过弹窗不应关闭').toBeVisible()
+    await tid(page, 'sku-form-cancel').click()
+  })
+
+  test('删除 SKU：被订单引用时被拒，新建的无引用 SKU 可删', async ({ page, request }) => {
+    await adminLogin(page)
+    const token = await adminTokenOf(page)
+
+    // ① 种子商品1 的第一个 SKU 被订单引用 → 被拒
+    // 按 id=1 精确取（列表第一条会随着本轮新建商品漂移，全量跑时 [0] 不是种子商品）
+    await openProducts(page)
+    const seedProduct = (await getAdminProductsApi(request, token)).find((p) => p.id === 1)
+    expect(seedProduct, '种子商品1 应存在于后台商品列表').toBeTruthy()
+    await page.getByTestId('product-row-1').getByTestId('product-row-skus').click()
+    await page.waitForURL(/\/product\/1\/skus/, { timeout: 15_000 })
+    await page.waitForTimeout(1200)
+    const usedSku = page.locator('.el-table__body tr').first()
+    await expect(usedSku).toBeVisible()
+    await usedSku.getByTestId('sku-row-delete').click()
+    // 新 UI：删除 SKU 走统一确认弹窗；被引用时预演就写明「删除会被拒绝」，
+    // 点「确认执行」后后端拒绝的中文原因留在弹窗里
+    await expect(dangerWillDo(page), '预演应说明这次删除会被拒绝').toContainText('删除会被拒绝', { timeout: 20_000 })
+    const blockedMsg = await confirmDangerExpectError(page)
+    expect(blockedMsg, '被订单引用的 SKU 应被拒绝').toContain('不能删除')
+    await dismissDanger(page)
+
+    // ② 新商品的 SKU（无引用）→ 可以删
+    const name = productNameOf(`${stamp()}-del`)
+    await openProducts(page)
+    await addProduct(page, { name, categoryName: '手机数码', typeName: '手机' })
+    const product = newestByName(await getAdminProductsApi(request, token, name), name)
+    await openProducts(page)
+    // 按 id 进 SKU 页：同名商品会累积，按名字点行可能点到旧那条，SKU 就加到了别的商品上
+    await openSkusById(page, product.id)
+    await addSku(page, { specs: [{ attrName: '颜色', value: attributeValues[1] }], price: 1, stock: 1 })
+    expect((await getAdminSkusApi(request, token, product.id)).length, '应有 1 个 SKU').toBe(1)
+
+    await page.locator('.el-table__body tr').first().getByTestId('sku-row-delete').click()
+    await confirmDanger(page, { willDo: '将删除规格 SKU' })
+    await expect(page.locator('.el-message--success').first()).toBeVisible({ timeout: 15_000 })
+    await page.waitForTimeout(800)
+    expect((await getAdminSkusApi(request, token, product.id)).length, 'SKU 应被删除').toBe(0)
+  })
+})

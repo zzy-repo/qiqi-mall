@@ -1,41 +1,38 @@
 #!/usr/bin/env node
 /**
- * check-sidebar-continuity.mjs —— 侧边栏「场景/图页编号连续性」门禁（零依赖：node 内置 + 全局 fetch）
+ * check-sidebar-continuity.mjs —— 侧边栏「顺序与清单一致」门禁（零依赖：node 内置 + 全局 fetch）
  *
- * ── 为什么需要它 ───────────────────────────────────────────────────────────
- * 侧边栏的显示名**不带编号**（页面 H1 也不带，见 /root/docsify/build-material.mjs 顶部约定：
- * 「文件名保留 N- 前缀，但侧边栏文案与页面 H1 一律不显示数字」），所以少一个场景时，
- * 肉眼翻侧边栏是完全看不出来的 —— 少的那一项压根不在列表里，页数和缺件检查也照样是绿的。
- * 但 **URL 会露馅**：……/7-收货地址.md 的下一条直接是 ……/9-确认收货并发.md，7→9 就是断档。
+ * ── 2026-11-14 口径变更（原来是「编号连续性」）──────────────────────────────
+ * 编号已经从**文件名 / URL / 目录名**里整个去掉了：场景的顺序只由 build-material.mjs 的
+ * SCENE_BUCKETS（四桶 → 子分类 → 场景）书写顺序决定。于是旧的判据（URL 里 1..N 连续）失效：
+ *   · 没有编号可数，`7→9` 这种断档再也不会出现在 URL 上；
+ *   · 而且旧判据只看得见「编号断档」，看不见「顺序被改了」「同名出现两次」。
+ * 新判据只有三句话，全部对着**构建自己落的顺序清单**比：
+ *   ① 侧边栏里的场景页序列 == 清单里的场景页序列（顺序逐条相同）；
+ *   ② 无重复（同一个 page 出现两次 = 两条链接抢同一个页面）；
+ *   ③ 无遗漏（清单里有、侧边栏里没有 = 少了一个场景；侧边栏里有、清单里没有 = 多了一个野页面）。
  *
- * 2026-11-14 就发生过一次：「8-支付并发冲突」的 e2e 用例已测过、图/口语稿/视频也已落盘，
- * 但 build-material.mjs 的 SCENE_GROUPS 里没登记它 → 不生成页面 → 侧边栏从 7 直接跳到 9。
- * 当时 ①页面数 ⑤缺件 ⑨死链 全绿（缺的那项从来不在清单里，所有「按清单数」的检查都不会报），
- * 只有把 URL 里的编号按组排一遍、验证 1..N 连续，才看得见这个洞。
- *
- * 所以本脚本的判据是「URL 编号序列」，不看显示名、不看总数：
- *   对每个分组（01-买家侧 / 02-商家-商品管理 / 二、状态机 …）取其下所有
- *   material/{scenarios,diagrams}/<组目录>/<N>-<名字>.md 链接，要求
- *     ① 1..max 每个号都在（无缺号）
- *     ② 没有重复号（两页共用一个编号 = 同上）
- *     ③ 条数 == max（防「1,2,3,5」这种 max 对得上但中间缺的写法溜过去）
+ * ── 清单从哪来 ─────────────────────────────────────────────────────────────
+ * build-material.mjs 每次构建写 `material/_nav-manifest.json`：
+ *   { version, scenes: [{bucket, sub, label, page}], diagrams: [{group, label, page}] }
+ * 顺序 = SCENE_BUCKETS / DIAGRAM_GROUPS 的书写顺序（构建期物化，不是按文件名排）。
+ * **为什么让构建落清单、而不是本脚本去解析 build-material.mjs 源码**：解析源码等于用正则猜代码，
+ * 改一行注释、换个写法就误判；而清单是构建产物，与侧边栏同源同批，判「生成物 == 清单」才有意义。
  *
  * ── 用法 ───────────────────────────────────────────────────────────────────
- *   # 取线上（最真实：验的就是用户点得到的那个 _sidebar.md）
- *   node scripts/check-sidebar-continuity.mjs --base=http://100.113.135.55:3027
- *   node scripts/check-sidebar-continuity.mjs --base https://docs.rose7.cn
- *   # 取本地产物（重建后、发布前、没网/没起站时用）
  *   node scripts/check-sidebar-continuity.mjs --root=/root/docsify
  *   node scripts/check-sidebar-continuity.mjs --root=/root/docsify/dist-prod
+ *   node scripts/check-sidebar-continuity.mjs --base=http://100.113.135.55:3027   # 线上（清单随站点发布）
  *
- *   --base=<url>   抓 <url>/_sidebar.md（站点根；末尾斜杠可有可无）
- *   --root=<dir>   读 <dir>/_sidebar.md（站点产物目录）
- *   两个都给时以 --base 为准（线上即真相），并在输出里注明。
+ *   --base=<url>   抓 <url>/_sidebar.md 与 <url>/material/_nav-manifest.json
+ *   --root=<dir>   读 <dir>/_sidebar.md 与 <dir>/material/_nav-manifest.json
+ *   --manifest=<p> 显式指定清单文件（Rspress 产物等清单不在默认位置时用）
+ *   两个取源都给时以 --base 为准（线上即真相）。
  *
  * ── 退出码（可直接当门禁）───────────────────────────────────────────────────
- *   0  所有分组编号连续
- *   1  有断档/重复；或一条带编号的条目都没扫到（源指错/产物被清空 —— 不许「空跑即通过」）
- *   2  参数错 / 取源失败（拿不到 _sidebar.md）
+ *   0  顺序一致、无重复、无遗漏
+ *   1  不一致 / 有重复 / 有遗漏；或侧边栏一个场景链接都没扫到（源指错/产物被清空 —— 不许空跑即通过）
+ *   2  参数错 / 取源失败 / 清单缺失（清单缺失 = 没法判，也判 2，不能当成通过）
  *
  * 只读：不改库、不改站、不写任何文件。
  */
@@ -47,25 +44,27 @@ import { fileURLToPath } from 'node:url'
 /** `- [文案](url)` —— 只认这种侧边栏行；标题行（`- 分组名`）靠缩进栈归组 */
 const LINK_RE = /^-\s*\[([^\]]*)\]\(([^)]*)\)/
 
-/** 带编号的页面链接：material/<scenarios|diagrams>/<组目录>/<N>-<名字>.md */
-const URL_RE = /^material\/(scenarios|diagrams)\/([^/]+)\/(\d+)-(.+?)\.md$/
+/** 场景页 / 图页链接（形如 material/scenarios/<桶>/<子分类>/<场景>.md）—— 与清单里的 page 同一种写法 */
+const SCENE_URL_RE = /^material\/scenarios\/.+\.md$/
+const DIAGRAM_URL_RE = /^material\/diagrams\/.+\.md$/
 
-const KIND_LABEL = { scenarios: '场景', diagrams: '图页' }
+const KIND_LABEL = { scenes: '场景', diagrams: '图页' }
+
+const decodeURIComponentSafe = (s) => {
+  try { return decodeURIComponent(s) } catch { return s }
+}
 
 /**
- * 解析 _sidebar.md → 分组列表。
+ * 解析 _sidebar.md → 按出现顺序拍平的链接清单（分组标题只用于报错定位，不参与判定）。
  *
  * 用「缩进栈」还原父子关系：markdown 列表靠缩进表达层级，遇到链接行时，
- * 栈里缩进比自己小的最近一行就是它的父标题（= 侧边栏上的分组名）。
- * 不按固定层级数写死 —— 侧边栏调整过缩进/加过外层分组都不会读错。
+ * 栈里缩进比自己小的最近一行就是它的父标题（= 侧边栏上的分组名）。不按固定层级数写死。
  *
- * @returns {{groups: Array<{kind:string,dir:string,label:string,items:Array<{n:number,name:string,url:string}>}>, numbered:number}}
+ * @returns {{order: Array<{kind:'scenes'|'diagrams', url:string, path:string, title:string, group:string}>, total:number}}
  */
 export function parseSidebar(md) {
-  const stack = []                 // [{ indent, text }]
-  const groups = new Map()         // key → group（保持文档顺序）
-  let numbered = 0
-
+  const stack = []
+  const order = []
   for (const rawLine of String(md).split('\n')) {
     if (!rawLine.trim()) continue
     const indent = rawLine.length - rawLine.trimStart().length
@@ -73,65 +72,82 @@ export function parseSidebar(md) {
     const link = LINK_RE.exec(body)
 
     if (!link) {
-      // 标题行：同级或更深的旧标题出栈，再把自己压入
       while (stack.length && stack[stack.length - 1].indent >= indent) stack.pop()
       stack.push({ indent, text: body.replace(/^-\s*/, '').replace(/\*\*/g, '').trim() })
       continue
     }
 
-    const [, title, url] = link
-    const m = URL_RE.exec(decodeURIComponentSafe(url).trim())
-    if (!m) continue               // 首页/手工文档/外链，不参与编号连续性
-    numbered++
-
-    const parent = [...stack].reverse().find((s) => s.indent < indent)
-    const [, kind, dir, n, name] = m
-    const label = parent ? parent.text : '(无分组)'
-    const key = `${kind}\u0000${dir}\u0000${label}`
-    if (!groups.has(key)) groups.set(key, { kind, dir, label, items: [] })
-    groups.get(key).items.push({ n: Number(n), name, title, url })
+    const [, title, rawUrl] = link
+    const url = decodeURIComponentSafe(rawUrl).trim()
+    const scene = SCENE_URL_RE.exec(url)
+    const diagram = DIAGRAM_URL_RE.exec(url)
+    if (!scene && !diagram) continue          // 首页 / 手工文档 / 外链：不参与顺序判定
+    const group = [...stack].reverse().find((s) => s.indent < indent)
+    order.push({
+      kind: scene ? 'scenes' : 'diagrams',
+      url,
+      // 与清单里的 page 同一种写法：站点相对路径（material/scenarios/… / material/diagrams/…）
+      path: url,
+      title,
+      group: group ? group.text : '(无分组)',
+    })
   }
-
-  return { groups: [...groups.values()], numbered }
-}
-
-function decodeURIComponentSafe(s) {
-  try { return decodeURIComponent(s) } catch { return s }
+  return { order, total: order.length }
 }
 
 /**
- * 逐组判连续性：1..max 无缺、无重、条数 == max。
- * @returns {{results:Array<{group:object,nums:number[],missing:number[],dup:number[],max:number,ok:boolean}>, bad:number, lines:string[]}}
+ * 判「侧边栏顺序 == 清单顺序」：逐条比对 + 查重复 + 查遗漏。
+ *
+ * @param {Array} sidebarOrder  parseSidebar().order
+ * @param {{scenes:Array<{page:string,label:string}>, diagrams:Array<{page:string,label:string}>}} manifest
+ * @returns {{results:Array<object>, bad:Array<object>, lines:string[]}}
  */
-export function checkContinuity(groups) {
+export function checkAgainstManifest(sidebarOrder, manifest) {
   const results = []
-  for (const group of groups) {
-    const nums = group.items.map((i) => i.n)
-    const max = nums.length ? Math.max(...nums) : 0
+  for (const kind of ['scenes', 'diagrams']) {
+    const expected = (manifest?.[kind] ?? []).map((x) => x.page)
+    const actual = sidebarOrder.filter((x) => x.kind === kind)
+    const actualPages = actual.map((x) => x.path)
+
     const seen = new Set()
     const dup = []
-    for (const n of nums) {
-      if (seen.has(n)) dup.push(n)   // 同一编号出现两次（含同号两页）
-      seen.add(n)
+    for (const p of actualPages) {
+      if (seen.has(p)) dup.push(p)      // 同一个页面被两条链接抢：点哪条都一样，等于少一个场景
+      seen.add(p)
     }
-    const missing = []
-    for (let i = 1; i <= max; i++) if (!seen.has(i)) missing.push(i)
-    const ok = missing.length === 0 && dup.length === 0 && nums.length === max
-    results.push({ group, nums, missing, dup, max, ok })
-  }
-  const bad = results.filter((r) => !r.ok)
-  const lines = results.map((r) => {
-    const tag = `[${KIND_LABEL[r.group.kind] || r.group.kind}] ${r.group.label} (${r.group.dir})`
-    if (r.ok) {
-      return `✅ ${tag}  n=${r.nums.length}  序列=${r.nums.join(',')}  → 1..${r.max} 连续无缺无重`
+
+    const expectedSet = new Set(expected)
+    const actualSet = new Set(actualPages)
+    const missing = expected.filter((p) => !actualSet.has(p))    // 清单有、侧边栏没有
+    const extra = actualPages.filter((p) => !expectedSet.has(p)) // 侧边栏有、清单没有
+
+    // 顺序：把两边的交集按各自顺序取出来，逐条比 —— 「少一条」不该掩盖「顺序也被换了」
+    const common = expected.filter((p) => actualSet.has(p))
+    const actualCommon = actualPages.filter((p) => expectedSet.has(p))
+    const orderBad = []
+    const n = Math.min(common.length, actualCommon.length)
+    for (let i = 0; i < n; i++) {
+      if (common[i] !== actualCommon[i]) { orderBad.push({ at: i + 1, want: common[i], got: actualCommon[i] }); break }
+    }
+
+    const ok = !dup.length && !missing.length && !extra.length && !orderBad.length && actualPages.length === expected.length
+    results.push({ kind, expected, actual: actualPages, dup, missing, extra, orderBad, ok })
+
+    const tag = `[${KIND_LABEL[kind]}]`
+    if (ok) {
+      results[results.length - 1].line = `✅ ${tag} ${actualPages.length} 条，顺序与清单逐条相同（无重复、无遗漏）`
+      continue
     }
     const why = []
-    if (r.missing.length) why.push(`缺 [${r.missing.join(',')}]`)
-    if (r.dup.length) why.push(`重复 [${r.dup.join(',')}]`)
-    if (!r.missing.length && !r.dup.length) why.push(`条数 ${r.nums.length} ≠ max ${r.max}`)
-    return `❌ ${tag}  n=${r.nums.length}  序列=${r.nums.join(',')}  → ${why.join(' / ')}`
-  })
-  return { results, bad, lines }
+    if (orderBad.length) why.push(`顺序在第 ${orderBad[0].at} 条就分叉：清单是 ${orderBad[0].want}，侧边栏是 ${orderBad[0].got}`)
+    if (missing.length) why.push(`少 ${missing.length} 条 [${missing.join(', ')}]`)
+    if (extra.length) why.push(`多 ${extra.length} 条（清单里没有）[${extra.join(', ')}]`)
+    if (dup.length) why.push(`重复 [${dup.join(', ')}]`)
+    if (!why.length && actualPages.length !== expected.length) why.push(`条数 ${actualPages.length} ≠ 清单 ${expected.length}`)
+    results[results.length - 1].line = `❌ ${tag} 侧边栏 ${actualPages.length} / 清单 ${expected.length} 条 → ${why.join(' / ')}`
+  }
+  const bad = results.filter((r) => !r.ok)
+  return { results, bad, lines: results.map((r) => r.line) }
 }
 
 /** 取 _sidebar.md 文本：--base 优先（线上即真相），否则 --root */
@@ -152,6 +168,35 @@ export async function loadSidebar({ base, root }) {
   return { text: readFileSync(file, 'utf8'), source: file, from: 'root' }
 }
 
+/**
+ * 取顺序清单：--manifest 优先 → <root>/material/_nav-manifest.json → <root>/_nav-manifest.json
+ * （--base 时走线上 <base>/material/_nav-manifest.json）。
+ * 找不到就抛错（清单缺失 = 判不了，绝不能当通过）。
+ */
+export async function loadManifest({ base, root, manifest }) {
+  if (manifest) {
+    const file = resolve(manifest)
+    if (!existsSync(file)) throw new Error(`找不到清单文件 ${file}`)
+    return { json: JSON.parse(readFileSync(file, 'utf8')), source: file }
+  }
+  if (base) {
+    const url = `${String(base).replace(/\/+$/, '')}/material/_nav-manifest.json`
+    let res
+    try {
+      res = await fetch(url)
+    } catch (e) {
+      throw new Error(`抓取清单失败（网络/域名）：${url} —— ${e.message}`)
+    }
+    if (!res.ok) throw new Error(`抓取清单失败：${url} → HTTP ${res.status}（重建站点后才会生成）`)
+    return { json: await res.json(), source: url }
+  }
+  for (const rel of ['material/_nav-manifest.json', '_nav-manifest.json']) {
+    const file = join(resolve(root), rel)
+    if (existsSync(file)) return { json: JSON.parse(readFileSync(file, 'utf8')), source: file }
+  }
+  throw new Error(`找不到顺序清单：${join(resolve(root), 'material/_nav-manifest.json')}（先跑 build-material.mjs 重建站点）`)
+}
+
 /* ------------------------------------------------------------------ CLI */
 
 const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))
@@ -166,42 +211,45 @@ if (isMain) {
   }
   const base = opt('--base')
   const root = opt('--root')
+  const manifest = opt('--manifest')
 
   if (!base && !root) {
     console.error('✗ 需要 --base=<url>（抓线上 _sidebar.md）或 --root=<站点产物目录>（读本地 _sidebar.md）')
-    console.error('  例：node scripts/check-sidebar-continuity.mjs --base=http://100.113.135.55:3027')
-    console.error('      node scripts/check-sidebar-continuity.mjs --root=/root/docsify')
+    console.error('  例：node scripts/check-sidebar-continuity.mjs --root=/root/docsify')
+    console.error('      node scripts/check-sidebar-continuity.mjs --base=http://100.113.135.55:3027')
     process.exit(2)
   }
 
-  let loaded
+  let loaded, man
   try {
     loaded = await loadSidebar({ base, root })
+    man = await loadManifest({ base, root, manifest })
   } catch (e) {
     console.error(`✗ ${e.message}`)
     process.exit(2)
   }
 
-  console.log(`源：${loaded.source}${base && root ? '（--base 优先，--root 已忽略）' : ''}`)
-  console.log('')
+  console.log(`侧边栏：${loaded.source}${base && root ? '（--base 优先，--root 已忽略）' : ''}`)
+  console.log(`顺序清单：${man.source}`)
 
-  const { groups, numbered } = parseSidebar(loaded.text)
-  const { lines, bad } = checkContinuity(groups)
+  const { order, total } = parseSidebar(loaded.text)
+  const { results, bad, lines } = checkAgainstManifest(order, man.json)
   for (const line of lines) console.log(line)
 
-  // fail-closed：扫不到带编号的条目 = 源指错了，不许当「全连续」放行
-  if (!groups.length || numbered === 0) {
+  // fail-closed：扫不到任何场景/图页链接 = 源指错了，不许当「一致」放行
+  if (!total) {
     console.log('')
-    console.log(`✗ 一条带编号的侧边栏条目都没扫到（分组 0 个 / 编号条目 0 条）—— 源指错了或产物是空的，不能判通过`)
+    console.log('✗ 侧边栏里一个场景页/图页链接都没扫到（0 条）—— 源指错了或产物是空的，不能判通过')
     process.exit(1)
   }
 
+  const expectedTotal = (man.json.scenes?.length ?? 0) + (man.json.diagrams?.length ?? 0)
   console.log('')
-  console.log(`分组 ${groups.length} 个；不连续 ${bad.length} 个`)
+  console.log(`侧边栏 ${total} 条 / 清单 ${expectedTotal} 条；不一致 ${bad.length} 组`)
 
   if (bad.length) {
     console.log('')
-    console.log(`✗ 断档明细：${bad.map((r) => `${r.group.label}(缺 ${r.missing.join(',') || '—'}${r.dup.length ? ` 重 ${r.dup.join(',')}` : ''})`).join('；')}`)
+    console.log(`✗ 明细：${results.filter((r) => !r.ok).map((r) => `${r.kind}(少 ${r.missing.length} 多 ${r.extra.length} 重 ${r.dup.length}${r.orderBad.length ? ' 顺序错' : ''})`).join('；')}`)
   }
   process.exit(bad.length ? 1 : 0)
 }

@@ -5,22 +5,22 @@
  * 不再产出「全流程合并片」——演示只需要按场景单独出片。
  *
  * 输入：`npm run demo`（DEMO=1）产出的一次录制目录，里面有若干个 <用例目录>/video.webm
- * 输出：`report/videos/<类别目录>/<场景>.mp4`（与 tests/scenarios/<类别目录>/<场景>.spec.js、docs 图目录三层同构）
+ * 输出：`report/videos/<桶>/[<子分类>/]<场景>/<段序>-<段名>.mp4`（与 tests/scenarios/<桶>/[<子分类>/]<场景>.spec.js、docs 图目录**同一段 rel**）
  *
  * 用法：
- *   npm run demo -- --grep "7-收货地址"        # 先录（DEMO 档，slowMo 400）
+ *   npm run demo -- --grep "收货地址"          # 先录（DEMO 档，slowMo 400）
  *   node scripts/collect-demo.mjs \
  *     --from report/videos/raw \
- *     --out report/videos/01-买家侧/7-收货地址.mp4 \
+ *     --out report/videos/业务/买家侧/收货地址/1-全流程.mp4 \
  *     --order "全流程,必填校验,超长文本"
  *
  * 一次录制出多段视频（场景拆 -1/-2/-3 的标准做法）：
  *   # 同一次录制目录里按关键词取子集 + 指定顺序，各出一段；--from 默认保留，可重复取用
  *   node scripts/collect-demo.mjs --from /tmp/pwout-addr \
- *     --out report/videos/01-买家侧/7-收货地址-1-全流程.mp4 \
+ *     --out report/videos/业务/买家侧/收货地址/1-全流程.mp4 \
  *     --only "全流程,删除默认地址" --order "全流程,删除默认地址"
  *   node scripts/collect-demo.mjs --from /tmp/pwout-addr \
- *     --out report/videos/01-买家侧/7-收货地址-2-边界.mp4 \
+ *     --out report/videos/业务/买家侧/收货地址/2-边界与默认唯一.mp4 \
  *     --only "必填校验,超长文本" --order "必填校验,超长文本" --clean
  *
  * 行为：
@@ -68,7 +68,7 @@ const die = (msg) => {
 const listClips = (clips) => clips.map((c) => `    · ${c.dir}`).join('\n')
 
 if (!argOf('--out')) {
-  die('缺少 --out，例如 --out report/videos/01-买家侧/7-收货地址.mp4')
+  die('缺少 --out，例如 --out report/videos/业务/买家侧/收货地址/1-全流程.mp4')
 }
 if (!existsSync(FROM)) {
   die(`没找到录制目录 ${FROM}，先跑 npm run demo`)

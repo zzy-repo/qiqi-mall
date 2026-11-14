@@ -3,7 +3,7 @@
 # 跑 e2e 的唯一入口：两个 shard 并行，各自一套「后端 + 前端 + 库」，整体关进 qiqi-e2e.slice。
 #
 #   scripts/e2e-run.sh                                  # 全量：2 shard 并行，跑前自动重置两个 e2e 库
-#   scripts/e2e-run.sh "tests/scenarios/03-商家-履约/1-订单审核与发货.spec.js"
+#   scripts/e2e-run.sh "tests/scenarios/业务/商家-履约/订单审核与发货.spec.js"
 #   scripts/e2e-run.sh --affected                        # 只跑被 git 改动波及的 spec（日常用这个）
 #   scripts/e2e-run.sh --affected --base=HEAD~3           # 换对比基准（默认 origin/main...HEAD + 工作区）
 #   scripts/e2e-run.sh --no-reset                        # 不重置库（调试单条时快一些；也不重启后端）
@@ -12,7 +12,7 @@
 #   E2E_FRONT_MODE=dev scripts/e2e-run.sh                # 回退：前端打 4 套 vite dev server（旧默认）
 #
 # ⚠ reset 库会让被测服务 JVM 里缓存的主数据（如平台买家 member_id）变悬空，所以 reset 之后
-#   必须重启后端；否则连续两次跑批会在 09-多平台接入/1-接入最小闭环 上红一次（code=1，fk_order_member）。
+#   必须重启后端；否则连续两次跑批会在 业务/渠道-多平台接入/接入主链路 上红一次（code=1，fk_order_member）。
 #   本脚本不给"reset 了但没重启"留路径：跑前的 reset 由 scripts/reset-e2e-db.sh 做，它**默认自动
 #   重启**对应分片后端；--no-reset 不重启（没 DROP 就没有悬空缓存）；SKIP_BACKEND_RESTART=1
 #   在 reset 生效时会被直接拒绝，除非同时显式给 E2E_ALLOW_SKIP_BACKEND_RESTART=1（只给对照实验用）。
@@ -97,7 +97,7 @@ if [[ "$DO_RESET" == "1" && "${SKIP_BACKEND_RESTART:-0}" == "1" ]]; then
   if [[ "${E2E_ALLOW_SKIP_BACKEND_RESTART:-0}" != "1" ]]; then
     echo "✗ SKIP_BACKEND_RESTART=1 与 reset 一起用被拒绝：这样跑出来的红/绿都不算数。" >&2
     echo "  reset 会 DROP DATABASE，而后端 JVM 里缓存的主数据（平台买家 member_id 等）会变悬空外键，" >&2
-    echo "  下一次拉单撞 fk_order_member → 09-多平台接入/1-接入最小闭环 红（这就是本次要修的那个坑）。" >&2
+    echo "  下一次拉单撞 fk_order_member → 业务/渠道-多平台接入/接入主链路 红（这就是本次要修的那个坑）。" >&2
     echo "  · 正常跑批：去掉 SKIP_BACKEND_RESTART（默认就是 reset 后自动重启）" >&2
     echo "  · 非要复现这个红：再加 E2E_ALLOW_SKIP_BACKEND_RESTART=1（结论只用于对照，不能当验收）" >&2
     exit 5
@@ -485,7 +485,7 @@ done
 # ⚠ 这一段的调用顺序被钉死了，别改成"只 reset 不重启"：
 #   reset-e2e-db.sh 在**它自己内部**（步骤 5）就把「重启对应分片后端」做完 —— DROP DATABASE
 #   会让被测服务 JVM 里缓存的主数据（ChannelOrderImporter.platformBuyerId() 的 member_id 等）
-#   变成悬空外键，只 reset 不重启 ⇒ 连续两次跑批时第二次会在 09-多平台接入/1-接入最小闭环
+#   变成悬空外键，只 reset 不重启 ⇒ 连续两次跑批时第二次会在 业务/渠道-多平台接入/接入主链路
 #   上红一次（code=1，fk_order_member）。所以这里：
 #     · 不传 SKIP_BACKEND_RESTART（默认就是重启，见上方护栏：想跳过必须再加一层显式开关）；
 #     · reset 的退出码**不再被 `|| true` 吞掉** —— reset/重启失败就停，绝不在半成品状态上跑批

@@ -49,7 +49,7 @@ export const trailButtonOf = (row) => row.getByTestId('audit-row-trail')
  * 点「立即审核一轮」→ 确认框 → 等 /admin/order-audit/run 的响应。
  *
  * 为什么要 waitForResponse 而不是只等 toast：toast 是「上一次成功」的残留，
- * 只等它会在请求还在飞的时候就去查库/查页面（09-多平台接入踩过同一个坑）。
+ * 只等它会在请求还在飞的时候就去查库/查页面（业务/渠道-多平台接入 踩过同一个坑）。
  * 确认框的按钮文案是「开始执行」（不是「确定」），必须按文案精确点。
  *
  * @returns {Promise<object>} run 接口的 data：{runId, triggerType, total, autoPass, manual, blocked, frozen, noMatch, skipped, decisions[]}

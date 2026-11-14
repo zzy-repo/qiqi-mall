@@ -1,5 +1,5 @@
 /**
- * 05-账号与会员 / 2-管理员账号 专属 helper（自建，不改 support/*.js 现有文件）。
+ * 业务/账号与会员/管理员账号 专属 helper（自建，不改 support/*.js 现有文件）。
  *
  * 页面 facts（来自 admin-web/src/views/admin/index.vue 与 AdminController 实际代码）：
  *   - 表单收集：登录名 / 密码（新增必填、编辑留空=不改）/ 昵称 / 邮箱 / 状态开关

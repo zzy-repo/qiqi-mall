@@ -2,9 +2,9 @@
 #
 # 录演示视频专用：cgroup 隔离（chrome/node 进 qiqi-e2e.slice）+ 打容器栈（右上角「测试环境」）。
 #
-#   scripts/demo-run.sh "tests/scenarios/04-商家-基础配置/2-订单设置.spec.js"
-#   scripts/demo-run.sh "tests/scenarios/04-商家-基础配置/3-退货原因字典.spec.js" --grep "字典维护页面"
-#   npm run demo -- "tests/scenarios/<类别>/<场景>.spec.js"        # 等价写法
+#   scripts/demo-run.sh "tests/scenarios/业务/商家-基础配置/订单设置.spec.js"
+#   scripts/demo-run.sh "tests/scenarios/业务/商家-基础配置/退货原因字典.spec.js" --grep "字典维护页面"
+#   npm run demo -- "tests/scenarios/<桶>/[<子分类>/]<场景>.spec.js"        # 等价写法
 #
 # ⚠️ 跑测试请用 scripts/e2e-run.sh（shard 并行 + 独立 e2e 库），**不要**用这个脚本。
 #    原因：这是"拍摄机"，素材必须来自测试环境（容器栈 5174/5176/18080，右上角红标「测试环境」）；
@@ -13,7 +13,7 @@
 #
 # 参数原样透传给 npx playwright test（--grep / --project 等都支持）；
 # 没显式给 --output 时自动落到 /tmp/pwout-demo-<pid>，避免多 agent 抢同一目录。
-# 录完用 node scripts/collect-demo.mjs 把 webm 归并成 mp4。
+# 录完用 node e2e/scripts/collect-demo.mjs 把 webm 归并成 mp4（路径按 <桶>/[<子分类>/]<场景>/<段序>-<段名>.mp4）。
 #
 # 限制：容器栈（18080）**没有**验证码 DEBUG 日志。需要读验证码的 spec 只能打 dev 栈，那种情况手动执行：
 #   env DEMO=1 PORTAL_BASE=http://127.0.0.1:5173 ADMIN_BASE=http://127.0.0.1:5175 \

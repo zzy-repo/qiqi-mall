@@ -32,7 +32,7 @@
  * 受影响集合通常只有 2~10 个文件，直接在这里装箱更准，也不用去改那个脚本。
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '')
@@ -40,80 +40,101 @@ const E2E = join(REPO, 'e2e')
 const SCEN = 'tests/scenarios'
 
 // ════════════════════════════════════════════════════════════════════════════
-// 1. spec 分组（相对 e2e/ 的路径）
+// 1. spec 宇宙集（**运行时发现**）+ 策展分组（键 = 场景名）
+//
+// 2026-11-14 结构重构（编号从路径里去掉、目录改语义化三层）后，这里改成「路径只出现在解析处」：
+//   · 宇宙集   walk e2e/tests/scenarios/**/*.spec.js —— **不再硬编码清单**。
+//     为什么必须这样：旧版硬编码 47 条，磁盘上实际 54 条，08 的 5 条 + 09 的 2 条从未登记，
+//     `--affected` 永远选不到它们（改了代码也不会跑）—— 清单式写法必然随目录改名一起漂。
+//   · 策展分组 键从「spec 文件路径」换成**场景名**（库存台账与对账 / 平台重推与503重试 …）。
+//     桶、子分类怎么抽怎么并，下面这张表一个字都不用改 —— 它只认「哪个场景会被这次改动波及」。
+//   · 解析    场景名 → spec 文件：`<场景名>.spec.js` 或 `<场景名>-<用例组>.spec.js`（`-` 是边界，
+//     所以「库存台账与对账」不会误吃「库存台账与对账-边界」）。
+//     0 命中 → 立刻 exit 2 并点名（策展表写了个不存在的场景，等价于这条规则失效，绝不能静默）；
+//     命中 >1 → 合法（一个场景可以有多条 spec，比如 08 的 5 条按内容分挂「判定链与四结局」(3) 与「六笔单走查」(2)），报告里列出来。
+//   · legacy   `e2e/tests/scenarios/_legacy/*.spec.js` 是跨场景回归/历史脚本，没有对应场景目录，
+//     用保留键 `@legacy/<文件名>` 引用。
 // ════════════════════════════════════════════════════════════════════════════
-const p = (...names) => names.map((n) => `${SCEN}/${n}`)
+const LEGACY_PREFIX = '@legacy/'
 
-const ALL_SPECS = [
-  ...p('01-买家侧/1-注册与登录.spec.js', '01-买家侧/2-商品浏览与搜索.spec.js', '01-买家侧/3-购物车.spec.js',
-    '01-买家侧/4-结算下单与支付.spec.js', '01-买家侧/5-我的订单与收货.spec.js', '01-买家侧/6-售后退货.spec.js',
-    '01-买家侧/7-收货地址.spec.js', '01-买家侧/8-支付并发冲突.spec.js', '01-买家侧/9-确认收货并发.spec.js',
-    '01-买家侧/10-同商品多人抢购库存.spec.js'),
-  ...p('02-商家-商品管理/1-商品类型与属性.spec.js', '02-商家-商品管理/2-商品分类.spec.js',
-    '02-商家-商品管理/3-商品维护.spec.js', '02-商家-商品管理/4-SKU与规格.spec.js',
-    '02-商家-商品管理/5-图片上传与预览.spec.js', '02-商家-商品管理/6-商品编辑并发冲突.spec.js',
-    '02-商家-商品管理/7-SKU编辑并发冲突.spec.js'),
-  ...p('03-商家-履约/1-订单审核与发货.spec.js', '03-商家-履约/2-跨仓拆单.spec.js',
-    '03-商家-履约/3-发货单调整.spec.js', '03-商家-履约/4-退货处理.spec.js',
-    '03-商家-履约/5-订单审核并发.spec.js', '03-商家-履约/6-发货单与仓库回传并发.spec.js',
-    '03-商家-履约/7-退货审核并发.spec.js', '03-商家-履约/8-订单删除守卫.spec.js',
-    '03-商家-履约/9-库存台账与对账.spec.js', '03-商家-履约/10-订单状态台账.spec.js',
-    '03-商家-履约/11-后台操作审计.spec.js', '03-商家-履约/12-包裹状态台账.spec.js',
-    '03-商家-履约/13-售后台账.spec.js', '03-商家-履约/14-WMS交换台账.spec.js',
-    '03-商家-履约/15-支付流水加固.spec.js'),
-  ...p('04-商家-基础配置/1-仓库管理.spec.js', '04-商家-基础配置/2-订单设置.spec.js',
-    '04-商家-基础配置/3-退货原因字典.spec.js'),
-  ...p('05-账号与会员/1-管理员登录与验证码.spec.js', '05-账号与会员/2-管理员账号.spec.js',
-    '05-账号与会员/3-会员管理.spec.js', '05-账号与会员/4-会员资料编辑并发.spec.js'),
-  ...p('06-数据概览/1-概览页.spec.js'),
-  ...p('07-AI集成/4-令牌管理.spec.js'),
-  ...p('image-chain.spec.js', 'scenario1-browse.spec.js', 'scenario2-checkout.spec.js',
-    'scenario3-fulfillment.spec.js', 'scenario4-return.spec.js', 'scenario5-split.spec.js')
-]
+/** 运行时发现全部 spec（相对 e2e/ 的路径）。支持任意深度：tests/scenarios/<桶>/[<子分类>/]<场景>[-<用例组>].spec.js */
+function discoverSpecs() {
+  const out = []
+  const stack = [SCEN]
+  while (stack.length) {
+    const rel = stack.pop()
+    let entries
+    try { entries = readdirSync(join(E2E, rel), { withFileTypes: true }) } catch { continue }
+    for (const e of entries) {
+      const childRel = `${rel}/${e.name}`
+      if (e.isDirectory()) stack.push(childRel)
+      else if (e.name.endsWith('.spec.js')) out.push(childRel)
+    }
+  }
+  return out.sort()
+}
 
-// 细分分组：映射表只写「这一片代码被改，会波及哪几条 spec」
-const g = (...paths) => paths.map((x) => `${SCEN}/${x}`)
+const ALL_SPECS = discoverSpecs()
+/** basename（去掉目录与 .spec.js）—— 桶搬家时它不变，所以它是策展表与权重表的稳定键 */
+const baseOf = (rel) => rel.slice(rel.lastIndexOf('/') + 1).replace(/\.spec\.js$/, '')
+const SPEC_BASES = ALL_SPECS.map((rel) => ({ rel, base: baseOf(rel) }))
+
+/** 场景名 / @legacy 键 → spec 路径数组（0 命中就抛，>1 记录进 MULTI_LOG 供报告输出） */
+const MULTI_LOG = []
+function resolveScene(name) {
+  if (name.startsWith(LEGACY_PREFIX)) {
+    const rel = `${SCEN}/_legacy/${name.slice(LEGACY_PREFIX.length)}.spec.js`
+    if (!ALL_SPECS.includes(rel)) {
+      throw new Error(`策展表引用了不存在的 legacy spec：${name}（期望 ${rel}）`)
+    }
+    return [rel]
+  }
+  const hits = SPEC_BASES.filter((x) => x.base === name || x.base.startsWith(`${name}-`))
+  if (!hits.length) {
+    throw new Error(`策展表引用了不存在的场景：${name}（e2e/tests/scenarios 下没有 "${name}.spec.js" 也没有 "${name}-*.spec.js"）`)
+  }
+  if (hits.length > 1) MULTI_LOG.push({ scene: name, files: hits.map((h) => h.base) })
+  return hits.map((h) => h.rel)
+}
+
+// 细分分组：只写「这一片代码被改，会波及哪几个场景」。**值是场景名，不是路径**
 const G = {
-  // ── 买家侧 ──
-  buyerAuth: g('01-买家侧/1-注册与登录.spec.js'),
-  buyerBrowse: g('01-买家侧/2-商品浏览与搜索.spec.js', 'scenario1-browse.spec.js', 'image-chain.spec.js'),
-  buyerCart: g('01-买家侧/3-购物车.spec.js'),
-  buyerCheckout: g('01-买家侧/4-结算下单与支付.spec.js', 'scenario2-checkout.spec.js'),
-  buyerPay: g('01-买家侧/4-结算下单与支付.spec.js', '01-买家侧/8-支付并发冲突.spec.js', '03-商家-履约/15-支付流水加固.spec.js'),
-  buyerOrders: g('01-买家侧/5-我的订单与收货.spec.js', '01-买家侧/9-确认收货并发.spec.js', '01-买家侧/10-同商品多人抢购库存.spec.js'),
-  buyerReturn: g('01-买家侧/6-售后退货.spec.js', 'scenario4-return.spec.js'),
-  buyerAddress: g('01-买家侧/7-收货地址.spec.js'),
-  // ── 商家：商品域 ──
-  productMgmt: g('02-商家-商品管理/1-商品类型与属性.spec.js', '02-商家-商品管理/2-商品分类.spec.js',
-    '02-商家-商品管理/3-商品维护.spec.js', '02-商家-商品管理/4-SKU与规格.spec.js',
-    '02-商家-商品管理/6-商品编辑并发冲突.spec.js', '02-商家-商品管理/7-SKU编辑并发冲突.spec.js'),
-  productImage: g('02-商家-商品管理/5-图片上传与预览.spec.js', 'image-chain.spec.js'),
-  // ── 商家：履约域 ──
-  fulfillmentAudit: g('03-商家-履约/1-订单审核与发货.spec.js', '03-商家-履约/5-订单审核并发.spec.js'),
-  fulfillmentSplit: g('03-商家-履约/2-跨仓拆单.spec.js', '03-商家-履约/3-发货单调整.spec.js',
-    'scenario5-split.spec.js', 'scenario3-fulfillment.spec.js'),
-  fulfillmentShip: g('03-商家-履约/1-订单审核与发货.spec.js', '03-商家-履约/6-发货单与仓库回传并发.spec.js',
-    '03-商家-履约/8-订单删除守卫.spec.js', 'scenario3-fulfillment.spec.js'),
-  fulfillmentReturn: g('03-商家-履约/4-退货处理.spec.js', '03-商家-履约/7-退货审核并发.spec.js',
-    '03-商家-履约/13-售后台账.spec.js'),
-  // ── 商家：台账域（9~15）──
-  ledger: g('03-商家-履约/9-库存台账与对账.spec.js', '03-商家-履约/10-订单状态台账.spec.js',
-    '03-商家-履约/11-后台操作审计.spec.js', '03-商家-履约/12-包裹状态台账.spec.js',
-    '03-商家-履约/13-售后台账.spec.js', '03-商家-履约/14-WMS交换台账.spec.js',
-    '03-商家-履约/15-支付流水加固.spec.js'),
-  ledgerStock: g('03-商家-履约/9-库存台账与对账.spec.js'),
-  auditTrail: g('03-商家-履约/11-后台操作审计.spec.js'),
-  // ── 商家：基础配置 ──
-  cfgWarehouse: g('04-商家-基础配置/1-仓库管理.spec.js', '03-商家-履约/2-跨仓拆单.spec.js'),
-  cfgOrder: g('04-商家-基础配置/2-订单设置.spec.js', '03-商家-履约/1-订单审核与发货.spec.js'),
-  cfgReturnReason: g('04-商家-基础配置/3-退货原因字典.spec.js', '01-买家侧/6-售后退货.spec.js'),
-  // ── 账号与会员 ──
-  adminAuth: g('05-账号与会员/1-管理员登录与验证码.spec.js'),
-  adminAccount: g('05-账号与会员/2-管理员账号.spec.js', '03-商家-履约/11-后台操作审计.spec.js'),
-  memberMgmt: g('05-账号与会员/3-会员管理.spec.js', '05-账号与会员/4-会员资料编辑并发.spec.js'),
+  // ── 业务 · 买家侧 ──
+  buyerAuth: ['注册与登录'],
+  buyerBrowse: ['商品浏览与搜索', 'scenario1-browse', 'image-chain'].map((x) => (x.startsWith('scenario') || x === 'image-chain' ? `@legacy/${x}` : x)),
+  buyerCart: ['购物车'],
+  buyerCheckout: ['结算下单与支付', '@legacy/scenario2-checkout'],
+  buyerPay: ['结算下单与支付', '支付并发冲突', '支付流水'],
+  buyerOrders: ['我的订单与收货', '确认收货并发', '一条SQL吃掉「读、判、写」'],
+  buyerReturn: ['售后退货', '@legacy/scenario4-return'],
+  buyerAddress: ['收货地址'],
+  // ── 业务 · 商品域 ──
+  productMgmt: ['商品类型与属性', '商品分类', '商品维护', 'SKU与规格', '商品编辑并发', 'SKU编辑并发'],
+  productImage: ['图片上传与预览', '@legacy/image-chain'],
+  // ── 业务 · 履约域 ──
+  fulfillmentAudit: ['订单审核与发货', '订单审核并发'],
+  fulfillmentSplit: ['跨仓拆单', '发货单调整', '@legacy/scenario5-split', '@legacy/scenario3-fulfillment'],
+  fulfillmentShip: ['订单审核与发货', '发货单与仓库回传', '订单删除守卫', '@legacy/scenario3-fulfillment'],
+  fulfillmentReturn: ['退货处理', '退货审核并发', '售后台账'],
+  // ── 台账与取证 ──
+  ledger: ['订单状态台账', '后台操作审计', '包裹状态台账', '售后台账', 'WMS交换台账', '支付流水'],
+  ledgerStock: ['库存台账与对账'],
+  auditTrail: ['后台操作审计'],
+  // ── 业务 · 基础配置 ──
+  cfgWarehouse: ['仓库管理', '跨仓拆单'],
+  cfgOrder: ['订单设置', '订单审核与发货'],
+  cfgReturnReason: ['退货原因字典', '售后退货'],
+  // ── 业务 · 账号与会员 ──
+  adminAuth: ['管理员登录与验证码'],
+  adminAccount: ['管理员账号', '后台操作审计'],
+  memberMgmt: ['会员管理', '会员资料编辑并发'],
+  // ── 08 订单自动审核 / 09 渠道接入 ──
+  // 08 一个场景挂多条 spec：'判定链与四结局' 解析到 3 条，'六笔单走查' 解析到 2 条（见 resolveScene 的多命中日志）。
+  orderAutoAudit: ['判定链与四结局', '六笔单走查'],
+  channelPlatform: ['接入主链路', '平台重推与503重试'],
   // ── 其它 ──
-  dashboard: g('06-数据概览/1-概览页.spec.js'),
-  aiKey: g('07-AI集成/4-令牌管理.spec.js')
+  dashboard: ['概览页'],
+  aiKey: ['令牌管理'],
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -126,47 +147,49 @@ const RULES = [
   { re: /^sql\//, full: 'sql/** 改动 → 跑全量' },
   { re: /^qiqi-mall-server\/src\/main\/resources\//, full: 'application*.yml / 资源文件改动 → 跑全量' },
   // shared/ledger 是台账专用、有明确的一对一场景，先于 shared/** 的总闸匹配
-  { re: new RegExp(`^${S}/shared/ledger/`), specs: G.ledger, why: 'shared/ledger → 台账 9~15' },
+  { re: new RegExp(`^${S}/shared/ledger/`), scenes: G.ledger, why: 'shared/ledger → 台账七类六页' },
   { re: new RegExp(`^${S}/shared/`), full: 'shared/common|config|security|web|guard|storage 改动 → 横切面，跑全量' },
   { re: /^qiqi-mall-server\/pom\.xml$/, full: 'pom.xml 改动 → 跑全量' },
 
   // —— 后端业务包 ——
-  { re: new RegExp(`^${S}/oms/`), specs: [...new Set([...G.fulfillmentAudit, ...G.fulfillmentSplit, ...G.fulfillmentShip, ...G.fulfillmentReturn, ...G.buyerOrders, ...G.buyerCheckout])], why: 'oms（订单/发货单/WMS）→ 履约 + 买家下单与收货 + scenario3/5' },
-  { re: new RegExp(`^${S}/order/`), specs: [...new Set([...G.buyerCheckout, ...G.buyerPay, ...G.buyerOrders, ...G.fulfillmentAudit, ...G.ledger])], why: 'order（订单实体/流水）→ 下单支付、订单列表、审核、台账' },
-  { re: new RegExp(`^${S}/catalog/`), specs: [...new Set([...G.productMgmt, ...G.productImage, ...G.buyerBrowse])], why: 'catalog（商品/SKU/分类）→ 02 商品管理 + 买家浏览 + 图片链' },
-  { re: new RegExp(`^${S}/stock/`), specs: [...new Set([...G.buyerOrders, ...G.buyerCheckout, ...G.fulfillmentSplit, ...G.fulfillmentShip, ...G.ledgerStock, ...G.cfgWarehouse])], why: 'stock（库存桶/扣减）→ 抢购、下单、拆单下发、库存台账、仓库' },
-  { re: new RegExp(`^${S}/audit/`), specs: [...new Set([...G.auditTrail, ...G.adminAccount])], why: 'audit（操作审计）→ 11-后台操作审计' },
-  { re: new RegExp(`^${S}/member/`), specs: [...new Set([...G.memberMgmt, ...G.buyerAuth, ...G.buyerAddress])], why: 'member（会员/地址）→ 05 会员 + 买家注册/地址' },
-  { re: new RegExp(`^${S}/portal/`), specs: [...new Set([...G.buyerAuth, ...G.buyerBrowse, ...G.buyerCart, ...G.buyerCheckout, ...G.buyerOrders, ...G.buyerReturn, ...G.buyerAddress])], why: 'portal controller（买家接口）→ 01 买家侧全量场景' },
-  { re: new RegExp(`^${S}/apikey/`), specs: G.aiKey, why: 'apikey → 07-令牌管理' },
+  { re: new RegExp(`^${S}/oms/`), scenes: [...new Set([...G.fulfillmentAudit, ...G.fulfillmentSplit, ...G.fulfillmentShip, ...G.fulfillmentReturn, ...G.buyerOrders, ...G.buyerCheckout])], why: 'oms（订单/发货单/WMS）→ 履约 + 买家下单与收货 + scenario3/5' },
+  { re: new RegExp(`^${S}/order/`), scenes: [...new Set([...G.buyerCheckout, ...G.buyerPay, ...G.buyerOrders, ...G.fulfillmentAudit, ...G.ledger])], why: 'order（订单实体/流水）→ 下单支付、订单列表、审核、台账' },
+  { re: new RegExp(`^${S}/catalog/`), scenes: [...new Set([...G.productMgmt, ...G.productImage, ...G.buyerBrowse])], why: 'catalog（商品/SKU/分类）→ 02 商品管理 + 买家浏览 + 图片链' },
+  { re: new RegExp(`^${S}/stock/`), scenes: [...new Set([...G.buyerOrders, ...G.buyerCheckout, ...G.fulfillmentSplit, ...G.fulfillmentShip, ...G.ledgerStock, ...G.cfgWarehouse])], why: 'stock（库存桶/扣减）→ 抢购、下单、拆单下发、库存台账、仓库' },
+  { re: new RegExp(`^${S}/audit/`), scenes: [...new Set([...G.auditTrail, ...G.adminAccount, ...G.orderAutoAudit])], why: 'audit（判定引擎/操作审计）→ 08 自动审核两页 + 11-后台操作审计' },
+  { re: new RegExp(`^${S}/channel/`), scenes: [...new Set([...G.channelPlatform])], why: 'channel（多平台接入）→ 接入主链路 + 平台重推与503重试' },
+  { re: /^mock-platform\//, scenes: [...new Set([...G.channelPlatform])], why: 'mock-platform（外部平台模拟器）→ 09 渠道接入两条 spec' },
+  { re: new RegExp(`^${S}/member/`), scenes: [...new Set([...G.memberMgmt, ...G.buyerAuth, ...G.buyerAddress])], why: 'member（会员/地址）→ 05 会员 + 买家注册/地址' },
+  { re: new RegExp(`^${S}/portal/`), scenes: [...new Set([...G.buyerAuth, ...G.buyerBrowse, ...G.buyerCart, ...G.buyerCheckout, ...G.buyerOrders, ...G.buyerReturn, ...G.buyerAddress])], why: 'portal controller（买家接口）→ 01 买家侧全量场景' },
+  { re: new RegExp(`^${S}/apikey/`), scenes: G.aiKey, why: 'apikey → 07-令牌管理' },
   { re: /^qiqi-mall-server\/src\/main\/java\/com\/qiqi\/mall\/QiQiMallApplication\.java$/, full: '启动类改动 → 跑全量' },
   // 后端测试代码不影响被测物
   { re: /^qiqi-mall-server\/src\/test\//, none: true, why: '后端单测代码改动 → 不需要 e2e' },
 
   // —— 前端：admin-web ——
-  { re: /^admin-web\/src\/views\/product(-type)?\//, specs: [...new Set([...G.productMgmt, ...G.productImage])], why: 'admin product 页 → 02 商品管理' },
-  { re: /^admin-web\/src\/views\/category\//, specs: G.productMgmt, why: 'admin category 页 → 02 商品管理' },
-  { re: /^admin-web\/src\/views\/order\//, specs: [...new Set([...G.fulfillmentAudit, ...G.fulfillmentSplit, ...G.fulfillmentShip])], why: 'admin order 页 → 履约 1/2/3/6/8' },
-  { re: /^admin-web\/src\/views\/return-apply\//, specs: [...new Set([...G.fulfillmentReturn])], why: 'admin return-apply 页 → 退货处理/退货审核/售后台账' },
-  { re: /^admin-web\/src\/views\/return-reason\//, specs: G.cfgReturnReason, why: 'admin return-reason 页 → 退货原因字典 + 买家退货' },
-  { re: /^admin-web\/src\/views\/warehouse\//, specs: G.cfgWarehouse, why: 'admin warehouse 页 → 仓库管理 + 跨仓拆单' },
-  { re: /^admin-web\/src\/views\/order-setting\//, specs: G.cfgOrder, why: 'admin order-setting 页 → 订单设置 + 审核发货' },
-  { re: /^admin-web\/src\/views\/member\//, specs: G.memberMgmt, why: 'admin member 页 → 05 会员' },
-  { re: /^admin-web\/src\/views\/(ledger|inventory-reconcile)\//, specs: G.ledger, why: 'admin 台账/对账页 → 台账 9~15' },
-  { re: /^admin-web\/src\/views\/dashboard\//, specs: G.dashboard, why: 'admin dashboard 页 → 06 概览' },
-  { re: /^admin-web\/src\/views\/api-key\//, specs: G.aiKey, why: 'admin api-key 页 → 07 令牌管理' },
-  { re: /^admin-web\/src\/views\/login\//, specs: [...new Set([...G.adminAuth, ...G.adminAccount])], why: 'admin login 页 → 05 登录/账号' },
-  { re: /^admin-web\/src\/views\/admin\//, specs: G.adminAccount, why: 'admin 账号管理页 → 05-2 管理员账号' },
+  { re: /^admin-web\/src\/views\/product(-type)?\//, scenes: [...new Set([...G.productMgmt, ...G.productImage])], why: 'admin product 页 → 02 商品管理' },
+  { re: /^admin-web\/src\/views\/category\//, scenes: G.productMgmt, why: 'admin category 页 → 02 商品管理' },
+  { re: /^admin-web\/src\/views\/order\//, scenes: [...new Set([...G.fulfillmentAudit, ...G.fulfillmentSplit, ...G.fulfillmentShip])], why: 'admin order 页 → 履约 1/2/3/6/8' },
+  { re: /^admin-web\/src\/views\/return-apply\//, scenes: [...new Set([...G.fulfillmentReturn])], why: 'admin return-apply 页 → 退货处理/退货审核/售后台账' },
+  { re: /^admin-web\/src\/views\/return-reason\//, scenes: G.cfgReturnReason, why: 'admin return-reason 页 → 退货原因字典 + 买家退货' },
+  { re: /^admin-web\/src\/views\/warehouse\//, scenes: G.cfgWarehouse, why: 'admin warehouse 页 → 仓库管理 + 跨仓拆单' },
+  { re: /^admin-web\/src\/views\/order-setting\//, scenes: G.cfgOrder, why: 'admin order-setting 页 → 订单设置 + 审核发货' },
+  { re: /^admin-web\/src\/views\/member\//, scenes: G.memberMgmt, why: 'admin member 页 → 05 会员' },
+  { re: /^admin-web\/src\/views\/(ledger|inventory-reconcile)\//, scenes: G.ledger, why: 'admin 台账/对账页 → 台账 9~15' },
+  { re: /^admin-web\/src\/views\/dashboard\//, scenes: G.dashboard, why: 'admin dashboard 页 → 06 概览' },
+  { re: /^admin-web\/src\/views\/api-key\//, scenes: G.aiKey, why: 'admin api-key 页 → 07 令牌管理' },
+  { re: /^admin-web\/src\/views\/login\//, scenes: [...new Set([...G.adminAuth, ...G.adminAccount])], why: 'admin login 页 → 05 登录/账号' },
+  { re: /^admin-web\/src\/views\/admin\//, scenes: G.adminAccount, why: 'admin 账号管理页 → 05-2 管理员账号' },
   { re: /^admin-web\/src\//, full: 'admin-web 公共层（api/router/utils/components/layout…）→ 跑全量' },
 
   // —— 前端：portal-web ——
-  { re: /^portal-web\/src\/views\/home\//, specs: [...new Set([...G.buyerBrowse])], why: 'portal home 页 → 浏览/搜索 + scenario1 + 图片链' },
-  { re: /^portal-web\/src\/views\/product\//, specs: [...new Set([...G.buyerBrowse, ...G.buyerOrders, ...G.productImage])], why: 'portal product 页 → 浏览/详情 + 抢购 + 图片链' },
-  { re: /^portal-web\/src\/views\/cart\//, specs: G.buyerCart, why: 'portal cart 页 → 03 购物车' },
-  { re: /^portal-web\/src\/views\/checkout\//, specs: G.buyerCheckout, why: 'portal checkout 页 → 04 结算下单' },
-  { re: /^portal-web\/src\/views\/order\//, specs: [...new Set([...G.buyerOrders, ...G.buyerReturn, ...G.buyerPay])], why: 'portal order 页 → 我的订单/售后/支付/收货' },
-  { re: /^portal-web\/src\/views\/address\//, specs: G.buyerAddress, why: 'portal address 页 → 07 收货地址' },
-  { re: /^portal-web\/src\/views\/login\//, specs: G.buyerAuth, why: 'portal login 页 → 01-1 注册登录' },
+  { re: /^portal-web\/src\/views\/home\//, scenes: [...new Set([...G.buyerBrowse])], why: 'portal home 页 → 浏览/搜索 + scenario1 + 图片链' },
+  { re: /^portal-web\/src\/views\/product\//, scenes: [...new Set([...G.buyerBrowse, ...G.buyerOrders, ...G.productImage])], why: 'portal product 页 → 浏览/详情 + 抢购 + 图片链' },
+  { re: /^portal-web\/src\/views\/cart\//, scenes: G.buyerCart, why: 'portal cart 页 → 03 购物车' },
+  { re: /^portal-web\/src\/views\/checkout\//, scenes: G.buyerCheckout, why: 'portal checkout 页 → 04 结算下单' },
+  { re: /^portal-web\/src\/views\/order\//, scenes: [...new Set([...G.buyerOrders, ...G.buyerReturn, ...G.buyerPay])], why: 'portal order 页 → 我的订单/售后/支付/收货' },
+  { re: /^portal-web\/src\/views\/address\//, scenes: G.buyerAddress, why: 'portal address 页 → 07 收货地址' },
+  { re: /^portal-web\/src\/views\/login\//, scenes: G.buyerAuth, why: 'portal login 页 → 01-1 注册登录' },
   { re: /^portal-web\/src\//, full: 'portal-web 公共层（api/router/utils/components/layout…）→ 跑全量' },
 
   // —— 测试自身：改了哪条就只跑哪条（support 是公共层 → 全量）——
@@ -183,6 +206,17 @@ const RULES = [
   { re: /^scripts\/e2e-/, full: 'e2e 跑批脚手架改动 → 自证一遍全量' }
 ]
 
+// ── 规则规范化：scenes（场景名）→ specs（真实文件路径）──
+// 这一步就是「路径只出现在解析处」的全部实现：策展表写场景名，运行时解析成文件。
+// 任何一条引用不存在 → 直接抛错退出（等价于那条规则失效，绝不能静默放过）。
+const RESOLVED = []
+for (const r of RULES) {
+  if (!r.scenes) continue
+  const files = [...new Set(r.scenes.flatMap(resolveScene))]
+  r.specs = files
+  RESOLVED.push({ why: r.why, scenes: r.scenes, files })
+}
+
 // ── 兜底：规则表没覆盖到的路径一律升级为全量 ──
 const FULL_THRESHOLD = Number(
   (process.argv.find((a) => a.startsWith('--full-threshold=')) || '').split('=')[1] || 0.7
@@ -192,29 +226,26 @@ const FULL_THRESHOLD = Number(
 // 3. 实测权重（秒）：2026-11-13 全量跑批逐条 spec 墙钟，供 --map 做 LPT 装箱
 // ════════════════════════════════════════════════════════════════════════════
 const MEASURED_SEC = {
-  '01-买家侧/1-注册与登录.spec.js': 28, '01-买家侧/2-商品浏览与搜索.spec.js': 36, '01-买家侧/3-购物车.spec.js': 61,
-  '01-买家侧/4-结算下单与支付.spec.js': 68, '01-买家侧/5-我的订单与收货.spec.js': 90, '01-买家侧/6-售后退货.spec.js': 153,
-  '01-买家侧/7-收货地址.spec.js': 53, '01-买家侧/8-支付并发冲突.spec.js': 46, '01-买家侧/9-确认收货并发.spec.js': 39,
-  '01-买家侧/10-同商品多人抢购库存.spec.js': 46,
-  '02-商家-商品管理/1-商品类型与属性.spec.js': 42, '02-商家-商品管理/2-商品分类.spec.js': 40,
-  '02-商家-商品管理/3-商品维护.spec.js': 55, '02-商家-商品管理/4-SKU与规格.spec.js': 79,
-  '02-商家-商品管理/5-图片上传与预览.spec.js': 59, '02-商家-商品管理/6-商品编辑并发冲突.spec.js': 23,
-  '02-商家-商品管理/7-SKU编辑并发冲突.spec.js': 33,
-  '03-商家-履约/1-订单审核与发货.spec.js': 64, '03-商家-履约/2-跨仓拆单.spec.js': 50,
-  '03-商家-履约/3-发货单调整.spec.js': 136, '03-商家-履约/4-退货处理.spec.js': 180,
-  '03-商家-履约/5-订单审核并发.spec.js': 34, '03-商家-履约/6-发货单与仓库回传并发.spec.js': 60,
-  '03-商家-履约/7-退货审核并发.spec.js': 46, '03-商家-履约/8-订单删除守卫.spec.js': 86,
-  '03-商家-履约/9-库存台账与对账.spec.js': 60, '03-商家-履约/10-订单状态台账.spec.js': 40,
-  '03-商家-履约/11-后台操作审计.spec.js': 40, '03-商家-履约/12-包裹状态台账.spec.js': 40,
-  '03-商家-履约/13-售后台账.spec.js': 40, '03-商家-履约/14-WMS交换台账.spec.js': 40,
-  '03-商家-履约/15-支付流水加固.spec.js': 30,
-  '04-商家-基础配置/1-仓库管理.spec.js': 34, '04-商家-基础配置/2-订单设置.spec.js': 18,
-  '04-商家-基础配置/3-退货原因字典.spec.js': 74,
-  '05-账号与会员/1-管理员登录与验证码.spec.js': 92, '05-账号与会员/2-管理员账号.spec.js': 41,
-  '05-账号与会员/3-会员管理.spec.js': 88, '05-账号与会员/4-会员资料编辑并发.spec.js': 22,
-  '06-数据概览/1-概览页.spec.js': 11, '07-AI集成/4-令牌管理.spec.js': 13,
-  'image-chain.spec.js': 28, 'scenario1-browse.spec.js': 18, 'scenario2-checkout.spec.js': 18,
-  'scenario3-fulfillment.spec.js': 59, 'scenario4-return.spec.js': 49, 'scenario5-split.spec.js': 52
+  // 键 = spec 的 basename（去掉目录与 .spec.js）——桶/子分类搬家时不变，只有改名才要跟着改。
+  // 2026-11-13 全量跑批逐条墙钟；新加/改名的 spec 没在这里就退化用「用例数 × 经验系数」。
+  '注册与登录': 28, '商品浏览与搜索': 36, '购物车': 61, '结算下单与支付': 68,
+  '我的订单与收货': 90, '售后退货': 153, '收货地址': 53,
+  '支付并发冲突': 46, '确认收货并发': 39, '一条SQL吃掉「读、判、写」': 46,
+  '商品类型与属性': 42, '商品分类': 40, '商品维护': 55, 'SKU与规格': 79,
+  '图片上传与预览': 59, '商品编辑并发': 23, 'SKU编辑并发': 33,
+  '订单审核与发货': 64, '跨仓拆单': 50, '发货单调整': 136, '退货处理': 180,
+  '订单审核并发': 34, '发货单与仓库回传': 60, '退货审核并发': 46, '订单删除守卫': 86,
+  '库存台账与对账': 60, '订单状态台账': 40, '后台操作审计': 40,
+  '包裹状态台账': 40, '售后台账': 40, 'WMS交换台账': 40, '支付流水': 30,
+  '仓库管理': 34, '订单设置': 18, '退货原因字典': 74,
+  '管理员登录与验证码': 92, '管理员账号': 41, '会员管理': 88, '会员资料编辑并发': 22,
+  '概览页': 11, '令牌管理': 13,
+  '判定链与四结局-自动过审与留人工': 40, '判定链与四结局-阻止与冻结': 40,
+  '判定链与四结局-不命中与差在哪': 40, '六笔单走查-审核轨迹与对齐': 40,
+  '六笔单走查-防回归': 70,
+  '接入主链路': 60, '平台重推与503重试': 90,
+  'image-chain': 28, 'scenario1-browse': 18, 'scenario2-checkout': 18,
+  'scenario3-fulfillment': 59, 'scenario4-return': 49, 'scenario5-split': 52
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -284,12 +315,20 @@ for (const f of files) {
     hits.push({ file: f, action: 'none', why: rule.why })
     continue
   }
-  noneOnly = false
+  // ⚠ noneOnly 只在「真的挑出了 spec」时才置 false：改名/删除留下的旧 spec 路径不选任何东西，
+  //   一次纯改名的 diff 不该因此升级成「全量」（那不是保守，那是白跑 20 分钟）。
   let added = 0
   if (rule.ownSpec) {
     const m = f.match(rule.re)
-    specs.add(`${SCEN}/${m[1]}`); added++
+    const rel = `${SCEN}/${m[1]}`
+    // 删除/改名留下的旧路径：磁盘上已经没有这个 spec，加进选中集合只会让 playwright 报
+    // 「no tests found」。改名时新路径是未跟踪文件，会被同一条规则单独命中 —— 所以这里直接跳过。
+    if (ALL_SPECS.includes(rel)) { specs.add(rel); added++; noneOnly = false } else {
+      hits.push({ file: f, action: 'skip', why: 'spec 已不在磁盘上（删除/改名）→ 无需跑' })
+      continue
+    }
   } else {
+    noneOnly = false
     for (const s of rule.specs) { specs.add(s); added++ }
   }
   hits.push({ file: f, action: 'spec', why: rule.why || '', specs: added })
@@ -304,8 +343,11 @@ if (!files.length) {
   mode = 'full'; reason = full
 } else if (!specs.size) {
   mode = noneOnly ? 'none' : 'full'
+  const allSkip = hits.length > 0 && hits.every((h) => h.action === 'skip')
   reason = mode === 'none'
-    ? `改动只涉及文档/物料（${files.length} 个文件）→ 无需跑 e2e`
+    ? (allSkip
+      ? `改动只涉及已删除/改名的 spec（${files.length} 个文件）→ 无需跑 e2e`
+      : `改动只涉及文档/物料（${files.length} 个文件）→ 无需跑 e2e`)
     : '改动没有命中任何 spec 映射 → 保守起见跑全量'
 } else if (specs.size >= ALL_SPECS.length * FULL_THRESHOLD) {
   mode = 'full'
@@ -325,7 +367,7 @@ const SHARDS = Math.max(1, Number(argOf('shards', '1')))
 /** LPT 装箱：和 e2e-shard.mjs 同一个算法，重量取实测秒数（缺表则 用例数×经验系数） */
 function lpt(specPaths, shards) {
   const items = specPaths.map((rel) => {
-    const short = rel.replace(`${SCEN}/`, '')
+    const short = baseOf(rel)
     const abs = join(E2E, rel)
     let sec = MEASURED_SEC[short]
     if (!sec) {

@@ -18,7 +18,7 @@ OUT=$(npm run build:dev 2>&1) || { echo "$OUT" | tail -40; echo "✗ dev 构建�
 echo "$OUT" | grep -E '图页|场景页|口语稿|缺视频|写入|built in|pages? built' | tail -6
 
 # 抽查：首页 + 一个真实页面（Rspress 静态产物是 .html 结尾，不是 _sidebar.md 那套）
-PAGE_PATH='material/scenarios/03-商家-履约/9-库存台账与对账.html'
+PAGE_PATH='material/scenarios/库存/库存台账与对账.html'
 [ -f "$OUT_DIR/$PAGE_PATH" ] || PAGE_PATH=$(cd "$OUT_DIR" && find material/scenarios -name '*.html' | sort | head -1)
 HOMEP=$(curl -s -o /dev/null -w '%{http_code}' --max-time 6 "$BASE/")
 PAGE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$BASE/$PAGE_PATH")
