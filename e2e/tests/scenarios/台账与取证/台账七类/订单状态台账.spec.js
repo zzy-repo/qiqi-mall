@@ -39,8 +39,9 @@ import { adminTokenOf, getProductApi, getAdminOrderBySnApi } from '../../../supp
  *   不会撞键」，只能查库；页面负责证明「人看得见」。
  *
  * ── 依赖（当前状态）──────────────────────────────────────────────────────
- *   台账页 `/ledger` 前端已就绪；后端 `GET /admin/ledgers` 控制器尚未进仓，
- *   故本文件**只写不跑**。直查库断言不依赖该接口。
+ *   台账页 `/ledger` 前端已就绪；后端 `GET /admin/ledgers` 控制器**已入仓并真跑**
+ *   （`shared/ledger/controller/AdminLedgerController`；订单分支 = `v_biz_status_timeline` 的 ORDER 支），
+ *   本文件三条用例都实跑（直查库的断言同样照跑，它们不依赖该接口）。
  */
 
 /* ------------------------------------------------------------------ 台账页（UI 侧） */

@@ -36,7 +36,8 @@ import { adminTokenOf, getProductApi, getAdminOrderBySnApi } from '../../../supp
  *   页面断言负责证明「人看得见」，库断言负责证明「写对了」。
  *
  * ── 依赖（当前状态）──────────────────────────────────────────────────────
- *   台账页 `/ledger` 前端已就绪；后端 `GET /admin/ledgers` 控制器尚未进仓，故**只写不跑**。
+ *   台账页 `/ledger` 前端已就绪；后端 `GET /admin/ledgers` 控制器**已入仓并真跑**
+ *   （`shared/ledger/controller/AdminLedgerController`；审计分支 = `LedgerSql` 的 AUDIT 支），本文件三条用例都实跑。
  */
 
 /* ------------------------------------------------------------------ 台账页（UI 侧） */

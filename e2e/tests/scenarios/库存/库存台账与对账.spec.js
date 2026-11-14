@@ -39,10 +39,11 @@ import { adminTokenOf, getProductApi, getAdminOrderBySnApi } from '../../support
  *   界面看得见 + 库里数得清，两边都成立才算过。
  *
  * ── 依赖（当前状态，写在这里免得下一个人以为是假红）──────────────────────
- *   台账页 `/ledger` 与照页 `/inventory-reconcile` 的前端已就绪（testid 齐），
- *   但后端 `GET /admin/ledgers`、`GET /admin/inventory/reconcile` 两个控制器还没进仓，
- *   所以本文件**只写不跑**：接口上线后直接 `scripts/demo-run.sh` 即可验证。
- *   直查库那部分不依赖这两个接口，随时可跑。
+ *   台账页 `/ledger` 与对账页 `/inventory-reconcile` 的前端已就绪（testid 齐），
+ *   后端两个接口**已入仓并真跑**：`GET /admin/ledgers`（`shared/ledger/controller/AdminLedgerController`）、
+ *   `GET /admin/inventory/reconcile`（`stock/controller/AdminInventoryController`）。
+ *   所以本文件三条用例都实跑（直查库那部分同样照跑，它们不依赖这两个接口）。
+ *   跑法：`scripts/demo-run.sh` 或 `scripts/e2e-run.sh "tests/scenarios/库存/库存台账与对账.spec.js"`。
  */
 
 /* ------------------------------------------------------------------ 台账页（UI 侧） */

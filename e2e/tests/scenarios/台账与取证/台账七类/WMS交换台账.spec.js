@@ -40,7 +40,8 @@ import { adminTokenOf, getProductApi, getAdminOrderBySnApi } from '../../../supp
  *   （台账页只有时间/类型/单号/变更/原因/操作人/摘要）。页面负责证明「人看得见」。
  *
  * ── 依赖（当前状态）──────────────────────────────────────────────────────
- *   台账页 `/ledger` 前端已就绪；后端 `GET /admin/ledgers` 控制器尚未进仓，故**只写不跑**。
+ *   台账页 `/ledger` 前端已就绪；后端 `GET /admin/ledgers` 控制器**已入仓并真跑**
+ *   （`shared/ledger/controller/AdminLedgerController`，六类 UNION + PAYMENT 分支），本文件三条用例都实跑。
  */
 
 /* ------------------------------------------------------------------ 台账页（UI 侧） */
