@@ -69,11 +69,14 @@ fi
 echo "    登录成功（JWT 已获取）"
 
 # ---- 取权限目录（唯一真相源是后端，不在本脚本里维护清单）----
-CATALOG=$(curl -sS -H "Authorization: Bearer $TOKEN" "${BASE}/admin/api-keys/scopes" 2>/dev/null)
+CATALOG=$(curl -sS -H "Authorization: Bearer $TOKEN" "${BASE_URL}/admin/api-keys/scopes" 2>/dev/null)
 SCOPES=$(echo "$CATALOG" | jq -c '.data.grantable // empty' 2>/dev/null)
 if [ -z "$SCOPES" ] || [ "$SCOPES" = "null" ]; then
   echo "✗ 取权限目录失败（GET /admin/api-keys/scopes）—— 本脚本不写死 scope 清单，取不到就停" >&2
   echo "  响应片段：$(echo "$CATALOG" | head -c 200)" >&2
+  echo "  常见原因：① BASE_URL 配错（当前 ${BASE_URL}）；② 运行的镜像比源码旧 ——" >&2
+  echo "           GET /admin/api-keys/scopes 是 2026-11-14 才加的端点，旧镜像会回 405「GET not supported」。" >&2
+  echo "           若看到 405，先重建后端镜像，别在本脚本里写死清单绕过去。" >&2
   exit 1
 fi
 echo "    权限目录：$(echo "$SCOPES" | jq 'length') 个可授予 scope"
