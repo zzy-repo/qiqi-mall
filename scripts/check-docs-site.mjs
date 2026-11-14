@@ -187,6 +187,11 @@ const NO_UI_SCENES = [
   // 纯概念页：内容是「平台同步日志」与「仓库交换台账」逐行对照，没有专属界面。
   // 验收口径见 build-material 的 HINT_NO_UI_LEDGER（本页字段对照 + 两侧台账只读 SQL），不借邻居场景的录屏。
   '台账与取证/取证链与证据对齐/与内部系统的边界',
+  // 性能与容量类（2026-11-14 起）：**没有界面可演**，验收 = 曲线数据 + 一条复现命令。
+  // ⚠️ 与 build-material.mjs 的 NO_UI_SCENE_HINTS 逐字同步（那边印 HINT_NO_UI_PERF）。
+  // 为什么不进 PENDING_VIDEO：这一类视频**永远不会来**（录压测终端证明不了结论），
+  // 而待补清单一共只有 3 个名额，6 页性能场景会把清单变成垃圾桶。
+  '性能与容量/雪崩点400',
 ]
 const NO_UI_SET = new Set(NO_UI_SCENES)
 
@@ -220,6 +225,13 @@ const PENDING_VIDEO = [
     plan: 'A10：补 UI 测试（两个会话并发改同一实体 → 断言后写者拿到 version 冲突提示、不覆盖先写者），'
       + '再录一段双窗并发视频，落 videos/并发与竞态/版本冲突/AI端并发/1-全流程.mp4。',
   },
+  {
+    path: '库存/库存分桶',
+    reason: '有真界面可演（两个窗口抢同一个 SKU 的最后几件 → 一个成功一个「库存不足」），属**能演未演**：'
+      + 'UI 测试已经写好并跑绿（e2e/tests/scenarios/库存/库存分桶.spec.js，51 条断言），这一轮只差录屏。',
+    plan: 'A10：录一段双窗抢购视频（含「库存不足」提示与后台库存归零两屏），'
+      + '落 videos/库存/库存分桶/1-分桶抢购.mp4；录完从本清单移除（体检⑤会拦「已经有视频还在清单里」）。',
+  },
 ]
 const PENDING_VIDEO_MAP = new Map(PENDING_VIDEO.map((p) => [p.path, p]))
 
@@ -234,7 +246,7 @@ const results = []
  *  - dist-prod：dev 产物里嵌着 prod 产物，而两者是**两个独立待验目标**，
  *    扫 /root/docsify 时若连它一起算，页面数/引用数会翻倍（本脚本本来就按 --root 分别验）。
  */
-const SKIP_DIRS = new Set(['node_modules', '.git', '_vendor', '_deploy', '_evidence'])
+const SKIP_DIRS = new Set(['node_modules', '.git', '_vendor', '_deploy', '_evidence', '_rollback'])
 const ROOT_BASE = posix.basename(ROOT.replace(/\\/g, '/'))
 
 function walk(rel = '', out = []) {

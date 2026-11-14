@@ -9,6 +9,8 @@
  *   - 只写 /root/docsify/，对 /root/qiqi-mall/ 只读；素材文件不改名、不移动、不复制。
  *   - 幂等：内容无变化不落盘；素材增删后重跑自动补齐 / 清理。
  *   - 页面正文（标题之外）≤ 25 字：只有标题、每段视频自己的名字、video/img，禁止任何解释性段落。
+ *     ⚠️ 2026-11-14 收窄：这 25 字只管**模板自己产出的那行摘要**。场景目录里的 `正文.md`（五段式正文）
+ *     与 `实测数字.sql` 是**作者写的内容**，整段摘出计量（见 assertStrict 与 THESIS_FILE 的注释）。
  *     （唯一例外是「缺视频」那一行 blockquote 提示：固定文案、单行、不占 25 字额度，见 HINTS；
  *       另一个例外是场景页末尾的「一分钟口语稿」折叠块，见下面 SPOKEN 一段）
  *
@@ -266,10 +268,12 @@ const SCENE_BUCKETS = [
   // 目录名 == 场景名 == spec 文件名 == 视频目录名，四处同构，改名必须四处一起改。
   // 不含全角冒号：「库存台账与对账」原来的目录名带「：三数相等」，全角冒号进路径既难打也易错，
   // 2026-11-14 收口成不带冒号的目录名（页面上的标题仍可写全）。
+  // 2026-11-14 挂上「库存分桶」：图 + 口语稿 + 正文 + UI 测试（51 条断言）都在，
+  // 缺的只有录屏 → 已登记进 check-docs-site.mjs 的 PENDING_VIDEO（不是无界面，是「能演未演」）。
   { dir: '库存', label: '库存', items: [
     'SKU与规格',
     '一条SQL吃掉「读、判、写」',
-    // '库存分桶',   // ← 新页：正文、图、口语稿、视频都还没写，先不登记（清单里不挂空页）
+    '库存分桶',
     '库存台账与对账',
   ] },
   { dir: '并发与竞态', label: '并发与竞态', subs: [
@@ -293,14 +297,17 @@ const SCENE_BUCKETS = [
       '状态与证据对齐', '与内部系统的边界',
     ] },
   ] },
-  // ── 性能与容量：**暂不登记**（2026-11-14 裁决）────────────────────────────────
-  // 这 6 个场景（雪崩点400 / 每单19条SQL / 会话探针 / 开环与闭环压测 /
-  // 分页替代全量列表 / 复合索引消filesort）正文与素材都还没写，先不进清单：
-  // 清单里挂着不存在的页，读者点进去就是空的。等正文、图、口语稿一起落盘，再取消注释加回来。
-  // { dir: '性能与容量', label: '性能与容量', items: [
-  //   '雪崩点400', '每单19条SQL', '会话探针',
-  //   '开环与闭环压测', '分页替代全量列表', '复合索引消filesort',
-  // ] },
+  // ── 性能与容量：**先只挂雪崩点400**（2026-11-14 17:xx）─────────────────────────
+  // 6 个场景全部是「先造出撑不住的环境再优化」来的，其中：
+  //   已落盘（图 + 口语稿 + 正文）：雪崩点400 —— 所以先挂上，让体检能真验到它。
+  //   还没写（图/口语稿/正文都没有）：每单19条SQL / 会话探针 / 开环与闭环压测 /
+  //   分页替代全量列表 / 复合索引消filesort —— 不挂空页，写完一条挂一条。
+  // 这一桶**全都不录视频**：结论只能由曲线数据 + 一条复现命令证明，录一段压测终端证明不了，
+  // 所以它们在体检那边走 NO_UI_SCENES（视频不适用），不在 PENDING_VIDEO 里占位。
+  { dir: '性能与容量', label: '性能与容量', items: [
+    '雪崩点400',
+    // '每单19条SQL', '会话探针', '开环与闭环压测', '分页替代全量列表', '复合索引消filesort',
+  ] },
 ]
 
 /**
@@ -581,6 +588,23 @@ function spokenBlock(text) {
  * 只读是硬约束：SQL 段里出现写语句直接让构建失败 —— 一份「实测数字」绝不能顺手改库。
  */
 const MEASURED_FILE = '实测数字.sql'
+/**
+ * 场景正文：**场景目录下的一份 markdown，一等输入**（2026-11-14 起）。
+ *
+ * 为什么它必须是一等输入：用户要的是「用真实场景把代码和项目摊开给人看」，不是「一张图 + 一段视频」。
+ * 早先模板把页面正文卡在 ≤25 字，本意只是「模板是生成的，别让人在生成物里手写解释文字」——
+ * 现在正文有了正经的家（场景目录里的 正文.md，与图/口语稿同级），那个目的就不再靠限字数实现。
+ *
+ * 约定（全部 fail-closed，写错就构建失败，不静默半渲染）：
+ *   ① **不要写 H1**：H1 由页面标题提供，正文从「一句话 / 场景」那节开始（写了 H1 会重复两次）；
+ *   ② **不要在正文里放图/视频**：素材由模板在正文**之前**统一渲染一次，
+ *      正文里再写 ![](...) 会得到一条相对路径（material/scenarios/… 下找不到那张图）→ 直接报错；
+ *   ③ 原文照排（markdown 直出），不加工、不改标题层级。
+ * 没有这份文件时，页面与旧版**逐字节一致**（渐进式：50 页既有场景不受影响）。
+ */
+const THESIS_FILE = '正文.md'
+const THESIS_START = '<!-- thesis:start -->'
+const THESIS_END = '<!-- thesis:end -->'
 const MEASURED_START = '<!-- measured:start -->'
 const MEASURED_END = '<!-- measured:end -->'
 const MEASURED_TITLE = '📊 实测数字（只读 SQL）'
@@ -635,7 +659,50 @@ function readMeasured(scene) {
   return parsed.cases.length ? parsed : null
 }
 
-/** 实测数字块：一张「断言 → 实测」表 + 每条自己的只读 SQL（正文之上一条分隔线，不加解释性段落） */
+/** 读场景目录下的 `正文.md`（五段式正文）；缺文件返回 null —— 页面与旧版逐字节一致 */
+function readThesis(scene) {
+  const abs = join(sceneAbs(scene), THESIS_FILE)
+  if (!existsSync(abs)) return null
+  let raw = readFileSync(abs, 'utf8').replace(/\r\n/g, '\n').trimEnd()
+  if (!raw.trim()) throw new Error(`${THESIS_FILE}（${scene.rel}）是空的 —— 要么把正文写完，要么删掉这个文件`)
+  // ① 正文开头写了 H1：**剥掉 + warn**，不 fail。
+  //    正文里写标题是最自然的写法，不该因为写了标题就让整次构建失败；
+  //    而页面的 H1 来自场景目录名（目录名 == 场景名 == 侧边栏文案，四处同构），
+  //    所以正文里那个 H1 一定是重复的 —— 剥掉它，并让作者在构建日志里看见自己多写了一行。
+  //    只剥「开头连续的 H1 行」，正文中间出现的 `# 注释`（代码块里）一概不动。
+  const headLines = raw.split('\n')
+  const strippedH1 = []
+  while (headLines.length && /^#\s+\S/.test(headLines[0].trim())) strippedH1.push(headLines.shift().trim())
+  if (strippedH1.length) {
+    raw = headLines.join('\n').replace(/^\s*\n+/, '')
+    for (const h of strippedH1) {
+      thesisWarnings.push(`⚠ ${THESIS_FILE}（${scene.rel}）的 H1 已被忽略（页面 H1 来自目录名）：${h}`)
+    }
+  }
+  if (!raw.trim()) throw new Error(`${THESIS_FILE}（${scene.rel}）剥掉 H1 之后是空的 —— 正文没有内容`)
+  // ② 不许在正文里放素材：图和视频由模板在正文之前统一渲染，这里的相对路径一定指不到文件
+  if (/!\[[^\]]*\]\(/.test(raw) || /<video\b/i.test(raw)) {
+    throw new Error(`${THESIS_FILE}（${scene.rel}）里不要写图片/视频引用 —— 素材由模板在正文之前渲染一次；`
+      + '正文要指图就用文字说「见本页上图」')
+  }
+  // ③ 别在正文里复述固定提示行的文案（那是模板的事，且会被 assertStrict 当成非法提示）
+  if (raw.split('\n').some((l) => l.trim().startsWith('> ⏳') || l.trim().startsWith('> 🔍'))) {
+    throw new Error(`${THESIS_FILE}（${scene.rel}）里不要写「⏳/🔍」那类固定提示行 —— 由模板按场景类型渲染`)
+  }
+  return raw
+}
+
+/**
+ * 正文块：原文照排，只加一对 HTML 注释当边界。
+ *
+ * 为什么要边界：assertStrict 的 ≤25 字额度只该管「模板里那行一句话摘要」，
+ * 不该管正文 —— 但正文**必须留在页面上**（它就是这个页面的主体）。所以用注释把它整段摘出来计量。
+ */
+function thesisBlock(thesis) {
+  return [THESIS_START, thesis, THESIS_END].join('\n')
+}
+
+/** 实测数字块：一张「断言 → 实测」表 + 每条自己的只读 SQL（正文之下一条分隔线，不加解释性段落） */
 function measuredBlock(measured) {
   const lines = [MEASURED_START, `## ${MEASURED_TITLE}`, '']
   for (const h of measured.head) lines.push(`> ${h}`)
@@ -680,7 +747,13 @@ const HINT_NO_UI_LEDGER = '> 🔍 本场景无界面操作：内容是「平台�
  * 所以这两页现在按「视频待补」出页（⏳），并写清欠的是什么 —— 欠 UI 测试 + 录屏，不是「不适用」。
  */
 const HINT_PENDING_UI_VIDEO = '> ⏳ 待补 UI 测试与视频：本场景可点可调（MCP 调试器，scripts/start-inspector.sh 启动），属「能演未演」，不是「无界面」。'
-const HINTS = new Set([HINT_PENDING, HINT_NO_UI, HINT_NO_UI_LEDGER, HINT_PENDING_UI_VIDEO])
+/**
+ * 性能与容量类（雪崩点400 起）：**没有界面可演，视频不适用** —— 这一类不是偷懒，
+ * 而是「能演未演」与「无界面」都不对：录一段压测终端什么也证明不了，这条结论只能由
+ * 曲线数据 + 一条复现命令证明。所以它写死自己的验收方式，不借 MCP 那句、也不进待补清单。
+ */
+const HINT_NO_UI_PERF = '> 🔍 本场景没有界面可演：验收方式是**曲线数据 + 一条复现命令**（见本页「凭什么证明好了」一节的命令与产物路径），不录视频。'
+const HINTS = new Set([HINT_PENDING, HINT_NO_UI, HINT_NO_UI_LEDGER, HINT_PENDING_UI_VIDEO, HINT_NO_UI_PERF])
 
 /**
  * 无界面产品能力的场景：
@@ -699,6 +772,9 @@ const HINTS = new Set([HINT_PENDING, HINT_NO_UI, HINT_NO_UI_LEDGER, HINT_PENDING
  */
 const NO_UI_SCENE_HINTS = new Map([
   ['台账与取证/取证链与证据对齐/与内部系统的边界', HINT_NO_UI_LEDGER],
+  // 性能与容量桶：没有界面可演，验收 = 曲线数据 + 复现命令（HINT_NO_UI_PERF）。
+  // 这条与 check-docs-site.mjs 的 NO_UI_SCENES 必须逐字同步，只改一边会变成「页面印着待补、体检是绿的」。
+  ['性能与容量/雪崩点400', HINT_NO_UI_PERF],
 ])
 
 /**
@@ -729,10 +805,10 @@ const isNoUiScene = (group, item) => noUiHintOf(group, item) !== null && !isPend
 /**
  * 页面严格模板：H1 + 可选一行说明 + 可选一行「缺视频」提示
  * +（多段视频：每段上面一行它自己的名字）+ 图
- * +（数据类场景）实测数字块 +（dev）口语稿折叠块。
- * 不加任何背景/取舍/总结/TODO/注意事项。
+ * +（场景目录有 正文.md 时）五段式正文 +（dev）口语稿折叠块 +（数据类场景）实测数字块。
+ * 模板自己不加任何背景/取舍/总结/TODO/注意事项 —— 那些只能出自 正文.md。
  */
-function renderPage({ title, desc, hint, videos, images, pagePath, spoken, measured }) {
+function renderPage({ title, desc, hint, videos, images, pagePath, spoken, thesis, measured }) {
   // docsify：页面在 material/**，素材在站点根的 _assets/，用相对上跳；
   // rspress：素材在 doc/public/_assets/（构建后落站点根 /_assets/），页面深两三层，
   //          直接用站点绝对路径最稳（Rspress 会把 img src 转百分号编码，绝对路径对得上门禁的 decode）
@@ -746,33 +822,58 @@ function renderPage({ title, desc, hint, videos, images, pagePath, spoken, measu
     lines.push(`<video src="${up}_assets/video/${v.path}" controls width="800"></video>`, '')
   }
   for (const img of images) lines.push(`![${title}](${up}_assets/img/${img})`, '')
-  // 实测数字：素材之后、口语稿之前（读者看完图/视频，紧接着看「这些数字对得上」）
-  if (measured) lines.push(measuredBlock(measured), '')
-  // 口语稿固定放在图/视频**之后**（读者先看素材，想讲的时候再展开）
-  if (spoken) lines.push(spokenBlock(spoken), '')
+  // 正文：素材之后。读者先看见「这东西长什么样 / 怎么动」，再读「谁在用、什么时候撑不住、改了什么、凭什么证明」
+  if (thesis) lines.push(thesisBlock(thesis), '')
+  if (thesis) {
+    // ── 有正文.md 的页面：新顺序（正文 → 口语稿 → 实测数字）──────────────
+    // 口语稿紧跟正文：读者读完正文，想照着讲的时候顺手展开；
+    // 实测数字殿后：它是「正文里那些数字怎么来的」的查询凭证，当附录最顺。
+    if (spoken) lines.push(spokenBlock(spoken), '')
+    if (measured) lines.push(measuredBlock(measured), '')
+  } else {
+    // ── 没有正文.md 的页面：**旧顺序原样保留**（实测数字 → 口语稿）──────────
+    // 为什么不全站统一成新顺序：那会把 8 个既有页（带 实测数字.sql 的台账页）的块位置全挪一遍，
+    // 只为了一个块的位置去重写 8 个既有页（而且差别只在 dev 可见）不值当 ——
+    // 「没有意图的变化就不该发生」，否则以后回看 diff 分不清哪次是真改了内容。
+    // 这 8 页将来补上 正文.md 时会自然切到新顺序，是个平滑迁移。
+    if (measured) lines.push(measuredBlock(measured), '')
+    if (spoken) lines.push(spokenBlock(spoken), '')
+  }
   return `${lines.join('\n')}\n`
 }
 
-/** 断言：标题之外只有 说明/分段名 + video + img（+ 实测数字块 + dev 口语稿折叠块）；正文总字数 ≤25；标题不得带数字前缀 */
+/**
+ * 断言：标题之外只有 说明/分段名 + video + img（+ 正文块 + 实测数字块 + dev 口语稿折叠块）；
+ * 标题不得带数字前缀。
+ *
+ * **≤25 字额度的语义（2026-11-14 收窄）**：它只管「模板自己产出的文字」—— 也就是那行一句话摘要（desc）
+ * 与视频分段名。它**不再管** 正文.md 与 实测数字：那两块是作者写的正经内容，有各自的家
+ * （场景目录里的 正文.md / 实测数字.sql），不是「在生成物里手写解释文字」—— 后者才是当年设这个上限的原因。
+ * 所以正文/实测/口语稿三块整段摘掉之后再量；摘不干净（未闭合）直接报错，不许把额度悄悄放大。
+ */
 function assertStrict(pagePath, page) {
   const [h1, ...allRest] = page.split('\n')
   if (!/^# \S/.test(h1)) throw new Error(`${pagePath}: H1 缺失`)
   if (/^# \d+-/.test(h1)) throw new Error(`${pagePath}: H1 不应带数字前缀`)
-  // 两块「素材之外的材料」整段摘掉再量正文，不占 25 字额度：
+  // 三块「作者写的材料」整段摘掉再量正文，不占 25 字额度：
   //   ① 口语稿折叠块（只在 dev 出现）—— 一分钟口播稿，是给作者念的，不是页面正文；
-  //   ② 实测数字块（MEASURED_START…MEASURED_END）—— SQL 与实测输出是数据类证据本身，
-  //      它天然远超 25 字；但它**必须留在页面上**（数据类场景没它就是偷懒），所以只摘出正文计量。
+  //   ② 正文块（THESIS_START…THESIS_END）—— 来自场景目录的 正文.md，原文直出；
+  //   ③ 实测数字块（MEASURED_START…MEASURED_END）—— SQL 与实测输出是数据类证据本身。
   const rest = []
   let inSpoken = false
   let inMeasured = false
+  let inThesis = false
   for (const line of allRest) {
     if (line.startsWith('<details class="spoken-script">')) { inSpoken = true; continue }
     if (inSpoken) { if (line.trim() === '</details>') inSpoken = false; continue }
+    if (line.trim() === THESIS_START) { inThesis = true; continue }
+    if (inThesis) { if (line.trim() === THESIS_END) inThesis = false; continue }
     if (line.startsWith(MEASURED_START)) { inMeasured = true; continue }
     if (inMeasured) { if (line.trim() === MEASURED_END) inMeasured = false; continue }
     rest.push(line)
   }
   if (inSpoken) throw new Error(`${pagePath}: 口语稿折叠块未闭合（缺 </details>）`)
+  if (inThesis) throw new Error(`${pagePath}: 正文块未闭合（缺 ${THESIS_END}）`)
   if (inMeasured) throw new Error(`${pagePath}: 实测数字块未闭合（缺 ${MEASURED_END}）`)
   // 「缺视频」提示行是 blockquote：只允许出现一次，且必须是两种标准文案之一；
   // 它不算「正文」（否则 25 字上限会被一句固定提示吃光），但仍受模板约束。
@@ -793,6 +894,8 @@ const changed = []
 const sceneStats = []
 const spokenEmbedded = []      // dev：真正嵌入了口语稿的场景（prod 恒为空，因为压根不读）
 const measuredEmbedded = []    // 真正渲染了「实测数字」块的场景（场景目录下有 实测数字.sql）
+const thesisEmbedded = []      // 真正渲染了「五段式正文」的场景（场景目录下有 正文.md）
+const thesisWarnings = []      // 正文.md 里被忽略的东西（目前只有「多余的 H1」），构建结束统一打出来
 
 function emit(pagePath, content, meta) {
   const abs = join(OUT_ROOT, pagePath)
@@ -823,7 +926,7 @@ for (const group of DIAGRAM_GROUPS) {
     // 所以稿件按「图所在的目录 + 图文件名」定位，见 readDiagramSpoken。
     const spoken = readDiagramSpoken(image)
     if (spoken) spokenEmbedded.push(`${group.label}/${item.name}`)
-    emit(pagePath, renderPage({ title: item.name, desc: item.desc, videos: [], images: [image], pagePath, spoken }), {
+    emit(pagePath, renderPage({ title: item.name, desc: item.desc, videos: [], images: [image], pagePath, spoken, thesis: null }), {
       kind: 'diagram', group: group.label, label: item.name,
       imageFiles: [image], videoFiles: [], hasSpoken: Boolean(spoken),
     })
@@ -858,14 +961,17 @@ for (const scene of SCENES) {
     // 一分钟口语稿：只有 dev 会读到这里（readSpokenScript 在 prod 直接返回 null）
     const spoken = readSpokenScript(scene)
     if (spoken) spokenEmbedded.push(sceneLabel)
+    // 五段式正文：场景目录下的 `正文.md`（一等输入，原文直出；缺文件时页面与旧版逐字节一致）
+    const thesis = readThesis(scene)
+    if (thesis) thesisEmbedded.push(sceneLabel)
     // 实测数字：场景目录下的 `实测数字.sql`（只读 select + 实测输出），缺文件就不渲染这一块
     const measured = readMeasured(scene)
     if (measured) measuredEmbedded.push(sceneLabel)
-    emit(pagePath, renderPage({ title: scene.name, desc: null, hint, videos, images, pagePath, spoken, measured }), {
+    emit(pagePath, renderPage({ title: scene.name, desc: null, hint, videos, images, pagePath, spoken, thesis, measured }), {
       kind: 'scene', group: scene.bucketLabel, bucket: scene.bucket, sub: scene.sub,
       label: scene.name, hint, rel: scene.rel,
       imageFiles: images, videoFiles: videos.map((v) => v.path), hasSpoken: Boolean(spoken),
-      hasMeasured: Boolean(measured),
+      hasThesis: Boolean(thesis), hasMeasured: Boolean(measured),
     })
     sceneStats.push({ scene: sceneLabel, status, pagePath,
       hint: hint
@@ -873,7 +979,7 @@ for (const scene of SCENES) {
           : (noUiHint ? '无界面操作（视频不适用）' : '视频待补'))
         : null,
       videos: videos.length, images: images.length, spoken: Boolean(spoken),
-      measured: Boolean(measured),
+      thesis: Boolean(thesis), measured: Boolean(measured),
       videoFiles: videos.map((v) => v.path), imageFiles: images })
   }
 }
@@ -1478,6 +1584,9 @@ const maxBody = Math.max(0, ...written.map((w) => w.bodyChars))
 console.log(`图页      : ${diagrams.length}  (${DIAGRAM_GROUPS.map((g) => byKind('diagram').filter((w) => w.group === g.label).length).join(' / ')})`)
 console.log(`场景页    : ${scenes.length}  / 清单 ${SCENES.length}`)
 // 口语稿：一份一行，dev 嵌入数 / prod 恒不嵌入（prod 不读文件，产物里不会有它的任何字节）
+console.log(`ℹ 正文块：${thesisEmbedded.length} 页有 正文.md（已渲染）/ ${SCENES.length - thesisEmbedded.length} 页无（跳过，页面与旧版逐字节一致）`
+        + (thesisEmbedded.length ? `\n    有正文：${thesisEmbedded.join('、')}` : ''))
+for (const w of thesisWarnings) console.log(w)
 console.log(`ℹ 口语稿：dev 嵌入 ${spokenEmbedded.length} 份 / prod 不嵌入`)
 console.log(`ℹ 实测数字：${measuredEmbedded.length} 个场景带「图 + SQL + 数字」证据块${measuredEmbedded.length ? '：' + measuredEmbedded.join('、') : '（下一轮补台账七页）'}`)
 console.log(`正文上限  : 实测最大 ${maxBody} 字（上限 ${BODY_LIMIT}）`)
