@@ -161,43 +161,47 @@
     <el-dialog
       v-model="editorVisible"
       :title="editing.id ? `编辑策略 - ${editing.name}` : '新建策略'"
-      width="900px"
+      width="min(900px, 94vw)"
       top="6vh"
       data-testid="policy-editor"
     >
       <el-form label-width="96px" size="small">
+        <!-- 首行四个字段的宽度分配：md 档 7+8+5+4=24 保证「优先级」有真实可用宽度
+             （span=4 时 131px 里 96px 被标签吃掉，内层 input 被压成 0 宽 → 看不见、点不到）；
+             xs/sm 档折行：窄屏下 类型/名称 各占整行、优先级/启用 并排一行 -->
         <el-row :gutter="12">
-          <el-col :span="8">
+          <el-col :xs="24" :sm="12" :md="7">
             <el-form-item label="类型">
               <el-select v-model="editing.type" data-testid="policy-form-type" style="width: 100%">
                 <el-option v-for="t in TYPES" :key="t" :label="auditPolicyTypeText(t)" :value="t" />
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :xs="24" :sm="12" :md="8">
             <el-form-item label="名称">
               <el-input v-model="editing.name" data-testid="policy-form-name" placeholder="同类型内唯一" />
             </el-form-item>
           </el-col>
-          <el-col :span="4">
-            <el-form-item label="优先级">
+          <el-col :xs="14" :sm="6" :md="5">
+            <!-- 标签宽度按内容（3 个字 ≈ 42px）单独收窄，别跟着表单的 96px 吃宽度 -->
+            <el-form-item label="优先级" label-width="56px">
               <el-input-number v-model="editing.priority" :min="1" :max="9999" controls-position="right" data-testid="policy-form-priority" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :span="4">
-            <el-form-item label="启用">
+          <el-col :xs="10" :sm="6" :md="4">
+            <el-form-item label="启用" label-width="56px">
               <el-switch v-model="editing.enabled" data-testid="policy-form-enabled" />
             </el-form-item>
           </el-col>
         </el-row>
 
         <el-row v-if="editing.type === 'EXCEPTION'" :gutter="12">
-          <el-col :span="10">
+          <el-col :xs="24" :sm="10">
             <el-form-item label="冻结标码">
               <el-input v-model="editing.actionTag" data-testid="policy-form-action-tag" placeholder="FROZEN" />
             </el-form-item>
           </el-col>
-          <el-col :span="14">
+          <el-col :xs="24" :sm="14">
             <el-form-item label="冻结原因">
               <el-input v-model="editing.actionReason" data-testid="policy-form-action-reason" placeholder="留空则用策略名" />
             </el-form-item>
@@ -773,9 +777,14 @@ onMounted(async () => {
 .cond-editor { width: 100%; }
 .cond-row {
   display: flex; align-items: center; gap: 8px;
+  /* 窄屏（<~520px 弹窗内容宽）里子控件是固定宽度的，不换行就会横向溢出弹窗；
+     宽松屏一行放得下，flex-wrap 不产生任何视觉变化 */
+  flex-wrap: wrap;
   padding: 6px 8px; margin-bottom: 6px;
   background: #fafafa; border: 1px solid #ebeef5; border-radius: 4px;
 }
+/* 子控件多为固定宽（字段 190 / 操作符 110 / 值 240），窄屏换行后允许被压缩，不外溢出行框 */
+.cond-row > * { min-width: 0; }
 .cond-seq { width: 26px; text-align: center; color: #909399; font-size: 12px; font-family: Consolas, Monaco, monospace; }
 .no-value { width: 130px; }
 .cond-tip { margin-top: 6px; }
