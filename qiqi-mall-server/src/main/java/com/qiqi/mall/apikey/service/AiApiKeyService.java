@@ -46,7 +46,22 @@ public class AiApiKeyService {
 
     private static final Logger log = LoggerFactory.getLogger(AiApiKeyService.class);
 
-    /** 固定 9 个权限，不按接口细化（接口 → scope 的映射见 ApiKeyAuthFilter） */
+    /**
+     * 权限目录，**共 13 个**，不按接口细化（接口 → scope 的映射见 ApiKeyAuthFilter）。
+     *
+     * <p>构成：{@code 13 = 9 + 4}。前 9 个是 2026-11-12 建 key 体系时那批 —— 订单 / 商品 /
+     * 会员 / 配置 四个域各一对读写（8 个）＋ 概览只读（1 个）；后 4 个（{@code ledger:read} /
+     * {@code stock:read} / {@code audit:read} / {@code channel:read}）是 **2026-11-13 为 MCP
+     * 排障与巡检补的四个只读域**（提交 2dbb996，随自动审核模块一起进来的）—— 也就是说注释
+     * 里早先那句「固定 9 个」从那天起就不准了，这里按实现改成实际数量。</p>
+     *
+     * <p>另有一批**刻意不在这里**的写 scope（{@code ledger:write} / {@code stock:write} /
+     * {@code audit:write} / {@code channel:write} / {@code payment:write}，共 5 个）：
+     * 它们不在目录里 ⇒ 任何 key 都拿不到 ⇒ 对应接口对 API Key 永远 403，只能人工 JWT 操作。
+     * 校验、理由与单测见 {@link com.qiqi.mall.shared.security.ApiKeyAuthFilter#unGrantableWriteScopes()}
+     * 与 {@code ApiKeyScopeCatalogTest}。前端 admin-web 的令牌管理页按这份目录分组渲染
+     * （读 / 写 / 不可授予），13 个可勾 + 5 个置灰不可授予。</p>
+     */
     public static final List<String> ALL_SCOPES = List.of(
             "order:read", "order:write",
             "catalog:read", "catalog:write",

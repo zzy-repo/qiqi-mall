@@ -105,15 +105,43 @@
           <span class="muted key-hint">Key 本身不可修改</span>
         </el-form-item>
 
+        <!-- 权限：按后端 ALL_SCOPES 分组渲染（读 / 写 / 不可授予），不写死项数 -->
         <el-form-item label="权限">
-          <el-checkbox-group v-model="form.scopes" data-testid="api-key-form-scopes" class="scope-group">
-            <el-checkbox
-              v-for="opt in SCOPE_OPTIONS"
-              :key="opt.value"
-              :value="opt.value"
-              :data-testid="`api-key-form-scope-${opt.value}`"
-            >{{ opt.label }}</el-checkbox>
-          </el-checkbox-group>
+          <div data-testid="api-key-form-scopes" class="scope-groups">
+            <div
+              v-for="group in SCOPE_GROUPS"
+              :key="group.key"
+              class="scope-group-block"
+              :data-testid="`api-key-form-scope-group-${group.key}`"
+            >
+              <div class="scope-group-title">
+                <span class="scope-group-name">{{ group.title }}</span>
+                <span class="scope-group-count">{{ group.scopes.length }}</span>
+              </div>
+              <div class="scope-group-hint">{{ group.hint }}</div>
+
+              <el-checkbox-group v-if="group.grantable" v-model="form.scopes" class="scope-group">
+                <el-checkbox
+                  v-for="opt in group.scopes"
+                  :key="opt.value"
+                  :value="opt.value"
+                  :data-testid="`api-key-form-scope-${opt.value}`"
+                >{{ opt.label }}</el-checkbox>
+              </el-checkbox-group>
+
+              <!-- 不可授予：只展示、永远勾不上（后端 ALL_SCOPES 里根本没有这些值） -->
+              <div v-else class="scope-group">
+                <el-checkbox
+                  v-for="opt in group.scopes"
+                  :key="opt.value"
+                  :disabled="true"
+                  :model-value="false"
+                  class="scope-checkbox-denied"
+                  :data-testid="`api-key-form-scope-denied-${opt.value}`"
+                >{{ opt.label }}</el-checkbox>
+              </div>
+            </div>
+          </div>
         </el-form-item>
 
         <el-form-item label="过期时间">
@@ -182,21 +210,12 @@ import { ref, reactive, onMounted } from 'vue'
 import { Plus, CopyDocument } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listApiKeys, createApiKey, updateApiKey, deleteApiKey } from '../../api/apiKey'
+import { SCOPE_GROUPS, GRANTABLE_SCOPE_VALUES, SCOPE_LABEL } from './scopeCatalog'
 
-/** 权限（scope）固定 9 项，前端只展示中文标签 */
-const SCOPE_OPTIONS = [
-  { value: 'order:read', label: '订单-读' },
-  { value: 'order:write', label: '订单-写' },
-  { value: 'catalog:read', label: '商品-读' },
-  { value: 'catalog:write', label: '商品-写' },
-  { value: 'member:read', label: '会员-读' },
-  { value: 'member:write', label: '会员-写' },
-  { value: 'config:read', label: '配置-读' },
-  { value: 'config:write', label: '配置-写' },
-  { value: 'dashboard:read', label: '概览-读' }
-]
-const SCOPE_LABEL = SCOPE_OPTIONS.reduce((acc, o) => ({ ...acc, [o.value]: o.label }), {})
-/** 列表里权限超过这个数量就折叠成 +N */
+/**
+ * 权限项不在这里写死：全部来自 scopeCatalog.js（= 后端 ALL_SCOPES 的镜像，13 个可授予
+ * + 5 个不可授予）。这里只保留「列表里权限超过几个就折叠成 +N」这一个展示参数。
+ */
 const SCOPE_FOLD_LIMIT = 3
 
 const list = ref([])
@@ -218,6 +237,13 @@ const revealKey = ref('')
 /** scope → 中文标签；未知 scope 原样显示，避免后端新增权限时前端空白 */
 const scopeLabel = (scope) => SCOPE_LABEL[scope] || scope
 const scopesOf = (row) => (Array.isArray(row.scopes) ? row.scopes : [])
+
+/**
+ * 只保留后端真能授予的 scope（= 页面上可勾的那 13 个）。
+ * 库里若残留了目录外的值（例如某天后端删掉了某个 scope），编辑时不会把它悄悄带回请求体里
+ * —— 后端对未知 scope 直接回「未知权限：…」，那样一次正常保存都会失败。
+ */
+const grantableOnly = (scopes) => scopes.filter((scope) => GRANTABLE_SCOPE_VALUES.includes(scope))
 
 /**
  * status 兼容：后端契约只写了 status，未固定字面量。
@@ -297,7 +323,7 @@ const openEdit = (row) => {
   Object.assign(form, {
     id: row.id,
     name: row.name || '',
-    scopes: scopesOf(row).slice(),
+    scopes: grantableOnly(scopesOf(row)),
     expiresAt: row.expiresAt ? formatDateTime(row.expiresAt) : null,
     enabled: isEnabled(row.status),
     keyPrefix: row.keyPrefix || ''
@@ -318,11 +344,17 @@ const setExpiresPreset = (days) => {
 const submit = async () => {
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
+  // 后端 normalizeScopes 对空数组回「权限不能为空」，先在页面上拦一句更直白的话
+  const scopes = grantableOnly(form.scopes)
+  if (!scopes.length) {
+    ElMessage.warning('请至少勾选一个权限')
+    return
+  }
   saving.value = true
   try {
     const payload = {
       name: form.name.trim(),
-      scopes: form.scopes.slice(),
+      scopes,                            // 已按可授予白名单过滤（顺序 = 页面勾选顺序）
       expiresAt: form.expiresAt || null // 留空 = 永不过期
     }
     if (form.id) {
@@ -435,8 +467,26 @@ onMounted(load)
 .key-hint { margin-left: 8px; }
 .scope-tag { margin: 2px 6px 2px 0; }
 .scope-tag-more { cursor: default; }
+.scope-groups { width: 100%; }
+.scope-group-block { margin-bottom: 10px; }
+.scope-group-block:last-child { margin-bottom: 0; }
+.scope-group-title { display: flex; align-items: center; gap: 6px; line-height: 20px; }
+.scope-group-name { font-size: 13px; font-weight: 600; color: #303133; }
+.scope-group-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #f0f2f5;
+  color: #909399;
+  font-size: 12px;
+  text-align: center;
+}
+.scope-group-hint { font-size: 12px; color: #909399; line-height: 18px; margin: 2px 0 4px; }
 .scope-group { display: flex; flex-wrap: wrap; gap: 0 4px; }
 .scope-group :deep(.el-checkbox) { width: 30%; margin-right: 0; }
+/* 不可授予：置灰 + 不可点，鼠标上给「不让点」的手势 */
+.scope-checkbox-denied :deep(.el-checkbox__label) { color: #c0c4cc; }
+.scope-checkbox-denied :deep(.el-checkbox__inner) { cursor: not-allowed; }
 .datetime { font-size: 13px; color: #606266; }
 .datetime-expired { color: #f56c6c; margin-left: 6px; }
 .expires-row { width: 100%; }
