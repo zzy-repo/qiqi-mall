@@ -1,0 +1,17 @@
+{
+ "dur": 68.42,
+ "ok": 20524,
+ "ok_s": 299.97,
+ "p50": 12.9,
+ "p95": 39.9,
+ "p99": 66.7,
+ "txn_per_order": 1.191,
+ "txn_ms_per_order": 10.623,
+ "stmt_per_order": 11.189,
+ "sql_ms_per_order": 8.257,
+ "nonsql_ms_per_order": 2.366,
+ "com_commit_per_order": 0.999,
+ "rowlock_ms_per_order": 0.882,
+ "logfsync_per_order": 3.3542,
+ "logio_ms_per_order": 1.292
+}

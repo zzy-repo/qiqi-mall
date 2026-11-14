@@ -1,0 +1,27 @@
+{
+  "label": "arm-gw300-r3",
+  "url": "http://172.21.0.6:80/portal/orders",
+  "method": "POST",
+  "mode": "open-loop-fixed-rate",
+  "steps": [
+    300
+  ],
+  "step_duration_s": 75,
+  "warmup_s": 90,
+  "warmup_rps": 100,
+  "start_iso": "2026-11-14T02:21:55.716Z",
+  "end_iso": "2026-11-14T02:24:40.735Z",
+  "measure_wall_s": 75.018,
+  "fired": 31500,
+  "completed": 31500,
+  "dropped": 0,
+  "ok": 22498,
+  "fail": 2,
+  "token_pool": 37800,
+  "token_exhausted": false,
+  "client_cpu_pct": 53.66,
+  "loadavg_1m": 8.49,
+  "errors": {
+    "HTTP200 code=1 msg=已存在相同记录，请检查唯一字段": 3
+  }
+}

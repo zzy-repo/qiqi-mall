@@ -8,7 +8,7 @@
 为什么要「紧邻快照」而不是 CSV 采样：P_S 的 digest 聚合表会被回收/Q清空，首末行做差会算出
 天文数字（上一轮实测出过 2800 万条语句）。只有窗口紧邻的前后两次快照相减才有意义。
 """
-import sys, os, csv, json, glob
+import sys, os, csv, json
 from collections import defaultdict, Counter
 
 PS = 1e9  # picoseconds per ms
@@ -185,7 +185,8 @@ def classify(stmts):
 def report_probe(d):
     tx = read_tsv(os.path.join(d, 'txn.txt'), 'TXN', 10)
     st = read_tsv(os.path.join(d, 'stmt.txt'), 'STMT', 12)
-    # txn 行：[thread, event_id, state, timer_wait, timer_start, timer_end, iso, access, n_stmt]
+    # txn 行：[thread, event_id, state, timer_wait, timer_start, timer_end, iso, access]
+    #   （dump 的 SQL 只选这 8 列；txncost.sh 的 cmd_dump 里若加列，这里要同步）
     TX = {}
     for f in tx:
         TX[(f[0], f[1])] = dict(state=f[2], wait=int(f[3]), start=int(f[4]), end=int(f[5]),

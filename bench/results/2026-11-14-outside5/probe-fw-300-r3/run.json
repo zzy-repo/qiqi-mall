@@ -1,0 +1,27 @@
+{
+  "label": "probe-fw-300-r3",
+  "url": "http://127.0.0.1:18080/portal/orders",
+  "method": "POST",
+  "mode": "open-loop-fixed-rate",
+  "steps": [
+    300
+  ],
+  "step_duration_s": 45,
+  "warmup_s": 60,
+  "warmup_rps": 100,
+  "start_iso": "2026-11-14T01:59:36.298Z",
+  "end_iso": "2026-11-14T02:01:21.317Z",
+  "measure_wall_s": 45.017,
+  "fired": 19500,
+  "completed": 19500,
+  "dropped": 0,
+  "ok": 0,
+  "fail": 13500,
+  "token_pool": 23400,
+  "token_exhausted": false,
+  "client_cpu_pct": 61.41,
+  "loadavg_1m": 2.85,
+  "errors": {
+    "HTTP200 code=1 msg=请选择要结算的商品": 19500
+  }
+}

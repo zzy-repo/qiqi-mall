@@ -2,6 +2,7 @@
 """auditcost.py —— 「审计写入成本」的量化：条/单、耗时占比、端到端延迟
 
     python3 auditcost.py <rundir>            # 定速下单档（gen.mjs + sqldigest + 事务聚合前后差）
+    python3 auditcost.py --step <idx> <rundir>  # 多档跑（steps.csv 有多行）时只看第 idx 档；auditcost.sh 默认传 STEP_INDEX/0
     python3 auditcost.py --ship <rundir>     # 后台发货路径微基准（ship_s.txt，串行单次操作墙钟）
 
 口径（不编数字，缺哪份就少哪一列）：

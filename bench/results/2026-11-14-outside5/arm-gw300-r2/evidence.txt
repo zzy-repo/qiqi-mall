@@ -1,0 +1,6 @@
+label=arm-gw300-r2 rps=300 secs=75 warmup=90s@100
+gen_rc=0
+jar_md5=6e45c98d711cf694669c01467d821573
+image=sha256:935feb000f5d356515c6d3d29197e34f928a6e0844ef7c873a8a24996d9b39d9
+git_HEAD=f84db75 dirty=11
+p_s_history_long=NO
