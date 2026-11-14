@@ -1,0 +1,27 @@
+{
+  "label": "probe-a",
+  "url": "http://127.0.0.1:18080/portal/orders",
+  "method": "POST",
+  "mode": "open-loop-fixed-rate",
+  "steps": [
+    20
+  ],
+  "step_duration_s": 19,
+  "warmup_s": 5,
+  "warmup_rps": 5,
+  "start_iso": "2026-11-14T00:37:47.666Z",
+  "end_iso": "2026-11-14T00:38:11.468Z",
+  "measure_wall_s": 18.971,
+  "fired": 405,
+  "completed": 405,
+  "dropped": 0,
+  "ok": 380,
+  "fail": 0,
+  "token_pool": 700,
+  "token_exhausted": false,
+  "client_cpu_pct": 3.71,
+  "loadavg_1m": 3.41,
+  "errors": {
+    "HTTP502 code=? msg=-": 2
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "label": "probe-merged",
+  "url": "http://127.0.0.1:18080/portal/orders",
+  "method": "POST",
+  "mode": "open-loop-fixed-rate",
+  "steps": [
+    5
+  ],
+  "step_duration_s": 8,
+  "warmup_s": 5,
+  "warmup_rps": 5,
+  "start_iso": "2026-11-14T01:26:51.451Z",
+  "end_iso": "2026-11-14T01:27:04.082Z",
+  "measure_wall_s": 7.82,
+  "fired": 65,
+  "completed": 65,
+  "dropped": 0,
+  "ok": 40,
+  "fail": 0,
+  "token_pool": 70,
+  "token_exhausted": false,
+  "client_cpu_pct": 2.02,
+  "loadavg_1m": 2.36,
+  "errors": {}
+}

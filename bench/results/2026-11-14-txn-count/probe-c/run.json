@@ -1,0 +1,25 @@
+{
+  "label": "probe-c",
+  "url": "http://127.0.0.1:18080/portal/orders",
+  "method": "POST",
+  "mode": "open-loop-fixed-rate",
+  "steps": [
+    4
+  ],
+  "step_duration_s": 14,
+  "warmup_s": 5,
+  "warmup_rps": 5,
+  "start_iso": "2026-11-14T00:42:32.768Z",
+  "end_iso": "2026-11-14T00:42:51.359Z",
+  "measure_wall_s": 13.77,
+  "fired": 81,
+  "completed": 81,
+  "dropped": 0,
+  "ok": 56,
+  "fail": 0,
+  "token_pool": 180,
+  "token_exhausted": false,
+  "client_cpu_pct": 1.68,
+  "loadavg_1m": 1.67,
+  "errors": {}
+}

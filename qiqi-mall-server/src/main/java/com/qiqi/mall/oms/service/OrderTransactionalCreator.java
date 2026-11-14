@@ -1,5 +1,6 @@
 package com.qiqi.mall.oms.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.order.entity.OrderItem;
 import com.qiqi.mall.catalog.entity.Product;
@@ -66,12 +67,24 @@ public class OrderTransactionalCreator {
 
     public record ItemInput(Long skuId, Integer quantity) {}
 
+    /**
+     * 建单结果：订单本体 + **在同一个事务里回读到的明细**。
+     *
+     * <p><b>为什么明细由这里带出来（本轮唯一改的那处事务边界）</b>：原来是 controller 在建单事务
+     * 提交之后又发一条 {@code SELECT ... FROM order_item WHERE order_id=?} 去拼响应 —— 那条 SELECT
+     * 是自动提交的，于是**一单变成两个事务事件**（性能实测：1 个建单事务 + 1 个只读事务）。
+     * 那条只读事务没有任何正确性理由：它读的就是本事务刚写进去的行，既不跨请求、也不需要
+     * 看见别人后来的提交。把它挪进建单事务里，事务数从 2 降到 1，响应内容一字不变
+     * （同一事务快照看到的就是刚写的那些行，列值/顺序 {@code orderByAsc(id)} 完全相同）。
+     */
+    public record CreatedOrder(Order order, List<OrderItem> items) {}
+
     /** 第一遍解析出来的「一行明细要用到的全部东西」：只读产物，不产生任何写 */
     private record ResolvedItem(Sku sku, Product product, int qty) {}
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public Order create(Long memberId, String receiverName, String receiverPhone, String receiverAddress,
-                        List<ItemInput> inputs, boolean fromCart) {
+    public CreatedOrder create(Long memberId, String receiverName, String receiverPhone, String receiverAddress,
+                               List<ItemInput> inputs, boolean fromCart) {
 
         // ---- 第一遍：只读解析（把「读」全部前置，才有下一步「一条 INSERT 写对总额」的前提）
         List<ResolvedItem> resolved = new ArrayList<>();
@@ -134,8 +147,13 @@ public class OrderTransactionalCreator {
 
         orderItemService.saveBatch(items);
 
+        // 明细回读放进**本事务**（原来在 controller 里、提交之后另开一个自动提交事务）：
+        // 同一份 SQL、同一份结果，少一个事务事件与一次往返。见 {@link CreatedOrder} 的说明。
+        List<OrderItem> persisted = orderItemService.list(new LambdaQueryWrapper<OrderItem>()
+                .eq(OrderItem::getOrderId, order.getId()).orderByAsc(OrderItem::getId));
+
         // 清购物车已上移到 portal 侧（下单事务后执行）：
         // 购物车是「意图清单」而非账务数据，允许与订单存在轻微不一致，以此解除 oms→member 的模块依赖。
-        return order;
+        return new CreatedOrder(order, persisted);
     }
 }

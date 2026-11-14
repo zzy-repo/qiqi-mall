@@ -1,0 +1,28 @@
+== 窗口 68.4s  成功 20525 单（300.0 ok/s 窗口平均）==
+  延迟（窗口内 ok）：p50=15.4 p95=40.8 p99=93.3 ms
+  事务数/单      = 2.189   事务墙钟/单 = 10.417 ms
+  语句数/单      = 12.186   SQL服务时间/单 = 6.977 ms   语句内 Lock_time/单 = 0.682 ms
+  非SQL时间/单   = 3.440 ms（占 33.0%）
+  Com_commit/单  = 1.001  Com_begin/单 = 0.000
+  行锁等待/单    = 0.670 ms（次数/单 0.144）
+  redo fsync/单  = 3.3659  data fsync/单 = 3.4646  fsync/s = 1010
+  threads_running 末值=0  created/单=0.0000
+  日志文件 I/O 等待/单 = 1.332 ms（68s 内共 27349 ms）
+      wait/io/file/innodb/innodb_log_file                  次数/单= 9.0534    1.3325 ms/单
+  -- 语句构成（条/单，ms/单）--
+       2.000 条/单   0.2758 ms/单  SET `autocommit` = ?
+       1.000 条/单   0.3964 ms/单  SELECT `id` , `order_id` , `product_id` , `product_sku_id` , `product_name` , 
+       1.000 条/单   0.4450 ms/单  INSERT INTO `order` ( `order_sn` , `member_id` , `total_amount` , STATUS , `pa
+       1.000 条/单   0.2820 ms/单  SELECT `id` , NAME , DESCRIPTION , `category_id` , `type_id` , `publish_status
+       1.000 条/单   2.1962 ms/单  COMMIT
+       1.000 条/单   0.4409 ms/单  UPDATE `stock_ledger` SET `bucket_no` = COALESCE ( `bucket_no` , ? ) WHERE `id
+       1.000 条/单   0.3537 ms/单  INSERT IGNORE INTO `stock_ledger` ( `order_id` , `sku_id` , `delta` , `reason`
+       1.000 条/单   0.2653 ms/单  SELECT `id` , `product_id` , `price` , `stock` , `pic` , `cost_price` , `versi
+       1.000 条/单   0.9565 ms/单  UPDATE `sku_bucket` SET `stock` = `stock` - ? WHERE `sku_id` = ? AND `bucket_n
+       1.000 条/单   0.4185 ms/单  INSERT INTO `order_status_ledger` ( `order_id` , `from_status` , `to_status` ,
+       1.000 条/单   0.3649 ms/单  INSERT INTO `order_item` ( `order_id` , `product_id` , `product_sku_id` , `pro
+       0.188 条/单   0.5905 ms/单  UPDATE `sku` `s` JOIN ( SELECT `sku_id` , SUM ( `stock` ) AS `total` FROM `sku
+       0.000 条/单   0.0001 ms/单  SELECT `id` , `auto_confirm_days` , `auto_close_minutes` , `auto_audit_enabled
+       0.000 条/单   0.0001 ms/单  SELECT * FROM `audit_run` ORDER BY `id` DESC LIMIT ?
+       0.000 条/单   0.0001 ms/单  ROLLBACK
+  MySQL 核数（窗口内）=0.93 核

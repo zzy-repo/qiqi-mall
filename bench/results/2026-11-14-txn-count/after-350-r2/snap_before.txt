@@ -1,0 +1,88 @@
+#epoch_ms=1794619076485
+TXN	transaction	12613740	274127368821037000
+STMT_TOTAL	103954832	175087531289657000	110579091424000000	60469986	115454588
+WAIT	wait/io/file/innodb/innodb_dblwr_file	145518	384930884028822
+WAIT	wait/io/file/innodb/innodb_data_file	16008534	714806862210473
+WAIT	wait/io/file/innodb/innodb_log_file	45381374	7780359619280637
+WAIT	wait/io/file/innodb/innodb_temp_file	78626	56882141390411
+WAIT	wait/io/table/sql/handler	138757710	108189045857545445
+WAIT	wait/io/socket/sql/client_connection	407185505	0
+DIGEST	c16f24f908846019a741db580f6545a5933e9435a7cf1579c50794a6ca287739	28180642	5459234557193000	0	0	28187229	SELECT @@SESSION . `transaction_read_only`
+DIGEST	158bfe3d4b4b0a372a4acdb38affe2cb4f6b3cb21a9af0ea9fad9a9a083ac18a	11539806	1836454362585000	0	0	0	SET `autocommit` = ?
+DIGEST	259670be6fafa78b4fe0b859288fbe5b02f5e564c84018cb6f356866d511cfb9	5927557	112231821927042000	108161625655000000	5765508	5765400	UPDATE `sku_bucket` SET `stock` = `stock` - ? WHERE `sku_id` = ? AND `bucket_no` = ? AND `stock` >= ?
+DIGEST	f2b9be5f0f32ca7507e4ddf133cd2fad0993a1c26fde9caa6f067b1af2b7603c	5767464	24818849105061000	0	0	0	COMMIT
+DIGEST	3b5ed01ce7e62848bc4a086461d5bd6af93e6c80db45d12ed65702c26109af53	5765664	3549383082953000	12982399000000	5765854	0	INSERT IGNORE INTO `stock_ledger` ( `order_id` , `sku_id` , `delta` , `reason` , `ref_type` , `ref_id` , `bucket_no` , `idem_key` , `created_at` ) VALUES ( ?, .
+DIGEST	28d78cada467357c8acc125335c3162f4a1a172df4fcdf88578244c3a1356873	5765646	3752926501328000	8876230000000	5765891	5765885	UPDATE `stock_ledger` SET `bucket_no` = COALESCE ( `bucket_no` , ? ) WHERE `idem_key` = ?
+DIGEST	682832816f11d6e27e33d73178e3f00ffdcf0e8891adf25b0ac4b3a269f32e25	5765218	3227521361819000	9476810000000	5765568	0	INSERT INTO `order_item` ( `order_id` , `product_id` , `product_sku_id` , `product_name` , `product_price` , `product_quantity` ) VALUES (...)
+DIGEST	ed620e7fa4b6a34ce68439cb55506c8ef9c1d422b72b90c8784ae6a25701c52d	5764873	4114936399958000	328486527000000	5764245	0	INSERT INTO `order` ( `order_sn` , `member_id` , `total_amount` , STATUS , `pay_type` , `receiver_name` , `receiver_phone` , `receiver_address` ) VALUES (...)
+DIGEST	07cbfd2bc1e2bf9fd86b10eb1138a6df2693c250fa086b3d4e6aa2577a72a672	5764699	2216535583677000	7981242000000	0	5765357	SELECT `id` , NAME , DESCRIPTION , `category_id` , `type_id` , `publish_status` , `pic` , `version` FROM `product` WHERE `id` = ?
+DIGEST	650e11285cbd58bf1052952765237f229c833fc57bdec2616561068b1eb3be31	5060620	1419390935123000	8780433000000	0	5061045	SELECT `id` , `product_id` , `price` , `stock` , `pic` , `cost_price` , `version` FROM `sku` WHERE `id` = ?
+DIGEST	442d1e94e4aa5f980807d4aeb8401a63691091a656421ccaf1d8d45a3257b6d0	5059807	2429473672572000	7575627000000	5060128	0	INSERT INTO `order_status_ledger` ( `order_id` , `from_status` , `to_status` , `reason` , `reason_detail` , `operator_type` , `operator_id` , `operator_name` , 
+DIGEST	c4e584a3c92a5dd10e802464028fb83a12b936367beecb949fcc25633129f123	5056685	1995390588013000	8837446000000	0	5057750	SELECT `id` , `order_id` , `product_id` , `product_sku_id` , `product_name` , `product_price` , `product_quantity` , `cost_price` FROM `order_item` WHERE ( `ord
+DIGEST	d1b44b0c19af710b5a679907e284acd2ddc285201794bc69a2389d77baedddae	3816560	402645456248000	0	0	3822411	SELECT ?
+DIGEST	07fc404dc9b9f1929a1d9bef843749b02e592dad9fa89acc3a0f14f19df906a2	2738197	1703050605151000	4425496000000	2738416	2738386	UPDATE `order` SET `order_sn` = ? , `member_id` = ? , `total_amount` = ? , STATUS = ? , `pay_type` = ? , `receiver_name` = ? , `receiver_phone` = ? , `receiver_
+DIGEST	f401a18920d3328b6bf5c455c508c4a94ff437f001acd37199417f1ab8ac0944	707175	840245376768000	1585790000000	0	707211	SELECT `id` , `product_id` , `price` , `stock` , `pic` , `version` FROM `sku` WHERE `id` = ?
+DIGEST	5543f1410a597f93d412874e0351cea47a84ebe17cecc2e559e17be6d50560bf	707140	927753449437000	1828136000000	0	707188	SELECT `id` , `order_id` , `product_id` , `product_sku_id` , `product_name` , `product_price` , `product_quantity` FROM `order_item` WHERE ( `order_id` = ? ) OR
+DIGEST	ef26eaba16e34a15ac53b9dc21aac49b023853b610d48cbde9671d8705a727e1	481694	3670454755590000	1972098583000000	481677	6894617	UPDATE `sku` `s` JOIN ( SELECT `sku_id` , SUM ( `stock` ) AS `total` FROM `sku_bucket` WHERE `sku_id` = ? GROUP BY `sku_id` ) `b` ON `b` . `sku_id` = `s` . `id`
+DIGEST	a2f4d49a4d6e64ebdd75fbb73b91db7cda05d67a2b3f962d9c4e8fb030375e2b	5019	1693492392000	9907000000	0	4800	SELECT COUNT ( * ) AS `total` FROM MEMBER WHERE ( `username` = ? )
+DIGEST	5f225902b68dbfa9ed7249b526ab95b9c415611dcbc747c84d28084cbf68c7bc	4810	2421523416000	10180000000	0	4812	SELECT `id` , `username` , PASSWORD , `nickname` , `phone` , STATUS , `create_time` , `customer_tag` , `version` FROM MEMBER WHERE ( `username` = ? )
+DIGEST	43e9b9c3339af8c96196068a106b73d1e074951d18b45b4930906d5975bf770e	4154	1457846271000	10007000000	0	8308	SELECT `id` , `type_id` , NAME , `is_filter` FROM ATTRIBUTE WHERE `id` IN (...)
+DIGEST	3e721af8c99794edb397e87d4f532280af6dcee72b6fe7602ea4bd53fd62c334	3556	139590620000	0	0	0	SET SESSION `character_set_results` = ?
+DIGEST	eb65eb2700629551fc6ae5c4834b944679ed95c1374820d61ebaecbc647e578d	2654	1075744740000	4431000000	0	4560	SELECT * FROM `audit_policy_condition` WHERE `policy_id` = ? AND `scope` = ? ORDER BY `seq` ASC , `id` ASC
+DIGEST	c20fcea11911be36651b7ca7bd3712d4ed9ac1134cee9c6620039e1fb13b5eff	2555	621809893000	0	0	2555	SELECT @@SESSION . `auto_increment_increment` AS `auto_increment_increment` , @@`character_set_client` AS `character_set_client` , @@`character_set_connection` 
+DIGEST	ee697e4b4152b6204eb23d2a055339cc8262297cf42467b78c1e241ddfcfbce3	2554	287113574000	0	0	0	SET `character_set_results` = ?
+DIGEST	8c8b47d52580f4f5be561c5dd173f7c33d513a516e3e12630c74ed24a32cd074	2477	592731818000	4842000000	0	2477	SELECT `id` , `username` , PASSWORD , `nickname` , `phone` , STATUS , `create_time` , `customer_tag` , `version` FROM MEMBER WHERE `id` = ?
+DIGEST	827998f10f6e2d440d8ae8f64fd66beffb18cc9222edf1a97312399f4fe9e900	2364	643346305000	4488000000	0	2364	SELECT `id` , `order_sn` , `member_id` , `total_amount` , STATUS , `pay_type` , `payment_time` , `receiver_name` , `receiver_phone` , `receiver_address` , `spli
+DIGEST	febc908b65a26a1c882c691fcf2e82d60e4bf116bab4e60d6e681ae9526c773c	1773	580605839000	3680000000	0	1773	SELECT `id` , `auto_confirm_days` , `auto_close_minutes` , `auto_audit_enabled` , `audit_stock_guard` , `audit_run_interval_min` FROM `order_setting`
+DIGEST	42551ff35096af39c75d47da51c5b05b39bf9638a929577b63ac8d1046b88468	1623	462201327000	2792000000	0	2533	SELECT COUNT ( * ) FROM `sku_bucket` WHERE `sku_id` = ?
+DIGEST	527a79e226d7ff649e3227f8065f82bde57caa6dae515feb2de060b304eec619	1522	508746261000	2474000000	1522	0	INSERT INTO `admin_audit_log` ( `operator_type` , `operator_id` , `operator_name` , ACTION , `target_type` , `target_id` , `target_sn` , `summary` , `reason` , 
+DIGEST	6a0a7e43224b0872d6176d763fcaa6ce1765cf6069301e4a171fecebc7f69b29	1517	422891619000	2272000000	1517	0	INSERT INTO `order` ( `order_sn` , `member_id` , `total_amount` , STATUS , `pay_type` , `receiver_name` , `receiver_phone` , `receiver_address` , `split_status`
+DIGEST	f159613be0e4a954cb34dc0f659462f2d6ddae820bdfcce6dded3259e8e3f58f	1427	441920394000	2329000000	0	2351	SELECT COALESCE ( SUM ( `stock` ) , ? ) FROM `sku_bucket` WHERE `sku_id` = ?
+DIGEST	d44b44663a0778ec66ba617ba0f79a806ea21089663001be80344bc3fc3b32a8	1417	465527982000	5880000000	1416	1417	UPDATE `order` SET STATUS = ? , `status_seq` = `status_seq` + ? , `version` = `version` + ? WHERE ( `id` = ? AND `version` = ? )
+DIGEST	3e67fa9d38d82054e7fc01fe3ee8844dc76faaaefbd74d213a2af42e60e95520	1375	2580344808000	0	0	0	ROLLBACK
+DIGEST	e21020e9019a5b1b1e0402ac901d63e85dcd28efe05daa94aeb5982603907586	1248	2047367091000	2842000000	1248	1248	UPDATE `order` SET STATUS = ? WHERE `id` = ?
+DIGEST	305fb068910f576f478c2e9882b4678ed38c4360ee0c5c087be3b912974186d9	1045	354051445000	1715000000	0	921	SELECT * FROM `order_audit_tag` WHERE `order_id` = ? AND ACTIVE = ? AND `tag_code` LIKE ? ORDER BY `id` ASC LIMIT ?
+DIGEST	66e990546241c8f68305916655d522f3199c02ca6f02b408bbe63d557ab7d2bd	1022	1238283764000	2224000000	591	591	DELETE FROM `order_status_ledger` WHERE `order_id` = ?
+DIGEST	10fb13609c88cec5e1e672d75d1bc73b804df482152d1017e95803938589b4c2	1022	1793502412000	2008000000	792	792	DELETE FROM `order_audit_decision` WHERE `order_id` = ?
+DIGEST	458dd41c10004b8100f1bb3b62f55d5a2a408e4c4099ea5823a66e25daf0e29d	1022	691629240000	2259000000	182	182	DELETE FROM `order_audit_tag` WHERE `order_id` = ?
+DIGEST	b63083e7c4276560cc98839136840ab74d71fef67e7ed66db216808bbf4ad96e	1021	471382824000	2103000000	128	128	DELETE FROM `admin_audit_log` WHERE `order_id` = ?
+DIGEST	906a097c7f36018e816b36a95c69cd2cb334ee930d592b2b6324c90284416b18	991	338287304000	2019000000	180	180	DELETE FROM `stock_ledger` WHERE `order_id` = ?
+DIGEST	476122eab68d502cc396ba83d7269e2d884e9183b94799582aec26764f7dedbc	979	288084357000	1657000000	0	1424	SELECT `id` , `order_id` , `product_id` , `product_sku_id` , `product_name` , `product_price` , `product_quantity` , `cost_price` FROM `order_item` WHERE ( `ord
+DIGEST	38da9933c75f48c1c3c3961f7b925f2fd597e2a76b6068dedcd66a3c125cf955	977	303215298000	1677000000	0	219	SELECT COUNT ( * ) AS `total` FROM `return_apply` WHERE ( `order_id` = ? AND STATUS = ? )
+DIGEST	256c7f6fd2bcea8e137396c017da44f41d235e2b056e5b5a8ea1df960cf4ee29	883	233090846000	1523000000	0	245	SELECT COALESCE ( MAX ( `round_no` ) , ? ) FROM `order_audit_decision` WHERE `order_id` = ?
+DIGEST	9cbb1a6986da93efad6662410f9df42a6afa1e3791bfd0378dabbfc99ffab06e	772	1754013139000	1798000000	772	0	INSERT INTO `order_item` ( `order_id` , `product_id` , `product_sku_id` , `product_name` , `product_price` , `product_quantity` , `cost_price` ) VALUES (...)
+DIGEST	e313bca5236500e66f7c47bd8241dea25b9f0cebeb3b53be0aefa12ef6ff150b	767	201626614000	1114000000	0	763	SELECT * FROM `audit_run` ORDER BY `id` DESC LIMIT ?
+DIGEST	a6e16d9e1a36aba681e0e0f49e43e8c41afaa245be3cb67ff94cce2eb9d21ab8	727	478772656000	1443000000	0	6204	SELECT * FROM `audit_policy` ORDER BY `FIELD` ( TYPE , ?, ... ) , `priority` ASC , `id` ASC
+DIGEST	f2fc3ec518e94cb555b3a512bbfb3dd7140b7057db57b613de54a1035aa57857	704	1622522868000	1675000000	704	0	INSERT INTO `sku_bucket` ( `sku_id` , `bucket_no` , `stock` ) VALUES (...)
+DIGEST	8a38586b58b06fd01eed66f2e781dfc9b02de55c015ca187a0a149c5584df989	640	173230175000	942000000	0	25	SELECT `variable_name` FROM `performance_schema` . `user_variables_by_thread` WHERE `variable_value` IS NOT NULL
+DIGEST	fc11bc78bbaa7ec8b3aeca7441766c78a89b8a51e7d807dd40b75e1d631c090a	620	1546482496000	1612000000	620	0	INSERT INTO `sku` ( `product_id` , `price` , `stock` , `version` , `cost_price` ) VALUES (...)
+DIGEST	9bbe7d9301cea73328f96a0b0560af7d5a4740fc8f18d6b1a56a4b1b0dc83d84	618	199203358000	1103000000	618	0	INSERT INTO `audit_policy_condition` ( `policy_id` , `seq` , `kind` , `scope` , `field_code` , `op_code` , `value_type` , `value_num` ) VALUES (...)
+DIGEST	82a5c4c98da93c15cd303c5d3c188bfc4b7b3e2641a163bc626ed91c7966453a	531	59434022000	0	0	0	SET `foreign_key_checks` = ? , `sql_safe_updates` = ?
+DIGEST	43bbc4c15fbade98a01d3784016b0345bb1b5dac12cfda76bc0e541375ebd255	531	11568866000	0	0	0	SET @? := ?
+DIGEST	2fc602a2e6477059dd142df8238836068154da786228d9faa0e45545010d7b35	526	271134730000	1143000000	0	64	SELECT COUNT ( * ) AS `total` FROM `delivery_order` WHERE ( `order_id` = ? AND STATUS != ? )
+DIGEST	c4b6889894c1d0b4b2f50105fa0e20d039abc513619b87ef888b1cf3af013fb6	503	22835634000	0	0	0	SET `SQL_QUOTE_SHOW_CREATE` = ?
+DIGEST	7f3eb9fcb71856f178b0f0a59c9a4e57e057d48aac7c30b45bd7f0aec09e46df	478	189058249000	870000000	478	0	INSERT INTO `audit_policy_version` ( `policy_id` , `version_no` , `snapshot_json` ) VALUES (...)
+DIGEST	2413e2cc8ab05efa79dba40d782ec54ff1d106ec924c511c9b89b01216e35e2d	460	22002611000	0	0	0	USE `qiqi_mall_test`
+DIGEST	8af292efc1bd0c86b9b6b148b0d611fb14af300100f689d0ca30101cbbfda4b3	451	1195031502000	1084000000	451	0	INSERT INTO `order_status_ledger` ( `order_id` , `from_status` , `to_status` , `reason` , `reason_detail` , `operator_type` , `operator_name` , `idem_key` ) VAL
+DIGEST	0f250acac4ec801f1d9707ddfa3c03ce30ca24bfb688105f8b8503aac1fee2d7	451	1177355102000	1053000000	451	0	INSERT INTO `order` ( `order_sn` , `member_id` , `total_amount` , STATUS , `pay_type` , `payment_time` , `created_at` , `receiver_name` , `receiver_phone` , `re
+DIGEST	66570a783004b2fd93def1323578350d357c68a5d2280e332883189bc0bbc8dd	440	21299769000	0	0	440	SELECT @@`collation_database`
+DIGEST	cb62f9bcae58a460fc985bfa6ed940c7d815b1a94c7fd7dd768819f9fd18a8fa	430	358770535000	401000000	0	18823	SHOW TABLE STATUS LIKE ?
+STAT	Com_begin	5070
+STAT	Com_commit	5788265
+STAT	Com_select	50151742
+STAT	Innodb_data_fsyncs	16883804
+STAT	Innodb_data_writes	44217622
+STAT	Innodb_log_waits	0
+STAT	Innodb_log_write_requests	359646568
+STAT	Innodb_log_writes	29143768
+STAT	Innodb_os_log_fsyncs	16118977
+STAT	Innodb_row_lock_current_waits	6
+STAT	Innodb_row_lock_time	110586142
+STAT	Innodb_row_lock_waits	2444624
+STAT	Innodb_rows_inserted	30729630
+STAT	Innodb_rows_updated	14728017
+STAT	Queries	114072131
+STAT	Questions	112731324
+STAT	Threads_connected	43
+STAT	Threads_created	4371
+STAT	Threads_running	9

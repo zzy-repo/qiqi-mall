@@ -1,0 +1,6 @@
+label=base-350-r1 rps=350 secs=75 warmup=90s@100
+gen_rc=0
+jar_md5=2fce23c8a4b08991ead5ab99df134e28
+image=sha256:935feb000f5d356515c6d3d29197e34f928a6e0844ef7c873a8a24996d9b39d9
+git_HEAD=211d555 dirty=3
+p_s_history_long=NO

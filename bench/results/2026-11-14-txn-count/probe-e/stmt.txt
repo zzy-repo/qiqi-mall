@@ -1,0 +1,885 @@
+STMT	58413	7894	NULL	-	42285000	93184051576284000	93184051618569000	0	0	0	qiqi_mall_test	NULL
+STMT	58413	7895	NULL	-	72428000	93184051709572000	93184051782000000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	7896	NULL	-	174064000	93184051974962000	93184052149026000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	7898	7897	TRANSACTION	125166000	93184052431139000	93184052556305000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	7899	7897	TRANSACTION	185017000	93184053010074000	93184053195091000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	7900	7897	TRANSACTION	178330000	93184053462382000	93184053640712000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	7901	7897	TRANSACTION	124902000	93184053805775000	93184053930677000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751934, 1, -1, 'ORDER_CR
+STMT	58413	7902	7897	TRANSACTION	198679000	93184054085334000	93184054284013000	0	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 2 AND stock >= 1
+STMT	58413	7903	7897	TRANSACTION	172585000	93184054432712000	93184054605297000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 2) WHERE idem_key = '4751934:1:ORDER_CREATE:0'
+STMT	58413	7904	7897	TRANSACTION	169658000	93184055053890000	93184055223548000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751934, 1, 1, '苹果 MacBook 
+STMT	58413	7905	7897	TRANSACTION	1768776000	93184055420784000	93184057189560000	0	0	0	qiqi_mall_test	commit
+STMT	58413	7906	NULL	-	52258000	93184057266861000	93184057319119000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	7907	NULL	-	189717000	93184057731275000	93184057920992000	1000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751934)
+STMT	58413	7909	NULL	-	88743000	93184445556743000	93184445645486000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	7910	NULL	-	173944000	93184445876928000	93184446050872000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	7912	7911	TRANSACTION	131444000	93184446381169000	93184446512613000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	7913	7911	TRANSACTION	205636000	93184447031192000	93184447236828000	2000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	7914	7911	TRANSACTION	193250000	93184447541996000	93184447735246000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	7915	7911	TRANSACTION	142363000	93184447918365000	93184448060728000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751936, 1, -1, 'ORDER_CR
+STMT	58413	7916	7911	TRANSACTION	194426000	93184448232049000	93184448426475000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 0 AND stock >= 1
+STMT	58413	7917	7911	TRANSACTION	155116000	93184448579807000	93184448734923000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 0) WHERE idem_key = '4751936:1:ORDER_CREATE:0'
+STMT	58413	7918	7911	TRANSACTION	156850000	93184449237158000	93184449394008000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751936, 1, 1, '苹果 MacBook 
+STMT	58413	7919	7911	TRANSACTION	2128852000	93184449606929000	93184451735781000	0	0	0	qiqi_mall_test	commit
+STMT	58413	7920	NULL	-	62939000	93184451840022000	93184451902961000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	7921	NULL	-	185403000	93184452300175000	93184452485578000	1000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751936)
+STMT	58413	7923	NULL	-	84537000	93184846719909000	93184846804446000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	7924	NULL	-	166001000	93184846960020000	93184847126021000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=4
+STMT	58413	7926	7925	TRANSACTION	107563000	93184847388145000	93184847495708000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	7927	7925	TRANSACTION	207106000	93184847932404000	93184848139510000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	7928	7925	TRANSACTION	203320000	93184848437988000	93184848641308000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	7929	7925	TRANSACTION	181910000	93184848847971000	93184849029881000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751938, 4, -1, 'ORDER_CR
+STMT	58413	7930	7925	TRANSACTION	210167000	93184849258877000	93184849469044000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 4 AND bucket_no = 1 AND stock >= 1
+STMT	58413	7931	7925	TRANSACTION	169113000	93184849587395000	93184849756508000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 1) WHERE idem_key = '4751938:4:ORDER_CREATE:0'
+STMT	58413	7932	7925	TRANSACTION	345997000	93184850228898000	93184850574895000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751938, 1, 4, '苹果 MacBook 
+STMT	58413	7933	7925	TRANSACTION	789928000	93184850592338000	93184851382266000	0	0	0	qiqi_mall_test	commit
+STMT	58413	7934	NULL	-	54123000	93184851450448000	93184851504571000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	7935	NULL	-	204661000	93184851871611000	93184852076272000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751938)
+STMT	58413	7937	NULL	-	40604000	93186045419162000	93186045459766000	0	0	0	qiqi_mall_test	NULL
+STMT	58413	7938	NULL	-	66753000	93186045551838000	93186045618591000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	7939	NULL	-	148343000	93186045798084000	93186045946427000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	7941	7940	TRANSACTION	113189000	93186046245329000	93186046358518000	0	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	7942	7940	TRANSACTION	247875000	93186046829266000	93186047077141000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	7943	7940	TRANSACTION	163502000	93186047347569000	93186047511071000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	7944	7940	TRANSACTION	115788000	93186047682264000	93186047798052000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751944, 1, -1, 'ORDER_CR
+STMT	58413	7945	7940	TRANSACTION	196439000	93186047945087000	93186048141526000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 7 AND stock >= 1
+STMT	58413	7946	7940	TRANSACTION	149165000	93186048314404000	93186048463569000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 7) WHERE idem_key = '4751944:1:ORDER_CREATE:0'
+STMT	58413	7947	7940	TRANSACTION	165692000	93186048905729000	93186049071421000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751944, 1, 1, '苹果 MacBook 
+STMT	58413	7948	7940	TRANSACTION	814411000	93186049268706000	93186050083117000	0	0	0	qiqi_mall_test	commit
+STMT	58413	7949	NULL	-	48873000	93186050160397000	93186050209270000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	7950	NULL	-	183558000	93186050570625000	93186050754183000	1000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751944)
+STMT	58413	7952	NULL	-	87489000	93186445024831000	93186445112320000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	7953	NULL	-	150241000	93186445314173000	93186445464414000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	7955	7954	TRANSACTION	118100000	93186445758315000	93186445876415000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	7956	7954	TRANSACTION	188825000	93186446356688000	93186446545513000	2000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	7957	7954	TRANSACTION	162563000	93186446826750000	93186446989313000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	7958	7954	TRANSACTION	121587000	93186447198969000	93186447320556000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751946, 1, -1, 'ORDER_CR
+STMT	58413	7959	7954	TRANSACTION	185319000	93186447470794000	93186447656113000	0	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 0 AND stock >= 1
+STMT	58413	7960	7954	TRANSACTION	144304000	93186447765340000	93186447909644000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 0) WHERE idem_key = '4751946:1:ORDER_CREATE:0'
+STMT	58413	7961	7954	TRANSACTION	150587000	93186448322935000	93186448473522000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751946, 1, 1, '苹果 MacBook 
+STMT	58413	7962	7954	TRANSACTION	1838342000	93186448648021000	93186450486363000	0	0	0	qiqi_mall_test	commit
+STMT	58413	7963	NULL	-	69782000	93186450604051000	93186450673833000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	7964	NULL	-	201447000	93186451246813000	93186451448260000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751946)
+STMT	58413	7966	NULL	-	91527000	93186844972464000	93186845063991000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	7967	NULL	-	156787000	93186845235628000	93186845392415000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	7969	7968	TRANSACTION	114148000	93186845663430000	93186845777578000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	7970	7968	TRANSACTION	170994000	93186846217838000	93186846388832000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	7971	7968	TRANSACTION	153537000	93186846615961000	93186846769498000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	7972	7968	TRANSACTION	153106000	93186846952450000	93186847105556000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751948, 1, -1, 'ORDER_CR
+STMT	58413	7973	7968	TRANSACTION	200146000	93186847271396000	93186847471542000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 3 AND stock >= 1
+STMT	58413	7974	7968	TRANSACTION	149873000	93186847624443000	93186847774316000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 3) WHERE idem_key = '4751948:1:ORDER_CREATE:0'
+STMT	58413	7975	7968	TRANSACTION	158827000	93186848248882000	93186848407709000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751948, 1, 1, '苹果 MacBook 
+STMT	58413	7976	7968	TRANSACTION	978856000	93186848611522000	93186849590378000	0	0	0	qiqi_mall_test	commit
+STMT	58413	7977	NULL	-	45466000	93186849665202000	93186849710668000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	7978	NULL	-	177087000	93186850088130000	93186850265217000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751948)
+STMT	58413	7980	NULL	-	90162000	93187245300660000	93187245390822000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	7981	NULL	-	156462000	93187245558401000	93187245714863000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	7983	7982	TRANSACTION	135251000	93187245988667000	93187246123918000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	7984	7982	TRANSACTION	187420000	93187246582172000	93187246769592000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	7985	7982	TRANSACTION	192403000	93187247044380000	93187247236783000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	7986	7982	TRANSACTION	126703000	93187247413057000	93187247539760000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751950, 1, -1, 'ORDER_CR
+STMT	58413	7987	7982	TRANSACTION	188342000	93187247648776000	93187247837118000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 7 AND stock >= 1
+STMT	58413	7988	7982	TRANSACTION	189544000	93187247940116000	93187248129660000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 7) WHERE idem_key = '4751950:1:ORDER_CREATE:0'
+STMT	58413	7989	7982	TRANSACTION	160305000	93187248608025000	93187248768330000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751950, 1, 1, '苹果 MacBook 
+STMT	58413	7990	7982	TRANSACTION	826767000	93187248939256000	93187249766023000	0	0	0	qiqi_mall_test	commit
+STMT	58413	7991	NULL	-	74496000	93187250030545000	93187250105041000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	7992	NULL	-	198754000	93187250520250000	93187250719004000	1000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751950)
+STMT	58413	7994	NULL	-	85103000	93187645174172000	93187645259275000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	7995	NULL	-	153483000	93187645472762000	93187645626245000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	7997	7996	TRANSACTION	130978000	93187645948727000	93187646079705000	0	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	7998	7996	TRANSACTION	177994000	93187646538986000	93187646716980000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	7999	7996	TRANSACTION	180368000	93187646952794000	93187647133162000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	8000	7996	TRANSACTION	126310000	93187647330628000	93187647456938000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751952, 1, -1, 'ORDER_CR
+STMT	58413	8001	7996	TRANSACTION	178133000	93187647603919000	93187647782052000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 6 AND stock >= 1
+STMT	58413	8002	7996	TRANSACTION	166542000	93187647879129000	93187648045671000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 6) WHERE idem_key = '4751952:1:ORDER_CREATE:0'
+STMT	58413	8003	7996	TRANSACTION	150430000	93187648548785000	93187648699215000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751952, 1, 1, '苹果 MacBook 
+STMT	58413	8004	7996	TRANSACTION	1904488000	93187648861875000	93187650766363000	0	0	0	qiqi_mall_test	commit
+STMT	58413	8005	NULL	-	53980000	93187650862356000	93187650916336000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	8006	NULL	-	182366000	93187651316886000	93187651499252000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751952)
+STMT	58413	8008	NULL	-	98048000	93188045118695000	93188045216743000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	8009	NULL	-	159043000	93188045401257000	93188045560300000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	8011	8010	TRANSACTION	117245000	93188045833792000	93188045951037000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	8012	8010	TRANSACTION	186663000	93188046461085000	93188046647748000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	8013	8010	TRANSACTION	194085000	93188046982305000	93188047176390000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	8014	8010	TRANSACTION	141527000	93188047420649000	93188047562176000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751954, 1, -1, 'ORDER_CR
+STMT	58413	8015	8010	TRANSACTION	206801000	93188047751697000	93188047958498000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 2 AND stock >= 1
+STMT	58413	8016	8010	TRANSACTION	200520000	93188048123558000	93188048324078000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 2) WHERE idem_key = '4751954:1:ORDER_CREATE:0'
+STMT	58413	8017	8010	TRANSACTION	172514000	93188048777339000	93188048949853000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751954, 1, 1, '苹果 MacBook 
+STMT	58413	8018	8010	TRANSACTION	907010000	93188049138878000	93188050045888000	0	0	0	qiqi_mall_test	commit
+STMT	58413	8019	NULL	-	62805000	93188050147451000	93188050210256000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	8020	NULL	-	200818000	93188050623567000	93188050824385000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751954)
+STMT	58413	8022	NULL	-	96608000	93188445070219000	93188445166827000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	8023	NULL	-	171587000	93188445347055000	93188445518642000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	8025	8024	TRANSACTION	141696000	93188445824537000	93188445966233000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	8026	8024	TRANSACTION	180620000	93188446458621000	93188446639241000	2000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	8027	8024	TRANSACTION	189211000	93188446902249000	93188447091460000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	8028	8024	TRANSACTION	131702000	93188447279894000	93188447411596000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751956, 1, -1, 'ORDER_CR
+STMT	58413	8029	8024	TRANSACTION	184353000	93188447545165000	93188447729518000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 4 AND stock >= 1
+STMT	58413	8030	8024	TRANSACTION	144019000	93188447818562000	93188447962581000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 4) WHERE idem_key = '4751956:1:ORDER_CREATE:0'
+STMT	58413	8031	8024	TRANSACTION	165437000	93188448423479000	93188448588916000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751956, 1, 1, '苹果 MacBook 
+STMT	58413	8032	8024	TRANSACTION	814511000	93188448772457000	93188449586968000	0	0	0	qiqi_mall_test	commit
+STMT	58413	8033	NULL	-	50715000	93188449661992000	93188449712707000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	8034	NULL	-	180425000	93188450104012000	93188450284437000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751956)
+STMT	58413	8036	NULL	-	86007000	93188845068274000	93188845154281000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	8037	NULL	-	150742000	93188845386394000	93188845537136000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=14
+STMT	58413	8039	8038	TRANSACTION	109420000	93188845823429000	93188845932849000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=4
+STMT	58413	8040	8038	TRANSACTION	183314000	93188846403925000	93188846587239000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	8041	8038	TRANSACTION	194440000	93188846850420000	93188847044860000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	8042	8038	TRANSACTION	128975000	93188847225996000	93188847354971000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751958, 14, -1, 'ORDER_C
+STMT	58413	8043	8038	TRANSACTION	195340000	93188847468055000	93188847663395000	0	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 14 AND bucket_no = 1 AND stock >= 1
+STMT	58413	8044	8038	TRANSACTION	176754000	93188847780964000	93188847957718000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 1) WHERE idem_key = '4751958:14:ORDER_CREATE:0'
+STMT	58413	8045	8038	TRANSACTION	158744000	93188848473060000	93188848631804000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751958, 4, 14, '苹果 iPhone 
+STMT	58413	8046	8038	TRANSACTION	864960000	93188848828258000	93188849693218000	0	0	0	qiqi_mall_test	commit
+STMT	58413	8047	NULL	-	46945000	93188849766073000	93188849813018000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	8048	NULL	-	183681000	93188850177716000	93188850361397000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751958)
+STMT	58413	8050	NULL	-	41852000	93189855550996000	93189855592848000	0	0	0	qiqi_mall_test	NULL
+STMT	58413	8051	NULL	-	67798000	93189855652479000	93189855720277000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	8052	NULL	-	150548000	93189855882492000	93189856033040000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	8054	8053	TRANSACTION	108301000	93189856283134000	93189856391435000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	8055	8053	TRANSACTION	184454000	93189856822082000	93189857006536000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	8056	8053	TRANSACTION	160110000	93189857257957000	93189857418067000	0	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	8057	8053	TRANSACTION	144798000	93189857619718000	93189857764516000	0	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751964, 1, -1, 'ORDER_CR
+STMT	58413	8058	8053	TRANSACTION	205072000	93189857909157000	93189858114229000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 0 AND stock >= 1
+STMT	58413	8059	8053	TRANSACTION	154670000	93189858243285000	93189858397955000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 0) WHERE idem_key = '4751964:1:ORDER_CREATE:0'
+STMT	58413	8060	8053	TRANSACTION	156945000	93189858807068000	93189858964013000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751964, 1, 1, '苹果 MacBook 
+STMT	58413	8061	8053	TRANSACTION	861275000	93189859151096000	93189860012371000	0	0	0	qiqi_mall_test	commit
+STMT	58413	8062	NULL	-	46345000	93189860083131000	93189860129476000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	8063	NULL	-	174637000	93189860496020000	93189860670657000	1000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751964)
+STMT	58413	8065	NULL	-	95303000	93190255620424000	93190255715727000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	8066	NULL	-	173068000	93190255869526000	93190256042594000	1000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	8068	8067	TRANSACTION	121990000	93190256295533000	93190256417523000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	8069	8067	TRANSACTION	241313000	93190256888698000	93190257130011000	2000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	8070	8067	TRANSACTION	195806000	93190257431919000	93190257627725000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	8071	8067	TRANSACTION	140039000	93190257849803000	93190257989842000	0	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751966, 1, -1, 'ORDER_CR
+STMT	58413	8072	8067	TRANSACTION	206980000	93190258132050000	93190258339030000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 1 AND stock >= 1
+STMT	58413	8073	8067	TRANSACTION	179189000	93190258473023000	93190258652212000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 1) WHERE idem_key = '4751966:1:ORDER_CREATE:0'
+STMT	58413	8074	8067	TRANSACTION	203063000	93190259170753000	93190259373816000	2000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751966, 1, 1, '苹果 MacBook 
+STMT	58413	8075	8067	TRANSACTION	1039307000	93190259576409000	93190260615716000	0	0	0	qiqi_mall_test	commit
+STMT	58413	8076	NULL	-	68256000	93190260770021000	93190260838277000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	8077	NULL	-	219476000	93190261299973000	93190261519449000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751966)
+STMT	58413	8079	NULL	-	85008000	93190655505616000	93190655590624000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	8080	NULL	-	149355000	93190655747527000	93190655896882000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=2
+STMT	58413	8082	8081	TRANSACTION	110104000	93190656182843000	93190656292947000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	8083	8081	TRANSACTION	193689000	93190656732313000	93190656926002000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	8084	8081	TRANSACTION	188323000	93190657216942000	93190657405265000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	8085	8081	TRANSACTION	142066000	93190657622191000	93190657764257000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751968, 2, -1, 'ORDER_CR
+STMT	58413	8086	8081	TRANSACTION	208711000	93190657910567000	93190658119278000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 2 AND bucket_no = 2 AND stock >= 1
+STMT	58413	8087	8081	TRANSACTION	163434000	93190658253261000	93190658416695000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 2) WHERE idem_key = '4751968:2:ORDER_CREATE:0'
+STMT	58413	8088	8081	TRANSACTION	161647000	93190658875628000	93190659037275000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751968, 1, 2, '苹果 MacBook 
+STMT	58413	8089	8081	TRANSACTION	1746592000	93190659234140000	93190660980732000	0	0	0	qiqi_mall_test	commit
+STMT	58413	8090	NULL	-	52355000	93190661060818000	93190661113173000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	8091	NULL	-	195051000	93190661486202000	93190661681253000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751968)
+STMT	58413	8093	NULL	-	86887000	93191055561903000	93191055648790000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	8094	NULL	-	154660000	93191055814736000	93191055969396000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	8096	8095	TRANSACTION	115668000	93191056238733000	93191056354401000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	8097	8095	TRANSACTION	182442000	93191056789350000	93191056971792000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	8098	8095	TRANSACTION	184795000	93191057212916000	93191057397711000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	8099	8095	TRANSACTION	142297000	93191057599162000	93191057741459000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751970, 1, -1, 'ORDER_CR
+STMT	58413	8100	8095	TRANSACTION	201744000	93191057844782000	93191058046526000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 1 AND stock >= 1
+STMT	58413	8101	8095	TRANSACTION	155053000	93191058225339000	93191058380392000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 1) WHERE idem_key = '4751970:1:ORDER_CREATE:0'
+STMT	58413	8102	8095	TRANSACTION	182314000	93191058852498000	93191059034812000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751970, 1, 1, '苹果 MacBook 
+STMT	58413	8103	8095	TRANSACTION	877494000	93191059237053000	93191060114547000	0	0	0	qiqi_mall_test	commit
+STMT	58413	8104	NULL	-	46753000	93191060185734000	93191060232487000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	8105	NULL	-	174107000	93191060591975000	93191060766082000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751970)
+STMT	58413	8107	NULL	-	89902000	93191456298657000	93191456388559000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	8108	NULL	-	168640000	93191456576753000	93191456745393000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	8110	8109	TRANSACTION	139283000	93191457036790000	93191457176073000	0	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	8111	8109	TRANSACTION	230502000	93191457822947000	93191458053449000	2000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	8112	8109	TRANSACTION	194859000	93191458350531000	93191458545390000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	8113	8109	TRANSACTION	138569000	93191458743355000	93191458881924000	0	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751972, 1, -1, 'ORDER_CR
+STMT	58413	8114	8109	TRANSACTION	218903000	93191459007576000	93191459226479000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 1 AND stock >= 1
+STMT	58413	8115	8109	TRANSACTION	175948000	93191459389364000	93191459565312000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 1) WHERE idem_key = '4751972:1:ORDER_CREATE:0'
+STMT	58413	8116	8109	TRANSACTION	186230000	93191460104547000	93191460290777000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751972, 1, 1, '苹果 MacBook 
+STMT	58413	8117	8109	TRANSACTION	1936093000	93191460495021000	93191462431114000	0	0	0	qiqi_mall_test	commit
+STMT	58413	8118	NULL	-	68587000	93191462547541000	93191462616128000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	8119	NULL	-	214150000	93191463057397000	93191463271547000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751972)
+STMT	58413	8121	NULL	-	107726000	93191855918400000	93191856026126000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	8122	NULL	-	171196000	93191856287653000	93191856458849000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	8124	8123	TRANSACTION	158347000	93191856782251000	93191856940598000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	8125	8123	TRANSACTION	229159000	93191857553206000	93191857782365000	2000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	8126	8123	TRANSACTION	203907000	93191858117674000	93191858321581000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	8127	8123	TRANSACTION	161221000	93191858569864000	93191858731085000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751974, 1, -1, 'ORDER_CR
+STMT	58413	8128	8123	TRANSACTION	241203000	93191858906414000	93191859147617000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 7 AND stock >= 1
+STMT	58413	8129	8123	TRANSACTION	234578000	93191859425952000	93191859660530000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 7) WHERE idem_key = '4751974:1:ORDER_CREATE:0'
+STMT	58413	8130	8123	TRANSACTION	216723000	93191860384834000	93191860601557000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751974, 1, 1, '苹果 MacBook 
+STMT	58413	8131	8123	TRANSACTION	970155000	93191860855254000	93191861825409000	0	0	0	qiqi_mall_test	commit
+STMT	58413	8132	NULL	-	87117000	93191861940677000	93191862027794000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	8133	NULL	-	215875000	93191862459187000	93191862675062000	1000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751974)
+STMT	58413	8135	NULL	-	91051000	93192255773809000	93192255864860000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	8136	NULL	-	161485000	93192256073560000	93192256235045000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	8138	8137	TRANSACTION	117589000	93192256506633000	93192256624222000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	8139	8137	TRANSACTION	180340000	93192257095168000	93192257275508000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	8140	8137	TRANSACTION	162970000	93192257525711000	93192257688681000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	8141	8137	TRANSACTION	118323000	93192257855817000	93192257974140000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751976, 1, -1, 'ORDER_CR
+STMT	58413	8142	8137	TRANSACTION	181556000	93192258086707000	93192258268263000	0	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 2 AND stock >= 1
+STMT	58413	8143	8137	TRANSACTION	144607000	93192258362480000	93192258507087000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 2) WHERE idem_key = '4751976:1:ORDER_CREATE:0'
+STMT	58413	8144	8137	TRANSACTION	154548000	93192258921523000	93192259076071000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751976, 1, 1, '苹果 MacBook 
+STMT	58413	8145	8137	TRANSACTION	916377000	93192259249033000	93192260165410000	0	0	0	qiqi_mall_test	commit
+STMT	58413	8146	NULL	-	50995000	93192260249843000	93192260300838000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	8147	NULL	-	185299000	93192260676470000	93192260861769000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751976)
+STMT	58413	8149	NULL	-	88556000	93192655550513000	93192655639069000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	8150	NULL	-	152910000	93192655794387000	93192655947297000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=15
+STMT	58413	8152	8151	TRANSACTION	111522000	93192656206979000	93192656318501000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=4
+STMT	58413	8153	8151	TRANSACTION	200051000	93192656854023000	93192657054074000	2000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	8154	8151	TRANSACTION	208938000	93192657339983000	93192657548921000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	8155	8151	TRANSACTION	176183000	93192657942052000	93192658118235000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751978, 15, -1, 'ORDER_C
+STMT	58413	8156	8151	TRANSACTION	194678000	93192658319216000	93192658513894000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 15 AND bucket_no = 6 AND stock >= 1
+STMT	58413	8157	8151	TRANSACTION	152115000	93192658620518000	93192658772633000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 6) WHERE idem_key = '4751978:15:ORDER_CREATE:0'
+STMT	58413	8158	8151	TRANSACTION	158489000	93192659219459000	93192659377948000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751978, 4, 15, '苹果 iPhone 
+STMT	58413	8159	8151	TRANSACTION	1927973000	93192659562516000	93192661490489000	0	0	0	qiqi_mall_test	commit
+STMT	58413	8160	NULL	-	53417000	93192661574912000	93192661628329000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	8161	NULL	-	182016000	93192662025394000	93192662207410000	1000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751978)
+STMT	58413	8163	NULL	-	36464000	93193856280664000	93193856317128000	0	0	0	qiqi_mall_test	NULL
+STMT	58413	8164	NULL	-	66451000	93193856441613000	93193856508064000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	8165	NULL	-	149040000	93193856691607000	93193856840647000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	8167	8166	TRANSACTION	118045000	93193857130972000	93193857249017000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	8168	8166	TRANSACTION	169161000	93193857671323000	93193857840484000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	8169	8166	TRANSACTION	154774000	93193858075339000	93193858230113000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	8170	8166	TRANSACTION	115432000	93193858386783000	93193858502215000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751984, 1, -1, 'ORDER_CR
+STMT	58413	8171	8166	TRANSACTION	169798000	93193858598009000	93193858767807000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 2 AND stock >= 1
+STMT	58413	8172	8166	TRANSACTION	142238000	93193858856808000	93193858999046000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 2) WHERE idem_key = '4751984:1:ORDER_CREATE:0'
+STMT	58413	8173	8166	TRANSACTION	156049000	93193859421663000	93193859577712000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751984, 1, 1, '苹果 MacBook 
+STMT	58413	8174	8166	TRANSACTION	861813000	93193859758062000	93193860619875000	0	0	0	qiqi_mall_test	commit
+STMT	58413	8175	NULL	-	56312000	93193860694650000	93193860750962000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	8176	NULL	-	188708000	93193861148553000	93193861337261000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751984)
+STMT	58413	8178	NULL	-	86870000	93194255657671000	93194255744541000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	8179	NULL	-	181071000	93194255917790000	93194256098861000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=12
+STMT	58413	8181	8180	TRANSACTION	136916000	93194256402514000	93194256539430000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=3
+STMT	58413	8182	8180	TRANSACTION	181205000	93194256960292000	93194257141497000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	8183	8180	TRANSACTION	189443000	93194257543076000	93194257732519000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	8184	8180	TRANSACTION	159389000	93194258047022000	93194258206411000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751986, 12, -1, 'ORDER_C
+STMT	58413	8185	8180	TRANSACTION	208190000	93194258399946000	93194258608136000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 12 AND bucket_no = 2 AND stock >= 1
+STMT	58413	8186	8180	TRANSACTION	158529000	93194258717173000	93194258875702000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 2) WHERE idem_key = '4751986:12:ORDER_CREATE:0'
+STMT	58413	8187	8180	TRANSACTION	168657000	93194259314701000	93194259483358000	2000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751986, 3, 12, '华为 MateBoo
+STMT	58413	8188	8180	TRANSACTION	2005490000	93194259694439000	93194261699929000	0	0	0	qiqi_mall_test	commit
+STMT	58413	8189	NULL	-	63118000	93194261802359000	93194261865477000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	8190	NULL	-	214078000	93194262315784000	93194262529862000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751986)
+STMT	58413	8192	NULL	-	86982000	93194655531669000	93194655618651000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	8193	NULL	-	143436000	93194655808856000	93194655952292000	1000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	8195	8194	TRANSACTION	136327000	93194656272290000	93194656408617000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	8196	8194	TRANSACTION	217907000	93194656927718000	93194657145625000	2000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	8197	8194	TRANSACTION	197514000	93194657461245000	93194657658759000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	8198	8194	TRANSACTION	148581000	93194657861397000	93194658009978000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751988, 1, -1, 'ORDER_CR
+STMT	58413	8199	8194	TRANSACTION	198122000	93194658133286000	93194658331408000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 5 AND stock >= 1
+STMT	58413	8200	8194	TRANSACTION	166241000	93194658494255000	93194658660496000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 5) WHERE idem_key = '4751988:1:ORDER_CREATE:0'
+STMT	58413	8201	8194	TRANSACTION	179965000	93194659134499000	93194659314464000	2000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751988, 1, 1, '苹果 MacBook 
+STMT	58413	8202	8194	TRANSACTION	2031963000	93194659511778000	93194661543741000	0	0	0	qiqi_mall_test	commit
+STMT	58413	8203	NULL	-	63151000	93194661567859000	93194661631010000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	8204	NULL	-	201013000	93194662156840000	93194662357853000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751988)
+STMT	58413	8206	NULL	-	90682000	93195055488125000	93195055578807000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	8207	NULL	-	152378000	93195055730179000	93195055882557000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	8209	8208	TRANSACTION	109414000	93195056172159000	93195056281573000	2000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	8210	8208	TRANSACTION	179019000	93195056714978000	93195056893997000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	8211	8208	TRANSACTION	162459000	93195057144843000	93195057307302000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	8212	8208	TRANSACTION	150991000	93195057485975000	93195057636966000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751990, 1, -1, 'ORDER_CR
+STMT	58413	8213	8208	TRANSACTION	192362000	93195057784424000	93195057976786000	0	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 0 AND stock >= 1
+STMT	58413	8214	8208	TRANSACTION	151940000	93195058108629000	93195058260569000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 0) WHERE idem_key = '4751990:1:ORDER_CREATE:0'
+STMT	58413	8215	8208	TRANSACTION	164717000	93195058690201000	93195058854918000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751990, 1, 1, '苹果 MacBook 
+STMT	58413	8216	8208	TRANSACTION	815543000	93195059030833000	93195059846376000	0	0	0	qiqi_mall_test	commit
+STMT	58413	8217	NULL	-	45308000	93195059911386000	93195059956694000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	8218	NULL	-	203679000	93195060346056000	93195060549735000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751990)
+STMT	58413	8220	NULL	-	87473000	93195455622103000	93195455709576000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	8221	NULL	-	166677000	93195455891180000	93195456057857000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	8223	8222	TRANSACTION	124081000	93195456364691000	93195456488772000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	8224	8222	TRANSACTION	191843000	93195456945013000	93195457136856000	2000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	8225	8222	TRANSACTION	174283000	93195457397396000	93195457571679000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	8226	8222	TRANSACTION	121702000	93195457778625000	93195457900327000	0	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751992, 1, -1, 'ORDER_CR
+STMT	58413	8227	8222	TRANSACTION	179246000	93195458100245000	93195458279491000	0	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 7 AND stock >= 1
+STMT	58413	8228	8222	TRANSACTION	154576000	93195458449787000	93195458604363000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 7) WHERE idem_key = '4751992:1:ORDER_CREATE:0'
+STMT	58413	8229	8222	TRANSACTION	143585000	93195459110742000	93195459254327000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751992, 1, 1, '苹果 MacBook 
+STMT	58413	8230	8222	TRANSACTION	1826261000	93195459444768000	93195461271029000	0	0	0	qiqi_mall_test	commit
+STMT	58413	8231	NULL	-	52599000	93195461361717000	93195461414316000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	8232	NULL	-	248553000	93195461828903000	93195462077456000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751992)
+STMT	58413	8234	NULL	-	103311000	93195857139146000	93195857242457000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	8235	NULL	-	168311000	93195857455041000	93195857623352000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	8237	8236	TRANSACTION	630203000	93195857951454000	93195858581657000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	8238	8236	TRANSACTION	481761000	93195858605170000	93195859086931000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	8239	8236	TRANSACTION	372953000	93195859107129000	93195859480082000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	8240	8236	TRANSACTION	296410000	93195859499438000	93195859795848000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751994, 1, -1, 'ORDER_CR
+STMT	58413	8241	8236	TRANSACTION	438426000	93195859813650000	93195860252076000	0	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 6 AND stock >= 1
+STMT	58413	8242	8236	TRANSACTION	203873000	93195860274730000	93195860478603000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 6) WHERE idem_key = '4751994:1:ORDER_CREATE:0'
+STMT	58413	8243	8236	TRANSACTION	191350000	93195861118413000	93195861309763000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751994, 1, 1, '苹果 MacBook 
+STMT	58413	8244	8236	TRANSACTION	1987541000	93195861589843000	93195863577384000	0	0	0	qiqi_mall_test	commit
+STMT	58413	8245	NULL	-	62969000	93195863706363000	93195863769332000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	8246	NULL	-	208316000	93195864298308000	93195864506624000	1000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751994)
+STMT	58413	8248	NULL	-	88881000	93196255654127000	93196255743008000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	8249	NULL	-	161504000	93196255895897000	93196256057401000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	8251	8250	TRANSACTION	112121000	93196256333169000	93196256445290000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	8252	8250	TRANSACTION	196796000	93196256889946000	93196257086742000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	8253	8250	TRANSACTION	163600000	93196257328708000	93196257492308000	0	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	8254	8250	TRANSACTION	121490000	93196257656033000	93196257777523000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751996, 1, -1, 'ORDER_CR
+STMT	58413	8255	8250	TRANSACTION	188806000	93196257909988000	93196258098794000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 6 AND stock >= 1
+STMT	58413	8256	8250	TRANSACTION	143425000	93196258240850000	93196258384275000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 6) WHERE idem_key = '4751996:1:ORDER_CREATE:0'
+STMT	58413	8257	8250	TRANSACTION	164170000	93196258842588000	93196259006758000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751996, 1, 1, '苹果 MacBook 
+STMT	58413	8258	8250	TRANSACTION	954885000	93196259182463000	93196260137348000	0	0	0	qiqi_mall_test	commit
+STMT	58413	8259	NULL	-	45680000	93196260208490000	93196260254170000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	8260	NULL	-	1140574000	93196260636419000	93196261776993000	1000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751996)
+STMT	58413	8262	NULL	-	88977000	93196655740402000	93196655829379000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58413	8263	NULL	-	157840000	93196655985982000	93196656143822000	1000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58413	8265	8264	TRANSACTION	124876000	93196656421201000	93196656546077000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58413	8266	8264	TRANSACTION	186053000	93196657004135000	93196657190188000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58413	8267	8264	TRANSACTION	162598000	93196657439731000	93196657602329000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58413	8268	8264	TRANSACTION	122730000	93196657772151000	93196657894881000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751998, 1, -1, 'ORDER_CR
+STMT	58413	8269	8264	TRANSACTION	206775000	93196657992992000	93196658199767000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 4 AND stock >= 1
+STMT	58413	8270	8264	TRANSACTION	163349000	93196658336937000	93196658500286000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 4) WHERE idem_key = '4751998:1:ORDER_CREATE:0'
+STMT	58413	8271	8264	TRANSACTION	188692000	93196659029707000	93196659218399000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751998, 1, 1, '苹果 MacBook 
+STMT	58413	8272	8264	TRANSACTION	988189000	93196659433434000	93196660421623000	0	0	0	qiqi_mall_test	commit
+STMT	58413	8273	NULL	-	467611000	93196660539520000	93196661007131000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58413	8274	NULL	-	193403000	93196661030508000	93196661223911000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751998)
+STMT	58414	1361	NULL	-	50145000	93184266488691000	93184266538836000	0	0	0	qiqi_mall_test	NULL
+STMT	58414	1362	NULL	-	1352720000	93184266661090000	93184268013810000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1364	NULL	-	1235157000	93184518394627000	93184519629784000	3000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1366	NULL	-	2144478000	93185020192807000	93185022337285000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 4 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1368	NULL	-	1337297000	93185272751781000	93185274089078000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1370	NULL	-	1288336000	93185774556330000	93185775844666000	3000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1372	NULL	-	1393287000	93186276411619000	93186277804906000	3000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1374	NULL	-	400924000	93186528240790000	93186528641714000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1376	NULL	-	2355338000	93187029230391000	93187031585729000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1378	NULL	-	1289713000	93187282042027000	93187283331740000	3000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1380	NULL	-	1337695000	93187783886000000	93187785223695000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1382	NULL	-	1410718000	93188285708230000	93188287118948000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1384	NULL	-	388225000	93188537547215000	93188537935440000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1386	NULL	-	1581444000	93189038480371000	93189040061815000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 14 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b
+STMT	58414	1388	NULL	-	1207296000	93189290409860000	93189291617156000	3000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 8 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1390	NULL	-	1227029000	93189542082909000	93189543309938000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1392	NULL	-	2216484000	93190043807834000	93190046024318000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1394	NULL	-	1225078000	93190296417365000	93190297642443000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1396	NULL	-	1195368000	93190798160196000	93190799355564000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 2 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1398	NULL	-	1223256000	93191299854745000	93191301078001000	3000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1400	NULL	-	434653000	93191551451829000	93191551886482000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1402	NULL	-	2266358000	93192052382647000	93192054649005000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1404	NULL	-	1222434000	93192305074337000	93192306296771000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1406	NULL	-	1359250000	93192806802083000	93192808161333000	3000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 15 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b
+STMT	58414	1408	NULL	-	1228465000	93193308660409000	93193309888874000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1410	NULL	-	1210676000	93193560273946000	93193561484622000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1412	NULL	-	1240707000	93194062015698000	93194063256405000	3000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1414	NULL	-	1270561000	93194313697947000	93194314968508000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 12 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b
+STMT	58414	1416	NULL	-	1481373000	93194815566410000	93194817047783000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1418	NULL	-	1214613000	93195067476273000	93195068690886000	3000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1420	NULL	-	1251520000	93195569212793000	93195570464313000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1422	NULL	-	1251855000	93196070958215000	93196072210070000	3000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58414	1424	NULL	-	417852000	93196322607545000	93196323025397000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58415	8854	NULL	-	42107000	93184245641181000	93184245683288000	0	0	0	qiqi_mall_test	NULL
+STMT	58415	8855	NULL	-	85623000	93184245749538000	93184245835161000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	8856	NULL	-	156689000	93184246011300000	93184246167989000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=15
+STMT	58415	8858	8857	TRANSACTION	123713000	93184246432683000	93184246556396000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=4
+STMT	58415	8859	8857	TRANSACTION	190536000	93184247006932000	93184247197468000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	8860	8857	TRANSACTION	173282000	93184247425271000	93184247598553000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	8861	8857	TRANSACTION	139611000	93184247783175000	93184247922786000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751935, 15, -1, 'ORDER_C
+STMT	58415	8862	8857	TRANSACTION	200144000	93184248041269000	93184248241413000	0	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 15 AND bucket_no = 5 AND stock >= 1
+STMT	58415	8863	8857	TRANSACTION	161512000	93184248339268000	93184248500780000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 5) WHERE idem_key = '4751935:15:ORDER_CREATE:0'
+STMT	58415	8864	8857	TRANSACTION	166663000	93184248955452000	93184249122115000	0	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751935, 4, 15, '苹果 iPhone 
+STMT	58415	8865	8857	TRANSACTION	1031563000	93184249301678000	93184250333241000	0	0	0	qiqi_mall_test	commit
+STMT	58415	8866	NULL	-	53147000	93184250411142000	93184250464289000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	8867	NULL	-	187317000	93184250846346000	93184251033663000	1000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751935)
+STMT	58415	8869	NULL	-	159320000	93185045803538000	93185045962858000	0	0	0	qiqi_mall_test	NULL
+STMT	58415	8870	NULL	-	285760000	93185045979787000	93185046265547000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	8871	NULL	-	474655000	93185046288878000	93185046763533000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=3
+STMT	58415	8873	8872	TRANSACTION	153803000	93185046785101000	93185046938904000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	8874	8872	TRANSACTION	224613000	93185047486655000	93185047711268000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	8875	8872	TRANSACTION	219567000	93185048019193000	93185048238760000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	8876	8872	TRANSACTION	177874000	93185048475120000	93185048652994000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751939, 3, -1, 'ORDER_CR
+STMT	58415	8877	8872	TRANSACTION	220820000	93185048814550000	93185049035370000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 3 AND bucket_no = 5 AND stock >= 1
+STMT	58415	8878	8872	TRANSACTION	183707000	93185049166178000	93185049349885000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 5) WHERE idem_key = '4751939:3:ORDER_CREATE:0'
+STMT	58415	8879	8872	TRANSACTION	219931000	93185049921707000	93185050141638000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751939, 1, 3, '苹果 MacBook 
+STMT	58415	8880	8872	TRANSACTION	1663024000	93185050377596000	93185052040620000	0	0	0	qiqi_mall_test	commit
+STMT	58415	8881	NULL	-	65787000	93185052161733000	93185052227520000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	8882	NULL	-	240959000	93185052708392000	93185052949351000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751939)
+STMT	58415	8884	NULL	-	95404000	93185445480329000	93185445575733000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	8885	NULL	-	152141000	93185445740331000	93185445892472000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58415	8887	8886	TRANSACTION	137204000	93185446190100000	93185446327304000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	8888	8886	TRANSACTION	188908000	93185446765997000	93185446954905000	2000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	8889	8886	TRANSACTION	172795000	93185447209613000	93185447382408000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	8890	8886	TRANSACTION	128053000	93185447553893000	93185447681946000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751941, 1, -1, 'ORDER_CR
+STMT	58415	8891	8886	TRANSACTION	186547000	93185447791009000	93185447977556000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 4 AND stock >= 1
+STMT	58415	8892	8886	TRANSACTION	156632000	93185448083897000	93185448240529000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 4) WHERE idem_key = '4751941:1:ORDER_CREATE:0'
+STMT	58415	8893	8886	TRANSACTION	155371000	93185448702637000	93185448858008000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751941, 1, 1, '苹果 MacBook 
+STMT	58415	8894	8886	TRANSACTION	1947126000	93185449109582000	93185451056708000	0	0	0	qiqi_mall_test	commit
+STMT	58415	8895	NULL	-	60538000	93185451164651000	93185451225189000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	8896	NULL	-	200184000	93185451640509000	93185451840693000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751941)
+STMT	58415	8898	NULL	-	98336000	93185845277360000	93185845375696000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	8899	NULL	-	157805000	93185845545065000	93185845702870000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=14
+STMT	58415	8901	8900	TRANSACTION	134634000	93185845961318000	93185846095952000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=4
+STMT	58415	8902	8900	TRANSACTION	193100000	93185846550028000	93185846743128000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	8903	8900	TRANSACTION	182832000	93185846984276000	93185847167108000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	8904	8900	TRANSACTION	139359000	93185847341502000	93185847480861000	0	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751943, 14, -1, 'ORDER_C
+STMT	58415	8905	8900	TRANSACTION	218807000	93185847608407000	93185847827214000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 14 AND bucket_no = 2 AND stock >= 1
+STMT	58415	8906	8900	TRANSACTION	176391000	93185847936572000	93185848112963000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 2) WHERE idem_key = '4751943:14:ORDER_CREATE:0'
+STMT	58415	8907	8900	TRANSACTION	174828000	93185848582657000	93185848757485000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751943, 4, 14, '苹果 iPhone 
+STMT	58415	8908	8900	TRANSACTION	980580000	93185848960162000	93185849940742000	0	0	0	qiqi_mall_test	commit
+STMT	58415	8909	NULL	-	61501000	93185850027329000	93185850088830000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	8910	NULL	-	193652000	93185850467405000	93185850661057000	1000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751943)
+STMT	58415	8912	NULL	-	103801000	93186245106776000	93186245210577000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	8913	NULL	-	175586000	93186245405431000	93186245581017000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58415	8915	8914	TRANSACTION	143194000	93186245866933000	93186246010127000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	8916	8914	TRANSACTION	210373000	93186246551858000	93186246762231000	2000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	8917	8914	TRANSACTION	177738000	93186247014058000	93186247191796000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	8918	8914	TRANSACTION	136604000	93186247406729000	93186247543333000	0	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751945, 1, -1, 'ORDER_CR
+STMT	58415	8919	8914	TRANSACTION	196985000	93186247661681000	93186247858666000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 6 AND stock >= 1
+STMT	58415	8920	8914	TRANSACTION	170204000	93186247974514000	93186248144718000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 6) WHERE idem_key = '4751945:1:ORDER_CREATE:0'
+STMT	58415	8921	8914	TRANSACTION	157030000	93186248606484000	93186248763514000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751945, 1, 1, '苹果 MacBook 
+STMT	58415	8922	8914	TRANSACTION	1113712000	93186248952612000	93186250066324000	0	0	0	qiqi_mall_test	commit
+STMT	58415	8923	NULL	-	70706000	93186250173293000	93186250243999000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	8924	NULL	-	225056000	93186250685268000	93186250910324000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751945)
+STMT	58415	8926	NULL	-	92082000	93186645012395000	93186645104477000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	8927	NULL	-	153780000	93186645317345000	93186645471125000	1000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58415	8929	8928	TRANSACTION	115526000	93186645762474000	93186645878000000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	8930	8928	TRANSACTION	172457000	93186646323136000	93186646495593000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	8931	8928	TRANSACTION	171547000	93186646757200000	93186646928747000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	8932	8928	TRANSACTION	139106000	93186647154861000	93186647293967000	0	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751947, 1, -1, 'ORDER_CR
+STMT	58415	8933	8928	TRANSACTION	192911000	93186647438365000	93186647631276000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 2 AND stock >= 1
+STMT	58415	8934	8928	TRANSACTION	163347000	93186647757041000	93186647920388000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 2) WHERE idem_key = '4751947:1:ORDER_CREATE:0'
+STMT	58415	8935	8928	TRANSACTION	169772000	93186648383144000	93186648552916000	0	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751947, 1, 1, '苹果 MacBook 
+STMT	58415	8936	8928	TRANSACTION	1039070000	93186648747620000	93186649786690000	0	0	0	qiqi_mall_test	commit
+STMT	58415	8937	NULL	-	56417000	93186649863079000	93186649919496000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	8938	NULL	-	200975000	93186650330658000	93186650531633000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751947)
+STMT	58415	8940	NULL	-	102837000	93187045013920000	93187045116757000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	8941	NULL	-	152119000	93187045279654000	93187045431773000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58415	8943	8942	TRANSACTION	116764000	93187045687509000	93187045804273000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	8944	8942	TRANSACTION	196594000	93187046227362000	93187046423956000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	8945	8942	TRANSACTION	194426000	93187046669614000	93187046864040000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	8946	8942	TRANSACTION	161677000	93187047091613000	93187047253290000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751949, 1, -1, 'ORDER_CR
+STMT	58415	8947	8942	TRANSACTION	211819000	93187047420370000	93187047632189000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 6 AND stock >= 1
+STMT	58415	8948	8942	TRANSACTION	184469000	93187047771527000	93187047955996000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 6) WHERE idem_key = '4751949:1:ORDER_CREATE:0'
+STMT	58415	8949	8942	TRANSACTION	177291000	93187048431760000	93187048609051000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751949, 1, 1, '苹果 MacBook 
+STMT	58415	8950	8942	TRANSACTION	885817000	93187048804534000	93187049690351000	0	0	0	qiqi_mall_test	commit
+STMT	58415	8951	NULL	-	47527000	93187049761627000	93187049809154000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	8952	NULL	-	186265000	93187050193515000	93187050379780000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751949)
+STMT	58415	8954	NULL	-	89954000	93187445138822000	93187445228776000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	8955	NULL	-	161079000	93187445464875000	93187445625954000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58415	8957	8956	TRANSACTION	153152000	93187445935310000	93187446088462000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	8958	8956	TRANSACTION	185754000	93187446573461000	93187446759215000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	8959	8956	TRANSACTION	173613000	93187447021237000	93187447194850000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	8960	8956	TRANSACTION	142967000	93187447432009000	93187447574976000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751951, 1, -1, 'ORDER_CR
+STMT	58415	8961	8956	TRANSACTION	196249000	93187447733318000	93187447929567000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 1 AND stock >= 1
+STMT	58415	8962	8956	TRANSACTION	167165000	93187448124087000	93187448291252000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 1) WHERE idem_key = '4751951:1:ORDER_CREATE:0'
+STMT	58415	8963	8956	TRANSACTION	170231000	93187448807037000	93187448977268000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751951, 1, 1, '苹果 MacBook 
+STMT	58415	8964	8956	TRANSACTION	1841350000	93187449199321000	93187451040671000	0	0	0	qiqi_mall_test	commit
+STMT	58415	8965	NULL	-	58323000	93187451141140000	93187451199463000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	8966	NULL	-	205381000	93187451598104000	93187451803485000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751951)
+STMT	58415	8968	NULL	-	100616000	93187845052499000	93187845153115000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	8969	NULL	-	164907000	93187845352467000	93187845517374000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58415	8971	8970	TRANSACTION	125506000	93187845805989000	93187845931495000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	8972	8970	TRANSACTION	186910000	93187846392686000	93187846579596000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	8973	8970	TRANSACTION	166071000	93187846809676000	93187846975747000	0	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	8974	8970	TRANSACTION	128136000	93187847160262000	93187847288398000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751953, 1, -1, 'ORDER_CR
+STMT	58415	8975	8970	TRANSACTION	183946000	93187847432085000	93187847616031000	0	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 5 AND stock >= 1
+STMT	58415	8976	8970	TRANSACTION	150784000	93187847713714000	93187847864498000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 5) WHERE idem_key = '4751953:1:ORDER_CREATE:0'
+STMT	58415	8977	8970	TRANSACTION	171655000	93187848347786000	93187848519441000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751953, 1, 1, '苹果 MacBook 
+STMT	58415	8978	8970	TRANSACTION	878531000	93187848718593000	93187849597124000	0	0	0	qiqi_mall_test	commit
+STMT	58415	8979	NULL	-	52481000	93187849677513000	93187849729994000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	8980	NULL	-	196775000	93187850126242000	93187850323017000	1000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751953)
+STMT	58415	8982	NULL	-	105129000	93188245121539000	93188245226668000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	8983	NULL	-	194162000	93188245446737000	93188245640899000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58415	8985	8984	TRANSACTION	187024000	93188245987916000	93188246174940000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	8986	8984	TRANSACTION	229428000	93188246679134000	93188246908562000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	8987	8984	TRANSACTION	216301000	93188247224919000	93188247441220000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	8988	8984	TRANSACTION	155030000	93188247668167000	93188247823197000	0	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751955, 1, -1, 'ORDER_CR
+STMT	58415	8989	8984	TRANSACTION	223285000	93188247956631000	93188248179916000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 7 AND stock >= 1
+STMT	58415	8990	8984	TRANSACTION	173860000	93188248293300000	93188248467160000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 7) WHERE idem_key = '4751955:1:ORDER_CREATE:0'
+STMT	58415	8991	8984	TRANSACTION	224591000	93188249741786000	93188249966377000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751955, 1, 1, '苹果 MacBook 
+STMT	58415	8992	8984	TRANSACTION	1021602000	93188250257886000	93188251279488000	0	0	0	qiqi_mall_test	commit
+STMT	58415	8993	NULL	-	69399000	93188251384161000	93188251453560000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	8994	NULL	-	212568000	93188251878757000	93188252091325000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751955)
+STMT	58415	8996	NULL	-	39698000	93188855569250000	93188855608948000	0	0	0	qiqi_mall_test	NULL
+STMT	58415	8997	NULL	-	82305000	93188855674329000	93188855756634000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	8998	NULL	-	159228000	93188855920872000	93188856080100000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58415	9000	8999	TRANSACTION	116211000	93188856336173000	93188856452384000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	9001	8999	TRANSACTION	201463000	93188856891111000	93188857092574000	0	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	9002	8999	TRANSACTION	195874000	93188857335083000	93188857530957000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	9003	8999	TRANSACTION	135233000	93188857726117000	93188857861350000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751959, 1, -1, 'ORDER_CR
+STMT	58415	9004	8999	TRANSACTION	199722000	93188857967807000	93188858167529000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 4 AND stock >= 1
+STMT	58415	9005	8999	TRANSACTION	164783000	93188858265996000	93188858430779000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 4) WHERE idem_key = '4751959:1:ORDER_CREATE:0'
+STMT	58415	9006	8999	TRANSACTION	171394000	93188858879352000	93188859050746000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751959, 1, 1, '苹果 MacBook 
+STMT	58415	9007	8999	TRANSACTION	747354000	93188859235136000	93188859982490000	0	0	0	qiqi_mall_test	commit
+STMT	58415	9008	NULL	-	52984000	93188860073341000	93188860126325000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	9009	NULL	-	209245000	93188860540889000	93188860750134000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751959)
+STMT	58415	9011	NULL	-	321091000	93189256131560000	93189256452651000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	9012	NULL	-	593923000	93189256477959000	93189257071882000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=21
+STMT	58415	9014	9013	TRANSACTION	160209000	93189257096307000	93189257256516000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=6
+STMT	58415	9015	9013	TRANSACTION	201770000	93189257760111000	93189257961881000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	9016	9013	TRANSACTION	180072000	93189258224601000	93189258404673000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	9017	9013	TRANSACTION	146415000	93189258599475000	93189258745890000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751961, 21, -1, 'ORDER_C
+STMT	58415	9018	9013	TRANSACTION	229473000	93189258857385000	93189259086858000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 21 AND bucket_no = 0 AND stock >= 1
+STMT	58415	9019	9013	TRANSACTION	174551000	93189259199049000	93189259373600000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 0) WHERE idem_key = '4751961:21:ORDER_CREATE:0'
+STMT	58415	9020	9013	TRANSACTION	194338000	93189259840160000	93189260034498000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751961, 6, 21, '苹果 iPad mi
+STMT	58415	9021	9013	TRANSACTION	2516589000	93189260233228000	93189262749817000	0	0	0	qiqi_mall_test	commit
+STMT	58415	9022	NULL	-	53886000	93189262832896000	93189262886782000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	9023	NULL	-	197730000	93189263315762000	93189263513492000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751961)
+STMT	58415	9025	NULL	-	89121000	93189655545996000	93189655635117000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	9026	NULL	-	164393000	93189655789230000	93189655953623000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58415	9028	9027	TRANSACTION	128905000	93189656235474000	93189656364379000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	9029	9027	TRANSACTION	176702000	93189656788536000	93189656965238000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	9030	9027	TRANSACTION	186211000	93189657256630000	93189657442841000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	9031	9027	TRANSACTION	147144000	93189657652686000	93189657799830000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751963, 1, -1, 'ORDER_CR
+STMT	58415	9032	9027	TRANSACTION	207367000	93189657935138000	93189658142505000	0	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 0 AND stock >= 1
+STMT	58415	9033	9027	TRANSACTION	158392000	93189658266130000	93189658424522000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 0) WHERE idem_key = '4751963:1:ORDER_CREATE:0'
+STMT	58415	9034	9027	TRANSACTION	152392000	93189658891364000	93189659043756000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751963, 1, 1, '苹果 MacBook 
+STMT	58415	9035	9027	TRANSACTION	892416000	93189659208025000	93189660100441000	0	0	0	qiqi_mall_test	commit
+STMT	58415	9036	NULL	-	46087000	93189660176310000	93189660222397000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	9037	NULL	-	183346000	93189660600980000	93189660784326000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751963)
+STMT	58415	9039	NULL	-	101518000	93190055499084000	93190055600602000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	9040	NULL	-	163303000	93190055793343000	93190055956646000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58415	9042	9041	TRANSACTION	128473000	93190056235406000	93190056363879000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	9043	9041	TRANSACTION	198020000	93190056811288000	93190057009308000	0	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	9044	9041	TRANSACTION	165934000	93190057244267000	93190057410201000	0	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	9045	9041	TRANSACTION	124490000	93190057578065000	93190057702555000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751965, 1, -1, 'ORDER_CR
+STMT	58415	9046	9041	TRANSACTION	216379000	93190057804949000	93190058021328000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 2 AND stock >= 1
+STMT	58415	9047	9041	TRANSACTION	158202000	93190058147098000	93190058305300000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 2) WHERE idem_key = '4751965:1:ORDER_CREATE:0'
+STMT	58415	9048	9041	TRANSACTION	148237000	93190058748402000	93190058896639000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751965, 1, 1, '苹果 MacBook 
+STMT	58415	9049	9041	TRANSACTION	755298000	93190059097432000	93190059852730000	0	0	0	qiqi_mall_test	commit
+STMT	58415	9050	NULL	-	47047000	93190059919691000	93190059966738000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	9051	NULL	-	193818000	93190060355966000	93190060549784000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751965)
+STMT	58415	9053	NULL	-	85714000	93190455516688000	93190455602402000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	9054	NULL	-	148451000	93190455823776000	93190455972227000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=9
+STMT	58415	9056	9055	TRANSACTION	133228000	93190456251924000	93190456385152000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=3
+STMT	58415	9057	9055	TRANSACTION	193256000	93190456854268000	93190457047524000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	9058	9055	TRANSACTION	156943000	93190457346787000	93190457503730000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	9059	9055	TRANSACTION	138201000	93190457735269000	93190457873470000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751967, 9, -1, 'ORDER_CR
+STMT	58415	9060	9055	TRANSACTION	193881000	93190458018448000	93190458212329000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 9 AND bucket_no = 6 AND stock >= 1
+STMT	58415	9061	9055	TRANSACTION	157540000	93190458336065000	93190458493605000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 6) WHERE idem_key = '4751967:9:ORDER_CREATE:0'
+STMT	58415	9062	9055	TRANSACTION	179309000	93190458926658000	93190459105967000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751967, 3, 9, '华为 MateBook
+STMT	58415	9063	9055	TRANSACTION	1731279000	93190459329991000	93190461061270000	0	0	0	qiqi_mall_test	commit
+STMT	58415	9064	NULL	-	54305000	93190461148385000	93190461202690000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	9065	NULL	-	201962000	93190461599602000	93190461801564000	1000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751967)
+STMT	58415	9067	NULL	-	94373000	93190855565663000	93190855660036000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	9068	NULL	-	151414000	93190855820864000	93190855972278000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58415	9070	9069	TRANSACTION	119451000	93190856241061000	93190856360512000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	9071	9069	TRANSACTION	193755000	93190856838111000	93190857031866000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	9072	9069	TRANSACTION	180455000	93190857351967000	93190857532422000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	9073	9069	TRANSACTION	126864000	93190857709322000	93190857836186000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751969, 1, -1, 'ORDER_CR
+STMT	58415	9074	9069	TRANSACTION	202069000	93190857934463000	93190858136532000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 2 AND stock >= 1
+STMT	58415	9075	9069	TRANSACTION	146985000	93190858226052000	93190858373037000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 2) WHERE idem_key = '4751969:1:ORDER_CREATE:0'
+STMT	58415	9076	9069	TRANSACTION	145491000	93190858821639000	93190858967130000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751969, 1, 1, '苹果 MacBook 
+STMT	58415	9077	9069	TRANSACTION	900928000	93190859148442000	93190860049370000	0	0	0	qiqi_mall_test	commit
+STMT	58415	9078	NULL	-	49273000	93190860131532000	93190860180805000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	9079	NULL	-	185779000	93190860563009000	93190860748788000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751969)
+STMT	58415	9081	NULL	-	107737000	93191255573794000	93191255681531000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	9082	NULL	-	180502000	93191255926290000	93191256106792000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58415	9084	9083	TRANSACTION	141264000	93191256419344000	93191256560608000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	9085	9083	TRANSACTION	201791000	93191256985319000	93191257187110000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	9086	9083	TRANSACTION	165559000	93191257407054000	93191257572613000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	9087	9083	TRANSACTION	127324000	93191257802229000	93191257929553000	0	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751971, 1, -1, 'ORDER_CR
+STMT	58415	9088	9083	TRANSACTION	184407000	93191258092664000	93191258277071000	0	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 1 AND stock >= 1
+STMT	58415	9089	9083	TRANSACTION	150623000	93191258412106000	93191258562729000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 1) WHERE idem_key = '4751971:1:ORDER_CREATE:0'
+STMT	58415	9090	9083	TRANSACTION	154856000	93191259057873000	93191259212729000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751971, 1, 1, '苹果 MacBook 
+STMT	58415	9091	9083	TRANSACTION	2336199000	93191259393673000	93191261729872000	0	0	0	qiqi_mall_test	commit
+STMT	58415	9092	NULL	-	57377000	93191261836754000	93191261894131000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	9093	NULL	-	211737000	93191262313472000	93191262525209000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751971)
+STMT	58415	9095	NULL	-	100350000	93191656075592000	93191656175942000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	9096	NULL	-	183787000	93191656407848000	93191656591635000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58415	9098	9097	TRANSACTION	154265000	93191656917989000	93191657072254000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	9099	9097	TRANSACTION	208514000	93191657595177000	93191657803691000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	9100	9097	TRANSACTION	416787000	93191658191332000	93191658608119000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	9101	9097	TRANSACTION	290390000	93191658629522000	93191658919912000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751973, 1, -1, 'ORDER_CR
+STMT	58415	9102	9097	TRANSACTION	336245000	93191658937204000	93191659273449000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 6 AND stock >= 1
+STMT	58415	9103	9097	TRANSACTION	648586000	93191659292978000	93191659941564000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 6) WHERE idem_key = '4751973:1:ORDER_CREATE:0'
+STMT	58415	9104	9097	TRANSACTION	182991000	93191659963551000	93191660146542000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751973, 1, 1, '苹果 MacBook 
+STMT	58415	9105	9097	TRANSACTION	901680000	93191660526550000	93191661428230000	0	0	0	qiqi_mall_test	commit
+STMT	58415	9106	NULL	-	57776000	93191661553539000	93191661611315000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	9107	NULL	-	212937000	93191662087698000	93191662300635000	1000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751973)
+STMT	58415	9109	NULL	-	96765000	93192055546084000	93192055642849000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	9110	NULL	-	165202000	93192055857649000	93192056022851000	1000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58415	9112	9111	TRANSACTION	122391000	93192056305262000	93192056427653000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	9113	9111	TRANSACTION	193686000	93192056900881000	93192057094567000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	9114	9111	TRANSACTION	169083000	93192057358621000	93192057527704000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	9115	9111	TRANSACTION	124311000	93192057696290000	93192057820601000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751975, 1, -1, 'ORDER_CR
+STMT	58415	9116	9111	TRANSACTION	194359000	93192057923560000	93192058117919000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 6 AND stock >= 1
+STMT	58415	9117	9111	TRANSACTION	187679000	93192058224428000	93192058412107000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 6) WHERE idem_key = '4751975:1:ORDER_CREATE:0'
+STMT	58415	9118	9111	TRANSACTION	180663000	93192058896640000	93192059077303000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751975, 1, 1, '苹果 MacBook 
+STMT	58415	9119	9111	TRANSACTION	917081000	93192059278157000	93192060195238000	0	0	0	qiqi_mall_test	commit
+STMT	58415	9120	NULL	-	55104000	93192060274583000	93192060329687000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	9121	NULL	-	200588000	93192060730552000	93192060931140000	1000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751975)
+STMT	58415	9123	NULL	-	40298000	93192855730126000	93192855770424000	0	0	0	qiqi_mall_test	NULL
+STMT	58415	9124	NULL	-	74136000	93192855864504000	93192855938640000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	9125	NULL	-	153098000	93192856153293000	93192856306391000	1000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58415	9127	9126	TRANSACTION	131743000	93192856627383000	93192856759126000	2000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	9128	9126	TRANSACTION	181663000	93192857256955000	93192857438618000	2000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	9129	9126	TRANSACTION	169777000	93192857668117000	93192857837894000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	9130	9126	TRANSACTION	145188000	93192858033940000	93192858179128000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751979, 1, -1, 'ORDER_CR
+STMT	58415	9131	9126	TRANSACTION	188499000	93192858308736000	93192858497235000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 2 AND stock >= 1
+STMT	58415	9132	9126	TRANSACTION	151256000	93192858598165000	93192858749421000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 2) WHERE idem_key = '4751979:1:ORDER_CREATE:0'
+STMT	58415	9133	9126	TRANSACTION	162483000	93192859198131000	93192859360614000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751979, 1, 1, '苹果 MacBook 
+STMT	58415	9134	9126	TRANSACTION	910028000	93192859573865000	93192860483893000	0	0	0	qiqi_mall_test	commit
+STMT	58415	9135	NULL	-	48428000	93192860566072000	93192860614500000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	9136	NULL	-	186266000	93192861009967000	93192861196233000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751979)
+STMT	58415	9138	NULL	-	94407000	93193255747501000	93193255841908000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	9139	NULL	-	158453000	93193256215397000	93193256373850000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=4
+STMT	58415	9141	9140	TRANSACTION	119475000	93193256647749000	93193256767224000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	9142	9140	TRANSACTION	202233000	93193257286536000	93193257488769000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	9143	9140	TRANSACTION	172587000	93193257738000000	93193257910587000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	9144	9140	TRANSACTION	150590000	93193258119997000	93193258270587000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751981, 4, -1, 'ORDER_CR
+STMT	58415	9145	9140	TRANSACTION	182298000	93193258418609000	93193258600907000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 4 AND bucket_no = 6 AND stock >= 1
+STMT	58415	9146	9140	TRANSACTION	153256000	93193258732977000	93193258886233000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 6) WHERE idem_key = '4751981:4:ORDER_CREATE:0'
+STMT	58415	9147	9140	TRANSACTION	159038000	93193259368967000	93193259528005000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751981, 1, 4, '苹果 MacBook 
+STMT	58415	9148	9140	TRANSACTION	2224970000	93193259714329000	93193261939299000	0	0	0	qiqi_mall_test	commit
+STMT	58415	9149	NULL	-	58220000	93193262054900000	93193262113120000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	9150	NULL	-	194165000	93193262508415000	93193262702580000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751981)
+STMT	58415	9152	NULL	-	103019000	93193655667066000	93193655770085000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	9153	NULL	-	173439000	93193655953834000	93193656127273000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=18
+STMT	58415	9155	9154	TRANSACTION	159585000	93193656434292000	93193656593877000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=5
+STMT	58415	9156	9154	TRANSACTION	199663000	93193657072668000	93193657272331000	2000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	9157	9154	TRANSACTION	1003184000	93193657531757000	93193658534941000	2000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	9158	9154	TRANSACTION	164374000	93193658812240000	93193658976614000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751983, 18, -1, 'ORDER_C
+STMT	58415	9159	9154	TRANSACTION	214438000	93193659129605000	93193659344043000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 18 AND bucket_no = 5 AND stock >= 1
+STMT	58415	9160	9154	TRANSACTION	181590000	93193659456367000	93193659637957000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 5) WHERE idem_key = '4751983:18:ORDER_CREATE:0'
+STMT	58415	9161	9154	TRANSACTION	225731000	93193660166481000	93193660392212000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751983, 5, 18, 'OPPO A57 5
+STMT	58415	9162	9154	TRANSACTION	788742000	93193660602303000	93193661391045000	0	0	0	qiqi_mall_test	commit
+STMT	58415	9163	NULL	-	55404000	93193661482903000	93193661538307000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	9164	NULL	-	227059000	93193661979586000	93193662206645000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751983)
+STMT	58415	9166	NULL	-	86123000	93194055615990000	93194055702113000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	9167	NULL	-	159968000	93194055862057000	93194056022025000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58415	9169	9168	TRANSACTION	126996000	93194056275318000	93194056402314000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	9170	9168	TRANSACTION	214405000	93194056899695000	93194057114100000	2000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	9171	9168	TRANSACTION	189322000	93194057365344000	93194057554666000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	9172	9168	TRANSACTION	144813000	93194057762137000	93194057906950000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751985, 1, -1, 'ORDER_CR
+STMT	58415	9173	9168	TRANSACTION	214182000	93194058077596000	93194058291778000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 3 AND stock >= 1
+STMT	58415	9174	9168	TRANSACTION	168433000	93194058398102000	93194058566535000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 3) WHERE idem_key = '4751985:1:ORDER_CREATE:0'
+STMT	58415	9175	9168	TRANSACTION	170632000	93194059044622000	93194059215254000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751985, 1, 1, '苹果 MacBook 
+STMT	58415	9176	9168	TRANSACTION	1877415000	93194059411898000	93194061289313000	0	0	0	qiqi_mall_test	commit
+STMT	58415	9177	NULL	-	61546000	93194061392734000	93194061454280000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	9178	NULL	-	235515000	93194061880773000	93194062116288000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751985)
+STMT	58415	9180	NULL	-	95636000	93194455698807000	93194455794443000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	9181	NULL	-	173052000	93194455971371000	93194456144423000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58415	9183	9182	TRANSACTION	127873000	93194456407687000	93194456535560000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	9184	9182	TRANSACTION	191453000	93194457028040000	93194457219493000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	9185	9182	TRANSACTION	165922000	93194457451180000	93194457617102000	0	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	9186	9182	TRANSACTION	124120000	93194457778706000	93194457902826000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751987, 1, -1, 'ORDER_CR
+STMT	58415	9187	9182	TRANSACTION	188953000	93194458009172000	93194458198125000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 6 AND stock >= 1
+STMT	58415	9188	9182	TRANSACTION	147508000	93194458289387000	93194458436895000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 6) WHERE idem_key = '4751987:1:ORDER_CREATE:0'
+STMT	58415	9189	9182	TRANSACTION	156168000	93194458868776000	93194459024944000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751987, 1, 1, '苹果 MacBook 
+STMT	58415	9190	9182	TRANSACTION	875220000	93194459198020000	93194460073240000	0	0	0	qiqi_mall_test	commit
+STMT	58415	9191	NULL	-	45935000	93194460148082000	93194460194017000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	9192	NULL	-	184913000	93194460566314000	93194460751227000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751987)
+STMT	58415	9194	NULL	-	95347000	93194855568531000	93194855663878000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	9195	NULL	-	171853000	93194855870031000	93194856041884000	1000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=13
+STMT	58415	9197	9196	TRANSACTION	150259000	93194856378608000	93194856528867000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=4
+STMT	58415	9198	9196	TRANSACTION	218160000	93194857029688000	93194857247848000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	9199	9196	TRANSACTION	205442000	93194857534772000	93194857740214000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	9200	9196	TRANSACTION	156166000	93194857929275000	93194858085441000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751989, 13, -1, 'ORDER_C
+STMT	58415	9201	9196	TRANSACTION	224906000	93194858230566000	93194858455472000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 13 AND bucket_no = 7 AND stock >= 1
+STMT	58415	9202	9196	TRANSACTION	179930000	93194858610864000	93194858790794000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 7) WHERE idem_key = '4751989:13:ORDER_CREATE:0'
+STMT	58415	9203	9196	TRANSACTION	212892000	93194859343833000	93194859556725000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751989, 4, 13, '苹果 iPhone 
+STMT	58415	9204	9196	TRANSACTION	902310000	93194859941172000	93194860843482000	0	0	0	qiqi_mall_test	commit
+STMT	58415	9205	NULL	-	71305000	93194860952394000	93194861023699000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	9206	NULL	-	218839000	93194861462729000	93194861681568000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751989)
+STMT	58415	9208	NULL	-	92956000	93195255599734000	93195255692690000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	9209	NULL	-	166562000	93195255855079000	93195256021641000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=15
+STMT	58415	9211	9210	TRANSACTION	122013000	93195256330073000	93195256452086000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=4
+STMT	58415	9212	9210	TRANSACTION	196311000	93195256920728000	93195257117039000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	9213	9210	TRANSACTION	161434000	93195257379929000	93195257541363000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	9214	9210	TRANSACTION	147001000	93195257781805000	93195257928806000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751991, 15, -1, 'ORDER_C
+STMT	58415	9215	9210	TRANSACTION	201498000	93195258077638000	93195258279136000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 15 AND bucket_no = 4 AND stock >= 1
+STMT	58415	9216	9210	TRANSACTION	186931000	93195258393155000	93195258580086000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 4) WHERE idem_key = '4751991:15:ORDER_CREATE:0'
+STMT	58415	9217	9210	TRANSACTION	163817000	93195259087894000	93195259251711000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751991, 4, 15, '苹果 iPhone 
+STMT	58415	9218	9210	TRANSACTION	2530800000	93195259458373000	93195261989173000	0	0	0	qiqi_mall_test	commit
+STMT	58415	9219	NULL	-	67116000	93195262115632000	93195262182748000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	9220	NULL	-	218121000	93195262601663000	93195262819784000	1000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751991)
+STMT	58415	9222	NULL	-	119446000	93195655894832000	93195656014278000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	9223	NULL	-	165479000	93195656214609000	93195656380088000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58415	9225	9224	TRANSACTION	137269000	93195656694387000	93195656831656000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	9226	9224	TRANSACTION	208145000	93195657313180000	93195657521325000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	9227	9224	TRANSACTION	177762000	93195657769705000	93195657947467000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	9228	9224	TRANSACTION	137200000	93195658144569000	93195658281769000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751993, 1, -1, 'ORDER_CR
+STMT	58415	9229	9224	TRANSACTION	202158000	93195658395240000	93195658597398000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 7 AND stock >= 1
+STMT	58415	9230	9224	TRANSACTION	167733000	93195658715496000	93195658883229000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 7) WHERE idem_key = '4751993:1:ORDER_CREATE:0'
+STMT	58415	9231	9224	TRANSACTION	211318000	93195659371365000	93195659582683000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751993, 1, 1, '苹果 MacBook 
+STMT	58415	9232	9224	TRANSACTION	775819000	93195659809008000	93195660584827000	0	0	0	qiqi_mall_test	commit
+STMT	58415	9233	NULL	-	55143000	93195660666557000	93195660721700000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	9234	NULL	-	222430000	93195661154489000	93195661376919000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751993)
+STMT	58415	9236	NULL	-	124575000	93196056004021000	93196056128596000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58415	9237	NULL	-	170764000	93196056370548000	93196056541312000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58415	9239	9238	TRANSACTION	117428000	93196056838163000	93196056955591000	0	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58415	9240	9238	TRANSACTION	178436000	93196057413598000	93196057592034000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58415	9241	9238	TRANSACTION	167961000	93196057842505000	93196058010466000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58415	9242	9238	TRANSACTION	127988000	93196058178348000	93196058306336000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751995, 1, -1, 'ORDER_CR
+STMT	58415	9243	9238	TRANSACTION	185364000	93196058449349000	93196058634713000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 7 AND stock >= 1
+STMT	58415	9244	9238	TRANSACTION	148181000	93196058729024000	93196058877205000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 7) WHERE idem_key = '4751995:1:ORDER_CREATE:0'
+STMT	58415	9245	9238	TRANSACTION	158692000	93196059343129000	93196059501821000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751995, 1, 1, '苹果 MacBook 
+STMT	58415	9246	9238	TRANSACTION	1809638000	93196059685171000	93196061494809000	0	0	0	qiqi_mall_test	commit
+STMT	58415	9247	NULL	-	65100000	93196061594969000	93196061660069000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58415	9248	NULL	-	196596000	93196062063988000	93196062260584000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751995)
+STMT	58416	1053	NULL	-	41858000	93185646506262000	93185646548120000	0	0	0	qiqi_mall_test	NULL
+STMT	58416	1054	NULL	-	80690000	93185646624892000	93185646705582000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58416	1055	NULL	-	191269000	93185646911615000	93185647102884000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58416	1057	1056	TRANSACTION	142613000	93185647417629000	93185647560242000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58416	1058	1056	TRANSACTION	496159000	93185648065160000	93185648561319000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58416	1059	1056	TRANSACTION	194152000	93185648581504000	93185648775656000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58416	1060	1056	TRANSACTION	142267000	93185648975465000	93185649117732000	0	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751942, 1, -1, 'ORDER_CR
+STMT	58416	1061	1056	TRANSACTION	193622000	93185649234501000	93185649428123000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 4 AND stock >= 1
+STMT	58416	1062	1056	TRANSACTION	154760000	93185649531139000	93185649685899000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 4) WHERE idem_key = '4751942:1:ORDER_CREATE:0'
+STMT	58416	1063	1056	TRANSACTION	160249000	93185650125320000	93185650285569000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751942, 1, 1, '苹果 MacBook 
+STMT	58416	1064	1056	TRANSACTION	1954175000	93185650613251000	93185652567426000	0	0	0	qiqi_mall_test	commit
+STMT	58416	1065	NULL	-	62347000	93185652676636000	93185652738983000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58416	1066	NULL	-	203202000	93185653183207000	93185653386409000	1000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751942)
+STMT	58416	1068	NULL	-	37543000	93189455610738000	93189455648281000	0	0	0	qiqi_mall_test	NULL
+STMT	58416	1069	NULL	-	71132000	93189455770967000	93189455842099000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58416	1070	NULL	-	143818000	93189456064835000	93189456208653000	1000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58416	1072	1071	TRANSACTION	119735000	93189456501447000	93189456621182000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58416	1073	1071	TRANSACTION	173964000	93189457102236000	93189457276200000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58416	1074	1071	TRANSACTION	173378000	93189457563927000	93189457737305000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58416	1075	1071	TRANSACTION	130561000	93189457902124000	93189458032685000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751962, 1, -1, 'ORDER_CR
+STMT	58416	1076	1071	TRANSACTION	181313000	93189458215054000	93189458396367000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 4 AND stock >= 1
+STMT	58416	1077	1071	TRANSACTION	146899000	93189458536392000	93189458683291000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 4) WHERE idem_key = '4751962:1:ORDER_CREATE:0'
+STMT	58416	1078	1071	TRANSACTION	160993000	93189459141266000	93189459302259000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751962, 1, 1, '苹果 MacBook 
+STMT	58416	1079	1071	TRANSACTION	1820757000	93189459504488000	93189461325245000	0	0	0	qiqi_mall_test	commit
+STMT	58416	1080	NULL	-	53849000	93189461400962000	93189461454811000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58416	1081	NULL	-	198569000	93189461832585000	93189462031154000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751962)
+STMT	58416	1083	NULL	-	40951000	93193455938479000	93193455979430000	0	0	0	qiqi_mall_test	NULL
+STMT	58416	1084	NULL	-	72985000	93193456115660000	93193456188645000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58416	1085	NULL	-	157471000	93193456427553000	93193456585024000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58416	1087	1086	TRANSACTION	129206000	93193456880833000	93193457010039000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58416	1088	1086	TRANSACTION	195577000	93193457527259000	93193457722836000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58416	1089	1086	TRANSACTION	181068000	93193457984745000	93193458165813000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58416	1090	1086	TRANSACTION	125643000	93193458386498000	93193458512141000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751982, 1, -1, 'ORDER_CR
+STMT	58416	1091	1086	TRANSACTION	194971000	93193458633064000	93193458828035000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 3 AND stock >= 1
+STMT	58416	1092	1086	TRANSACTION	172426000	93193458932378000	93193459104804000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 3) WHERE idem_key = '4751982:1:ORDER_CREATE:0'
+STMT	58416	1093	1086	TRANSACTION	199852000	93193459707625000	93193459907477000	2000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751982, 1, 1, '苹果 MacBook 
+STMT	58416	1094	1086	TRANSACTION	918783000	93193460135635000	93193461054418000	0	0	0	qiqi_mall_test	commit
+STMT	58416	1095	NULL	-	55118000	93193461136684000	93193461191802000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58416	1096	NULL	-	186335000	93193461613489000	93193461799824000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751982)
+STMT	58417	1068	NULL	-	48945000	93185245291100000	93185245340045000	0	0	0	qiqi_mall_test	NULL
+STMT	58417	1069	NULL	-	73443000	93185245432309000	93185245505752000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58417	1070	NULL	-	154072000	93185245667266000	93185245821338000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58417	1072	1071	TRANSACTION	117231000	93185246116381000	93185246233612000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58417	1073	1071	TRANSACTION	249319000	93185246763743000	93185247013062000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58417	1074	1071	TRANSACTION	200975000	93185247289926000	93185247490901000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58417	1075	1071	TRANSACTION	306004000	93185247721672000	93185248027676000	2000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751940, 1, -1, 'ORDER_CR
+STMT	58417	1076	1071	TRANSACTION	200373000	93185248044953000	93185248245326000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 1 AND stock >= 1
+STMT	58417	1077	1071	TRANSACTION	157042000	93185248377046000	93185248534088000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 1) WHERE idem_key = '4751940:1:ORDER_CREATE:0'
+STMT	58417	1078	1071	TRANSACTION	163697000	93185248975391000	93185249139088000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751940, 1, 1, '苹果 MacBook 
+STMT	58417	1079	1071	TRANSACTION	874691000	93185249326111000	93185250200802000	0	0	0	qiqi_mall_test	commit
+STMT	58417	1080	NULL	-	52683000	93185250279500000	93185250332183000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58417	1081	NULL	-	188194000	93185250716738000	93185250904932000	1000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751940)
+STMT	58417	1083	NULL	-	40443000	93189055521615000	93189055562058000	0	0	0	qiqi_mall_test	NULL
+STMT	58417	1084	NULL	-	68149000	93189055619396000	93189055687545000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58417	1085	NULL	-	173912000	93189055854003000	93189056027915000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=8
+STMT	58417	1087	1086	TRANSACTION	128522000	93189056312767000	93189056441289000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=2
+STMT	58417	1088	1086	TRANSACTION	213540000	93189056915321000	93189057128861000	2000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58417	1089	1086	TRANSACTION	180496000	93189057410600000	93189057591096000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58417	1090	1086	TRANSACTION	139260000	93189057790458000	93189057929718000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751960, 8, -1, 'ORDER_CR
+STMT	58417	1091	1086	TRANSACTION	197195000	93189058078529000	93189058275724000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 8 AND bucket_no = 7 AND stock >= 1
+STMT	58417	1092	1086	TRANSACTION	163093000	93189058405628000	93189058568721000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 7) WHERE idem_key = '4751960:8:ORDER_CREATE:0'
+STMT	58417	1093	1086	TRANSACTION	165218000	93189059008169000	93189059173387000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751960, 2, 8, '华硕 灵耀 Pro 双
+STMT	58417	1094	1086	TRANSACTION	1005303000	93189059379769000	93189060385072000	0	0	0	qiqi_mall_test	commit
+STMT	58417	1095	NULL	-	78678000	93189060484531000	93189060563209000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58417	1096	NULL	-	217265000	93189061054348000	93189061271613000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751960)
+STMT	58417	1098	NULL	-	50242000	93193056018120000	93193056068362000	0	0	0	qiqi_mall_test	NULL
+STMT	58417	1099	NULL	-	74483000	93193056166433000	93193056240916000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58417	1100	NULL	-	161600000	93193056439321000	93193056600921000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58417	1102	1101	TRANSACTION	127082000	93193056862579000	93193056989661000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58417	1103	1101	TRANSACTION	211763000	93193057490361000	93193057702124000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58417	1104	1101	TRANSACTION	217111000	93193057985726000	93193058202837000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58417	1105	1101	TRANSACTION	149895000	93193058418367000	93193058568262000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751980, 1, -1, 'ORDER_CR
+STMT	58417	1106	1101	TRANSACTION	201517000	93193058690554000	93193058892071000	0	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 7 AND stock >= 1
+STMT	58417	1107	1101	TRANSACTION	160374000	93193059008803000	93193059169177000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 7) WHERE idem_key = '4751980:1:ORDER_CREATE:0'
+STMT	58417	1108	1101	TRANSACTION	185467000	93193059695377000	93193059880844000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751980, 1, 1, '苹果 MacBook 
+STMT	58417	1109	1101	TRANSACTION	991329000	93193060095924000	93193061087253000	0	0	0	qiqi_mall_test	commit
+STMT	58417	1110	NULL	-	81880000	93193061181648000	93193061263528000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58417	1111	NULL	-	200871000	93193061683943000	93193061884814000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751980)
+STMT	58424	2255	NULL	-	73068000	93184462950108000	93184463023176000	0	0	0	qiqi_mall_test	NULL
+STMT	58424	2256	NULL	-	1205599000	93184463111203000	93184464316802000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 15 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b
+STMT	58424	2258	NULL	-	93225000	93184645920537000	93184646013762000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58424	2259	NULL	-	149819000	93184646249481000	93184646399300000	1000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58424	2261	2260	TRANSACTION	110222000	93184646684081000	93184646794303000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58424	2262	2260	TRANSACTION	172380000	93184647250189000	93184647422569000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58424	2263	2260	TRANSACTION	156686000	93184647669338000	93184647826024000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58424	2264	2260	TRANSACTION	134157000	93184648013185000	93184648147342000	0	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751937, 1, -1, 'ORDER_CR
+STMT	58424	2265	2260	TRANSACTION	182079000	93184648308429000	93184648490508000	0	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 2 AND stock >= 1
+STMT	58424	2266	2260	TRANSACTION	145946000	93184648631343000	93184648777289000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 2) WHERE idem_key = '4751937:1:ORDER_CREATE:0'
+STMT	58424	2267	2260	TRANSACTION	180131000	93184649268720000	93184649448851000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751937, 1, 1, '苹果 MacBook 
+STMT	58424	2268	2260	TRANSACTION	946337000	93184649655372000	93184650601709000	0	0	0	qiqi_mall_test	commit
+STMT	58424	2269	NULL	-	52328000	93184650693095000	93184650745423000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58424	2270	NULL	-	189464000	93184651154211000	93184651343675000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751937)
+STMT	58424	2272	NULL	-	1444703000	93184714680473000	93184716125176000	1000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2274	NULL	-	1381193000	93185216682968000	93185218064161000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 3 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2276	NULL	-	1245009000	93185468435694000	93185469680703000	3000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2278	NULL	-	1433748000	93185970257394000	93185971691142000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 14 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b
+STMT	58424	2280	NULL	-	1269145000	93186472256427000	93186473525572000	3000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2282	NULL	-	1366434000	93186723914378000	93186725280812000	3000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2284	NULL	-	1514518000	93187225820984000	93187227335502000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2286	NULL	-	1389964000	93187477740654000	93187479130618000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2288	NULL	-	1325153000	93187979659808000	93187980984961000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2290	NULL	-	1284290000	93188481498285000	93188482782575000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2292	NULL	-	96154000	93188644972910000	93188645069064000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58424	2293	NULL	-	157100000	93188645274758000	93188645431858000	1000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58424	2295	2294	TRANSACTION	126740000	93188645715191000	93188645841931000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58424	2296	2294	TRANSACTION	188089000	93188646334461000	93188646522550000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58424	2297	2294	TRANSACTION	189122000	93188646763802000	93188646952924000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58424	2298	2294	TRANSACTION	128858000	93188647143224000	93188647272082000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751957, 1, -1, 'ORDER_CR
+STMT	58424	2299	2294	TRANSACTION	187570000	93188647418610000	93188647606180000	1000000	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 3 AND stock >= 1
+STMT	58424	2300	2294	TRANSACTION	161809000	93188647705783000	93188647867592000	0	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 3) WHERE idem_key = '4751957:1:ORDER_CREATE:0'
+STMT	58424	2301	2294	TRANSACTION	152160000	93188648336554000	93188648488714000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751957, 1, 1, '苹果 MacBook 
+STMT	58424	2302	2294	TRANSACTION	790756000	93188648662733000	93188649453489000	0	0	0	qiqi_mall_test	commit
+STMT	58424	2303	NULL	-	51328000	93188649540003000	93188649591331000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58424	2304	NULL	-	195824000	93188649979175000	93188650174999000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751957)
+STMT	58424	2306	NULL	-	1426526000	93188733208926000	93188734635452000	9000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2308	NULL	-	1275415000	93188985071702000	93188986347117000	3000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2310	NULL	-	1309890000	93189486871031000	93189488180921000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 21 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b
+STMT	58424	2312	NULL	-	1337266000	93189738582300000	93189739919566000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2314	NULL	-	1457815000	93190240463410000	93190241921225000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2316	NULL	-	1366937000	93190492320528000	93190493687465000	3000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 9 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2318	NULL	-	1334379000	93190994215838000	93190995550217000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2320	NULL	-	1858644000	93191496106123000	93191497964767000	3000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2322	NULL	-	1252886000	93191748264272000	93191749517158000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2324	NULL	-	1277848000	93192250075997000	93192251353845000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2326	NULL	-	91480000	93192455622118000	93192455713598000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58424	2327	NULL	-	170254000	93192455907662000	93192456077916000	1000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58424	2329	2328	TRANSACTION	118964000	93192456372090000	93192456491054000	1000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58424	2330	2328	TRANSACTION	203103000	93192456962937000	93192457166040000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58424	2331	2328	TRANSACTION	166204000	93192457449546000	93192457615750000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58424	2332	2328	TRANSACTION	132720000	93192457811103000	93192457943823000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751977, 1, -1, 'ORDER_CR
+STMT	58424	2333	2328	TRANSACTION	189827000	93192458107725000	93192458297552000	0	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 3 AND stock >= 1
+STMT	58424	2334	2328	TRANSACTION	184661000	93192458483113000	93192458667774000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 3) WHERE idem_key = '4751977:1:ORDER_CREATE:0'
+STMT	58424	2335	2328	TRANSACTION	184142000	93192459158339000	93192459342481000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751977, 1, 1, '苹果 MacBook 
+STMT	58424	2336	2328	TRANSACTION	1785588000	93192459561921000	93192461347509000	0	0	0	qiqi_mall_test	commit
+STMT	58424	2337	NULL	-	60394000	93192461449080000	93192461509474000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58424	2338	NULL	-	221157000	93192461922417000	93192462143574000	2000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751977)
+STMT	58424	2340	NULL	-	1265298000	93192501746716000	93192503012014000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2342	NULL	-	1291411000	93193003622448000	93193004913859000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2344	NULL	-	1423000000	93193505426703000	93193506849703000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 4 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2346	NULL	-	1571074000	93193757241424000	93193758812498000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 18 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b
+STMT	58424	2348	NULL	-	366664000	93194259299081000	93194259665745000	1000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2350	NULL	-	1342010000	93194510106643000	93194511448653000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2352	NULL	-	1188612000	93195012039310000	93195013227922000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 13 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b
+STMT	58424	2354	NULL	-	1346324000	93195263549837000	93195264896161000	3000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 15 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b
+STMT	58424	2356	NULL	-	1306103000	93195765579013000	93195766885116000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2358	NULL	-	1222595000	93196267432347000	93196268654942000	3000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58424	2360	NULL	-	91009000	93196455631245000	93196455722254000	0	0	0	qiqi_mall_test	SET autocommit=0
+STMT	58424	2361	NULL	-	165655000	93196455930696000	93196456096351000	2000000	0	1	qiqi_mall_test	SELECT id,product_id,price,stock,pic,cost_price,version FROM sku WHERE id=1
+STMT	58424	2363	2362	TRANSACTION	138479000	93196456379579000	93196456518058000	2000000	0	1	qiqi_mall_test	SELECT id,name,description,category_id,type_id,publish_status,pic,version FROM product WHERE id=1
+STMT	58424	2364	2362	TRANSACTION	205827000	93196457022063000	93196457227890000	1000000	1	0	qiqi_mall_test	INSERT INTO `order`  ( order_sn, member_id, total_amount, status, pay_type,  receiver_name, receiver_phone, receiver_address )  VALUES (  'QQ202611140
+STMT	58424	2365	2362	TRANSACTION	172129000	93196457483783000	93196457655912000	1000000	1	0	qiqi_mall_test	INSERT INTO order_status_ledger (order_id, from_status, to_status, reason, reason_detail, operator_type, operator_id, operator_name,  ref_type, ref_id
+STMT	58424	2366	2362	TRANSACTION	124592000	93196457830903000	93196457955495000	1000000	1	0	qiqi_mall_test	INSERT IGNORE INTO stock_ledger (order_id, sku_id, delta, reason, ref_type, ref_id, bucket_no, idem_key, created_at) VALUES (4751997, 1, -1, 'ORDER_CR
+STMT	58424	2367	2362	TRANSACTION	188053000	93196458065087000	93196458253140000	0	1	0	qiqi_mall_test	UPDATE sku_bucket SET stock = stock - 1 WHERE sku_id = 1 AND bucket_no = 5 AND stock >= 1
+STMT	58424	2368	2362	TRANSACTION	149722000	93196458343201000	93196458492923000	1000000	1	0	qiqi_mall_test	UPDATE stock_ledger SET bucket_no = COALESCE(bucket_no, 5) WHERE idem_key = '4751997:1:ORDER_CREATE:0'
+STMT	58424	2369	2362	TRANSACTION	155997000	93196458915256000	93196459071253000	1000000	1	0	qiqi_mall_test	INSERT INTO order_item  ( order_id, product_id, product_sku_id, product_name, product_price, product_quantity )  VALUES (  4751997, 1, 1, '苹果 MacBook 
+STMT	58424	2370	2362	TRANSACTION	887145000	93196459248040000	93196460135185000	0	0	0	qiqi_mall_test	commit
+STMT	58424	2371	NULL	-	48364000	93196460212501000	93196460260865000	0	0	0	qiqi_mall_test	SET autocommit=1
+STMT	58424	2372	NULL	-	185447000	93196460653507000	93196460838954000	1000000	0	1	qiqi_mall_test	SELECT  id,order_id,product_id,product_sku_id,product_name,product_price,product_quantity,cost_price  FROM order_item      WHERE  (order_id = 4751997)
+STMT	58424	2374	NULL	-	1236231000	93196519064117000	93196520300348000	2000000	1	0	qiqi_mall_test	UPDATE sku s JOIN (SELECT sku_id, SUM(stock) AS total FROM sku_bucket WHERE sku_id = 1 GROUP BY sku_id) b ON b.sku_id = s.id SET s.stock = GREATEST(b.
+STMT	58783	3	NULL	-	955007000	93183874959572000	93183875914579000	4000000	0	0	-	truncate table performance_schema.events_statements_history_long
+STMT	58783	4	NULL	-	805269000	93183876308279000	93183877113548000	2000000	0	0	-	truncate table performance_schema.events_transactions_history_long
+STMT	58783	5	NULL	-	4986000	93183877145312000	93183877150298000	0	0	0	-	NULL
+STMT	58784	1	NULL	-	68341000	93183944402386000	93183944470727000	0	0	1	-	select @@version_comment limit 1
+STMT	58784	2	NULL	-	20397000	93183944482695000	93183944503092000	0	0	0	-	select $$
+STMT	58784	3	NULL	-	119000000	93183944532856000	93183944651856000	1000000	0	2	-	select concat(NAME,'=',ENABLED) from performance_schema.setup_consumers\n          where NAME in ('events_statements_history_long','events_transactions
+STMT	58784	4	NULL	-	3243000	93183944727479000	93183944730722000	0	0	0	-	NULL
+STMT	58785	1	NULL	-	20130000	93185833633720000	93185833653850000	0	0	0	-	NULL
+STMT	58785	2	NULL	-	1998000	93185833682936000	93185833684934000	0	0	0	-	NULL
+STMT	58786	1	NULL	-	70019000	93188357184449000	93188357254468000	0	0	1	-	select @@version_comment limit 1
+STMT	58786	2	NULL	-	21150000	93188357267534000	93188357288684000	0	0	0	-	select $$
+STMT	58786	3	NULL	-	426615000	93188357312546000	93188357739161000	1000000	0	2	-	select substring_index(host,':',1) ip, count(*) c, sum(command<>'Sleep') a\n      from information_schema.processlist where db='qiqi_mall_test' group b
+STMT	58786	4	NULL	-	3618000	93188357824282000	93188357827900000	0	0	0	-	NULL
+STMT	58787	1	NULL	-	72891000	93193426332828000	93193426405719000	0	0	1	-	select @@version_comment limit 1
+STMT	58787	2	NULL	-	22493000	93193426419971000	93193426442464000	0	0	0	-	select $$
+STMT	58787	3	NULL	-	460181000	93193426491899000	93193426952080000	0	0	2	-	select substring_index(host,':',1) ip, count(*) c, sum(command<>'Sleep') a\n      from information_schema.processlist where db='qiqi_mall_test' group b
+STMT	58787	4	NULL	-	4557000	93193427047464000	93193427052021000	0	0	0	-	NULL
+STMT	58788	1	NULL	-	20273000	93195895111180000	93195895131453000	0	0	0	-	NULL
+STMT	58788	2	NULL	-	1731000	93195895203035000	93195895204766000	0	0	0	-	NULL
+STMT	58789	1	NULL	-	72313000	93196740786978000	93196740859291000	0	0	1	-	select @@version_comment limit 1
+STMT	58789	2	NULL	-	64286000	93196740895015000	93196740959301000	0	0	0	-	select $$
+STMT	58789	3	NULL	-	898218000	93196740962112000	93196741860330000	2000000	0	194	-	select 'TXN', t.THREAD_ID, t.EVENT_ID, t.STATE,\n        t.TIMER_WAIT, t.TIMER_START, t.TIMER_END, t.ISOLATION_LEVEL, coalesce(t.ACCESS_MODE,'-')\n     
+STMT	58789	4	NULL	-	5972000	93196742182514000	93196742188486000	0	0	0	-	NULL
+STMT	58790	1	NULL	-	66196000	93196806676447000	93196806742643000	0	0	1	-	select @@version_comment limit 1
+STMT	58790	2	NULL	-	19053000	93196806772200000	93196806791253000	0	0	0	-	select $$

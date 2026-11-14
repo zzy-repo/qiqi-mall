@@ -1,6 +1,5 @@
 package com.qiqi.mall.oms.service;
 
-import com.qiqi.mall.order.entity.Order;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.CannotAcquireLockException;
@@ -35,8 +34,13 @@ public class OrderCreateService {
         this.creator = creator;
     }
 
-    public Order createWithRetry(Long memberId, String receiverName, String receiverPhone, String receiverAddress,
-                                 List<OrderTransactionalCreator.ItemInput> inputs, boolean fromCart) {
+    /**
+     * @return 建单结果（订单 + 事务内回读到的明细）—— 明细由事务内带出，见
+     *         {@link OrderTransactionalCreator.CreatedOrder}
+     */
+    public OrderTransactionalCreator.CreatedOrder createWithRetry(
+            Long memberId, String receiverName, String receiverPhone, String receiverAddress,
+            List<OrderTransactionalCreator.ItemInput> inputs, boolean fromCart) {
         for (int attempt = 0; ; attempt++) {
             try {
                 return creator.create(memberId, receiverName, receiverPhone, receiverAddress, inputs, fromCart);

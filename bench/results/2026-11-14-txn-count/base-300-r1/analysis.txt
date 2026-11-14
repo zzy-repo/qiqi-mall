@@ -1,0 +1,28 @@
+== 窗口 68.6s  成功 20585 单（300.0 ok/s 窗口平均）==
+  延迟（窗口内 ok）：p50=45.1 p95=240.0 p99=504.5 ms
+  事务数/单      = 2.186   事务墙钟/单 = 24.286 ms
+  语句数/单      = 12.209   SQL服务时间/单 = 11.118 ms   语句内 Lock_time/单 = 4.630 ms
+  非SQL时间/单   = 13.169 ms（占 54.2%）
+  Com_commit/单  = 1.002  Com_begin/单 = 0.000
+  行锁等待/单    = 4.530 ms（次数/单 0.294）
+  redo fsync/单  = 3.2407  data fsync/单 = 3.3341  fsync/s = 972
+  threads_running 末值=-3  created/单=0.0000
+  日志文件 I/O 等待/单 = 1.319 ms（69s 内共 27161 ms）
+      wait/io/file/innodb/innodb_log_file                  次数/单= 8.7407    1.3195 ms/单
+  -- 语句构成（条/单，ms/单）--
+       2.002 条/单   0.2268 ms/单  SET `autocommit` = ?
+       1.002 条/单   0.3150 ms/单  SELECT `id` , `order_id` , `product_id` , `product_sku_id` , `product_name` , 
+       1.001 条/单   0.3456 ms/单  INSERT INTO `order_item` ( `order_id` , `product_id` , `product_sku_id` , `pro
+       1.001 条/单   0.2484 ms/单  SELECT `id` , `product_id` , `price` , `stock` , `pic` , `cost_price` , `versi
+       1.001 条/单   0.6625 ms/单  INSERT INTO `order` ( `order_sn` , `member_id` , `total_amount` , STATUS , `pa
+       1.001 条/单   4.3458 ms/单  UPDATE `sku_bucket` SET `stock` = `stock` - ? WHERE `sku_id` = ? AND `bucket_n
+       1.001 条/单   2.6585 ms/单  COMMIT
+       1.001 条/单   0.3525 ms/单  INSERT IGNORE INTO `stock_ledger` ( `order_id` , `sku_id` , `delta` , `reason`
+       1.001 条/单   0.2538 ms/单  SELECT `id` , NAME , DESCRIPTION , `category_id` , `type_id` , `publish_status
+       1.001 条/单   0.4075 ms/单  UPDATE `stock_ledger` SET `bucket_no` = COALESCE ( `bucket_no` , ? ) WHERE `id
+       1.001 条/单   0.3957 ms/单  INSERT INTO `order_status_ledger` ( `order_id` , `from_status` , `to_status` ,
+       0.179 条/单   0.8313 ms/单  UPDATE `sku` `s` JOIN ( SELECT `sku_id` , SUM ( `stock` ) AS `total` FROM `sku
+       0.000 条/单   0.0000 ms/单  SELECT `id` , `auto_confirm_days` , `auto_close_minutes` , `auto_audit_enabled
+       0.000 条/单   0.0001 ms/单  ROLLBACK
+       0.000 条/单   0.0000 ms/单  SELECT * FROM `audit_run` ORDER BY `id` DESC LIMIT ?
+  MySQL 核数（窗口内）=0.95 核

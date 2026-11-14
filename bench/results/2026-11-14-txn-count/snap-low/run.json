@@ -1,0 +1,25 @@
+{
+  "label": "snap-low",
+  "url": "http://127.0.0.1:18080/portal/orders",
+  "method": "POST",
+  "mode": "open-loop-fixed-rate",
+  "steps": [
+    10
+  ],
+  "step_duration_s": 20,
+  "warmup_s": 10,
+  "warmup_rps": 5,
+  "start_iso": "2026-11-14T00:45:03.295Z",
+  "end_iso": "2026-11-14T00:45:33.036Z",
+  "measure_wall_s": 19.921,
+  "fired": 250,
+  "completed": 250,
+  "dropped": 0,
+  "ok": 200,
+  "fail": 0,
+  "token_pool": 600,
+  "token_exhausted": false,
+  "client_cpu_pct": 2.9,
+  "loadavg_1m": 2.29,
+  "errors": {}
+}
