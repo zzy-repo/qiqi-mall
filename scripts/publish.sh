@@ -1703,16 +1703,27 @@ else:
     print("    主清单抽检 %d 条（HEAD 一次，记录 X-Cache/Age 供人工复核）" % len(samples))
     hit_samples = []
     base_age = {}            # 每条抽检对象的 Age 基线：Age 是"该副本在边缘已存在多少秒"，
-    for r in samples:        # 刷新生效后边缘会重新拉一份、Age 归零再重新增长 ⇒ **Age 变小**即为生效
+    zero_age = []            # 刷新生效后边缘会重新拉一份、Age 归零再重新增长 ⇒ **Age 变小**即为生效
+    for r in samples:
         st, xc, age, _sv = head_once(url_of(r))
         if (xc or "").startswith("HIT"):
+            if age is None or age == 0:
+                # 基线 Age=0：副本刚被拉下来（通常是 canary 探针刚刷热的那一条）。
+                # 它既无法证明"刷新让它变了"，也无法证明"没生效" —— age < base_age(0) 永不成立。
+                # 2026-11-14 实测踩过：唯一抽中的对象正是 canary 刚刷热的同一个 svg，被误判成"没刷"。
+                # 处理：不计入可比样本，单独记录，改为"由 canary 探针证明该对象已回源"。
+                zero_age.append(r)
+                continue
             hit_samples.append(r)
             base_age[r] = age
+    if zero_age:
+        print("    ℹ %d 条抽检对象基线 Age=0（刚被回源），不可比 ⇒ 不计入判定，"
+              "其生效性由 canary 探针的 X-Cache 转 MISS 证明" % len(zero_age))
         print("      %-58s HTTP %-3s X-Cache: %-22s Age: %s"
               % (encode_object_path(r), st or "-", xc or "-", age if age is not None else "-"))
     if not hit_samples:
-        print("    ⚠ 抽检对象基线均非 HIT（html/md 是 TTL 0，每次请求都回源）⇒ X-Cache 前后"
-              "无可比性；本次生效性以 canary 探针 + 每批次 HTTP 200/RefreshTaskId 为准")
+        print("    ⚠ 抽检对象无可比基线（html/md 是 TTL 0 每次回源；或基线 Age=0 刚被回源）"
+              "⇒ X-Cache 前后无可比性；本次生效性以 canary 探针 + 每批次 HTTP 200/RefreshTaskId 为准")
     else:
         pending = set(hit_samples)
         started = time.time()

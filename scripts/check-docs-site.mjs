@@ -410,12 +410,32 @@ const completeScenes = sceneList.length - sceneGaps.length
   const pageSet = new Set(pageFiles)
   const noPage = sceneList.filter((s) => !sceneGaps.some((g) => g.path === s.path) && !pageSet.has(`material/scenarios/${s.path}.${PAGE_EXT}`))
   const lines = []
-  if (noPage.length) {
-    lines.push(`提示：源侧图+视频齐全场景 ${completeScenes} 个，其中 ${noPage.length} 个在产物里没有页面（重建后应补齐）`)
-    for (const s of noPage) lines.push(`  material/scenarios/${s.path}.${PAGE_EXT} 缺失`)
+  // 关键区分（2026-11-14 踩过）：产物缺页有两种原因，性质完全不同 ——
+  //   a) 源素材刚改、产物还没重建 → 「等重建」，只提示；
+  //   b) 产物比源新、却仍然缺页 → **生成器配置漏登记**（改了目录名但 SCENE_BUCKETS 没跟着改），
+  //      再重建也补不出来，必须判红。当年「库存/条件更新」就是这样从 65 篇静默掉到 64 篇、
+  //      一路发到线上变成 404 的 —— 而这里只当"提示"，所以没人发现。
+  // 判据：产物目录的 mtime 与源场景目录的 mtime 比较。
+  const stale = noPage.filter((s) => {
+    try {
+      const src = Math.max(...s.files.filter((f) => f).map((f) => fs.statSync(path.join(DOCS_ROOT, s.rel, f)).mtimeMs))
+      const out = fs.statSync(path.join(root, 'material', 'scenarios')).mtimeMs
+      return src > out
+    } catch { return false }
+  })
+  const configGap = noPage.filter((s) => !stale.includes(s))
+  if (stale.length) {
+    lines.push(`提示：源侧图+视频齐全场景 ${completeScenes} 个，其中 ${stale.length} 个在产物里没有页面（源比产物新，重建后应补齐）`)
+    for (const s of stale) lines.push(`  material/scenarios/${s.path}.${PAGE_EXT} 缺失（等重建）`)
   }
-  push('①', '页面数', scenarioPages > 0 && diagramPages > 0,
-    `场景页 ${scenarioPages} / 图页 ${diagramPages}（源侧齐全场景 ${completeScenes}）`, lines)
+  if (configGap.length) {
+    lines.push(`✗ 生成器配置漏登记：产物比源新，但下列 ${configGap.length} 个场景没有页面 —— 重建也补不出来，`
+      + `通常是改了目录名却没同步 SCENE_BUCKETS：`)
+    for (const s of configGap) lines.push(`  material/scenarios/${s.path}.${PAGE_EXT} 缺失（源在、产物无 ⇒ 查 build-material 的场景清单）`)
+  }
+  push('①', '页面数', scenarioPages > 0 && diagramPages > 0 && configGap.length === 0,
+    `场景页 ${scenarioPages} / 图页 ${diagramPages}（源侧齐全场景 ${completeScenes}`
+      + (configGap.length ? `，配置漏登记 ${configGap.length}` : '') + `）`, lines)
 }
 
 /* ============================================================== ②③ 图 / 视频引用完整性 */
