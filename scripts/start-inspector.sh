@@ -17,8 +17,8 @@
 set -euo pipefail
 
 REPO_ROOT="/root/qiqi-mall"
-DOCS_README="/root/docsify/README.md"
-DOCS_BUILDER="/root/docsify/build-material.mjs"
+DOCS_README="/root/docs-rspress/doc/index.md"          # 主文档站已迁到 Rspress（:3027），首页源是这份
+DOCS_BUILDER="RSPRESS_DEV"                            # 哨兵：见下方「重建站点」分支
 DOCS_LOCK="/tmp/docsify.lock"
 
 UNIT="mcp-inspector"
@@ -168,8 +168,10 @@ fi
 grep -q '^| MCP 调试器 |' "$DOCS_README" || die "写入 $DOCS_README 失败"
 
 # ---------------------------------------------------------------- 6) 重建站点
-log "重建文档站"
-flock "$DOCS_LOCK" node "$DOCS_BUILDER" >/dev/null 2>&1 || die "文档站重建失败（$DOCS_BUILDER）"
+log "重建文档站（Rspress dev）"
+flock "$DOCS_LOCK" bash -c 'cd /root/docs-rspress && npm run build:dev' >/dev/null 2>&1 \
+  || die "文档站重建失败（cd /root/docs-rspress && npm run build:dev）"
+# 重建后 :3027 立刻可见（容器挂的是 doc_build_dev，无需重启）
 
 # ---------------------------------------------------------------- 7) 报告
 echo
@@ -181,7 +183,7 @@ ss -lntH "sport = :${CLIENT_PORT}" 2>/dev/null | awk '{print $4}' | paste -sd' '
 echo -n "带 token 访问: "
 curl -s -o /dev/null -m 10 -w "%{http_code}\n" "$PUBLIC_URL" || echo "curl 失败"
 echo -n "首页那一行 : "
-curl -s -m 10 "${DOCS_SITE}/README.md" | grep -c 'MCP 调试器' | sed 's/^/匹配行数=/' || echo "匹配行数=0"
+curl -s -m 10 "${DOCS_SITE}/" | grep -c 'MCP 调试器' | sed 's/^/匹配行数=/' || echo "匹配行数=0"
 echo "文档首页   : ${DOCS_SITE}/"
 echo "停止       : bash scripts/stop-inspector.sh"
 echo "================================================="
