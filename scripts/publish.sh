@@ -287,7 +287,12 @@ CRED_FILE="/root/.aliyun-qiqi/credentials.env"
 ADMIN_SECRET_FILE="/root/.qiqi-secrets/admin.txt"
 
 EXPECT_MALL="${EXPECT_MALL:-200}"
-EXPECT_ADMIN="${EXPECT_ADMIN:-401}"   # admin.rose7.cn 在 ECS Caddy 上挂了 basic auth
+EXPECT_ADMIN="${EXPECT_ADMIN:-200}"   # 2026-11-14 起：admin.rose7.cn 已不再挂 basic auth
+#   判断依据（当时实测）：响应无 WWW-Authenticate 头、Server 是 nginx/1.31.8（不是 ECS Caddy），
+#   且返回的是 admin SPA 的 index.html（599B，引 CDN 上的 v111 构建产物）⇒ 200 就是健康信号。
+#   历史：早期在 ECS Caddy 上挂 basic auth 时期望 401；后来去掉了，这条默认值一直没跟上，
+#   导致每次发布都以退出码 2 结束（发布本身是成功的）。
+#   若将来重新挂上 basic auth：EXPECT_ADMIN=401 覆盖即可，不用改脚本。
 EXPECT_DOCS="${EXPECT_DOCS:-200}"
 EXPECT_HEALTH="${EXPECT_HEALTH:-200}"
 

@@ -1,0 +1,18 @@
+{
+  "name": "docs-rspress",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "qiqi-mall 主文档站（Rspress 版）—— 内容由 /root/docsify/build-material.mjs --target=rspress 生成",
+  "scripts": {
+    "gen:dev": "node build-material.mjs --target=rspress --mode=dev",
+    "gen:prod": "node build-material.mjs --target=rspress --mode=prod",
+    "dev": "npm run gen:dev && rspress dev",
+    "build:dev": "npm run gen:dev && RSPRESS_ALLOW_SPOKEN=1 RSPRESS_OUT=doc_build_dev rspress build",
+    "build:prod": "npm run gen:prod && rspress build",
+    "build": "npm run build:prod"
+  },
+  "devDependencies": {
+    "@rspress/core": "2.1.3"
+  }
+}
