@@ -25,6 +25,13 @@ import {
   submitCartOrder,
 } from '../../support/ui.js'
 import { adminTokenOf, getProductApi, getAdminOrderBySnApi } from '../../support/assert.js'
+import {
+  clickReplayAndConfirm,
+  expectReplayToast,
+  installToastRecorder,
+  ledgerRowCount,
+  stopToastRecorder,
+} from '../../support/replay-toast.js'
 
 /**
  * 03-商家-履约 / 15-支付流水加固
@@ -45,12 +52,17 @@ import { adminTokenOf, getProductApi, getAdminOrderBySnApi } from '../../support
  *     受 `qiqi.payment.sandbox-endpoints-enabled` 控制，默认 false，只有 dev/test/e2e 打开；
  *     写权限 payment:write 不可授予 ⇒ API Key 403，只有人工 JWT 能调）。
  *
- * ── 三条用例各钉住一件事 ─────────────────────────────────────────────────
+ * ── 四条用例各钉住一件事 ─────────────────────────────────────────────────
  *   ① 页面上看得见：台账页选「支付流水」+ 业务ID（订单ID）→ 那一行带着订单号、渠道流水号、操作人；
  *   ② 重复通知被挡：重放渠道回调两次 → 都是「重复通知，已忽略」，库里仍 1 行、金额不变，
  *      并且 uk_channel_trade 是**活闸**（直插同 channel+trade_no 会被库拒绝，不是代码自觉）；
  *   ③ 退款可溯源：退款流水带 `{orderSn}:REFUND:{returnApplyId}` 幂等键，
  *      origin_flow_id 指回原支付流水（退的是哪一笔钱，靠这一列回答）。
+ *   ④ 页面上点一次「重放渠道通知」→ 台账页必须弹 **warning 级**「重复通知，已忽略」、
+ *      **没有 error 级提示**、弹窗收起、**行数点前点后不变**（用例四，断言在 support/replay-toast.js）。
+ *      这条是 onError 同步契约的回归门禁：`useDangerConfirm` 判的是 `_onError(e) === true` 且不 await，
+ *      谁把 ledger 页的 onError 改回 async，`Promise === true` 恒 false ⇒ 重复通知掉进红色错误区、
+ *      弹窗不收 ⇒ 用例四红。（这条比前三条多守一件事：**语义不被做反**。）
  *
  * ── 两条口径（写断言前先读）──────────────────────────────────────────────
  *   · `payment_record` 与 `order` **没有外键**：order_sn 是唯一对账键，order_id 允许悬空；
@@ -389,6 +401,69 @@ test.describe('03-商家-履约 › 15-支付流水加固', () => {
         await expect(table, `退款行的摘要应能读回原支付流水 #${payId}（页面上也能溯源）`)
           .toContainText(`原流水 #${payId}`)
         await expect(table, '退款行的关联单据应显示 RETURN_APPLY').toContainText('RETURN_APPLY')
+      })
+    } finally {
+      await cleanupSelfMadeOrder(request, { orderId, orderSn, token })
+    }
+  })
+
+  /**
+   * 用例四：**台账页 UI 上的三态回归门禁**（本轮新增，不改上面三条）。
+   *
+   * 前三条都在接口/库这一层证明「重复通知不会变成两笔钱」；这一条证明**页面上不把它说错**：
+   * 点「重放渠道通知」之后必须是 warning 级「重复通知，已忽略」，不是 error「执行失败」。
+   *
+   * 门禁怎么生效（踩过的坑，别再踩）：
+   *   ledger 页 replay() 的 exec 把 outcome=DUPLICATE 转成带 `duplicateNotice` 标记的异常，
+   *   交给 onError 认领 → 换 warning 级提示 + 刷新列表 + `return true`（= 已自行处理、收起弹窗）。
+   *   而 `useDangerConfirm.execute()` 的判定是 `dangerState._onError(e) === true`，**不 await**。
+   *   所以 onError 一旦被改成 `async`：返回 Promise → `Promise === true` 恒 false →
+   *   接管静默失效 → 弹窗停在红色错误区（写的还是「重复通知，已忽略」）→ 界面上把
+   *   「渠道又投递了一次，我们正确地没多记」显示成「执行失败」，语义正好做反。
+   *   用例四对「弹窗必须收起 + 无 error 级提示 + 行数不变」同时下断言，所以那个改法必红。
+   *
+   * 断言清单见 support/replay-toast.js 的 expectReplayToast('DUPLICATE')：
+   *   warning 出现且含「重复通知，已忽略」/ 无 error 级 / 无 success 级 / 弹窗收起 /
+   *   弹窗红色错误区无节点 / 台账行数点前点后不变。
+   */
+  test('用例四：台账页点「重放渠道通知」→ warning「重复通知，已忽略」，没有 error、行数不变', async ({ page, request }) => {
+    test.setTimeout(180_000)
+    let orderSn = null
+    let orderId = null
+    let token = null
+    try {
+      await adminLoginHardened(page)
+      token = await adminTokenOf(page)
+
+      const ctx = await preparePaidOrder(page, request)
+      orderSn = ctx.orderSn
+      orderId = ctx.orderId
+      const [payId, tradeNo] = payFlowOf(orderSn)
+      expect(payId, '前提：这笔订单要有一条可重放的支付流水').toBeTruthy()
+      expect(flowCountOf(orderSn), '前提：支付后恰好一条流水').toBe(1)
+
+      await test.step('③ 台账页筛到「支付流水 + 订单ID」，行数=1（这就是点前基线）', async () => {
+        await gotoLedger(page)
+        await filterLedgerByPayment(page, orderId)
+        await expect(tid(page, 'ledger-list-table'), `行上应能看到渠道流水号 ${tradeNo}`).toContainText(tradeNo)
+        await expect(ledgerRows(page), '点之前该订单恰好一行支付流水').toHaveCount(1)
+      })
+
+      const rowsBefore = await ledgerRowCount(page)
+      console.log(`[15-④] 支付流水 id=${payId} trade_no=${tradeNo}，点之前台账行数=${rowsBefore}`)
+
+      await test.step('④ 点「重放渠道通知」→ 确认 → 必须是 warning「重复通知，已忽略」，且弹窗收起', async () => {
+        // 录像机必须在点击之前装：ElMessage 3 秒自动消失，「没看到」不等于「没出现」
+        await installToastRecorder(page)
+        await clickReplayAndConfirm(page, payId)
+        const { toasts } = await expectReplayToast(page, 'DUPLICATE', { rowsBefore })
+        console.log(`[15-④] 这一步录到的提示：${JSON.stringify(toasts)}`)
+      })
+
+      await test.step('⑤ 行数点前点后不变（页面证据）＋ 库里也没有多记（事实证据）', async () => {
+        await expect(ledgerRows(page), '重放之后台账行数必须与点之前一致').toHaveCount(rowsBefore)
+        expect(flowCountOf(orderSn), '重放之后库里仍然只有一条支付流水').toBe(1)
+        await stopToastRecorder(page)
       })
     } finally {
       await cleanupSelfMadeOrder(request, { orderId, orderSn, token })
