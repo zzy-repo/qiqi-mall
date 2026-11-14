@@ -1,0 +1,31 @@
+flowchart TB
+    P["一节 · 分页先把返回量收住（机制，不是性能）<br/>原来 listOrders 返回全量数组、前端一次渲染 → 改 Page + 主键倒序<br/>size 限 1~50，返回 records / total / current / size / pages"]
+
+    P --> Q1["二节 · 撑不住的时候：返回量收住了，排序量没收住<br/>克隆库实测（200,000 单全归同一个会员），只有 idx_member(member_id) 时<br/>key=idx_member · rows=99,120（估算）/ 实际读 200,000 行 · Extra: Using filesort"]
+    Q1 --> Q2["每取 10 条，都要先把 20 万行捞出来按 payment_time 排一遍<br/>EXPLAIN ANALYZE 真跑：Limit actual time = 387ms<br/>Index lookup 读满 200,000 行 → Sort 再切 10 行"]
+    Q2 --> Q3["拐点在哪：会员的历史订单是单调增长的<br/>读放大 = 该会员订单总数 ÷ 每页条数<br/>越用越慢，而且没有任何兜底"]
+
+    Q3 --> R1["三节 · 改了什么<br/>KEY idx_member_time (member_id, payment_time) —— 列序就是「先等值、后排序」"]
+    Q3 --> R2["list() 排序键从 id DESC 改成 payment_time DESC, id DESC<br/>（id 只做同秒兜底，保证翻页稳定）"]
+    R1 --> R3["为什么能免排序：InnoDB 二级索引本身按 (member_id, payment_time) 有序<br/>同一 member_id 段内天然有序 ⇒ 反向扫就是这个查询要的顺序"]
+    R2 --> R3
+
+    R3 --> V1["EXPLAIN（同一条查询、同一个 200k 克隆库）<br/>key=idx_member_time · Extra: Backward index scan · 无 filesort"]
+    V1 --> V2["EXPLAIN ANALYZE 真跑：0.095ms ~ 0.099ms<br/>Index lookup on order using idx_member_time (member_id=1) (reverse) rows=10"]
+    V2 --> V3["387ms → 0.099ms，而且与会员订单总量无关：<br/>读多少行由 LIMIT 决定，不由表大小决定"]
+
+    V3 --> L1["最左前缀：这条索引只对「先给 member_id」的查询有用"]
+    L1 --> L2["不带 member_id、只按 payment_time 筛+排<br/>type=ALL · Using where; Using filesort<br/>（第一列没用上，第二列也就不存在）"]
+    L1 --> L3["带 member_id + 时间范围<br/>type=range · Using index condition; Backward index scan<br/>（范围也是有序的，照样免排序）"]
+    L1 --> L4["排序键换成 created_at<br/>key=idx_member · Using filesort<br/>（索引盖住了过滤，盖不住排序）"]
+
+    L2 --> LG["说明<br/>直角框＝实测事实 实线＝推导顺序<br/>红边＝退化成 filesort 绿边＝免排序<br/>所有 EXPLAIN 都在本机 200,000 行的克隆库上真跑，不是回忆"]
+    L3 --> LG
+    L4 --> LG
+
+    classDef go fill:#f6ffed,stroke:#389e0d,stroke-width:2px,color:#135200
+    classDef bad fill:#fff1f0,stroke:#cf1322,stroke-width:2px,color:#820014
+    classDef legend fill:#fffbe6,stroke:#d4b106,stroke-width:2px
+    class Q3,L2,L4 bad
+    class V1,V2,V3,L3 go
+    class LG legend

@@ -8,8 +8,19 @@ target/
 .DS_Store
 .vite/
 
-# docs 整体不入库（本地维护）
-docs/
+# docs：只把「场景内容」入库存档，私人与可再生产物仍排除
+#   · 入库：docs/flows/** 与 docs/er/** 下的 .mmd（图源码）/ .svg（渲染产物）/ 正文.md / 实测数字.sql
+#   · 不入库：口语稿（作者面试用的私人口述材料）、*.png（可由 mmd 重渲，7.9M）、
+#             _refs（外部课程参考资料）、reports / screenshots / _rollback
+docs/*
+!docs/flows/
+!docs/er/
+docs/**/*.png
+docs/**/口语稿*.txt
+docs/_refs/
+docs/reports/
+docs/screenshots/
+docs/_rollback/
 
 # CDN 证书签发工具（只保留脚本本体，venv/证书/私钥/日志一律不入库）
 scripts/cdn-converge/*

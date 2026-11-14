@@ -1,0 +1,43 @@
+%% 订单自动审核 · 六笔单走查图
+%% 用户最想看的一张：每笔单各自命中了什么、结论是什么、原因里写了什么
+%% 排法：两列三行，一笔单一格；格内固定四行＝事实 → 判定 → 结论 → 原因
+%% 每行都控制在二十几个字以内，避免自动折行折出孤字（见 render-svg.sh 文件头的坑）
+%% 配色＝结论：绿 自动过审／黄 留人工／红 阻止／橙 冻结／灰 不命中
+flowchart TD
+    H["六笔演示单，用同一套策略跑一遍<br/>每格四行：事实 → 判定 → 结论 → 原因<br/>判定行必须点名是哪条策略<br/>四种结局才看得出到底是谁导致的"]
+
+    C1["QT-1001｜自动过审<br/>事实：淘宝·应收268.00·2个样<br/>判定：淘宝-标准单三条条件全满足<br/>结论：待审核变待发货<br/>原因：268.00小于500、2个样不超过5<br/>库存预检也过了"]
+    C2["QT-1002｜留人工（转人工）<br/>事实：淘宝·应收268.00·客服备注含「改」<br/>判定：淘宝-标准单满足，却被全局排除挡下<br/>结论：状态仍待审核，留人工<br/>原因：条件满足却被排除<br/>满足的条件和被排除那条都留在决策里"]
+    C3["QT-1003｜不命中<br/>事实：抖音·应收1580.00·八个样<br/>判定：抖音-标准单差在应收上限<br/>结论：状态仍待审核<br/>原因：1580.00不小于500<br/>八个样也超过5"]
+    C4["QT-1004｜阻止<br/>事实：直营门店·应收199.00·毛利−12.00<br/>判定：阻止策略「毛利不为正」先命中<br/>结论：状态仍待审核，等运营联系客户<br/>原因：毛利−12.00≤0<br/>同时回填：本会命中直营-小单"]
+    C5["QT-1005｜先冻结，解冻后过审<br/>事实：淘宝·应收320.00·有退款申请<br/>判定：异常策略「退款申请冻结」命中<br/>结论：打冻结标，状态仍待审核<br/>原因：回填本会命中淘宝-标准单<br/>客服处理完并解冻，第二轮自动过审"]
+    C6["QT-1006｜不命中<br/>事实：淘宝·应收420.00·6个样共6件<br/>判定：淘宝-标准单差在样数<br/>结论：不命中；人工审核时才查出缺货<br/>最终审核不通过，变已关闭<br/>原因：库存预检只服务自动过审"]
+
+    NOTE["六笔单的结局分布<br/>自动过审两笔：QT-1001，加QT-1005第二轮<br/>留人工一笔：QT-1002，条件满足但被排除<br/>阻止一笔：QT-1004，毛利为负<br/>冻结一笔：QT-1005，有退款申请<br/>不命中两笔：QT-1003金额超限、QT-1006样数超限"]
+
+    GAP["顺手暴露的一处缝<br/>不命中的单从来不做库存预检<br/>缺货只能等人工审核才发现<br/>QT-1006 就是这样走到已关闭的<br/>想提前发现，就得让预检也覆盖不命中"]
+
+    H ~~~ C1
+    H ~~~ C2
+    C1 ~~~ C3
+    C2 ~~~ C4
+    C3 ~~~ C5
+    C4 ~~~ C6
+    C5 ~~~ NOTE
+    C6 ~~~ GAP
+
+    classDef head fill:#eceff1,stroke:#37474f,stroke-width:2px
+    classDef pass fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    classDef manual fill:#fffde7,stroke:#f9a825,stroke-width:2px
+    classDef block fill:#fdecea,stroke:#c62828,stroke-width:2px
+    classDef frozen fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef miss fill:#f5f5f5,stroke:#616161,stroke-width:1.5px
+    classDef note fill:#fafafa,stroke:#9e9e9e,stroke-width:1.5px,stroke-dasharray:6 4
+
+    class H head
+    class C1 pass
+    class C2 manual
+    class C3,C6 miss
+    class C4 block
+    class C5 frozen
+    class NOTE,GAP note

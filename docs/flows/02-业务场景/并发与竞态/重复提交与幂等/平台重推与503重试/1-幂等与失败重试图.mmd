@@ -1,0 +1,64 @@
+%% 多平台接入 · ②幂等与失败重试图
+%% 一句话：重复进来的单不会变成第二张单；一次外呼失败不会变成一笔糊涂账
+%% 读法：三条竖列是三种「出事现场」，左起依次是重复拉单、编码对不上、回传失败
+%%       最下面一行是这三种现场在日志页留下的同一个长相：有行、有原因、有第几次尝试
+%% 配色：蓝＝判断与入口／灰＝外部事实／橙＝跳过（正常但必须留痕）／红＝失败／绿＝正常推进／灰虚线＝结论
+flowchart TD
+    subgraph G3["回传失败：只重试一次，两次都留痕"]
+        C0["出库后逐包裹回传<br/>只挑已出库的包裹，一个包裹一次外呼"]
+        C1["第1次尝试：平台回服务不可用"]
+        C2["记一行「失败·第1次尝试」<br/>原因就写平台回了什么"]
+        C3["不等、不攒，立刻重试一次<br/>只重试这一次，不做无限重试"]
+        C4["第2次尝试成功<br/>再记一行「成功·第2次尝试」"]
+        C5["同一个包裹两行，第几次尝试写在行上<br/>重试过几次由数据自己说明，不另立统计列"]
+        C0 --> C1
+        C1 --> C2
+        C2 --> C3
+        C3 --> C4
+        C4 --> C5
+    end
+
+    subgraph G2["编码对不上：整单放弃，不拖累同批"]
+        B0["逐张落单，先对本地商品编码"]
+        B1["3张对得上<br/>各自建单落在「待审核」"]
+        B2["1张对不上<br/>整单失败并记一行「失败·编码匹配不到」"]
+        B3["不猜商品、不建半张单<br/>缺哪个编码写进失败原因"]
+        B4["一张单一个独立事务<br/>所以这1张失败，另外3张照常进审核"]
+        B0 --> B1
+        B0 --> B2
+        B2 --> B3
+        B1 --> B4
+        B3 --> B4
+    end
+
+    subgraph G1["重复拉单：闸门拦下，不建第二张单"]
+        A0["平台把同一批4张单又推一遍<br/>水位重叠、平台重推都算正常现象"]
+        A1["逐张查幂等闸门<br/>这个店铺加这个平台单号"]
+        A2["4张全命中<br/>每张各记一行「跳过·重复」"]
+        A3["不建单、不动库存、不当错误<br/>订单表零新增"]
+        A4["这次拉单只落一行成功汇总<br/>拉回4单：新建0／跳过4／失败0"]
+        A0 --> A1
+        A1 --> A2
+        A2 --> A3
+        A3 --> A4
+    end
+
+    CONC["这三个现场合起来只说三件事<br/>重复进来：闸门命中就记跳过，不建第二张单<br/>编码对不上：整单失败，同批不受牵连<br/>回传失败：两次尝试各落一行，第几次写进行里<br/>两次都失败就把错误交回后台，不假成功"]
+
+    A4 --> CONC
+    B4 --> CONC
+    C5 --> CONC
+
+    classDef judge fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef premise fill:#eceff1,stroke:#37474f,stroke-width:1.5px
+    classDef skip fill:#fff3e0,stroke:#ef6c00,stroke-width:1.5px
+    classDef fail fill:#fdecea,stroke:#c62828,stroke-width:2px
+    classDef ok fill:#e8f5e9,stroke:#2e7d32,stroke-width:1.5px
+    classDef note fill:#fafafa,stroke:#9e9e9e,stroke-width:1.5px,stroke-dasharray:6 4
+
+    class A1,B0 judge
+    class A0,C0,C1 premise
+    class A2,A3,B3 skip
+    class B2,C2 fail
+    class A4,B1,B4,C3,C4,C5 ok
+    class CONC note

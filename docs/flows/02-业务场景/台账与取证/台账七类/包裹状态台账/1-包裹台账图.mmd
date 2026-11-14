@@ -1,0 +1,21 @@
+sequenceDiagram
+    autonumber
+    actor 管理员 as 管理员
+    participant WH as 仓库系统
+    participant OMS as 订单服务
+    participant TZ as 包裹台账
+
+    Note over 管理员,TZ: 一头包裹一路走下来 每一步都在台账里留一行<br/>行里还带着包裹单号的快照
+    OMS->>TZ: 拆单生出包裹 记出生行 前态空 后态待下发
+    管理员->>OMS: 点下发
+    OMS->>TZ: 记一行 待下发到已下发 原因下发
+    OMS->>WH: 把这一头的货单发出去
+    WH-->>OMS: 回传已拣货
+    OMS->>TZ: 记一行 已下发到已拣货 原因是仓库回传
+    WH-->>OMS: 回传出库并给运单号
+    OMS->>TZ: 记一行 已拣货到已出库 原因是仓库回传出库
+    WH-->>OMS: 回传签收
+    OMS->>TZ: 记一行 已出库到已签收 原因是仓库回传签收
+
+    Note over OMS,TZ: 同一个事件仓库重复推两次<br/>台账也只有一行<br/>事件号相同就当已经记过
+    Note over 管理员,TZ: 订单被删除时包裹会被真的删掉<br/>可单号快照留在台账里<br/>所以「这一单发过几个包裹 各到哪一步」永远查得到

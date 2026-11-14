@@ -1,0 +1,48 @@
+sequenceDiagram
+    autonumber
+    actor A as 操作人甲
+    actor B as 操作人乙
+    participant BG as 管理后台
+    participant DB as 数据库版本号
+
+    rect rgb(238, 246, 255)
+    note over A,DB: 场景 两个操作人同时编辑同一件商品
+    A->>BG: 打开商品编辑
+    BG-->>A: 返回这个商品，附带版本号 V1
+    B->>BG: 同时打开同一件商品
+    BG-->>B: 也拿到版本号 V1
+    note over A,B: 两人手上都是同一份 V1，<br/>谁也不知道对方在改
+    end
+
+    rect rgb(240, 252, 244)
+    note over A,DB: 甲先提交 这一次通过
+    A->>BG: 改好后保存（带着 V1）
+    BG->>DB: 比对：还是 V1 吗
+    DB-->>BG: 是 V1，比对通过
+    BG->>DB: 版本号推进到 V2
+    DB-->>BG: 已记下 V2
+    BG-->>A: 保存成功
+    end
+
+    rect rgb(255, 238, 238)
+    note over A,DB: 乙后提交 这一次被拒
+    B->>BG: 改好后保存（仍带着 V1）
+    BG->>DB: 比对：还是 V1 吗
+    DB-->>BG: 已经是 V2，对不上
+    BG-->>B: 拒绝
+    note over B,BG: 「数据已被他人修改（可能其他人在编辑），<br/>请刷新后重试」
+    note over A,DB: 乙这次改动一个字都没写进去，甲改的内容也没有被覆盖
+    end
+
+    rect rgb(255, 248, 238)
+    note over A,DB: 乙刷新后重来 这一次通过
+    B->>BG: 刷新，重新打开这件商品
+    BG-->>B: 重新读到 V2
+    B->>BG: 再改好后保存（带着 V2）
+    BG->>DB: 比对：还是 V2 吗
+    DB-->>BG: 是 V2，比对通过
+    BG->>DB: 版本号推进到 V3
+    BG-->>B: 保存成功
+    end
+
+    note over A,DB: 后提交者不会被静默覆盖；<br/>两人改同一行的冲突当场暴露，谁都不会白改

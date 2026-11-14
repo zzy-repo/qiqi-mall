@@ -1,0 +1,34 @@
+sequenceDiagram
+    autonumber
+    actor B as 买家
+    participant M as 我的订单
+    participant R as 售后
+    actor A as 商家
+
+    rect rgb(235, 245, 255)
+    note over B,R: 申请退货
+    B->>M: 已付款 / 已发货订单点「申请退货」
+    alt 订单状态不满足（如待审核）
+        M-->>B: 不显示申请入口
+    else 满足
+        M-->>B: 弹出申请表单（退货原因字典 + 详细说明）
+        B->>R: 提交申请
+        R-->>M: 申请待处理，订单转「退款中」
+        M-->>B: 售后列显示「退款处理中」，申请入口消失（不能重复申请）
+    end
+    end
+
+    rect rgb(240, 250, 240)
+    note over A,R: 商家审核
+    A->>R: 打开「退货申请」页
+    alt 审核通过
+        R-->>A: 已通过
+        R->>R: 退款流水 + 库存回补
+        R-->>M: 订单转「已退款」
+        M-->>B: 售后列显示「退款成功」
+    else 审核拒绝
+        R-->>A: 已拒绝
+        R-->>M: 订单回到「已付款」
+        M-->>B: 售后列显示「退货被拒绝」
+    end
+    end

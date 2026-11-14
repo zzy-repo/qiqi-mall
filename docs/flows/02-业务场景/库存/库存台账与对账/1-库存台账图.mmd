@@ -1,0 +1,44 @@
+flowchart TB
+    A[买家下单<br/>按购买数量扣减库存<br/>记一行负数台账]
+    B[审核不通过<br/>整单回补]
+    C[取消某一个包裹<br/>按这个包裹的数量回补]
+    D[退货审核通过<br/>按申请数量回补]
+
+    K{同一个触发以前记过账没有<br/>按订单 规格 原因 关联单据去重}
+    K2[记过 → 一行都不写<br/>库存也一点不动]
+    H{这次回补会不会超过下单量<br/>按同一订单同一规格夹紧}
+    H2[会超过 → 只补到下单量为止<br/>多出来的部分直接跳过]
+    W[记一行台账<br/>变化量 原因 关联单据 落点桶]
+    S[记完才动库存<br/>扣减落到某一个桶 回补优先回原桶]
+
+    A --> K
+    B --> K
+    C --> K
+    D --> K
+    K --> K2
+    K --> H
+    H --> H2
+    H --> W
+    W --> S
+
+    R1[对账页并排三个数<br/>桶的总和 就是权威值]
+    R2[页面显示的库存<br/>只是缓存 本该等于权威值]
+    R3[台账净额<br/>全生命周期进出和 不是余额]
+    S --> R1
+    R1 --> R2
+    R2 --> R3
+
+    N1[注<br/>四条路径只走同一个写入口<br/>谁都不许自己拼一条扣减语句<br/>所以扣和补永远有账] ~~~ K
+    N2[注<br/>去重键由订单 规格 原因 单据号拼成<br/>唯一的那个键撞上就当作记过<br/>同一件货不会补第二次] ~~~ H
+    N3[注<br/>净额不能和权威值对平<br/>它只回答一件事：这单到底补过货没有 补了多少] ~~~ R3
+
+    LG[说明<br/>菱形＝判定 直角框＝动作或结果<br/>虚线框＝注解 实线＝先后顺序]
+
+    classDef note fill:#fafafa,stroke:#aaa,stroke-dasharray:4 3,color:#444
+    classDef stop fill:#fff1f0,stroke:#cf1322,stroke-width:2px,color:#820014
+    classDef go fill:#f6ffed,stroke:#389e0d,stroke-width:2px,color:#135200
+    classDef legend fill:#fffbe6,stroke:#d4b106,stroke-width:2px
+    class N1,N2,N3 note
+    class K2,H2 stop
+    class W,S go
+    class LG legend

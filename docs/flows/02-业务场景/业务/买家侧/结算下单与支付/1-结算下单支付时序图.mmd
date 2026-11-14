@@ -1,0 +1,47 @@
+sequenceDiagram
+    autonumber
+    actor B as 买家
+    participant M as 结算页
+    participant O as 订单
+    participant S as 库存
+
+    B->>M: 从购物车进入结算
+    M-->>B: 展示商品清单与应付金额，可选用已保存的收货地址
+
+    rect rgb(235, 245, 255)
+    note over B,O: 提交订单
+    B->>M: 填收货人 / 电话 / 地址，点「提交订单」
+    alt 收货人或地址没填
+        M-->>B: 提示「请填写收货人和收货地址」，不下单
+    else 库存不足
+        M->>O: 提交
+        O->>S: 扣减库存
+        S-->>O: 不足
+        O-->>M: 下单失败
+        M-->>B: 报错并停在结算页，库存与购物车都不变
+    else 正常
+        M->>O: 提交（带防重复提交凭证）
+        O->>S: 原子扣减库存
+        O-->>M: 订单已创建
+        M-->>B: 跳到我的订单
+    end
+    end
+
+    rect rgb(240, 250, 240)
+    note over B,O: 支付（模拟）
+    M->>O: 自动发起模拟支付
+    alt 订单状态不是「待付款」
+        O-->>M: 当前订单状态不可支付
+    else 待付款
+        O-->>M: 支付成功，写支付流水
+        M-->>B: 订单进入「待审核」，等待商家处理
+    end
+    end
+
+    rect rgb(255, 248, 235)
+    note over B,O: 防重复提交
+    B->>M: 网络卡顿时连点两次「提交订单」
+    M->>O: 第二次带同一凭证
+    O-->>M: 请勿重复提交
+    M-->>B: 只生成一个订单
+    end

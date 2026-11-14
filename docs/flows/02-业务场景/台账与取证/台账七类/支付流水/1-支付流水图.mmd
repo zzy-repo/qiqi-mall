@@ -1,0 +1,46 @@
+flowchart TB
+    P[买家付款成功<br/>记一条支付流水]
+    R[退货审核通过<br/>记一条退款流水]
+
+    C1[流水上记清四件事<br/>关联哪张订单 触发它的是哪张单据<br/>操作人是谁 去重键是什么]
+    C2[退款那条还必须指向要退的那笔支付流水<br/>否则这笔钱是从哪笔退的说不清]
+
+    P --> C1
+    R --> C1
+    R --> C2
+
+    U1{同一个渠道流水号<br/>是否已经入过账}
+    U2[已经入过 → 直接拒<br/>第三方重复通知不会变成两笔钱]
+    U3{同一个去重键<br/>是否已经记过}
+    U4[记过 → 一行不写<br/>自己重试和连点都不会多记一笔]
+    C3[写入这一条流水<br/>金额 方向 渠道流水号 订单 触发单据 操作人 都记齐]
+
+    C1 --> U1
+    U1 --> U2
+    U1 --> U3
+    U3 --> U4
+    U3 --> C3
+    C2 --> C3
+
+    A[删单时这张单的流水会被显式清理<br/>删之前只打一条 warn 应用日志：单号 金额 流水号<br/>删完库里就没有它的支付流水了]
+    A2[所以删单之后查不到那张单的支付流水<br/>能查到的是应用日志里那条 warn 台账里没有<br/>订单号快照管的是没被删掉的单怎么对账]
+    C3 --> A
+    A --> A2
+
+    N1[注<br/>渠道流水号唯一是硬闸 挡住的是对方重复通知<br/>去重键是本地这一侧的闸 挡住的是自己连点和重试<br/>两道闸管的不是同一件事 少一道就漏一笔]
+    N2[注<br/>退款指向原流水 才能回答「退的是哪一笔钱」<br/>没有这个指向 只能拿金额和时间去猜]
+    N3[注<br/>流水不回头改旧行 写错了再记一条冲正<br/>唯一会删的情形是删单时整单显式清理 且只打 warn 不写台账行]
+    U1 -.-> N1
+    C2 -.-> N2
+    C3 -.-> N3
+
+    LG[说明<br/>菱形＝判定 直角框＝动作或结果<br/>虚线框＝注解 实线＝先后顺序]
+
+    classDef note fill:#fafafa,stroke:#aaa,stroke-dasharray:4 3,color:#444
+    classDef stop fill:#fff1f0,stroke:#cf1322,stroke-width:2px,color:#820014
+    classDef go fill:#f6ffed,stroke:#389e0d,stroke-width:2px,color:#135200
+    classDef legend fill:#fffbe6,stroke:#d4b106,stroke-width:2px
+    class N1,N2,N3 note
+    class U2,U4 stop
+    class C3,A,A2 go
+    class LG legend

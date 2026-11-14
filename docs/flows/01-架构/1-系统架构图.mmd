@@ -1,0 +1,80 @@
+flowchart TB
+    subgraph C端[买家商城<br/>portal-web·C端]
+        direction TB
+        P1[首页/商品列表/详情<br/>商品图片由CDN就近加载] --> P2[登录/注册页<br/>member账号]
+        P2 --> P3[购物车/结算<br/>懒登录拦截<br/>买家身份令牌]
+    end
+
+    subgraph B端[管理后台<br/>admin-web·B端]
+        direction TB
+        A1[登录页<br/>admin账号 无注册<br/>失败5次加验证码] --> A2[商品/订单/退货管理<br/>含图片上传<br/>商家身份令牌]
+    end
+
+    subgraph 公网入口[公网入口·三个域名收敛到一个网关]
+        direction TB
+        U[公网用户<br/>买家/商家/同事或面试官看文档]
+        D1[mall.rose7.cn<br/>买家商城]
+        D2[admin.rose7.cn<br/>管理后台]
+        D3[docs.rose7.cn<br/>文档站]
+        GWR[阿里云ECS上的反向代理网关<br/>唯一公网入口·统一HTTPS与证书<br/>按域名分流·后台入口带访问口令]
+        U --> D1
+        U --> D2
+        U --> D3
+        D1 --> GWR
+        D2 --> GWR
+        D3 --> GWR
+    end
+
+    subgraph AI[AI接入·可选]
+        direction TB
+        AI1[AI助手<br/>Claude Desktop/DSH<br/>自然语言下指令<br/>MCP协议]
+        AI2[MCP服务<br/>把订单中台能力暴露成工具<br/>只读工具直调·写操作先预演再执行<br/>AI访问密钥]
+        AI1 --> AI2
+        note2["AI与后台走同一套接口与鉴权<br/>用「AI访问密钥」鉴权，权限按密钥勾选<br/>写操作先预演（不落库）→人确认→带版本号执行<br/>并发冲突由版本号乐观锁统一兜住"]
+    end
+
+    subgraph 后端[qiqi-mall-server·同一代码可起N实例]
+        direction TB
+        GW[本机nginx网关<br/>内部分发到双实例<br/>mall、admin 两个域名内网回源]
+        subgraph S1[实例1]
+            direction TB
+            F1A[买家身份校验] --> PA[买家侧业务]
+            F2A[商家身份校验] --> AA[管理侧业务+上传]
+        end
+        subgraph S2[实例2（滚动发布用）]
+            direction TB
+            F1B[买家身份校验] --> PB[买家侧业务]
+            F2B[商家身份校验] --> AB[管理侧业务+上传]
+        end
+        KV[("Redis<br/>验证码/幂等令牌/失败计数<br/>跨实例共享TTL")]
+        note["进程私有仅剩:业务无状态<br/>JWT无状态→任意实例可验"]
+    end
+
+    DB[(MySQL<br/>全部业务表 唯一共享真源)]
+    OSS[(对象存储<br/>阿里云OSS·图片与文档静态资源<br/>图片上传)]
+    CDN[CDN<br/>图片与文档就近分发<br/>不回源、不占回源带宽<br/>文档站分流<br/>买家图片由CDN直接返回]
+
+    P3 --> 公网入口
+    A2 --> 公网入口
+    AI2 --> 公网入口
+    GWR --> GW
+    GWR --> CDN
+    CDN --> OSS
+    P1 -.-> CDN
+    GW --> S1
+    GW --> S2
+    PA --> KV
+    PB --> KV
+    AA --> KV
+    AB --> KV
+    PA --> DB
+    PB --> DB
+    AA --> DB
+    AB --> DB
+    AA --> OSS
+
+    style C端 fill:#e8f4fd,stroke:#2196f3
+    style B端 fill:#fff3e0,stroke:#ff9800
+    style 后端 fill:#f1f8e9,stroke:#689f38
+    style AI fill:#f3e5f5,stroke:#8e24aa
+    style 公网入口 fill:#e0f7fa,stroke:#00838f

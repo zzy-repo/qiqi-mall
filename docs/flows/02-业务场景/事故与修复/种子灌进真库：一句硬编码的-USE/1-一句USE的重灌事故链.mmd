@@ -1,0 +1,19 @@
+flowchart TB
+    A["要重置一个临时库<br/>复制 init 脚本 把库名换成 zz_init_check<br/>调用方代码：显式把库名传给 mysql"]
+    A --> B["但种子文件第一行写着 USE qiqi_mall_test<br/>库名在文件内部被改写"]
+    B --> C["种子灌进真库 qiqi_mall_test<br/>29 张业务表被清空重灌<br/>admin 口令被打回种子弱口令"]
+    C --> D["目标库 zz_init_check 反而空着<br/>日志里每条语句都成功 0 报错<br/>成功在了错的库上"]
+    D --> E["两次同源事故<br/>事故一是 schema 文件带 USE 加逐表删<br/>事故二是种子文件带 USE"]
+
+    E --> F["七处文件去掉硬编码 USE<br/>生成器源头也不再写 USE"]
+    F --> G["所有调用点改成显式传库<br/>灌种子 = 把库名交给 mysql"]
+    G --> H["加多库安全验证<br/>一条自查命令：文件里不许出现 USE 或建库语句<br/>期望零命中"]
+    H --> I["铁律<br/>含 USE 或建库语句的 SQL 不许直接 source<br/>库名只能由调用方给"]
+
+    C --> X["为什么难查<br/>不是报错 是静默改道<br/>错误发生在最外层的那个词上"]
+
+    classDef bad fill:#fff1f0,stroke:#cf1322,stroke-width:2px,color:#820014
+    classDef fix fill:#f6ffed,stroke:#389e0d,stroke-width:2px,color:#135200
+    classDef note fill:#fffbe6,stroke:#d4b106,stroke-width:2px,color:#613400
+    class A,B,C,D,E,X bad
+    class F,G,H,I fix

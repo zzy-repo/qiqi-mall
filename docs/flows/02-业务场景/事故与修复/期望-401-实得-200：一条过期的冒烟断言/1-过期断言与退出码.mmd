@@ -1,0 +1,18 @@
+flowchart TB
+    A["发布脚本的冒烟段<br/>四个地址各断言一个期望码<br/>admin 站早期挂着基础认证 所以期望 401"]
+    A --> B["后来基础认证去掉了<br/>默认值没跟上<br/>期望值还停在 401"]
+    B --> C["每次发布冒烟红一项<br/>脚本以退出码 2 结束<br/>而发布本身是成功的"]
+    C --> D["后果不是发布坏了<br/>是人开始无视退出码<br/>门禁被噪声驯化 真的红也会被跳过"]
+
+    D --> E["把默认值改成 200<br/>并把判断依据写进注释"]
+    E --> F["依据三条<br/>响应里没有要求认证的响应头<br/>服务器标识是 nginx 而不是那台机器上的网关<br/>返回的是后台单页应用的首页 599 字节"]
+    F --> G["保留覆盖入口：换回 401 只改环境变量<br/>不用改脚本"]
+    G --> H["改前退出码 2 改后 0"]
+
+    C --> X["同一处漂移的残余<br/>试运行那行文案还写着基础认证<br/>注释改了 文案没改"]
+
+    classDef bad fill:#fff1f0,stroke:#cf1322,stroke-width:2px,color:#820014
+    classDef fix fill:#f6ffed,stroke:#389e0d,stroke-width:2px,color:#135200
+    classDef note fill:#fffbe6,stroke:#d4b106,stroke-width:2px,color:#613400
+    class A,B,C,D,X bad
+    class E,F,G,H fix

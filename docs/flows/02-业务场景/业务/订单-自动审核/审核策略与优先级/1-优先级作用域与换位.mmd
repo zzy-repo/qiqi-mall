@@ -1,0 +1,35 @@
+flowchart TB
+    P["后台「自动审核策略」页<br/>三个页签：自动 / 阻止 / 异常<br/>行上是 优先级 名称 启用 版本 条件摘要 动作<br/>行尾是 上移 下移 编辑 删除"]
+
+    P --> T1["自动（AUTO）页签<br/>100 直营-小单<br/>200 淘宝-标准单<br/>300 抖音-标准单"]
+    P --> T2["阻止（BLOCK）页签<br/>10 毛利不为正<br/>20 双地址"]
+    P --> T3["异常（EXCEPTION）页签<br/>10 退款申请冻结<br/>20 平台备注冻结"]
+
+    T1 --> NOTE["页面顶部那行口径<br/>优先级只在同类型之间比较<br/>跨类型固定 阻止 先于 异常 先于 自动"]
+    T2 --> NOTE
+    T3 --> NOTE
+
+    NOTE --> CHAIN["判定链的顺序是写死的<br/>已冻结的先跳过<br/>阻止 整段先跑<br/>异常 整段随后<br/>自动 最后跑"]
+    CHAIN --> M21["矩阵用例 M21（判定矩阵表第 21 行）<br/>阻止-双地址 优先级 20<br/>异常-退款申请 优先级 10 数字更小<br/>实得 阻止命中 —— 数字小不等于先判"]
+    CHAIN --> M15["矩阵用例 M15 / M16 同类内才看优先级<br/>两条自动同时命中取数字小的那条<br/>小的被停用则由次优接上"]
+
+    M21 --> EV["这一页能被验的两件事<br/>上移一位后 命中的策略名跟着变<br/>把阻止的优先级改成 5000<br/>结论仍是阻止 本来会过审那条只落在证据里"]
+    M15 --> EV
+
+    C["条件编辑器 三件套<br/>字段 / 操作符 / 值<br/>字段清单来自后端 字段注册表<br/>取不到就显红条 不让配<br/>操作符按值类型过滤 值控件随类型切换"]
+    G["全局排除（不分策略）<br/>每条自动策略判定时都会并入<br/>随任一条自动策略一并保存<br/>整套替换 不是追加"]
+    P --> C
+    T1 --> G
+
+    LG["说明<br/>圆角框＝页面上的东西 尖角框＝实测事实或结论<br/>虚线＝同一作用域内的换位 实线＝推导顺序<br/>绿边＝已被用例钉住 黄边＝页面上的口径提示"]
+    EV --> LG
+    C --> LG
+    G --> LG
+
+    classDef note fill:#fafafa,stroke:#aaa,stroke-dasharray:4 3,color:#444
+    classDef go fill:#f6ffed,stroke:#389e0d,stroke-width:2px,color:#135200
+    classDef legend fill:#fffbe6,stroke:#d4b106,stroke-width:2px
+    classDef ui fill:#e6f7ff,stroke:#1890ff,stroke-width:1.5px,color:#003a8c
+    class M21,M15,EV,CHAIN go
+    class NOTE,C,G,T1,T2,T3 ui
+    class LG legend

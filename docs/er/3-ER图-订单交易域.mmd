@@ -1,0 +1,78 @@
+%% 订单交易域 · 5 张表 / 4 条真实外键 + 3 条逻辑关系（含支付流水自引用）
+%% 图例：实线 = 库中真实外键；点线 = 逻辑关联但库中无外键，标签以「逻辑·」开头
+%% 订单状态台账是只追加证据表：与订单之间故意无外键，删单时按 id 显式清理
+%% 订单设置：全站单行配置。以前没有任何消费者，现在被审核定时任务读（间隔与总开关）。
+%% 它没有任何入边、也没有可连的 join 列，所以仍然不画线——但注解不许再写"孤岛"。
+erDiagram
+    member["会员·存根"] {
+        bigint id PK "详见会员域"
+    }
+    product["商品·存根"] {
+        bigint id PK "详见商品域"
+    }
+    sku["规格·存根"] {
+        bigint id PK "详见商品域"
+    }
+    order["订单"] {
+        bigint id PK "主键"
+        varchar order_sn UK "订单号，全局唯一"
+        bigint member_id FK "买家"
+        decimal total_amount "订单总金额"
+        tinyint status "十态：待付款到已退款"
+        int status_seq "状态流转序号，每次流转加一"
+        datetime status_changed_at "展示缓存：权威是状态台账"
+        tinyint split_status "0 未拆 1 已拆"
+        varchar channel "销售渠道：审核判据的来源"
+        decimal gross_profit "毛利，下单时算好落库；空=没算过"
+        int version "乐观锁版本"
+    }
+    order_item["订单明细"] {
+        bigint id PK "主键"
+        bigint order_id FK "所属订单"
+        bigint product_id FK "商品快照"
+        bigint product_sku_id FK "规格快照"
+        varchar product_name "下单时名称快照"
+        decimal product_price "成交价快照"
+        decimal cost_price "成本价快照；空或零=未维护成本"
+        int product_quantity "购买数量"
+    }
+    payment_record["支付流水"] {
+        bigint id PK "主键"
+        bigint order_id "可靠关联，库中无外键"
+        varchar order_sn "对账键：与渠道按单号对账"
+        decimal amount "金额"
+        tinyint type "1 支付 2 退款"
+        varchar trade_no UK "渠道流水号，与渠道联合唯一"
+        varchar ref_type "退款溯源单据类型"
+        bigint ref_id "退款溯源单据 id"
+        bigint origin_flow_id "退款指向原支付流水"
+        varchar idem_key UK "幂等键，退款不会记两遍"
+    }
+    order_status_ledger["订单状态台账"] {
+        bigint id PK "主键"
+        bigint order_id "无外键：证据不随订单级联删除"
+        tinyint from_status "变更前，空表示建单"
+        tinyint to_status "变更后"
+        varchar reason "流转原因码"
+        varchar operator_type "管理员／会员／密钥／系统"
+        varchar operator_name "操作者名快照"
+        varchar event_key UK "外部事件号，重投只留一条"
+        varchar idem_key UK "幂等键"
+        datetime created_at "记账时间"
+    }
+    order_setting["订单设置·全站配置"] {
+        bigint id PK "主键"
+        int auto_confirm_days "自动收货天数"
+        int auto_close_minutes "未付款关单分钟数"
+        tinyint auto_audit_enabled "自动审核总开关"
+        varchar audit_stock_guard "库存判据档位：严格／宽松"
+        int audit_run_interval_min "定时审核间隔，分钟"
+    }
+
+    member ||--o{ order : "一个会员多笔订单"
+    order ||--o{ order_item : "一个订单多条明细"
+    product ||--o{ order_item : "下单时留商品快照"
+    sku ||--o{ order_item : "下单时留规格快照"
+    order ||..o{ payment_record : "逻辑·order_id 与 order_sn·库中无外键"
+    payment_record ||..o| payment_record : "逻辑·origin_flow_id 退款指向原支付"
+    order ||..o{ order_status_ledger : "证据·只追加·库中无外键"

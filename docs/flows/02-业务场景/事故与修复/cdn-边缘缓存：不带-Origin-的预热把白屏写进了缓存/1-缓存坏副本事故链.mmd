@@ -1,0 +1,28 @@
+flowchart TB
+    A["首轮发布 90 个 assets 传上 OSS<br/>其中 52 个 js<br/>桶是私有的 由 CDN 回源"]
+
+    A --> B["上传脚本当时只对 2 个样本做了带 Origin 的预热<br/>其余对象在边缘缓存里还是空的"]
+
+    B --> C["巡检用裸 curl 逐个查 200<br/>不带 Origin 头"]
+    C --> D["边缘缓存不把 Origin 算进缓存键<br/>这一遍请求就是首次填充<br/>写进去的副本没有 ACAO"]
+    D --> E["52 个 js 里 50 个成了坏副本<br/>另 2 个恰好是被预热过的那两个（推断）<br/>缓存头是 immutable 加一年"]
+
+    E --> F["浏览器加载模块脚本按 CORS 拦掉<br/>三个后台页白屏<br/>控制台报 21 条 testid 一个都不出现"]
+    F --> G["当次回滚后台前端<br/>后端保持新镜像"]
+    F --> H["易错点：css 也缺 ACAO 却不白屏<br/>它走 link 不是 CORS 请求<br/>所以别往业务代码上想"]
+
+    G --> I{"两条出路"}
+    I --> I1["刷新 CDN 缓存<br/>本账号默认禁止刷新与预热<br/>需明确批准"]
+    I --> I2["换一个没被缓存过的新前缀重发<br/>只新增对象 一个 CDN 配置都不动"]
+
+    I2 --> J["带 Origin 全量预热<br/>52 个 js 全部预热<br/>52 个都有 ACAO 三页控制台错误 0"]
+    J --> K["把做法固化进脚本<br/>全量预热加全数校验<br/>汇总行直接给 js 多少比多少<br/>有坏副本就打一行星号说不要切流量"]
+
+    K --> L["红线写进运行手册<br/>验证线上 CDN 必须带 Origin 头<br/>裸 curl 只对已缓存的好副本无害<br/>排查口诀：同一地址加个参数再请求一次"]
+
+    classDef bad fill:#fff1f0,stroke:#cf1322,stroke-width:2px,color:#820014
+    classDef fix fill:#f6ffed,stroke:#389e0d,stroke-width:2px,color:#135200
+    classDef ui fill:#e6f7ff,stroke:#1890ff,stroke-width:1.5px,color:#003a8c
+    class A,B,C,D,E,F,G,H bad
+    class I2,J,K,L fix
+    class I1 ui

@@ -1,0 +1,21 @@
+flowchart TB
+    A["这轮想做的事：删掉 78 处固定等待<br/>理由只有一句 后面有断言"]
+    A --> B["但没证明 断言断的是上一步动作的异步产物<br/>去掉等待之后 读到的可能是上一步留下的旧数据"]
+    B --> C["结果一 假绿<br/>旧数据也满足断言 于是永远绿<br/>比如查 0 行被当成有 1 行"]
+    B --> D["结果二 偶发红<br/>断言恰好落在刷新之前的那一瞬间"]
+    C --> E["78 处全部回滚<br/>并重判三类"]
+
+    E --> F["A 类 真静态可删 8 处<br/>断的是静态标题 断言自己会轮询"]
+    E --> G["B 类 需要改造 72 处<br/>把固定等待换成轮询到条件成立"]
+    E --> H["C 类 13 处<br/>删不得 或得先另造条件"]
+
+    F --> I["验证方法：重复执行<br/>把同一批用例在独占分片上跑多遍<br/>判据是零失败 不是耗时"]
+    I --> J["27 条 乘 3 遍 等于 81 条<br/>81 比 81 全绿 零 flaky"]
+
+    C --> K["判断一句话<br/>可删的不是等待本身 而是等一个必然已经成立的静态事实"]
+
+    classDef bad fill:#fff1f0,stroke:#cf1322,stroke-width:2px,color:#820014
+    classDef fix fill:#f6ffed,stroke:#389e0d,stroke-width:2px,color:#135200
+    classDef note fill:#fffbe6,stroke:#d4b106,stroke-width:2px,color:#613400
+    class A,B,C,D,K bad
+    class E,F,G,H,I,J fix

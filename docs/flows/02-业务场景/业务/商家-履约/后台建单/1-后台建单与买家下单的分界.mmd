@@ -1,0 +1,19 @@
+flowchart TB
+    A["客服代客下单<br/>买家电话下单 后台先把单落下来"]
+    A --> B["管理端建单入口<br/>请求体 = 订单本体 + 明细数组"]
+    B --> C["这条路径和买家侧结算下单是两条路<br/>不走购物车 不走支付<br/>金额只认明细 请求体里写的金额不算数"]
+
+    C --> D["准入与金额的四条收敛<br/>初始状态只放行 待付款 已付款 待审核 其余一律拒单<br/>拆单标记强制 0 建单这一刻一张包裹都没有<br/>待付款与待审核 清掉支付痕迹<br/>明细为空则总额 0 有明细则 单价乘件数"]
+
+    B --> H["建单即扣库存 并记一行建单台账<br/>与买家下单同一套口径<br/>扣不动就整笔回滚"]
+
+    H --> I["历史上这里不扣库存<br/>而审核不通过 取消包裹 退货退款都会按明细回补<br/>于是库存净增 实测一个规格从四十七补到四十九"]
+
+    C --> J["后台表单强制校验明细<br/>空明细在界面上点不出来<br/>所以这条路径只对直连接口存在"]
+
+    classDef note fill:#e6f7ff,stroke:#1890ff,stroke-width:1.5px,color:#003a8c
+    classDef go fill:#f6ffed,stroke:#389e0d,stroke-width:2px,color:#135200
+    classDef bad fill:#fff1f0,stroke:#cf1322,stroke-width:2px,color:#820014
+    class A,B,C,D,J note
+    class H go
+    class I bad

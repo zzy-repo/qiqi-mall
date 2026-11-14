@@ -1,0 +1,20 @@
+%%{init: {"flowchart": {"nodeSpacing": 30, "rankSpacing": 52}}}%%
+flowchart LR
+    A[打开后台登录页] --> B{之前输错<br/>满 5 次了吗}
+    B -->|没满| C[填账号和密码]
+    B -->|满了| D[多出一行验证码<br/>填对才让登录]
+    D --> C
+    C --> E{账号密码<br/>对得上吗}
+    E -->|对，且账号启用中| F[登录成功<br/>进入后台首页]
+    E -->|不对或已停用| G[提示账号或密码错误<br/>失败次数 +1]
+    G --> H{连续失败<br/>满 5 次了吗}
+    H -->|还没满| I[清空密码框<br/>可以马上再试]
+    I --> C
+    H -->|满了| J[下次登录必须先填验证码<br/>成功后次数才归零]
+    J --> B
+    F --> K([正常使用后台])
+    D -.细节见下一张.-> L[验证码怎么出、怎么取<br/>用一次就作废]
+    style F fill:#e8f5e9,stroke:#43a047
+    style K fill:#e8f5e9,stroke:#43a047
+    style G fill:#fdecea,stroke:#e53935
+    style L fill:#e8f4fd,stroke:#2196f3

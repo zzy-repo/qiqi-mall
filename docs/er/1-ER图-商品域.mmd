@@ -1,0 +1,59 @@
+%% 商品域 · 7 张表 / 7 条真实外键 + 1 条逻辑关系（自引用无外键）
+%% 图例：实线 = 库中真实外键；点线 = 逻辑关联但库中无外键，标签以「逻辑·」开头
+%% 只给影响语义的字段写一句注释；图片地址统一写「对象存储」，不写产品名
+%% cost_price 是当前成本：毛利按订单明细里的成本快照算，不回头看这一列
+erDiagram
+    category["商品分类"] {
+        bigint id PK "主键"
+        bigint parent_id "父分类，0 为顶级"
+        varchar name "分类名称"
+    }
+    product_type["商品类型"] {
+        bigint id PK "主键"
+        varchar name "类型名称"
+    }
+    attribute["属性"] {
+        bigint id PK "主键"
+        bigint type_id FK "所属类型"
+        varchar name "属性名称"
+        tinyint is_filter "是否筛选属性"
+    }
+    product["商品SPU"] {
+        bigint id PK "主键"
+        varchar name "商品名称"
+        bigint category_id FK "所属分类"
+        bigint type_id FK "所属类型"
+        tinyint publish_status "1 上架 0 下架"
+        varchar pic "主图，对象存储"
+        int version "乐观锁版本"
+    }
+    sku["规格SKU"] {
+        bigint id PK "主键"
+        bigint product_id FK "所属商品"
+        decimal price "价格"
+        decimal cost_price "成本价当前值，空=未维护"
+        int stock "展示缓存：由分桶汇总回写，不参与扣减裁决"
+        varchar pic "规格图，对象存储"
+        int version "乐观锁版本"
+    }
+    sku_spec["规格取值"] {
+        bigint id PK "主键"
+        bigint sku_id FK "所属规格"
+        bigint attribute_id FK "指向属性定义"
+        varchar value "属性值，如 黑色"
+    }
+    product_gallery["商品相册"] {
+        bigint id PK "主键"
+        bigint product_id FK "所属商品"
+        varchar url "图片地址，对象存储"
+        int sort "展示顺序"
+    }
+
+    product_type ||--o{ attribute : "一个类型下有多个属性"
+    category ||--o{ product : "一个分类下有多件商品"
+    product_type ||--o{ product : "一个类型下有多件商品"
+    product ||--o{ product_gallery : "一件商品多张图"
+    product ||--o{ sku : "一件商品多个规格"
+    attribute ||--o{ sku_spec : "一个属性被多个取值引用"
+    sku ||--o{ sku_spec : "一个规格多个取值"
+    category ||..o{ category : "逻辑·自引用·0为顶级·库中无外键"

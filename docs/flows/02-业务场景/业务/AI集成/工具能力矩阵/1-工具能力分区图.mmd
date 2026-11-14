@@ -1,0 +1,88 @@
+flowchart LR
+    OP["操作人<br/>用自然语言说需求"]
+    AI["AI助手<br/>听懂意图、挑对能力"]
+    MCPS["MCP服务<br/>经MCP协议对外<br/>把后台能力<br/>摆成一组工具"]
+    CORE["订单中台<br/>同一套接口与鉴权<br/>不为AI另开后门"]
+    DATA[("数据<br/>订单·发货单<br/>商品·库存·会员")]
+    KEY["怎么读这张图<br/>绿：AI直接能查，随便查<br/>黄：AI能改，但先预演、人点头、再过一道闸门<br/>红：根本不给AI，只能人工"]
+    RULE["分档就看三件事<br/>①会不会改数据<br/>②改之前能不能让人看清<br/>③会不会改变谁能用AI"]
+
+    OP --> AI
+    AI --> MCPS
+    MCPS --> CORE
+
+    subgraph RO["①只读区（绿）·直接调用，不需要任何确认"]
+        R1["订单查询<br/>待审核、待发货"]
+        R2["发货单查询<br/>每个包裹一张单"]
+        R3["商品查询<br/>在售与下架"]
+        R4["分类与属性查询<br/>各类型有哪些属性"]
+        R5["库存与概览<br/>各仓可用量"]
+        R6["一句话：随便查<br/>不改任何数据"]
+        R1 ~~~ R2 ~~~ R3 ~~~ R4 ~~~ R5 ~~~ R6
+    end
+
+    subgraph RW["②写操作区（黄）·先预演，再由人拍板，过闸门才执行"]
+        W0["能改的七件事<br/>商品与规格的修改（含价格、库存）<br/>订单审核<br/>发货单的调整、拆分、合并<br/>下发仓库<br/>退货审核<br/>仓库与订单设置<br/>会员资料"]
+        subgraph FLOW["写操作必经的三步"]
+            direction LR
+            W1["第一步·预演<br/>只算不落库<br/>把「将要发生什么」<br/>先讲清楚"]
+            W2["第二步·人看一眼<br/>在自己的界面上<br/>点头或者改主意"]
+            W3["第三步·过闸门执行<br/>数据在你确认之后<br/>被别人改过→拒绝"]
+            W1 --> W2 --> W3
+        end
+        W0 ~~~ W1
+    end
+
+    subgraph RR["③红线区（红）·不给AI，只能人工"]
+        X1["管理员账号管理<br/>谁能进后台、谁有权改什么"]
+        X2["AI访问密钥自身的管理<br/>发钥匙、换钥匙、收钥匙"]
+        X3["一句话：AI不能自己发钥匙<br/>也不能改能发钥匙的人"]
+        X1 ~~~ X2 ~~~ X3
+    end
+
+    OP ~~~ KEY
+    OP ~~~ RULE
+
+    subgraph GATE["过哪道闸，看这份数据本身有没有版本号"]
+        G1["有版本号的写<br/>商品 规格 会员 订单<br/>发货单的改仓改量 拆分 合并 删除<br/>你确认之后数据又被别人改过→直接拒绝"]
+        G2["没有版本号的写<br/>下发仓库 取消发货单 退货审核<br/>退货原因 仓库 订单设置 会员地址 购物车<br/>先看状态对不对，再拿「到底改到了几行」复核<br/>改到 0 行就说明这条记录已被别人删掉→拒绝"]
+        G1 ~~~ G2
+    end
+
+    CORE ~~~ R1
+    CORE ~~~ W0
+    CORE ~~~ X1
+    CORE ~~~ G1
+    CORE --> DATA
+
+    style OP fill:#ffffff,stroke:#455a64
+    style AI fill:#f3e5f5,stroke:#8e24aa
+    style MCPS fill:#fffde7,stroke:#fbc02d
+    style CORE fill:#e3f2fd,stroke:#1565c0
+    style DATA fill:#f1f8e9,stroke:#689f38
+    style KEY fill:#fafafa,stroke:#9e9e9e,stroke-dasharray:6 4
+    style RULE fill:#fafafa,stroke:#9e9e9e,stroke-dasharray:6 4
+
+    style RO fill:#e6f4e6,stroke:#2e7d32,stroke-width:2px
+    style RW fill:#fff4d1,stroke:#f9a825,stroke-width:2px
+    style RR fill:#fbdcdc,stroke:#c62828,stroke-width:2px
+    style FLOW fill:#ffffff,stroke:#f9a825,stroke-dasharray:6 4
+    style GATE fill:#ffffff,stroke:#ef6c00,stroke-dasharray:6 4
+
+    style R1 fill:#ffffff,stroke:#2e7d32
+    style R2 fill:#ffffff,stroke:#2e7d32
+    style R3 fill:#ffffff,stroke:#2e7d32
+    style R4 fill:#ffffff,stroke:#2e7d32
+    style R5 fill:#ffffff,stroke:#2e7d32
+    style R6 fill:#c8e6c9,stroke:#2e7d32,stroke-width:2px
+
+    style W0 fill:#ffffff,stroke:#f9a825
+    style W1 fill:#ffffff,stroke:#f9a825
+    style W2 fill:#ffffff,stroke:#f9a825
+    style W3 fill:#ffe082,stroke:#ef6c00,stroke-width:2px
+    style G1 fill:#ffffff,stroke:#ef6c00
+    style G2 fill:#ffffff,stroke:#ef6c00
+
+    style X1 fill:#ffffff,stroke:#c62828
+    style X2 fill:#ffffff,stroke:#c62828
+    style X3 fill:#ffcdd2,stroke:#c62828,stroke-width:2px

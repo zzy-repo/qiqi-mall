@@ -1,0 +1,21 @@
+flowchart LR
+    A[商家登录后台] --> B[点「数据概览」]
+    B --> C[一次加载整页数据]
+    C --> D[顶部 6 张指标卡<br/>今日成交额 / 今日订单 / 商品总数<br/>待审核 / 待发货 / 待处理退货]
+    C --> E[近 7 天趋势<br/>订单数 + 成交额双轴折线]
+    C --> F[订单状态分布<br/>环形图]
+    C --> G[热销商品 Top 5<br/>条形图]
+    C --> H[库存告警<br/>库存 ≤ 10 的规格]
+    D --> I{发现异常}
+    E --> I
+    F --> I
+    G --> I
+    H --> I
+    I -->|待审核/待发货多| J[去订单列表处理]
+    I -->|库存偏低| K[去 SKU 页补库存]
+    I -->|待处理退货| L[去退货申请页审核]
+    I -->|一切正常| M([日常巡店完成])
+    style M fill:#e8f4fd,stroke:#2196f3
+    style J fill:#fff3e0,stroke:#ff9800
+    style K fill:#fff3e0,stroke:#ff9800
+    style L fill:#fff3e0,stroke:#ff9800

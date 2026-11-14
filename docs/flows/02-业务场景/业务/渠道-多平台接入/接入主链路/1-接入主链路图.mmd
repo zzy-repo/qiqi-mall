@@ -1,0 +1,62 @@
+%% 多平台接入 · ①接入主链路图
+%% 一句话：三个平台走同一条路，差异只在适配器
+%% 读法：最上面两层是「各说各话」和「翻译」，从统一模型往下是三个平台共用的一条路
+%% 配色：灰＝平台侧／蓝＝适配器与闸门／绿＝主干正常推进／橙＝跳过／灰虚线＝收尾留痕
+flowchart TD
+    subgraph PP["第一层·平台侧：三个平台各说各话"]
+        direction LR
+        TB["淘宝「果小铺」<br/>模拟平台：字段与错误码自成一套"]
+        DY["抖音「果小铺严选」<br/>模拟平台：路径段与字段名不同"]
+        SH["自营商城「上海直营」<br/>真调开放接口：后端也真的走一遍网络"]
+    end
+
+    subgraph AA["第二层·适配器：平台差异只允许活在这里"]
+        direction LR
+        TBAD["淘宝适配器<br/>拼地址、解报文、译错误码"]
+        DYAD["抖音适配器<br/>同一份代码换路径段<br/>在注册表里注册成两个"]
+        SHAD["自营商城适配器<br/>超时与非成功响应一律判失败"]
+    end
+
+    MD["统一模型：平台订单<br/>平台单号／收件人／明细／金额<br/>三个平台的单到这里长得一样"]
+    GT["幂等闸门：平台单号映射<br/>这个店铺加这个平台单号，来过没有"]
+    SK["来过就是重复<br/>记一行「跳过·重复」<br/>不建单、不动库存、不当错误"]
+    BD["落单：一张单一个事务<br/>先查闸门，再对商品编码<br/>任一明细对不上，整单放弃<br/>成功即「待审核」，交棒审核模块"]
+    AU["审核：复用既有审核模块<br/>过审才往下走，判定链不在这里"]
+    SP["拆单：一仓一包<br/>拆完才有包裹这个对象"]
+    OB["出库：包裹拿到<br/>承运商与运单号"]
+    PS["回传发货：逐包裹一次外呼<br/>只挑已出库的包裹，取消的不算<br/>运单号写回平台<br/>同一层适配器，反向再走一次"]
+    LG["同步日志：一次外呼一行，只追加<br/>动作／结果／失败原因／第几次尝试<br/>耗时、拉单汇总、每单跳过与失败<br/>每次回传尝试都在里面"]
+    KEY["这张图只看一句话：三个平台走同一条路<br/>主干九成代码共用，差异全收进适配器<br/>再加平台＝再写一个适配器，主干不改"]
+
+    TB --> TBAD
+    DY --> DYAD
+    SH --> SHAD
+    TBAD --> MD
+    DYAD --> MD
+    SHAD --> MD
+    MD --> GT
+    GT --> SK
+    GT --> BD
+    BD --> AU
+    AU --> SP
+    SP --> OB
+    OB --> PS
+    PS --> LG
+    SK --> LG
+    LG ~~~ KEY
+
+    classDef plat fill:#eceff1,stroke:#37474f,stroke-width:1.5px
+    classDef adap fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef gate fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef pass fill:#e8f5e9,stroke:#2e7d32,stroke-width:1.5px
+    classDef skip fill:#fff3e0,stroke:#ef6c00,stroke-width:1.5px
+    classDef ledger fill:#f5f5f5,stroke:#616161,stroke-width:1.5px,stroke-dasharray:6 4
+    classDef note fill:#fafafa,stroke:#9e9e9e,stroke-width:1.5px,stroke-dasharray:6 4
+
+    class TB,DY,SH plat
+    class TBAD,DYAD,SHAD adap
+    class MD,GT gate
+    class BD,AU,SP,OB,PS pass
+    class SK skip
+    class LG ledger
+    class KEY note

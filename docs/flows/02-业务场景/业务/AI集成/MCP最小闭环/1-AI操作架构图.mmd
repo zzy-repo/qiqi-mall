@@ -1,0 +1,38 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 340
+    nodeSpacing: 45
+    rankSpacing: 70
+    padding: 14
+---
+flowchart LR
+    U["用户<br/>把需求说成人话<br/>「把待审核的订单列出来」"]
+    AI["AI 助手<br/>听懂意图、挑对工具<br/>把工具结果讲回人话"]
+    M{{"订单中台<br/>通过 MCP 对外<br/>提供一组业务能力"}}
+
+    RO["可直接调用区 · 只读工具<br/>AI 自己就能调，只看不改、不落库<br/>① 查订单：待审核几笔、各多少钱<br/>② 看拆单方案：哪个仓发哪些商品"]
+
+    RW["需人确认区 · 写操作<br/>AI 不能闷头落库<br/>必须先预演、再由人点头<br/>① 预演：只算不落库，把「将要发生什么」讲清楚<br/>② 人确认后才执行（执行时带版本号）<br/>③ 生成发货单：一仓一个包裹"]
+
+    SAME["规则 · 权限与人工界面完全一致<br/>AI 走的是后台同一套能力、同一套权限<br/>AI 能做的，人本来就能做<br/>人不能做的，AI 也做不了<br/>不存在「AI 能绕过人做的事」<br/>并发冲突由版本号乐观锁兜住 —— AI 和人在同一把锁下，没有例外"]
+
+    DA[("数据<br/>订单：待审核 / 待发货<br/>发货单：每个包裹一张<br/>库存：各仓可用量")]
+
+    U -->|"说人话"| AI
+    AI ==>|"通过 MCP 调用工具"| M
+
+    M --> RO
+    M ==>|"要写数据，先预演"| RW
+    M -. "共用同一套权限" .-> SAME
+
+    RO -. "读" .-> DA
+    RW -->|"写"| DA
+
+    style RO fill:#e8f4fd,stroke:#2196f3,stroke-dasharray: 9 6
+    style RW fill:#fff3e0,stroke:#ff9800,stroke-dasharray: 9 6
+    style DA fill:#f1f8e9,stroke:#689f38
+    style U fill:#ffffff,stroke:#455a64
+    style AI fill:#f3e5f5,stroke:#8e24aa
+    style M fill:#fffde7,stroke:#fbc02d
+    style SAME fill:#fafafa,stroke:#607d8b

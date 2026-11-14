@@ -1,0 +1,50 @@
+sequenceDiagram
+    autonumber
+    actor B as 买家
+    participant M as 商城页面
+    participant K as 购物车
+
+    B->>M: 商品详情点「加入购物车」
+    alt 未登录
+        M-->>B: 先存在本浏览器（提示「登录后自动合并」）
+    else 已登录
+        M->>K: 加入
+        K-->>M: 同一规格已存在则数量累加，否则新增一行
+        M-->>B: 跳到购物车，展示商品/规格/单价/数量/小计
+    end
+
+    rect rgb(235, 245, 255)
+    note over B,K: 调整数量
+    B->>M: 点 + / -，或直接改输入框
+    alt 改成 0 或负数
+        M-->>B: 自动纠正为 1（下限守卫）
+    else 正常数量
+        M->>K: 更新数量
+        K-->>M: 小计与合计随之变化
+    end
+    end
+
+    rect rgb(255, 240, 240)
+    note over B,K: 删除
+    B->>M: 某行点「删除」
+    M->>K: 移除该规格
+    K-->>M: 列表刷掉这一行，合计重算
+    end
+
+    rect rgb(255, 248, 235)
+    note over B,K: 去结算
+    B->>M: 点「去结算」
+    alt 未登录
+        M-->>B: 拦住并跳登录页，登录后回到结算页
+    else 已登录
+        M-->>B: 进入结算页
+    end
+    end
+
+    rect rgb(240, 250, 240)
+    note over B,K: 匿名加购后登录
+    B->>M: 登录
+    M->>K: 把本浏览器的购物车合并进去（同规格累加）
+    K-->>M: 合并条数
+    M-->>B: 提示「已合并 N 件」，本地购物车清空
+    end

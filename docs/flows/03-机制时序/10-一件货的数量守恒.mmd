@@ -1,0 +1,40 @@
+flowchart TB
+    A[扣一次：下单<br/>提交订单即扣，整单凑够才成<br/>落到：命中的那个桶]
+    B[补一次：审核不通过<br/>待审核订单被驳回，按整单回补<br/>落到：台账记的那个桶]
+    C[补一次：取消包裹<br/>待下发包裹被取消，只按该包裹<br/>落到：台账记的那个桶]
+    D[补一次：退货通过退款<br/>退货审核通过，按整单回补<br/>落到：台账记的那个桶]
+
+    DED[扣减口径<br/>① 条件更新单桶，余量够就扣<br/>② 影响 0 行 → 换下一个桶，最多 8 次<br/>③ 都扣不动 → 按桶号升序跨桶拼单<br/>④ 拼不够才判库存不足，一件不扣]
+    RST[回补口径<br/>分桶模式：补回台账记的那个桶<br/>桶号缺失或桶已不在 → 补桶号最小的桶<br/>旧单行模式：直接加回规格库存字段]
+
+    BK[分桶库存：唯一权威<br/>每个规格固定 8 个桶<br/>可售总量 = SUM（各桶）<br/>扣减裁决只在这里发生]
+
+    subgraph CACHEBOX[展示层：只读缓存，不参与裁决]
+        direction LR
+        WRITE[缓存回写<br/>周期任务每 250ms 一轮<br/>把 SUM（各桶）写进来] --> CACHE[规格库存字段<br/>页面与列表读的是它<br/>滞后 ≤250ms]
+    end
+
+    INV[主不变量（不变）<br/>同一件货在任何时刻<br/>只有一个入口记账<br/>四条扣/补路径必须互斥]
+    CONS[守恒口径升级<br/>守的是 SUM（各桶）<br/>不是界面上那个数<br/>展示字段与 SUM（各桶）偏差有界<br/>≤ 一个缓存周期内的变动量]
+    NOTE[曾经的两条回补没有台账<br/>同一件货可能被补两次<br/>现已修：四个入口各记一条流水<br/>幂等键管重放，数量守恒管跨入口]
+
+    A --> DED
+    B --> RST
+    C --> RST
+    D --> RST
+    DED --> BK
+    RST --> BK
+    BK --> CACHEBOX
+
+    INV ~~~ BK
+    CONS ~~~ CACHEBOX
+    NOTE ~~~ A
+
+    classDef inv fill:#fff1f0,stroke:#d03050,stroke-width:2px,color:#a8071a
+    classDef authority fill:#e6f4ff,stroke:#1677ff,stroke-width:2px
+    classDef rule fill:#f6ffed,stroke:#389e0d,stroke-width:2px,color:#135200
+    classDef cache fill:#fafafa,stroke:#aaa,stroke-dasharray:4 3,color:#555
+    class INV,CONS inv
+    class BK authority
+    class DED,RST rule
+    class WRITE,CACHE,NOTE cache

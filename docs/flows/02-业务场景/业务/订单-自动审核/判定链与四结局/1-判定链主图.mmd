@@ -1,0 +1,82 @@
+%% 订单自动审核 · 判定链主图
+%% 一图讲清：九步固定顺序 + 每个出口由哪条规则造成 + 「假如没被拦」回填插在哪一步
+%% 读法：问句节点＝一道闸门或一条策略；出口节点第一行就写着「什么情况下走到这里」
+%% 配色：绿＝自动过审路（唯一会改状态的出口）／红＝阻止／橙＝冻结／黄＝留人工／灰＝跳过与不命中
+flowchart TD
+    IN["一笔待审核订单进入本轮<br/>候选＝待审核单与已冻结单<br/>逐单装配：店铺、渠道、应收、样数、毛利、库存可用量"]
+
+    Q1{"第①步·状态闸门<br/>当前状态是待审核？"}
+    Q2{"第②步·冻结闸门<br/>这张单上有生效的冻结标？"}
+
+    Q3{"第③步·阻止策略<br/>毛利不为正／收货地址是双地址"}
+    BL["阻止策略命中 → 出口·阻止<br/>结论＝阻止，带命中策略名与具体数值差<br/>状态仍待审核，等运营联系客户"]
+
+    Q4{"第④步·异常策略<br/>有退款申请／平台备注二十四小时内被改过"}
+    FR["异常策略命中 → 出口·冻结<br/>打冻结标＋写一条操作审计<br/>冻结不是一个新状态码，状态仍待审核"]
+
+    WB["第③④步出了结论还要往下走这一步<br/>回填「假如没被拦，本来会命中哪条自动策略」<br/>把自动策略按原优先级重跑一遍，只看不执行<br/>结论只写进决策行的回填列，绝不推进状态"]
+
+    Q5{"第⑤步之一·自动策略按优先级从小到大逐条看<br/>本条的条件全部满足？"}
+    MS["有一条没满足 → 记下差在哪<br/>哪条条件、期望值对实际值<br/>接着试下一条，不提前收工"]
+
+    Q6{"第⑤步之二·排除条件任一生效？<br/>本策略级＋全局级（客服备注含「改」）"}
+    MN["条件满足但被排除 → 出口·留人工<br/>结论＝转人工，写清被哪条排除挡下<br/>状态仍待审核"]
+
+    Q7{"第⑦步·库存预检（只给准过审的单做）<br/>各库存桶求和≥需求件数？"}
+    DN["库存不够 → 出口·留人工（降级）<br/>结论＝转人工，降级原因＝库存不足<br/>状态仍待审核，另打库存不足标挂起"]
+    AP["条件全满足且库存够 → 出口·自动过审<br/>结论＝自动过审，待审核变待发货"]
+
+    SK["不是待审核／已冻结 → 出口·跳过<br/>本轮不判定、不动状态<br/>只落一行「跳过」决策留痕"]
+    NM["第⑥步·一条都不中 → 出口·不命中<br/>结论＝不命中，逐条列出每条策略差在哪<br/>状态仍待审核"]
+
+    LG["第⑧⑨步·收尾（每个出口最后都要走这一步）<br/>执行只做结论允许的事：过审才改状态、冻结才打标<br/>然后同一事务里落库：决策表每单每轮一行<br/>幂等键＝订单加轮次，与状态台账同一套写法<br/>过审那笔同时在状态台账记一行，行上带本轮批次号"]
+
+    KEY["四个业务结局怎么读<br/>自动过审：待审核变待发货，唯一动状态的出口<br/>留人工：三支，条件满足被排除／九步都不中<br/>再加一支库存不够时的降级<br/>阻止：命中毛利或双地址，等运营谈<br/>冻结：命中退款或改备注，等客服处理<br/>技术上还有「跳过」，不算结局，只说明本轮没轮到它"]
+
+    IN --> Q1
+    Q1 --> Q2
+    Q1 --> SK
+    Q2 --> Q3
+    Q2 --> SK
+    Q3 --> BL
+    Q3 --> Q4
+    Q4 --> FR
+    Q4 --> WB
+    WB --> Q5
+    Q5 --> Q6
+    Q5 --> MS
+    MS --> NM
+    Q6 --> MN
+    Q6 --> Q7
+    Q7 --> AP
+    Q7 --> DN
+    AP --> LG
+    DN --> LG
+    FR --> LG
+    BL --> LG
+    MN --> LG
+    NM --> LG
+    SK --> LG
+    IN ~~~ KEY
+
+    classDef spine fill:#ffffff,stroke:#455a64,stroke-width:1.5px
+    classDef gate fill:#e3f2fd,stroke:#1565c0,stroke-width:1.5px
+    classDef pass fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    classDef block fill:#fdecea,stroke:#c62828,stroke-width:2px
+    classDef frozen fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef manual fill:#fffde7,stroke:#f9a825,stroke-width:2px
+    classDef miss fill:#f5f5f5,stroke:#616161,stroke-width:1.5px
+    classDef backfill fill:#e1f5fe,stroke:#0277bd,stroke-width:1.5px,stroke-dasharray:6 4
+    classDef wrap fill:#eceff1,stroke:#37474f,stroke-width:2px
+    classDef note fill:#fafafa,stroke:#9e9e9e,stroke-width:1.5px,stroke-dasharray:6 4
+
+    class IN spine
+    class Q1,Q2,Q3,Q4,Q5,Q6,Q7 gate
+    class AP pass
+    class BL block
+    class FR frozen
+    class DN,MN manual
+    class SK,NM,MS miss
+    class WB backfill
+    class LG wrap
+    class KEY note

@@ -1,0 +1,44 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 340
+    nodeSpacing: 45
+    rankSpacing: 70
+    padding: 14
+---
+flowchart TD
+    NEW["新建令牌<br/>填名称、勾权限域、设有效期"]
+
+    CREATED["已创建<br/>明文密钥只在创建弹窗里出现一次<br/>关掉弹窗后列表只剩前缀"]
+
+    LIVE["调用中（启用后进入）<br/>AI每次调用都带着它<br/>只刷新最后使用时间<br/>不改权限"]
+
+    DIS["已禁用（点禁用后进入）<br/>立即失效<br/>下一次调用直接被拒<br/>可随时重新启用"]
+
+    EXP["已过期（有效期到点自动进入）<br/>自然失效，不需要人工操作<br/>有效期留空则永远不进这一格"]
+
+    DEL["已删除（点删除并确认后进入）<br/>立即失效且不可恢复<br/>要再用只能新建一条"]
+
+    SCOPES["权限按域勾选，各分读与写<br/>订单读、订单写<br/>商品读、商品写<br/>会员读、会员写<br/>配置读、配置写<br/>概览只有读<br/>有效期二选一<br/>永不过期，或具体到分秒"]
+
+    RL["两条红线，任何状态下都成立<br/>一、不能管理管理员账号<br/>AI要是能建管理员<br/>就等于能给自己发任何权限<br/>二、不能管理密钥自身<br/>AI要是能改自己的权限<br/>就等于没有授权体系"]
+
+    NEW --> CREATED
+    CREATED --> LIVE
+    LIVE --> DIS
+    LIVE --> EXP
+    LIVE --> DEL
+    DIS --> LIVE
+    DIS --> DEL
+    EXP --> DEL
+    LIVE -.-> SCOPES
+    LIVE -.-> RL
+
+    style NEW fill:#ffffff,stroke:#455a64
+    style CREATED fill:#e3f2fd,stroke:#1976d2
+    style LIVE fill:#e8f5e9,stroke:#388e3c
+    style DIS fill:#fff3e0,stroke:#f57c00
+    style EXP fill:#fce4ec,stroke:#c2185b
+    style DEL fill:#f5f5f5,stroke:#616161,stroke-dasharray: 6 4
+    style SCOPES fill:#f3e5f5,stroke:#8e24aa,stroke-dasharray: 9 6
+    style RL fill:#ffebee,stroke:#d32f2f

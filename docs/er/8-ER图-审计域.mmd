@@ -1,0 +1,30 @@
+%% 审计域 · 1 张表 / 0 条真实外键 + 1 条逻辑关系
+%% 图例：实线 = 库中真实外键；点线 = 逻辑关联但库中无外键，标签以「逻辑·」开头
+%% 横切全库：改价、删单、拆单、合并、发货、退货审核都往这里留一条，只追加、不修改、不软删。
+%% 目标对象是多态的（订单／包裹／退货申请／规格／会员／密钥），除订单 id 外不固定指向某张表，
+%% 因此只画订单这一条；其余目标用类型加 id 两列表达，不连线。
+%% 幂等口径与状态台账不同：一次请求一条，同一个人连点两次要留两条（第二次失败也是证据）。
+erDiagram
+    order["订单·存根"] {
+        bigint id PK "详见订单交易域"
+    }
+    admin_audit_log["操作审计日志"] {
+        bigint id PK "主键"
+        varchar action "动作码：改价／删单／拆单／合并／发货／退货审核"
+        varchar target_type "目标类型，多态"
+        bigint target_id "目标 id，可空：目标可能已被删"
+        varchar target_sn "目标单号或名称快照"
+        bigint order_id "落在哪张订单上，冗余便于检索"
+        json before_json "变更前快照"
+        json after_json "变更后快照"
+        varchar summary "一句人话，列表直接展示"
+        varchar reason "管理员填写的原因，敏感动作必填"
+        varchar operator_type "管理员／密钥／系统"
+        bigint operator_id "操作者 id"
+        varchar operator_name "操作者名快照"
+        varchar request_id "请求追踪号，一次请求一条"
+        varchar idem_key UK "幂等键"
+        datetime created_at "发生时间"
+    }
+
+    order ||..o{ admin_audit_log : "逻辑·order_id 冗余检索·库中无外键"

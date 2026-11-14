@@ -1,0 +1,49 @@
+%% 渠道接入域 · 3 张表 / 0 条真实外键 + 5 条逻辑关系
+%% 图例：实线 = 库中真实外键；点线 = 逻辑关联但库中无外键，标签以「逻辑·」开头
+%% 这一域讲的是"外部平台 ↔ 内部订单"的边界：
+%%   平台店铺（外部身份 + 拉单水位）→ 平台订单映射（平台单号 ↔ 内部订单）→ 渠道同步日志（每次拉单/回传）。
+%% 三张表一条外键都没有，而且是故意的：店铺停用、平台数据被清理，都不允许连带删掉内部的
+%% 映射与同步证据；订单删了，这几行也要能独立留下来说明"当时确实同步过"。
+%% 同步日志的形状与履约域的仓库交互台账同构（动作＋结果＋第几次＋耗时＋失败原因）——
+%% 平台在这个意义上就是另一个外部作业系统，只是它拉的是单、回的是发货。
+erDiagram
+    order["订单·存根"] {
+        bigint id PK "详见订单交易域"
+    }
+    delivery_order["发货单·存根"] {
+        bigint id PK "详见履约域"
+    }
+    channel_shop["平台店铺"] {
+        bigint id PK "主键"
+        enum platform_type "自营开放接口／两个本地模拟平台"
+        varchar shop_code "平台侧店铺编码，调接口时带上"
+        varchar shop_name "店铺名，后台卡片标题"
+        tinyint enabled "停用后不许拉单与回传"
+        datetime watermark_at "拉单水位：上次成功拉单的开始时刻"
+        datetime last_pull_at "上次拉单结束时刻，含失败"
+    }
+    channel_order_map["平台订单映射"] {
+        bigint id PK "主键"
+        bigint shop_id "所属店铺，无外键"
+        varchar platform_sn "平台单号，自营渠道直接用订单号"
+        bigint order_id "内部订单 id，无外键"
+        datetime created_at "入库时间"
+    }
+    channel_sync_log["渠道同步日志"] {
+        bigint id PK "主键"
+        bigint shop_id "所属店铺，无外键"
+        enum action "拉单／回传发货"
+        varchar ref_type "关联对象类型，多态"
+        bigint ref_id "关联对象 id，由类型决定指向"
+        enum result "成功／失败／幂等跳过"
+        varchar reason "失败或跳过原因"
+        int attempt "第几次尝试，重试各留一行"
+        int latency_ms "外呼耗时"
+        datetime created_at "记录时间"
+    }
+
+    channel_shop ||..o{ channel_order_map : "逻辑·shop_id·库中无外键"
+    order ||..o{ channel_order_map : "逻辑·order_id·库中无外键"
+    channel_shop ||..o{ channel_sync_log : "逻辑·shop_id·库中无外键"
+    order ||..o{ channel_sync_log : "逻辑·ref_id 多态指订单·库中无外键"
+    delivery_order ||..o{ channel_sync_log : "逻辑·ref_id 多态指发货单·库中无外键"

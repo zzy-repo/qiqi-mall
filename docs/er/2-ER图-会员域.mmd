@@ -1,0 +1,39 @@
+%% 会员域 · 3 张表 / 2 条真实外键 + 2 条逻辑关系（购物车引用商品与规格，裸 id 无外键）
+%% 图例：实线 = 库中真实外键；点线 = 逻辑关联但库中无外键，标签以「逻辑·」开头
+%% 右侧两张为存根卡片（只画主键），完整字段见商品域
+erDiagram
+    member["会员"] {
+        bigint id PK "主键"
+        varchar username UK "登录名，全局唯一"
+        varchar nickname "昵称"
+        varchar phone "手机号"
+        varchar customer_tag "客户标签：审核判据的来源"
+        tinyint status "1 启用 0 禁用"
+        int version "乐观锁版本"
+    }
+    member_address["收货地址"] {
+        bigint id PK "主键"
+        bigint member_id FK "所属会员"
+        varchar name "收件人"
+        varchar phone "收件电话"
+        varchar detail "详细地址"
+        tinyint default_status "是否默认地址"
+    }
+    cart["购物车"] {
+        bigint id PK "主键"
+        bigint member_id FK "所属会员"
+        bigint product_id "商品，裸 id 无外键"
+        bigint product_sku_id "规格，裸 id 无外键"
+        int quantity "数量"
+    }
+    product["商品·存根"] {
+        bigint id PK "详见商品域"
+    }
+    sku["规格·存根"] {
+        bigint id PK "详见商品域"
+    }
+
+    member ||--o{ member_address : "一个会员多个收货地址"
+    member ||--o{ cart : "一个会员一辆购物车"
+    cart ||..o{ product : "逻辑·product_id·库中无外键"
+    cart ||..o{ sku : "逻辑·product_sku_id·库中无外键"

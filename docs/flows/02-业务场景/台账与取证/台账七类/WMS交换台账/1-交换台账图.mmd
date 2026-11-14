@@ -1,0 +1,28 @@
+sequenceDiagram
+    autonumber
+    actor 管理员 as 管理员
+    participant WH as 仓库系统
+    participant OMS as 订单服务
+    participant TZ as 交换台账
+
+    Note over 管理员,TZ: 一次外发最多两行<br/>先记「我要发什么」 再记「对方回了什么」
+    管理员->>OMS: 点下发
+    OMS->>TZ: 先记下发行 第几次尝试 报文快照 回执列留空
+    OMS->>WH: 这时才真的把货单发出去
+    WH-->>OMS: 回执回来了 成功还是失败 用了多少毫秒
+    OMS->>TZ: 追加回传行 同一次尝试 记结果和耗时和回执报文
+
+    Note over OMS,TZ: 为什么要先记再发<br/>货单一旦发出去就收不回来<br/>反过来先发后记 发成功却记不上 就是一个黑洞
+    Note over OMS,WH: 超时也照样记一行失败<br/>重试就再记一组 尝试次数加一<br/>老的那组一条都不改 只追加
+
+    alt 第一次超时 重试成功
+        OMS->>TZ: 记第一组 下发行 尝试次数是一 回执列留空
+        WH-->>OMS: 等不到回执 这一次判超时
+        OMS->>TZ: 给第一组追加回传行 记失败与超时
+        OMS->>TZ: 记第二组下发行 尝试次数加一
+        OMS->>WH: 第二次把货单发出去
+        WH-->>OMS: 第二次回执成功
+        OMS->>TZ: 给第二组追加回传行 记成功与耗时
+    end
+
+    Note over 管理员,TZ: 于是「这一单到底发了没发 发了几次 每次多久」<br/>查台账就有答案 不用去翻日志

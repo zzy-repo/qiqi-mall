@@ -1,0 +1,28 @@
+flowchart TB
+    A[管理员点了一个敏感按钮<br/>改价 改库存 删单 拆单 合并 发货 退货审核]
+    R[这一下就是一个请求<br/>请求号由本次请求决定]
+    W[写一行审计<br/>动作码 目标类型 目标单号快照 一句人话摘要<br/>改前快照与改后快照 管理员填的原因]
+    OK[第一次点 业务成功<br/>留一行]
+    FAIL[同一个人又点了一次 业务失败<br/>照样再留一行<br/>失败本身就是要留的证据]
+    P[目标后来被删掉了<br/>单号快照还在 仍读得出来这是哪一单]
+
+    A --> R
+    R --> W
+    W --> OK
+    W --> FAIL
+    W --> P
+
+    N1[注<br/>去重键只能由请求号派生<br/>绝不能由订单号或包裹号派生<br/>否则连点两次的第二次会撞上同一把键<br/>插入失败连带业务回滚 证据被抹掉] ~~~ W
+    N2[注<br/>审计和业务在同一个事务里<br/>业务失败就不该留成功的假象<br/>业务成功也不该少一行] ~~~ FAIL
+    N3[注<br/>只记敏感字段 不整行复制<br/>价格 状态 数量才是要追的<br/>手机号和地址不该被复制进只追加的表] ~~~ P
+
+    LG[说明<br/>直角框＝动作或结果<br/>虚线框＝注解 实线＝先后顺序<br/>一对一：一次请求一行]
+
+    classDef note fill:#fafafa,stroke:#aaa,stroke-dasharray:4 3,color:#444
+    classDef go fill:#f6ffed,stroke:#389e0d,stroke-width:2px,color:#135200
+    classDef warn fill:#fff7e6,stroke:#d46b08,stroke-width:2px,color:#873800
+    classDef legend fill:#fffbe6,stroke:#d4b106,stroke-width:2px
+    class N1,N2,N3 note
+    class OK,P go
+    class FAIL warn
+    class LG legend

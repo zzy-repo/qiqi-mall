@@ -1,0 +1,81 @@
+%% 履约域 · 6 张表 / 4 条真实外键 + 5 条逻辑关系
+%% 图例：实线 = 库中真实外键；点线 = 逻辑关联但库中无外键，标签以「逻辑·」开头
+%% 旧「拆单合单」图并入本图：拆单 = 一张订单拆成多张发货单（订单对发货单是一对多），
+%%   合单 = 多张发货单并回同一仓库同一收货快照；拆分量的账在 delivery_item.quantity，
+%%   它与订单明细之间是逻辑关联（库中无外键），且是一对多（一张明细可拆进多个包裹）。
+%% delivery_order.split_rule_id 指向一张尚不存在的规则表：预留字段，不画线。
+erDiagram
+    order["订单·存根"] {
+        bigint id PK "详见订单交易域"
+    }
+    order_item["订单明细·存根"] {
+        bigint id PK "详见订单交易域"
+    }
+    sku["规格·存根"] {
+        bigint id PK "详见商品域"
+    }
+    warehouse["仓库"] {
+        bigint id PK "主键"
+        varchar name "仓库名称"
+        tinyint status "1 启用 0 停用"
+    }
+    delivery_order["发货单（包裹）"] {
+        bigint id PK "主键"
+        varchar delivery_sn UK "发货单号，DL 开头"
+        bigint order_id FK "父订单"
+        bigint warehouse_id FK "发货仓"
+        tinyint status "待下发送到已签收，另有已取消"
+        int status_seq "状态流转序号"
+        datetime status_changed_at "展示缓存：权威是包裹台账"
+        tinyint source "0 自动拆单 1 人工调整"
+        bigint split_rule_id "预留：拆单规则，全库无此表"
+        int version "乐观锁版本"
+    }
+    delivery_item["发货单明细"] {
+        bigint id PK "主键"
+        bigint delivery_id FK "所属发货单"
+        bigint order_item_id "拆分来源，裸 id 无外键"
+        bigint product_sku_id "规格，裸 id 无外键"
+        int quantity "本包裹承担的数量"
+    }
+    delivery_logistics["物流信息"] {
+        bigint id PK "主键"
+        bigint delivery_id UK "一个包裹一条，唯一"
+        varchar company "快递公司"
+        varchar track_no UK "运单号，唯一"
+        datetime created_at "回传时间"
+    }
+    delivery_status_ledger["包裹状态台账"] {
+        bigint id PK "主键"
+        bigint delivery_id "无外键：证据不随包裹级联删除"
+        bigint order_id "冗余：删包后仍可按订单反查流水"
+        varchar delivery_sn "单号快照，删单后仍可读"
+        tinyint from_status "变更前，空表示建包裹"
+        tinyint to_status "变更后"
+        varchar reason "流转原因码"
+        varchar operator_name "操作者名快照"
+        varchar event_key UK "仓库事件号，重投只留一条"
+        varchar idem_key UK "幂等键"
+    }
+    wms_exchange_ledger["仓库交互台账"] {
+        bigint id PK "主键"
+        bigint delivery_id "无外键"
+        varchar delivery_sn "单号快照"
+        varchar direction "出=我方下发 入=仓库回传"
+        varchar event "下发／拣货／出库／运输／签收"
+        varchar phase "发出意图／结果，两行成对"
+        int attempt_no "第几次尝试，重试各留一行"
+        varchar result "成功／失败／超时"
+        varchar error_code "失败码"
+        varchar idem_key UK "幂等键，含尝试次数"
+    }
+
+    warehouse ||--o{ delivery_order : "一个仓库发出多个包裹"
+    order ||--o{ delivery_order : "一张订单拆成多个包裹"
+    delivery_order ||--o{ delivery_item : "一个包裹多条明细"
+    delivery_order ||--o| delivery_logistics : "一个包裹一条运单"
+    delivery_item ||..o{ order_item : "逻辑·拆分来源 order_item_id·库中无外键"
+    delivery_item ||..o{ sku : "逻辑·product_sku_id·库中无外键"
+    delivery_order ||..o{ delivery_status_ledger : "证据·只追加·库中无外键"
+    delivery_order ||..o{ wms_exchange_ledger : "证据·逐次留证·库中无外键"
+    order ||..o{ delivery_status_ledger : "逻辑·order_id 冗余反查·库中无外键"

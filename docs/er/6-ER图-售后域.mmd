@@ -1,0 +1,45 @@
+%% 售后域 · 3 张表 / 3 条真实外键 + 2 条逻辑关系
+%% 图例：实线 = 库中真实外键；点线 = 逻辑关联但库中无外键，标签以「逻辑·」开头
+%% 订单对退货申请是一对多（一张订单可多次申请）；同时至多一条待处理由唯一键保证，
+%% 该唯一键建在「仅待处理才有值」的生成列上，已处理的申请不占用键位。
+erDiagram
+    order["订单·存根"] {
+        bigint id PK "详见订单交易域"
+    }
+    member["会员·存根"] {
+        bigint id PK "详见会员域"
+    }
+    return_apply["退货申请"] {
+        bigint id PK "主键"
+        bigint order_id FK "所属订单"
+        bigint member_id FK "申请人"
+        bigint reason_id FK "退货原因字典"
+        varchar return_reason "原因描述文本"
+        tinyint status "待处理／通过／拒绝"
+        int status_seq "状态流转序号"
+        bigint pending_order_id UK "生成列：待处理才有值，保证一单同时一条"
+        datetime reviewed_at "审核时间"
+    }
+    return_reason["退货原因"] {
+        bigint id PK "主键"
+        varchar name "原因名称"
+    }
+    return_status_ledger["售后处理台账"] {
+        bigint id PK "主键"
+        bigint return_apply_id "无外键：证据不随申请级联删除"
+        bigint order_id "冗余：售后排障从订单出发"
+        tinyint from_status "变更前，空表示提交申请"
+        tinyint to_status "变更后"
+        varchar reason "提交／通过／拒绝／撤销"
+        bigint reason_id "原因字典快照"
+        decimal refund_amount "通过时的退款金额"
+        varchar operator_name "操作者名快照"
+        varchar event_key UK "事件号，重投只留一条"
+        varchar idem_key UK "幂等键"
+    }
+
+    order ||--o{ return_apply : "一张订单可多次申请退货"
+    member ||--o{ return_apply : "一个会员可多次申请"
+    return_reason ||--o{ return_apply : "申请时选一个原因"
+    return_apply ||..o{ return_status_ledger : "证据·只追加·库中无外键"
+    order ||..o{ return_status_ledger : "逻辑·order_id 冗余联查·库中无外键"

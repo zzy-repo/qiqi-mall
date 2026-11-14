@@ -1,0 +1,25 @@
+%% 权限域 · 2 张表 / 0 条真实外键 + 1 条逻辑关系
+%% 图例：实线 = 库中真实外键；点线 = 逻辑关联但库中无外键，标签以「逻辑·」开头
+%% 管理员账号与访问密钥是两条独立凭证链：密钥的签发人只存登录名字符串，删改管理员不会带走密钥。
+%% 两类主体都要能被台账记下来：密钥调用时登录主体不是管理员账号，因此台账的操作者列必须
+%% 同时容得下「管理员／会员／密钥／系统」四类，只放一个管理员 id 会让密钥调用变成无主记录。
+erDiagram
+    admin["管理员"] {
+        bigint id PK "主键"
+        varchar username UK "后台登录名，唯一"
+        varchar nickname "昵称"
+        tinyint status "1 启用 0 禁用"
+        datetime create_time "创建时间"
+    }
+    ai_api_key["访问密钥"] {
+        bigint id PK "主键"
+        varchar name "用途名称"
+        varchar key_prefix "明文前八位，列表展示用"
+        char key_hash UK "摘要值，明文不落库"
+        varchar scopes "授权范围，逗号分隔"
+        tinyint status "1 启用 0 禁用"
+        varchar created_by "签发人登录名，字符串，库中无外键"
+        datetime expires_at "到期时间，空表示不过期"
+    }
+
+    admin ||..o{ ai_api_key : "逻辑·created_by 存登录名·库中无外键"

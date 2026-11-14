@@ -1,0 +1,22 @@
+%%{init: {"flowchart": {"nodeSpacing": 28, "rankSpacing": 48}}}%%
+flowchart LR
+    A[同一账号连续输错 5 次] --> B[下次打开登录页<br/>多出一行验证码]
+    B --> C[系统现做一张图<br/>配一个一次性标识]
+    C --> D[图和标识<br/>一起显示在页面上]
+    D --> E{提交时填了吗}
+    E -->|没填| F[提示请输入验证码<br/>不校验账号密码]
+    E -->|填了| G{字符和标识<br/>都对得上吗}
+    G -->|对不上| H[提示验证码错误<br/>请重新获取]
+    G -->|对得上| I[这个标识当场作废<br/>同一张图再用会被拒]
+    F --> J[换一张新图<br/>配新标识]
+    H --> J
+    J --> D
+    D -.看不清就换一张.-> J
+    I --> K{接着校验账号密码}
+    K -->|对| L[登录成功<br/>失败次数清零]
+    K -->|不对| M[次数接着累加<br/>验证码继续要]
+    M --> J
+    style L fill:#e8f5e9,stroke:#43a047
+    style I fill:#e8f4fd,stroke:#2196f3
+    style F fill:#fff3e0,stroke:#ff9800
+    style H fill:#fff3e0,stroke:#ff9800

@@ -1,0 +1,53 @@
+%% 订单自动审核 · 状态与证据图
+%% 上半：待审核在四种结局下各自动没动（只有两条路真的改了状态）
+%% 下半：决策行与状态台账怎么对上（强对齐／弱对齐／对不上），以及冻结为什么不在状态台账里
+%% 配色：绿＝状态真的改了；黄＝人工那条路；灰＝状态停在原地；蓝＝证据侧
+flowchart TD
+    IN["一笔待审核订单，四种结局<br/>状态只有三个中文名：待审核、待发货、已关闭<br/>其余的都是标和审计，不是状态"]
+
+    SEC1["上半·状态这一列：四种结局里只有两条路真的改了状态"]
+    ST["当前状态：待审核"]
+    P1["自动过审 → 待发货<br/>唯一由审核批次推进的改状态<br/>状态台账那一行带本轮批次号"]
+    H2["人工审核不通过 → 已关闭<br/>人工那条路推进的，库存同时回补<br/>审核批次不参与这一笔"]
+    STOP["其余情形都停在待审核<br/>阻止：仍待审核，台账一行都不写<br/>冻结：仍待审核，加冻结标和操作审计<br/>不命中：仍待审核，台账一行都不写<br/>跳过：仍待审核，这轮没轮到它<br/>库存不足降级：仍待审核，加库存不足标<br/>所以「状态动没动」本身就是一条结论"]
+
+    SEC2["下半·证据这一列：决策行与状态台账怎么对上、对不上怎么说"]
+    D["决策行：每单每轮一行，只追加<br/>幂等键＝订单加轮次<br/>行上照抄当时的流转序号"]
+    L1["对上第一种·强对齐<br/>台账行的触发单据＝本轮批次<br/>就是这一轮推进的，同一条因果链"]
+    L2["对上第二种·弱对齐<br/>流转序号相同，但不是本轮推进<br/>例：不命中那轮没动状态，序号还是旧值"]
+    L3["一种都对不上<br/>直说未对齐，绝不按时间最接近硬配"]
+    AU["另外记住：冻结与解冻只写操作审计<br/>状态没变，所以状态台账里没有它们的行<br/>想证明冻过，就查标记和那条审计"]
+
+    IN ~~~ SEC1
+    SEC1 ~~~ ST
+    ST --> P1
+    ST --> H2
+    ST -.-> STOP
+    P1 ~~~ SEC2
+    H2 ~~~ SEC2
+    STOP ~~~ SEC2
+    SEC2 ~~~ D
+    D --> L1
+    L1 ~~~ L2
+    L2 ~~~ L3
+    L3 ~~~ AU
+
+    classDef head fill:#eceff1,stroke:#37474f,stroke-width:2px
+    classDef sec fill:#607d8b,stroke:#37474f,stroke-width:2px,color:#ffffff
+    classDef state fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef pass fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    classDef stay fill:#f5f5f5,stroke:#616161,stroke-width:1.5px
+    classDef manual fill:#fffde7,stroke:#f9a825,stroke-width:2px
+    classDef ev fill:#ffffff,stroke:#0277bd,stroke-width:1.5px
+    classDef ev2 fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef note fill:#fafafa,stroke:#9e9e9e,stroke-width:1.5px,stroke-dasharray:6 4
+
+    class IN head
+    class SEC1,SEC2 sec
+    class ST state
+    class P1 pass
+    class H2 manual
+    class STOP stay
+    class D ev2
+    class L1,L2,L3 ev
+    class AU note

@@ -1,0 +1,20 @@
+flowchart LR
+    A[商家在商品弹窗里] --> B{要传什么}
+    B -->|主图| C[点「上传」选一张图]
+    B -->|相册| D[点「添加图片」后逐个上传]
+    B -->|SKU 图| E[在 SKU 弹窗里点「上传」]
+    C --> F{校验}
+    D --> F
+    E --> F
+    F -->|不是图片| G[提示只支持 jpg/png/webp，不传]
+    F -->|超过 5MB| H[提示图片不能超过 5MB，不传]
+    F -->|未登录| I[要求先登录]
+    F -->|正常| J[上传成功：字段自动回填图片地址<br/>右侧/下方立刻出现预览图]
+    J --> K[相册可以填排序号决定展示顺序]
+    K --> L[点确定保存商品]
+    L --> M[C 端商品详情页：主图 + 相册按序展示]
+    M --> N([买家看到真实商品图])
+    style N fill:#e8f4fd,stroke:#2196f3
+    style G fill:#fff3e0,stroke:#ff9800
+    style H fill:#fff3e0,stroke:#ff9800
+    style I fill:#fff3e0,stroke:#ff9800

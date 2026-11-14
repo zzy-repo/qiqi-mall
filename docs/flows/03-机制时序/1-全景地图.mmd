@@ -1,0 +1,22 @@
+flowchart TB
+    HEAD[先看这张<br/>四层：买家、商城、订单中台、仓库<br/>三条流：钱、货、状态<br/>每条流只经过该经过的那几层]
+    TRUNK[主干只有一条<br/>下单 → 付款 → 待审核 → 审核通过拆成包裹<br/>→ 下发仓库 → 出库 → 签收 → 已完成]
+
+    M1[钱 · 买家<br/>付款] --> M2[钱 · 商城<br/>收单] --> M3[钱 · 订单中台<br/>记支付流水] --> M4[钱 · 仓库<br/>不经手钱，这条流到不了这里]
+
+    G1[货 · 仓库<br/>拣货、出库、发运] --> G2[货 · 订单中台<br/>拆成包裹并跟踪] --> G3[货 · 商城<br/>只展示物流进度] --> G4[货 · 买家<br/>收货并签收]
+
+    S1[状态 · 买家动作<br/>付款、申请退货、确认收货] --> S3
+    S2[状态 · 商家动作<br/>审核、发货、退货审核] --> S3
+    S4[状态 · 仓库回传<br/>拣货、出库、揽收、签收] --> S3
+    S3[状态 · 订单中台<br/>唯一写状态的地方<br/>包裹状态也在这里汇总] --> S5[状态 · 商城<br/>只展示，不写状态]
+
+    HEAD --> M1
+    HEAD --> G1
+    HEAD --> S1
+    S5 --> TRUNK
+
+    classDef head fill:#fffbe6,stroke:#d4b106,stroke-width:2px
+    classDef trunk fill:#e6f4ff,stroke:#1677ff,stroke-width:2px
+    class HEAD head
+    class TRUNK trunk

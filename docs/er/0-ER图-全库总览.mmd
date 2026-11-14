@@ -1,0 +1,106 @@
+%% 全库总览：39 张表 + 1 个只读视图 / 10 个域。只写表名，不写任何字段。
+%% 视图 v_biz_status_timeline（三张状态台账合并 + 中文状态名）不在表数内，故不画卡片。
+%% 域间 17 条主干箭头；6 张只追加台账带「只追加」短语；纪律例外（审核批次计数回写、审核标记可解除）标在节点上。
+%% 实线=真实外键；点线=逻辑关联但库中无外键，详见各域图图例。
+flowchart LR
+    subgraph ALL["全库总览 · 39 张表 + 1 视图 / 10 个域"]
+        subgraph D1["商品域 · 7 张"]
+            direction TB
+            t_category["商品分类<br/>category"]
+            t_product_type["商品类型<br/>product_type"]
+            t_attribute["属性<br/>attribute"]
+            t_product["商品<br/>product"]
+            t_sku["规格<br/>sku"]
+            t_sku_spec["规格取值<br/>sku_spec"]
+            t_product_gallery["商品相册<br/>product_gallery"]
+        end
+        subgraph D2["会员域 · 3 张"]
+            direction TB
+            t_member["会员<br/>member"]
+            t_member_address["收货地址<br/>member_address"]
+            t_cart["购物车<br/>cart"]
+        end
+        subgraph D3["订单交易域 · 5 张"]
+            direction TB
+            t_order["订单<br/>order"]
+            t_order_item["订单明细<br/>order_item"]
+            t_payment_record["支付流水<br/>payment_record<br/>资金凭证"]
+            t_order_status_ledger["订单状态台账<br/>order_status_ledger<br/>只追加"]
+            t_order_setting["订单设置<br/>order_setting<br/>全站配置"]
+        end
+        subgraph D4["履约域 · 6 张"]
+            direction TB
+            t_warehouse["仓库<br/>warehouse"]
+            t_delivery_order["发货单<br/>delivery_order<br/>仓库定从哪发"]
+            t_delivery_item["发货单明细<br/>delivery_item"]
+            t_delivery_logistics["物流信息<br/>delivery_logistics"]
+            t_delivery_status_ledger["包裹状态台账<br/>delivery_status_ledger<br/>只追加"]
+            t_wms_exchange_ledger["仓库交互台账<br/>wms_exchange_ledger<br/>逐次留证"]
+        end
+        subgraph D5["库存域 · 3 张"]
+            direction TB
+            t_sku_bucket["库存分桶<br/>sku_bucket<br/>可售唯一权威"]
+            t_inventory["分仓库存<br/>inventory<br/>不参与扣减"]
+            t_stock_ledger["库存台账<br/>stock_ledger<br/>只追加"]
+        end
+        subgraph D6["售后域 · 3 张"]
+            direction TB
+            t_return_apply["退货申请<br/>return_apply"]
+            t_return_reason["退货原因<br/>return_reason"]
+            t_return_status_ledger["售后处理台账<br/>return_status_ledger<br/>只追加"]
+        end
+        subgraph D7["权限域 · 2 张"]
+            direction TB
+            t_admin["管理员<br/>admin"]
+            t_ai_api_key["访问密钥<br/>ai_api_key"]
+        end
+        subgraph D8["审计域 · 1 张"]
+            direction TB
+            t_admin_audit_log["操作审计日志<br/>admin_audit_log<br/>只追加·横切全库"]
+        end
+        subgraph D9["审核域 · 6 张"]
+            direction TB
+            t_audit_policy["审核策略<br/>audit_policy"]
+            t_audit_policy_condition["策略条件<br/>audit_policy_condition"]
+            t_audit_policy_version["策略版本<br/>audit_policy_version"]
+            t_audit_run["审核批次<br/>audit_run<br/>计数会回写"]
+            t_order_audit_decision["订单审核决策<br/>order_audit_decision<br/>只追加"]
+            t_order_audit_tag["订单审核标记<br/>order_audit_tag<br/>可解除"]
+        end
+        subgraph D10["渠道接入域 · 3 张"]
+            direction TB
+            t_channel_shop["平台店铺<br/>channel_shop"]
+            t_channel_order_map["平台订单映射<br/>channel_order_map"]
+            t_channel_sync_log["渠道同步日志<br/>channel_sync_log<br/>逐次留证"]
+        end
+    end
+
+    t_member -->|下单| t_order
+    t_product -->|下单快照| t_order_item
+    t_order -->|下单扣减| t_sku_bucket
+    t_order -->|一拆多| t_delivery_order
+    t_delivery_order -->|取消回补| t_sku_bucket
+    t_delivery_order -->|下发| t_warehouse
+    t_warehouse -->|每次下发回传留证| t_wms_exchange_ledger
+    t_order -->|售后申请| t_return_apply
+    t_return_apply -->|审核退款| t_payment_record
+    t_order -->|状态变更留痕| t_order_status_ledger
+    t_delivery_order -->|状态变更留痕| t_delivery_status_ledger
+    t_return_apply -->|状态变更留痕| t_return_status_ledger
+    t_admin -->|审计留痕| t_admin_audit_log
+    t_channel_shop -->|拉单映射| t_order
+    t_order -->|自动审核| t_order_audit_decision
+    t_order_audit_decision -->|放行或拦截| t_order_status_ledger
+    t_delivery_order -->|回传平台| t_channel_sync_log
+
+    style ALL fill:#ffffff,stroke:#9aa4b2,stroke-width:1px,stroke-dasharray:6 4
+    style D1 fill:#e8f1fb,stroke:#6b9bd2
+    style D2 fill:#f2ebfb,stroke:#9b7fd4
+    style D3 fill:#fff3e3,stroke:#dd9a4e
+    style D4 fill:#e9f7ee,stroke:#5fae7c
+    style D5 fill:#e6f4f7,stroke:#4f9aa8
+    style D6 fill:#fdeceb,stroke:#d4736f
+    style D7 fill:#eceefa,stroke:#7b87c9
+    style D8 fill:#fdf6e3,stroke:#c9a227
+    style D9 fill:#fde9f1,stroke:#c9548f
+    style D10 fill:#f2f4e6,stroke:#9aa74f

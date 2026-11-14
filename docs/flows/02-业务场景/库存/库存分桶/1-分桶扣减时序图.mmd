@@ -1,0 +1,28 @@
+sequenceDiagram
+    autonumber
+    actor 甲 as 买家甲
+    actor 乙 as 买家乙
+    participant 下单 as 下单服务
+    participant 桶 as sku_bucket 8 行
+
+    Note over 甲,桶: 同一个 SKU 的一份库存 物理拆成 8 行（bucket_no 0~7）<br/>改之前全仓只有 sku 表那一行 所有并发抢同一把行锁
+
+    Note over 甲,桶: 扣减快路径：随机起点轮询 一次扣减里每个桶号只试一次<br/>UPDATE sku_bucket SET stock=stock-N WHERE bucket_no=? AND stock>=N<br/>影响 1 行 = 扣成功 0 行 = 这个桶不够 换下一个桶
+
+    甲->>下单: 提交订单 买 2 件
+    乙->>下单: 提交订单 买 2 件
+
+    下单->>桶: 甲 随机起点 3 → 扣 3 号桶
+    桶-->>下单: 影响 1 行 → 扣成功 命中 3 号桶
+    下单->>桶: 乙 随机起点 6 → 扣 6 号桶
+    桶-->>下单: 影响 1 行 → 扣成功 命中 6 号桶
+
+    Note over 甲,桶: 两笔扣减落在两把互不相干的行锁上 谁也不等谁<br/>这才是「拆成八把」的全部收益 单桶扣减本身跟原来一样原子
+
+    Note over 下单,桶: 兜底一 单桶装不下这一单（平均拆桶后单桶只有总量/N）<br/>按桶号升序跨桶拼单 所有事务同一加锁顺序 不成环<br/>凑不够就把已经拿走的原样补回去 返回库存不足
+
+    Note over 下单,桶: 回补不带随机：回到台账里记的那个 bucket_no<br/>台账没记桶号（分桶前的历史账）就落到最小的桶号
+
+    Note over 桶: 不变量：每个桶 CHECK(stock>=0) ⇒ SUM(桶) 任何时刻都不为负<br/>sku.stock 只是展示缓存 由周期任务按 SUM(桶) 回写 不参与任何裁决
+
+    Note over 甲,桶: 最终数据：一个买家下单成功 一个收到库存不足<br/>8 个桶合计恰好回落 N 件 一件不多一件不少

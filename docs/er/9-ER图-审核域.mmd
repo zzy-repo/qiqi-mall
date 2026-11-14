@@ -1,0 +1,91 @@
+%% 审核域 · 6 张表 / 2 条真实外键 + 5 条逻辑关系
+%% 图例：实线 = 库中真实外键；点线 = 逻辑关联但库中无外键，标签以「逻辑·」开头
+%% 本域分两个角色：
+%%   配置侧（可改）：审核策略 / 策略条件 / 策略版本 —— 只有这三张允许 UPDATE，
+%%     改条件会把策略版本号加一并留一份整份快照，历史决策永远指得到当时的版本。
+%%   运行与证据侧（不改历史）：审核批次 / 订单审核决策 / 订单审核标记。
+%% ⚠️ 纪律例外（必须写在图上，别让人以为整块都是只追加）：
+%%   ① 审核批次 audit_run 会回写一次计数（建行时写零，跑完回写），**不是**严格只追加；
+%%   ② 订单审核标记 order_audit_tag 可以被解除（生效转已解除，留解除时间与解除人），
+%%      所以它是"当前状态表"，不是台账。
+%%   ③ 本域严格只追加的只有一张：订单审核决策 order_audit_decision。
+%% 标签以「逻辑·」或「取证链·」开头即表示"库中无外键"（见图例）；过长的标签不再追加"无外键"三字，避免折行成孤字。
+%% 字段码与操作符码不做数据库闭集校验（由代码里的字段注册表与操作符注册表校验），
+%% 所以它们到哪张字典表都没有线可画。
+erDiagram
+    order["订单·存根"] {
+        bigint id PK "详见订单交易域"
+    }
+    order_status_ledger["订单状态台账·存根"] {
+        bigint id PK "详见订单交易域"
+        int status_seq "流转序号，决策行按它对账"
+    }
+    audit_policy["审核策略·配置"] {
+        bigint id PK "主键"
+        enum type "自动过审／前置拦截／异常冻结"
+        int priority "同类型内升序执行"
+        varchar name "策略名，决策行会快照它"
+        tinyint enabled "停用不删，历史决策仍指得到"
+        int version_no "改条件则加一"
+        json action_json "冻结动作，仅异常冻结型有"
+    }
+    audit_policy_condition["策略条件·配置"] {
+        bigint id PK "主键"
+        bigint policy_id FK "所属策略；全局排除时为空"
+        int seq "求值顺序"
+        enum kind "必须满足／命中即排除"
+        enum scope "本策略级／全部自动策略共用"
+        varchar field_code "字段码，代码注册表校验"
+        varchar op_code "操作符码，代码注册表校验"
+        enum value_type "数值／文本／布尔／结构化"
+        decimal value_num "按类型读三列之一"
+    }
+    audit_policy_version["策略版本·配置快照"] {
+        bigint id PK "主键"
+        bigint policy_id FK "所属策略"
+        int version_no "与策略当前版本号对齐"
+        json snapshot_json "策略与全部条件的整份快照"
+        datetime created_at "快照时间"
+    }
+    audit_run["审核批次·运行"] {
+        bigint id PK "主键"
+        enum trigger_type "人工触发／定时任务"
+        varchar idem_key UK "仅定时填，人工空"
+        int total "本轮产出决策的单数"
+        int auto_pass "自动过审数"
+        int manual "转人工数"
+        datetime created_at "开始时间"
+    }
+    order_audit_decision["订单审核决策·只追加"] {
+        bigint id PK "主键"
+        bigint order_id "无外键·证据不删"
+        bigint run_id "所属批次，无外键同理"
+        int round_no "该订单第几轮审核"
+        enum result "过审·人工·拦截·冻结·未命中·跳过"
+        bigint matched_policy_id "命中策略，无外键"
+        varchar matched_policy_name "策略名快照"
+        int matched_policy_version_no "策略版本快照"
+        json evidence_json "证据：人话原因加数值差"
+        int order_status_seq "与状态台账同序号"
+        varchar operator_type "管理员／会员／密钥／系统"
+        varchar idem_key UK "幂等键 订单:轮次"
+        datetime created_at "判定时间"
+    }
+    order_audit_tag["订单审核标记·可解除"] {
+        bigint id PK "主键"
+        bigint order_id "无外键"
+        varchar tag_code "冻结／缺货／缺成本等"
+        varchar active_tag UK "仅生效时非空·同单同标唯一"
+        tinyint active "1 生效 0 已解除"
+        varchar reason "为什么打这个标"
+        datetime released_at "解除时间"
+        varchar released_by "解除人"
+    }
+
+    audit_policy ||--o{ audit_policy_condition : "一个策略多条条件·级联删除"
+    audit_policy ||--o{ audit_policy_version : "改一次留一份快照·级联删除"
+    audit_run ||..o{ order_audit_decision : "逻辑·run_id·同域无外键"
+    audit_policy ||..o{ order_audit_decision : "逻辑·matched_policy_id"
+    order ||..o{ order_audit_decision : "证据·只追加·库中无外键"
+    order ||..o{ order_audit_tag : "逻辑·order_id·库中无外键"
+    order_status_ledger ||..o{ order_audit_decision : "取证链·order_status_seq"

@@ -1,0 +1,44 @@
+flowchart TB
+    subgraph PIC["一 先把「19 条」拆开：一半不是业务 SQL"]
+        direction TB
+        P1["一单 20.10 条语句<br/>（A 臂 420 档，30,199 单的 DIGEST 画像）"]
+        P2["driver 自己发的 10.05 条（50%）<br/>SELECT @@SESSION.transaction_read_only 每条 DML 前一条 = 7.04 条<br/>SET autocommit = 2.01 条 · COMMIT = 1.00 条"]
+        P3["业务 SQL 只有 10 条<br/>INSERT order / order_item / 出生台账 / 库存台账<br/>UPDATE sku_bucket 一档累计 510s，占语句时间 63.8%"]
+        P1 --> P2
+        P1 --> P3
+    end
+
+    subgraph FIX["二 只合并一处：少 1 条 DML，连带少 1 条探针"]
+        direction TB
+        F1["改前两条 DML<br/>INSERT order(total_amount=0) → 扣库存 → UPDATE order 回填总额"]
+        F2["改后一条 DML<br/>先把 SKU / 商品 / 价格读前置 → 总额算好 → 一次 INSERT 写对"]
+        F1 --> F2
+        F2 --> F3["代价如实记<br/>那条 UPDATE 后面的 requireAffected 守卫跟着一起消失<br/>（本事务内不可达，但确实少了一条防御性检查）"]
+    end
+
+    PIC --> FIX
+
+    F2 --> R1["每单语句数 20.62 → 18.77（−9.0%）"]
+    R1 --> R2["先写预测：ok/s = 8,215 ÷ 18.77 = 437.5"]
+    R2 --> R3["再去压测对撞：实测 441.0　偏差 +0.8%"]
+    R3 --> R4["450 档 398.4 → 441.0（+10.7%，3 轮中位）<br/>拐区起点 400 → 450 rps，饱和点 420 → 大于 450"]
+    R4 --> C1["控制变量：两臂除「语句条数」外几乎重合"]
+    C1 --> C2["SQL/s 7,703 → 7,575（−0.4%）· MySQL 1.43 → 1.42 核<br/>行锁等待 190.3 → 193.5 次/s · fsync 900/855 → 914/868<br/>after-GC 堆 95 → 93MB · GC 占比 0.8% → 0.9%"]
+    C2 --> C3["所以涨的 10.7% 只能来自语句条数：<br/>不是算力变了、不是锁变了、不是持久化变了、不是 GC 变了"]
+
+    REV["反向也对得上<br/>ok/s_A = 8,215 ÷ 20.62 = 398.4，实测 398.4<br/>同一个常量同时解释两臂 ⇒ 不是自圆其说"]
+    EXT["QPS_cap 先当外部常量量出来<br/>裸机 SELECT 1 闭环保压：A 21,832/22,026 · B 21,419/21,694<br/>两臂差 ≤2% ⇒ 机器没变，整组对照成立"]
+
+    R1 --> REV
+    REV --> EXT
+    C3 --> LG["说明<br/>直角框＝实测事实或结论 实线＝推导顺序<br/>绿边＝本轮的关键证据"]
+    EXT --> LG
+
+    classDef go fill:#f6ffed,stroke:#389e0d,stroke-width:2px,color:#135200
+    classDef legend fill:#fffbe6,stroke:#d4b106,stroke-width:2px
+    classDef band fill:#fbfbf7,stroke:#c9c9c9,stroke-width:1px,color:#333
+    classDef warn fill:#fff7e6,stroke:#d46b08,stroke-width:2px,color:#ad4e00
+    class R3,R4,C2,C3 go
+    class F3 warn
+    class LG legend
+    class PIC,FIX band

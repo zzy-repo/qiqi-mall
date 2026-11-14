@@ -1,0 +1,57 @@
+sequenceDiagram
+    autonumber
+    actor U as 操作人
+    actor AI as AI 助手
+    participant M as MCP 服务
+    participant O as 订单中台
+    participant DB as 数据库版本号
+
+    rect rgb(238, 246, 255)
+    note over U,DB: 场景 让人工智能助手去改一件商品的名字
+    U->>AI: 把这个商品改名
+    AI->>M: 通过 MCP 读取这件商品
+    M->>O: 请给出这件商品当前的样子
+    O-->>M: 商品内容 + 版本号 V1
+    M-->>AI: 商品内容 + 版本号 V1
+    note over AI: 此刻 AI 手上拿的是 V1
+    end
+
+    rect rgb(255, 238, 238)
+    note over U,DB: 就在这中间 有人抢先改了同一件商品
+    O->>DB: 比对那次改动：还是 V1 吗
+    DB-->>O: 是 V1，比对通过
+    O->>DB: 版本号推进到 V2
+    DB-->>O: 已记下 V2
+    note over U,DB: AI 并不知道，它手上仍然是 V1
+    end
+
+    rect rgb(255, 248, 238)
+    note over U,DB: AI 带着旧版本号提交 被拒
+    AI->>M: 带着 V1 提交改名
+    M->>O: 提交改名（带着 V1）
+    O->>DB: 比对：还是 V1 吗
+    DB-->>O: 已经是 V2，对不上
+    O-->>M: 拒绝
+    M-->>AI: 拒绝，原样退回
+    note over AI,M: 「数据已被他人修改，<br/>请刷新后重试」
+    note over U,DB: 这和人自己在后台保存被拒是同一个判断，AI 没有任何特权
+    end
+
+    rect rgb(240, 252, 244)
+    note over U,DB: AI 重新读取 再提交 这一次通过
+    AI->>M: 重新读取这件商品
+    M->>O: 请给出这件商品当前的样子
+    O-->>M: 商品内容 + 版本号 V2
+    M-->>AI: 商品内容 + 版本号 V2
+    AI->>M: 带着 V2 再提交改名
+    M->>O: 提交改名（带着 V2）
+    O->>DB: 比对：还是 V2 吗
+    DB-->>O: 是 V2，比对通过
+    O->>DB: 版本号推进到 V3
+    O-->>M: 改名成功
+    M-->>AI: 改名成功
+    AI-->>U: 已改好
+    note over U,DB: AI 自己发现数据被人抢先改过，<br/>重新读取后一次就提交成功
+    end
+
+    note over U,DB: AI 和人走同一把锁、同一套判断，没有例外 ——<br/>锁在数据层，不在 AI 那侧

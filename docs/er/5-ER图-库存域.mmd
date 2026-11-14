@@ -1,0 +1,58 @@
+%% 库存域 · 3 张表 / 3 条真实外键 + 4 条逻辑关系（库存台账的触发单据是多态）
+%% 图例：实线 = 库中真实外键；点线 = 逻辑关联但库中无外键，标签以「逻辑·」开头
+%% 存根卡片只画主键；唯一例外是规格——它的库存缓存是本域第 2 个落点，必须让人看见
+%% 本域要回答的唯一问题：四个库存落点谁说了算。
+%%   ① 库存分桶 = 可售量的唯一权威（下单扣这里，检查约束保证不为负）
+%%   ② 规格库存 = 展示缓存，由汇总桶回写，滞后数百毫秒，不参与任何裁决（存根卡片里画出这一列）
+%%   ③ 分仓库存 = 分仓归属，下单不扣，只用于拆单时选仓
+%%   ④ 库存台账 = 只追加证据，记的是进出和，不等于当前库存，不能拿来当余额
+erDiagram
+    sku["规格·存根"] {
+        bigint id PK "详见商品域"
+        int stock "展示缓存：权威在库存分桶"
+    }
+    warehouse["仓库·存根"] {
+        bigint id PK "详见履约域"
+    }
+    order["订单·存根"] {
+        bigint id PK "详见订单交易域"
+    }
+    delivery_order["发货单·存根"] {
+        bigint id PK "详见履约域"
+    }
+    return_apply["退货申请·存根"] {
+        bigint id PK "详见售后域"
+    }
+    inventory["分仓库存"] {
+        bigint id PK "主键"
+        bigint sku_id FK "规格"
+        bigint warehouse_id FK "仓库"
+        int stock "分仓归属量：下单不扣，不参与裁决"
+    }
+    sku_bucket["库存分桶"] {
+        bigint id PK "主键"
+        bigint sku_id FK "规格"
+        int bucket_no "桶号，同一规格唯一"
+        int stock "本桶可售量：全库唯一权威，检查约束不为负"
+        datetime updated_at "最近变动时间"
+    }
+    stock_ledger["库存台账"] {
+        bigint id PK "主键"
+        bigint order_id "无外键：证据不随订单级联删除"
+        bigint sku_id "无外键"
+        int delta "负为扣减，正为回补"
+        varchar reason "下单／审核不通过／取消包裹／退货退款"
+        varchar ref_type "触发单据类型，多态"
+        bigint ref_id "触发单据 id，由类型决定指向"
+        int bucket_no "落点桶号，仅用于回补定位"
+        varchar idem_key UK "幂等键，同一触发只记一条"
+        datetime created_at "记账时间"
+    }
+
+    sku ||--o{ inventory : "一个规格在每个仓一条归属"
+    warehouse ||--o{ inventory : "一个仓有多条归属"
+    sku ||--o{ sku_bucket : "一个规格拆成多个桶"
+    stock_ledger ||..o{ order : "逻辑·order_id·库中无外键"
+    stock_ledger ||..o{ sku : "逻辑·sku_id·库中无外键"
+    stock_ledger ||..o{ delivery_order : "逻辑·ref_id 多态指向·库中无外键"
+    stock_ledger ||..o{ return_apply : "逻辑·ref_id 多态指向·库中无外键"
