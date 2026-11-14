@@ -16,7 +16,7 @@ import { memberNickOf, addressOf } from '../../support/fixtures.js'
 import { tid } from '../../support/tid.js'
 
 /**
- * 库存 / 一条SQL吃掉「读、判、写」
+ * 库存 / 条件更新
  *
  * 一笔 SKU 库存 = 2，两个会员（两个独立 browser context，各登各的账号）几乎同时各下 2 件：
  * 这是 `UPDATE sku SET stock = stock - ? WHERE id = ? AND stock >= ?` 的原子性问题（不是版本号冲突），
@@ -134,7 +134,7 @@ const createOrderRespOf = (page) =>
     { timeout: 60_000 }
   )
 
-test.describe('库存 › 一条SQL吃掉「读、判、写」', () => {
+test.describe('库存 › 条件更新', () => {
   test('库存只有 2 件、两个会员同时各买 2 件：恰一人成功，另一人收到「库存不足」，库存落到 0 且不为负、订单只多 1 笔', async ({ page, request, browser }) => {
     test.setTimeout(360_000)
 
