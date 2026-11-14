@@ -21,7 +21,12 @@
  *   # 一句话：dev 站 = --internal-ok --private-ok；prod 站 = 不带任何豁免开关（带了就是把问题藏起来）。
  *
  * 参数：--root 站点产物目录（必填） / --base 站点基址（除非 --skip-http） / --skip-http 只查本地文件
- *       --internal-ok 仅 dev 站用：第 ⑥ 项豁免根目录 README.md（dev 索引页），其余文件照扫
+ *       --internal-ok 仅 dev 站用：第 ⑥ 项豁免首页文件（默认 README.md，见 --internal-ok-files），其余文件照扫
+ *       --internal-ok-files=a,b  dev 站豁免的内网扫描文件名列表（default README.md）。Rspress 站传
+ *                     index.html,index.md —— 它的首页不叫 README.md
+ *       --page-ext=md|html  产物里「页面」的扩展名（default md）。Rspress 静态产物是 .html
+ *       --sidebar=<path>    侧边栏文件（default <root>/_sidebar.md）。Rspress 站根不放它，
+ *                     指到 /root/docs-rspress/_sidebar.md（与 config 侧边栏同源同序）
  *       --private-ok 仅 dev 站用：第 ⑩ 项（私人文稿零泄漏）+ 第 ⑪ 项（产物洁净度）整体豁免 ——
  *       dev 站刻意含口语稿/私人笔记，也刻意保留 _deploy/_evidence（nginx deny 的内网材料）
  *       --private-src 指定 build-material.mjs（第 ⑩ 项的 PRIVATE_DOCS 名单来源；默认自动在
@@ -67,12 +72,31 @@ const SKIP_HTTP = argv.includes('--skip-http')
 // dev 站专用开关：dev 首页 README.md 是内网索引页（本来就列着内网 IP/端口/测试账号），
 // 第 ⑥ 项豁免它一个文件；prod 站不许带（prod 的 README.md 也必须过内网信息扫描）。
 const INTERNAL_OK = argv.includes('--internal-ok')
-const INTERNAL_OK_SKIP = 'README.md'
+// 豁免哪些「首页文件」不做内网信息扫描。docsify 的首页是 README.md；Rspress 的首页是 index.html
+// （还带一份 index.md 的 llms 镜像）→ 用列表表达，默认仍是 README.md，docsify 侧行为逐字节不变。
+// 支持简单通配 *（按站点相对路径整串匹配）。为什么需要：Rspress 站把首页内容同时 SSR 进
+// index.html 和它那条 route-<hash>.js 分片里，只豁免 html 会让「首页同一段内容」从 JS 侧照旧命中。
+const INTERNAL_OK_FILES = (opt('--internal-ok-files') ?? 'README.md')
+  .split(',').map((x) => x.trim()).filter(Boolean)
+const globToRe = (g) => new RegExp(`^${g.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`)
+const INTERNAL_OK_RES = INTERNAL_OK_FILES.map(globToRe)
 // dev 站专用开关（第 ⑩⑪ 项）：dev 站是内网「完整版」，口语稿、那 12 篇私人笔记、_deploy/_evidence
 // 都是刻意保留的；prod 站（dist-prod → docs.rose7.cn）绝不许带。
 const PRIVATE_OK = argv.includes('--private-ok')
 const DOCS = resolve(opt('--docs') ?? join(REPO, 'docs'))
 const VIDEOS = resolve(opt('--videos') ?? join(REPO, 'e2e', 'report', 'videos'))
+
+// 产物里「一个页面」长什么样：docsify 站点页面就是 .md 源文件；Rspress 静态产物是 .html
+// （Rspress 还会顺手生成同名 .md 的 llms 镜像，但那份把 <video> 组件吃掉了，所以引用扫描必须看 .html）。
+// 只影响 ①页面数 / ②③引用扫描 / ⑤「场景有没有对应页面」，默认 md —— 原有判定完全不变。
+const PAGE_EXT = (opt('--page-ext') ?? 'md').replace(/^\./, '')
+if (!['md', 'html'].includes(PAGE_EXT)) {
+  console.error(`✗ --page-ext=${PAGE_EXT} 不支持（只支持 md / html）`)
+  process.exit(2)
+}
+// 侧边栏文件：docsify 在站点根（<root>/_sidebar.md）；Rspress 站根不放它，
+// 用 --sidebar=<path> 指到生成物 /root/docs-rspress/_sidebar.md（与 config 侧边栏同源同序）。
+const SIDEBAR = opt('--sidebar') ? resolve(opt('--sidebar')) : null
 
 if (!opt('--root') || !existsSync(ROOT)) {
   console.error('✗ 缺少有效的 --root（站点产物目录）')
@@ -276,10 +300,11 @@ function push(id, title, ok, detail, lines = []) {
 /* ============================================================== ① 页面数 */
 
 const allFiles = walk()
-const mdFiles = allFiles.filter((f) => f.endsWith('.md')).sort(zhSort)
-const countMd = (prefix) => mdFiles.filter((f) => f.startsWith(prefix)).length
-const scenarioPages = countMd('material/scenarios/')
-const diagramPages = countMd('material/diagrams/')
+// 页面文件：PAGE_EXT=md（docsify）取 .md；PAGE_EXT=html（Rspress 产物）取 .html
+const pageFiles = allFiles.filter((f) => f.endsWith(`.${PAGE_EXT}`)).sort(zhSort)
+const countPage = (prefix) => pageFiles.filter((f) => f.startsWith(prefix)).length
+const scenarioPages = countPage('material/scenarios/')
+const diagramPages = countPage('material/diagrams/')
 
 /* ============================================================== ⑤ 场景素材齐全（先算，①要引用它的结论） */
 
@@ -316,12 +341,12 @@ const completeScenes = sceneList.length - sceneGaps.length
 
 {
   // ① 判「两类页面都产出了」。源素材比产物新（还没重建）时页数会少于齐全场景数，那是「等重建」不算坏，只提示
-  const pageSet = new Set(mdFiles)
-  const noPage = sceneList.filter((s) => !s.missing && !pageSet.has(`material/scenarios/${s.path}.md`))
+  const pageSet = new Set(pageFiles)
+  const noPage = sceneList.filter((s) => !s.missing && !pageSet.has(`material/scenarios/${s.path}.${PAGE_EXT}`))
   const lines = []
   if (noPage.length) {
     lines.push(`提示：源侧图+视频齐全场景 ${completeScenes} 个，其中 ${noPage.length} 个在产物里没有页面（重建后应补齐）`)
-    for (const s of noPage) lines.push(`  material/scenarios/${s.path}.md 缺失`)
+    for (const s of noPage) lines.push(`  material/scenarios/${s.path}.${PAGE_EXT} 缺失`)
   }
   push('①', '页面数', scenarioPages > 0 && diagramPages > 0,
     `场景页 ${scenarioPages} / 图页 ${diagramPages}（源侧齐全场景 ${completeScenes}）`, lines)
@@ -331,7 +356,7 @@ const completeScenes = sceneList.length - sceneGaps.length
 
 const imgRefs = []
 const vidRefs = []
-for (const rel of mdFiles) {
+for (const rel of pageFiles) {
   const text = readText(join(ROOT, rel))
   const dir = posix.dirname(rel)
   for (const m of text.matchAll(/!\[[^\]]*\]\(\s*([^)\s]+)/g)) imgRefs.push({ from: rel, rel: toSiteRel(dir, m[1]) })
@@ -462,7 +487,23 @@ const LEAK_WORDS = [
 ].map(([label, re]) => ({ label, re }))
 // 扫描对象 = 产物里的 md/html/js + 全部 SVG（源 svg 会被 dev 站 alias 直出，产物 svg 是 prod 真发布的字节）
 // --internal-ok（仅 dev 站）：只豁免根目录 README.md 这一个文件（dev 索引页），其它文件照扫，不是把问题藏起来。
-const leakSkipIsReadme = (f) => INTERNAL_OK && f === INTERNAL_OK_SKIP
+const isLeakExemptByName = (f) => INTERNAL_OK && INTERNAL_OK_RES.some((re) => re.test(f))
+// 被豁免的首页 HTML **引用的** route-*.js 分片一并豁免：那是同一页内容的 SSR 载荷，
+// 换个文件形态还是同一段内容（Rspress 把首页正文同时写进 index.html 和它的 route 分片）。
+// 只跟被豁免的 HTML 走，不会波及别的页面的分片 —— 不是「JS 一律不看」。
+const leakDerived = new Set()
+if (INTERNAL_OK) {
+  for (const rel of allFiles.filter((f) => f.endsWith('.html') && isLeakExemptByName(f))) {
+    for (const m of readText(join(ROOT, rel)).matchAll(/["']([^"']*route-[^"']+?\.js)["']/g)) {
+      leakDerived.add(m[1].replace(/^\.?\//, ''))
+    }
+  }
+}
+const leakSkipIsReadme = (f) => isLeakExemptByName(f) || leakDerived.has(f)
+const leakExempted = INTERNAL_OK ? allFiles.filter((f) => /\.(md|html|js)$/i.test(f) && leakSkipIsReadme(f)) : []
+const leakExemptLabel = INTERNAL_OK
+  ? [...INTERNAL_OK_FILES, ...(leakDerived.size ? [`${[...leakDerived].join(', ')}（首页 HTML 引用的分片，自动跟随）`] : [])].join(', ')
+  : ''
 const leakMdTargets = allFiles
   .filter((f) => /\.(md|html|js)$/i.test(f))
   .filter((f) => !leakSkipIsReadme(f))
@@ -480,12 +521,20 @@ for (const t of leakTargets) {
     if (n) leakHits.push(`${t.label}  ⊃ ${w.label} ×${n}`)
   }
 }
+// docsify 侧（缺省名单 = README.md）保持原来的措辞与输出逐字节不变；只有传了自定义名单才展开细节
+const IS_LEGACY_INTERNAL_OK = INTERNAL_OK_FILES.length === 1 && INTERNAL_OK_FILES[0] === 'README.md'
 push('⑥',
   INTERNAL_OK
-    ? '内网信息泄露（已豁免 README.md：dev 站索引页，内网专用）'
+    ? (IS_LEGACY_INTERNAL_OK
+      ? '内网信息泄露（已豁免 README.md：dev 站索引页，内网专用）'
+      : `内网信息泄露（已豁免 ${leakExemptLabel}：dev 站首页及其 SSR 分片，内网专用）`)
     : '内网信息泄露',
   leakHits.length === 0,
-  `扫描 ${leakTargets.length} 个文件，命中 ${leakHits.length}（prod 环境不要加 --internal-ok）`, leakHits)
+  `扫描 ${leakTargets.length} 个文件，命中 ${leakHits.length}（prod 环境不要加 --internal-ok）`
+  + (!INTERNAL_OK || IS_LEGACY_INTERNAL_OK
+    ? ''
+    : `；豁免 ${leakExempted.length} 个：${leakExempted.slice(0, 6).join(', ')}${leakExempted.length > 6 ? ' …' : ''}`),
+  leakHits)
 
 /* ============================================================== ⑦ SVG 硬指标 */
 
@@ -517,7 +566,7 @@ push('⑧', '图内禁词（文字层）', diagramHits.length === 0, `${svgDetai
 
 /* ============================================================== ⑨ 侧边栏死链 */
 
-const sidebarPath = join(ROOT, '_sidebar.md')
+const sidebarPath = SIDEBAR ?? join(ROOT, '_sidebar.md')
 const deadLinks = []
 let sidebarLinks = 0
 if (!existsSync(sidebarPath)) {
@@ -530,11 +579,15 @@ if (!existsSync(sidebarPath)) {
     try { p = decodeURIComponent(p) } catch { /* 保留原样 */ }
     if (!p) continue
     sidebarLinks++
-    // 目录链接（首页 = /）落到 README.md / index.html，其余必须命中真实 .md
-    const target = p === '/' || p === './'
-      ? (isFile(join(ROOT, 'README.md')) ? join(ROOT, 'README.md') : join(ROOT, 'index.html'))
-      : join(ROOT, p.replace(/^\.?\//, ''))
-    if (!isFile(target)) deadLinks.push(`${p}  →  ${target.replace(ROOT + '/', '')} 不存在`)
+    // 目录链接（首页 = /）落到 README.md / index.html。
+    // 其余必须命中**真实产物页**：侧边栏按 docsify 约定写 .md，Rspress 产物页是同路径的 .html，
+    // 所以按 PAGE_EXT 换后缀再试一次（不放松判定：三种候选都不在，照样判死链）。
+    const relLink = p.replace(/^\.?\//, '')
+    const candidates = p === '/' || p === './'
+      ? ['README.md', 'index.html']
+      : [relLink, relLink.replace(/\.md$/, `.${PAGE_EXT}`), relLink.replace(/\.md$/, '/index.html')]
+    const target = candidates.map((c) => join(ROOT, c)).find((abs) => isFile(abs))
+    if (!target) deadLinks.push(`${p}  →  ${join(ROOT, candidates[0]).replace(ROOT + '/', '')} 不存在`)
   }
 }
 push('⑨', '侧边栏一致性', deadLinks.length === 0, `链接 ${sidebarLinks} 个，死链 ${deadLinks.length}`, deadLinks)

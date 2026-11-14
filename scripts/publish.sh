@@ -5,10 +5,18 @@
 #
 # 用法
 #   scripts/publish.sh --version v0.2.0 [--dry-run] [--skip-docs] [--skip-frontend] [--skip-backend]
+#   scripts/publish.sh --version v0.2.0 --docs-engine=rspress   # 可选：文档站用哪个引擎（默认 docsify）
 #   scripts/publish.sh --rollback v0.1.0 [--dry-run]        # 回滚到指定镜像 tag
 #   scripts/publish.sh --version v0.2.0 --dry-run           # 只演练：打印命令 + 校验前置，不动任何东西
 #
 #   --force-low-mem   逃生开关：跳过"内存/交换区不足"硬门禁（报告里标红，OOM 风险自负）
+#
+#   --docs-engine=docsify|rspress   文档站用哪个引擎构建+体检（默认 docsify = 现状，逐字节不变）
+#     docsify : node /root/docsify/build-material.mjs --mode=prod → /root/docsify/dist-prod
+#     rspress : (cd /root/docs-rspress && npm run build)          → /root/docs-rspress/doc_build
+#               门禁自动追加 --page-ext=html；上传目标 OSS 前缀**不变**（仍是 oss://<bucket>/），
+#               CDN 刷新的"静态资源目录"从 _vendor/ 换成 static/（Rspress 把 js/css 打在这儿）。
+#               切换那天只改这一个参数；两套产物能同时发，出问题立刻切回 docsify。
 #
 #   环境变量（都有默认值，按需覆盖）
 #     HEALTH_TIMEOUT=120     单实例健康轮询上限（秒），超时即判定失败并自动回退该实例
@@ -264,6 +272,11 @@ PROBE_LOGIN="${PROBE_LOGIN:-1}"
 DOCS_SRC_DIR="/root/docsify"
 DOCS_BUILD="$DOCS_SRC_DIR/build-material.mjs"
 DOCS_DIST="$DOCS_SRC_DIR/dist-prod"
+# 文档站引擎（--docs-engine，默认 docsify）。下面的 DOCS_* 变量由 resolve_docs_engine() 定稿；
+# 这里给的是 **缺省值 = docsify 现状**，保证不带参数时命令串/产物路径/门禁参数全部与改动前一致。
+DOCS_ENGINE="docsify"
+RSPRESS_DIR="/root/docs-rspress"
+DOCS_ASSET_DIR="_vendor"   # CDN 刷新说明里那个"静态资源目录"：docsify=_vendor/，rspress=static/
 DOCS_MMD_ROOT="$REPO_ROOT/docs"
 DOCS_BUCKET="qiqi-mall-docs"
 DOCS_DOMAIN="docs.rose7.cn"
@@ -341,7 +354,7 @@ die() {  # 失败即停：打印回滚提示；EXIT trap 负责收尾表格
 }
 
 usage() {
-  sed -n '6,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '6,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -408,11 +421,40 @@ parse_args() {
       --skip-frontend) SKIP_FRONTEND=1; shift ;;
       --skip-backend)  SKIP_BACKEND=1; shift ;;
       --force-low-mem) FORCE_LOW_MEM=1; shift ;;
+      --docs-engine)   DOCS_ENGINE="${2:-}"; shift 2 ;;
+      --docs-engine=*) DOCS_ENGINE="${1#*=}"; shift ;;
       -h|--help)     usage 0 ;;
       *) err "未知参数：$1"; usage 1 ;;
     esac
   done
   [ -n "$VER" ] || { err "缺少 --version 或 --rollback"; usage 1; }
+}
+
+# --------------------------------------------------- 文档站引擎：把 DOCS_* 定稿
+# 只在这里做「参数 → 变量」的映射，后面各步骤一律只读这些变量。
+# 缺省（docsify）分支写回的**就是改动前的那几行值**，所以默认路径的命令串与产物路径逐字节不变。
+resolve_docs_engine() {
+  case "$DOCS_ENGINE" in
+    docsify)
+      DOCS_BUILD="$DOCS_SRC_DIR/build-material.mjs"
+      DOCS_DIST="$DOCS_SRC_DIR/dist-prod"
+      DOCS_GATE_FLAGS=""          # 现状：门禁不带任何额外参数
+      DOCS_ASSET_DIR="_vendor"
+      ;;
+    rspress)
+      # 生成器仍是同一份（/root/docs-rspress/build-material.mjs 是指向 /root/docsify 的软链），
+      # 但构建必须走 npm script：它串了 gen:prod（不产出口语稿）+ rspress build + 口语稿 guard。
+      DOCS_BUILD="$RSPRESS_DIR/build-material.mjs"
+      DOCS_DIST="$RSPRESS_DIR/doc_build"
+      DOCS_GATE_FLAGS="--page-ext=html"   # 产物页是 .html；引用扫描/页面计数都按它取源
+      DOCS_ASSET_DIR="static"
+      ;;
+    *)
+      err "--docs-engine=$DOCS_ENGINE 不支持（只接受 docsify | rspress）"
+      usage 1
+      ;;
+  esac
+  [ -d "$(dirname "$DOCS_DIST")" ] || warn "文档产物目录的父目录不存在：$(dirname "$DOCS_DIST")"
 }
 
 # ------------------------------------------------------------------ 1. 前置检查
@@ -1068,10 +1110,20 @@ rolling_frontend() {
 build_docs() {
   step_begin "构建文档站"
   if [ "$SKIP_DOCS" -eq 1 ]; then info "--skip-docs：跳过"; step_end skip; return 0; fi
-  drynote "node $DOCS_BUILD --mode=prod    # 产出 $DOCS_DIST/"
+  if [ "$DOCS_ENGINE" = "rspress" ]; then
+    drynote "( cd $RSPRESS_DIR && npm run build )    # 产出 $DOCS_DIST/"
+  else
+    drynote "node $DOCS_BUILD --mode=prod    # 产出 $DOCS_DIST/"
+  fi
   if [ "$DRY_RUN" -eq 0 ]; then
-    ( command -v node >/dev/null && node "$DOCS_BUILD" --mode=prod ) 2>&1 | sed 's/^/      /' \
-      || die "文档构建失败（线上文档仍是上一版，未上传）"
+    if [ "$DOCS_ENGINE" = "rspress" ]; then
+      # npm run build = gen:prod（不产出口语稿）+ rspress build + 口语稿 guard（直接 rspress build 会被 guard 拦）
+      ( cd "$RSPRESS_DIR" && npm run build ) 2>&1 | sed 's/^/      /' \
+        || die "文档构建失败（$DOCS_ENGINE；线上文档仍是上一版，未上传）"
+    else
+      ( command -v node >/dev/null && node "$DOCS_BUILD" --mode=prod ) 2>&1 | sed 's/^/      /' \
+        || die "文档构建失败（线上文档仍是上一版，未上传）"
+    fi
     [ -f "$DOCS_DIST/index.html" ] || die "构建产物缺 index.html：$DOCS_DIST"
     local n; n=$(find "$DOCS_DIST" -type f | wc -l)
     info "dist-prod 就绪：$n 个文件 / $(du -sh "$DOCS_DIST" | cut -f1)"
@@ -1104,9 +1156,15 @@ check_docs_gate() {
   fi
 
   # 上传前只做静态检查：--skip-http（此刻公网还是上一版，探测公网既慢又没意义）
-  drynote "node $checker --root $dist --skip-http    # 十二项全 PASS 才允许上传 OSS/刷 CDN"
+  # DOCS_GATE_FLAGS：docsify 时为空串（命令与输出与改动前逐字节一致）；rspress 时为 --page-ext=html
+  if [ -n "$DOCS_GATE_FLAGS" ]; then
+    drynote "node $checker --root $dist --skip-http $DOCS_GATE_FLAGS    # 十二项全 PASS 才允许上传 OSS/刷 CDN"
+  else
+    drynote "node $checker --root $dist --skip-http    # 十二项全 PASS 才允许上传 OSS/刷 CDN"
+  fi
   local rc=0
-  node "$checker" --root "$dist" --skip-http 2>&1 | sed 's/^/      /' || rc=$?
+  # shellcheck disable=SC2086  # 有意分词：空串 → 不传参数；非空 → 单个 --flag=value
+  node "$checker" --root "$dist" --skip-http $DOCS_GATE_FLAGS 2>&1 | sed 's/^/      /' || rc=$?
   if [ "$rc" -ne 0 ]; then
     die "文档产物门禁未通过（EXIT=$rc）→ 拒绝上传：dist-prod 里有不该上公网的东西（口语稿 / PRIVATE_DOCS 私人笔记 / 私密文件名 / 原始录屏 / 内网 IP 与绝对路径 等，见上面每条命中）。\
 一旦传上 OSS 再刷 CDN，svg/mp4/_vendor 是 30 天缓存，公网上撤不干净（见脚本头【十二】）"
@@ -1128,8 +1186,8 @@ publish_docs() {
     "$C_D" "$plan_flag" "$DOCS_DIST" "$DOCS_BUCKET" "$OSS_ENDPOINT" "$C_0"
   printf '    %s$ python3 <<oss2 备份>> %s %s/**/*.mmd → oss://%s/_src/%s\n' \
     "$C_D" "$plan_flag" "$DOCS_MMD_ROOT" "$DOCS_BUCKET" "$C_0"
-  printf '    %s$ python3 <<CDN 刷新>>   %s %s 的 html/md/目录首页 + _vendor/ 下的 js/css + svg/mp4 等 30 天缓存对象%s\n' \
-    "$C_D" "$plan_flag" "$DOCS_DOMAIN" "$C_0"
+  printf '    %s$ python3 <<CDN 刷新>>   %s %s 的 html/md/目录首页 + %s/ 下的 js/css + svg/mp4 等 30 天缓存对象%s\n' \
+    "$C_D" "$plan_flag" "$DOCS_DOMAIN" "$DOCS_ASSET_DIR" "$C_0"
 
   if ! python3 - "$DOCS_DIST" "$DOCS_BUCKET" "$OSS_ENDPOINT" "$DOCS_MMD_ROOT" "$plan_flag" "$CRED_FILE" <<'PY'
 # -*- coding: utf-8 -*-
@@ -1831,6 +1889,7 @@ run_rollback() {
 # ------------------------------------------------------------------ main
 main() {
   parse_args "$@"
+  resolve_docs_engine
   T0=$SECONDS
   log "${C_B}qiqi-mall publish${C_0}  mode=$MODE version=$VER dry-run=$DRY_RUN skip(docs=$SKIP_DOCS frontend=$SKIP_FRONTEND backend=$SKIP_BACKEND)"
 
