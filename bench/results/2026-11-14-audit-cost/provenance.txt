@@ -1,0 +1,40 @@
+# provenance —— 2026-11-14 审计写入成本测量（Redis Stream 异步化 第一步）
+
+## 时间窗（同一把 bench-lock 独占）
+lock owner: audit-cost-step1   acquire 2026-11-14 07:50:14   release 见 run.log/终端
+实验段: 07:48 build → 07:50 deploy(on) → 07:52 ship-on → 07:53:19 ship-on(重跑, 直取 P_S)
+        07:58 on-450-r1 → 08:00 deploy(off) → 08:01 ship-off/off-450-r1 → 08:04 off-450-b
+        08:07 deploy(on) → 08:08 on-300-a → 08:09 on-300-w → 08:12 deploy(off) → 08:13 off-300-w
+        08:16 off-300-x → 08:19 deploy(on) → 08:21 on-300-x → 08:23 on-450-warm
+        08:25 deploy(off) → 08:26 off-450-cold/off-450-warm → 08:29 restore + 清场
+
+## 两臂（唯一差异 = 一个环境变量）
+git HEAD: c51d5f0 (worktree 仅 bench/** 改动；qiqi-mall-server/** 一行未动 —— 本步只做测量)
+jar:      qiqi-mall-server/target/qiqi-mall-server-0.0.1-SNAPSHOT.jar  md5=2fce23c8a4b08991ead5ab99df134e28
+容器内 /app/app.jar md5（两臂）: 2fce23c8a4b08991ead5ab99df134e28（同一份）
+镜像:     qiqi-mall-server:test  sha256:935feb000f5d356515c6d3d29197e34f928a6e0844ef7c873a8a24996d9b39d9（未重建）
+注入:     bench/jar-mount.override.yml（只读挂载）+ bench/ledger-audit.override.yml
+          QIQI_LEDGER_AUDIT_ENABLED=true|false  → 属性 qiqi.ledger.audit-enabled
+生效证据: 启动日志 [ledger] … audit=true|false …（见各轮 evidence.txt 的 ledger_line=）
+restore 后: 容器无 mount、无 env 覆盖、jar md5=e8b9cc01caf0db9336e8a244c21f8b1d（= 进场时镜像自带那份）
+
+## 数据前置（每轮一致）
+prepare.sh reset（只删 lg\_% 名下）+ sql/reset-sku-bucket.sql（桶 N=8，总 500000，drift=0）
++ 幂等令牌切片（/tmp/loadgen/.token_offset 滚动，TTL 30min）+ purge 门禁（trx_rseg_history_len<400）
+JMX/GC: 两臂都开 -Xlog:gc*:file=/tmp/gc.log（bench/jvm-gc.override.yml，观测项，不改堆/GC 算法）
+
+## 文件
+runs.csv            12 轮定速下单的汇总（含"首跑 vs 次跑"标注）
+REPORT.md           完整报告（判据 / 数据 / 判定 / 该做什么）
+<label>/steps.csv        档窗口（epoch_start/end 供 DIGEST 做差）
+<label>/persecond.csv    逐秒 ok/延迟分位/inflight
+<label>/samples.csv      逐请求明细（.gitignore，不入库；前 1000 行样例见各目录 *_first1000 若有）
+<label>/sqldigest.csv.gz performance_schema DIGEST 快照（1s 一次，累计值，前后差 = 窗口内条数/耗时）
+<label>/txn_before.txt,txn_after.txt   事务聚合前后差（COUNT_STAR, SUM_TIMER_WAIT ps）
+<label>/env.csv          vmstat us/sy/id/wa/st + loadavg（环境漂移取证）
+<label>/evidence.txt     ledger 生效行 / jar md5 / 审计表行数前后差
+ship-*/                 后台发货路径（带审计）微基准：ids.txt, ship_s.txt, ps_audit_*.txt, ps_all_*.txt
+
+## 清场
+order=20、order_item=25、sku1=500000/桶 drift=0、admin_audit_log=595（594 原有 + 1 条 08:12:22 定时
+调度真 AUDIT_RUN；我造的 600 条 ORDER_SHIP 已按 id 精确删除）、Redis DBSIZE=0、容器回镜像自带 jar。

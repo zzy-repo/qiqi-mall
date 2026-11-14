@@ -1,0 +1,28 @@
+{
+  "label": "on-300-a",
+  "url": "http://127.0.0.1:18080/portal/orders",
+  "method": "POST",
+  "mode": "open-loop-fixed-rate",
+  "steps": [
+    300
+  ],
+  "step_duration_s": 60,
+  "warmup_s": 20,
+  "warmup_rps": 200,
+  "start_iso": "2026-11-14T00:07:36.732Z",
+  "end_iso": "2026-11-14T00:09:07.235Z",
+  "measure_wall_s": 65.206,
+  "fired": 17630,
+  "completed": 17630,
+  "dropped": 4370,
+  "ok": 14298,
+  "fail": 1,
+  "token_pool": 57600,
+  "token_exhausted": false,
+  "client_cpu_pct": 17.75,
+  "loadavg_1m": 32.38,
+  "errors": {
+    "HTTP502 code=? msg=-": 404,
+    "HTTP200 code=1 msg=已存在相同记录，请检查唯一字段": 1
+  }
+}

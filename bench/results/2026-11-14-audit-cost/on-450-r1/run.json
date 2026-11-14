@@ -1,0 +1,27 @@
+{
+  "label": "on-450-r1",
+  "url": "http://127.0.0.1:18080/portal/orders",
+  "method": "POST",
+  "mode": "open-loop-fixed-rate",
+  "steps": [
+    450
+  ],
+  "step_duration_s": 60,
+  "warmup_s": 20,
+  "warmup_rps": 200,
+  "start_iso": "2026-11-13T23:59:02.862Z",
+  "end_iso": "2026-11-14T00:00:22.908Z",
+  "measure_wall_s": 60.042,
+  "fired": 31000,
+  "completed": 31000,
+  "dropped": 0,
+  "ok": 26987,
+  "fail": 13,
+  "token_pool": 86400,
+  "token_exhausted": false,
+  "client_cpu_pct": 35.49,
+  "loadavg_1m": 19,
+  "errors": {
+    "HTTP200 code=1 msg=已存在相同记录，请检查唯一字段": 13
+  }
+}

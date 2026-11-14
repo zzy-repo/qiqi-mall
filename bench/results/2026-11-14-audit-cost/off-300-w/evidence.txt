@@ -1,0 +1,5 @@
+label=off-300-w rps=300 secs=60 warmup=30s@300
+gen_rc=0
+ledger_line=[ledger] 台账写入已启用：ledger.enabled=true status=true audit=false wms=true payment-trace=true
+jar_md5=2fce23c8a4b08991ead5ab99df134e28
+audit_rows_before=1195 audit_rows_after=1195 delta=0

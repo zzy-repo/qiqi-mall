@@ -1,0 +1,27 @@
+{
+  "label": "smoke-on",
+  "url": "http://127.0.0.1:18080/portal/orders",
+  "method": "POST",
+  "mode": "open-loop-fixed-rate",
+  "steps": [
+    100
+  ],
+  "step_duration_s": 10,
+  "warmup_s": 5,
+  "warmup_rps": 50,
+  "start_iso": "2026-11-13T23:50:55.626Z",
+  "end_iso": "2026-11-13T23:51:10.764Z",
+  "measure_wall_s": 10.095,
+  "fired": 1250,
+  "completed": 1250,
+  "dropped": 0,
+  "ok": 1000,
+  "fail": 0,
+  "token_pool": 488174,
+  "token_exhausted": false,
+  "client_cpu_pct": 17.32,
+  "loadavg_1m": 7.3,
+  "errors": {
+    "HTTP502 code=? msg=-": 77
+  }
+}

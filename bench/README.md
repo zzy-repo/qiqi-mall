@@ -1055,3 +1055,47 @@ ok/s ≈ 连接数（2 实例 × 10 = 20） ÷ 每单事务墙钟时长 T
 3. **减事务数**：合并下单路径上的写事务。
 
 **下一步要量的是 T 的分布（每单事务时长），不是池子大小。**
+
+---
+
+## 16. 后台审计（`admin_audit_log`）值不值得异步化？—— **不值得（0 条/单）**
+
+> 完整报告：`results/2026-11-14-audit-cost/REPORT.md`（含 12 轮原始数据 `runs.csv` + 各轮
+> `steps/persecond/samples/env/evidence`）。工具：`tools/auditcost.sh`（跑 + 取证）、
+> `tools/auditcost.py`（DIGEST/事务聚合 → 条/单、占比、分位）、`ledger-audit.override.yml`（只切审计分项）。
+
+问题：`admin_audit_log` 的写入在 450 rps 下单路径上占多少时间？值不值得搬进 Redis Stream？
+
+**开关是干净的**：`qiqi.ledger.audit-enabled` 是分项开关（`AdminAuditWriter.record()` 第一行
+`if (!props.auditOn()) return;`），所以两臂只差一个环境变量 `QIQI_LEDGER_AUDIT_ENABLED`，
+业务代码一行没动、镜像 digest 未变、两臂 jar md5 相同，`status/wms/payment-trace` 三项始终为 true。
+生效证据只看启动日志那行：`… status=true audit=true|false wms=true payment-trace=true`。
+
+**结论（三条独立证据，互相不依赖）**
+
+1. **下单路径根本不写审计**：`auditWriter.record` 的 24 个调用点里没有 `POST /portal/orders`。
+   实测 12 轮、每轮 1.4~2.7 万单：`admin_audit_log` 行数增量 **恒为 0**，
+   P_S 里 `INSERT INTO admin_audit_log` 的 `COUNT_STAR` 增量也 **恒为 0**，
+   而业务 SQL 仍是 12.0~12.3 条/单。审计的口径是「**每个敏感动作 1 条**」（不是每单 1 条）。
+2. **假设**硬塞「1 条审计/单」：服务器端 0.225 ms ÷ 每单事务墙钟 17.62 ms = **1.28%**（对 SQL 时间 3.5%）
+   —— 仍 < 2% 判据，收益在 ±2.8% 噪声带内。
+3. **真正写审计的路径**（后台发货 `ORDER_SHIP`，真实 HTTP × 300 次）：1.0 条/操作、
+   SQL 语句/操作 **7.01 vs 6.01**（正好差那条 INSERT）、审计 INSERT **0.225 ms**、
+   占单次操作墙钟 **3.56%** —— 而那是「人点按钮」的速率，没有吞吐可拿。
+   且教科书 outbox 要在**同事务内多写一条 outbox 行**，事务内写次数不降反平，净收益 ≤ 0。
+
+**方法学副产品（比结论更值钱，下一轮别再踩）**
+
+* **450 档在这台 4 核机上就在膝点上**：p50 在 **87 ms ↔ 6.7 s** 之间乱跳（同臂内 60 倍），
+  宿主 `us+sy≈99%`、`id≈0`、`loadavg` 峰值 30（基线 2.8）。**任何 <1 ms 的两臂差异在这里没有判别力。**
+* **「部署后首跑」系统性偏慢**：`deploy → 首跑` p50 2.4~6.7 s，`同容器第二跑` 12~14 ms，
+  两臂对称中招 → 冷 JVM 的 JIT 编译线程在饱和的 4 核上抢不到 CPU。**对照必须「弃首跑、取次跑」**，
+  否则会把装置偏差当成被测物效应。
+* **reset 的 purge 会污染紧随其后的一轮**：一次删掉上一轮几万单，InnoDB purge 没消化完就开跑，
+  p50 直接抬到秒级 → `auditcost.sh` 里加了 `trx_rseg_history_len` 门禁。
+* **幂等令牌必须每轮换切片**：`gen.mjs` 的 `tokenIdx` 每轮从 0 开始，令牌是 GETDEL 一次性消费，
+  复用同一批会成片「请勿重复提交订单」（本轮实测 12000/12000 全失败）。
+
+**下一个杠杆**（同批数据里读出来的，接 §15.6）：300 rps 稳态下 SQL 服务时间 **6.49 ms/单**、
+事务墙钟 **17.62 ms/单** → **63% 的时间不在 SQL 上**；P_S 事务事件 **2.73 个/单**。
+该做的是「把 2.73 个事务/单压下去 + 拆开那 63% 的等待（行锁 vs 往返）」，不是再引入一个 MQ。

@@ -1,0 +1,26 @@
+# bench/ledger-audit.override.yml —— 「审计写入开/关」对照实验的注入口（compose override，**只在显式 -f 时生效**）
+#
+# 本轮唯一变量：`qiqi.ledger.audit-enabled`（后台操作审计 admin_audit_log 的分项开关）。
+#   · 不改业务代码（AdminAuditWriter 里本来就有这个开关：auditOn() 为假 → record() 直接 return）
+#   · 不重建镜像（镜像仍是 qiqi-mall-server:test，同一 digest）
+#   · 不动总闸 qiqi.ledger.enabled，也不动 status/wms/payment-trace 三个分项
+#     → 三张状态台账、wms_exchange_ledger、payment_record 的行为在两臂里**完全一致**
+#
+# 为什么用环境变量而不是改 yml：yml 在 jar 里（改它就得重打 jar，等于引入第二个变量）。
+# Spring Boot 宽松绑定：环境变量 QIQI_LEDGER_AUDIT_ENABLED → 属性 qiqi.ledger.audit-enabled，
+# 且**优先级高于** application-test.yml 里的同名项。生效证据不看配置、只看启动日志那一行：
+#   [ledger] 台账写入已启用：ledger.enabled=true status=true audit=true/false wms=true payment-trace=true
+#
+# 用法（见 tools/auditcost.sh）：
+#   export BENCH_LEDGER_AUDIT_ENABLED=true|false
+#   docker compose -f docker-compose.yml -f bench/jvm-gc.override.yml \
+#                  -f bench/jar-mount.override.yml -f bench/ledger-audit.override.yml \
+#     up -d --no-deps --force-recreate server-1 server-2
+#   回滚 = 不带这个 -f 再 up 一次（或 tools/jar-deploy.sh --restore）
+services:
+  server-1:
+    environment:
+      QIQI_LEDGER_AUDIT_ENABLED: "${BENCH_LEDGER_AUDIT_ENABLED:?必须设置 BENCH_LEDGER_AUDIT_ENABLED=true|false}"
+  server-2:
+    environment:
+      QIQI_LEDGER_AUDIT_ENABLED: "${BENCH_LEDGER_AUDIT_ENABLED:?必须设置 BENCH_LEDGER_AUDIT_ENABLED=true|false}"

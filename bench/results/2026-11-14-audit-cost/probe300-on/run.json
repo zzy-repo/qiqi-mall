@@ -1,0 +1,27 @@
+{
+  "label": "probe300-on",
+  "url": "http://127.0.0.1:18080/portal/orders",
+  "method": "POST",
+  "mode": "open-loop-fixed-rate",
+  "steps": [
+    300
+  ],
+  "step_duration_s": 30,
+  "warmup_s": 15,
+  "warmup_rps": 200,
+  "start_iso": "2026-11-13T23:57:14.352Z",
+  "end_iso": "2026-11-13T23:57:59.375Z",
+  "measure_wall_s": 30.017,
+  "fired": 12000,
+  "completed": 12000,
+  "dropped": 0,
+  "ok": 8999,
+  "fail": 1,
+  "token_pool": 32400,
+  "token_exhausted": false,
+  "client_cpu_pct": 51.82,
+  "loadavg_1m": 7.74,
+  "errors": {
+    "HTTP200 code=1 msg=已存在相同记录，请检查唯一字段": 2
+  }
+}

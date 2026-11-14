@@ -1,0 +1,3 @@
+label=ship-on n=300
+ledger_line=[ledger] 台账写入已启用：ledger.enabled=true status=true audit=true wms=true payment-trace=true
+audit_rows_before=894 audit_rows_after=1194 delta=300
