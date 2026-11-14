@@ -26,8 +26,9 @@ import { confirmDanger, expectToastSuccess } from '../../../support/admin-ui.js'
  *      接口只在两个地方出现：**(a) 拿这把 key 去真调用**（这就是被测行为本身）、
  *      **(b) 只读核对**（读 categories/types 取参照 id、读列表核对服务端事实）。
  *      清场动作（删除造出来的商品、兜底删残留密钥）也走页面按钮，只有 afterEach 兜底那一层用接口。
- *   2) 定位一律 data-testid。页面共 14 个静态 testid + 2 类动态 testid（行锚点 api-key-row-<id>、
- *      权限勾选框 api-key-form-scope-<scope>），本用例用到 17 个，见每个 test.step 里的注释。
+ *   2) 定位一律 data-testid（静态 + 动态两类：行锚点 api-key-row-<id>、权限勾选框
+ *      api-key-form-scope-<scope>、不可授予 api-key-form-scope-denied-<scope>），
+ *      本用例用到 17 个，见每个 test.step 里的注释。
  *   3) 自给自足：名称带时间戳，跑完把自己造的密钥、自己造的商品都删掉；
  *      连跑两轮不 reset 库都应该全绿（第二轮看到的列表只是多了/少了自己的东西，与断言无关）。
  *
@@ -137,7 +138,7 @@ test.describe('业务 › AI集成 › 令牌管理', () => {
       await expect(dlg, '点「新增令牌」应弹出新增弹窗').toBeVisible()
       await dlg.getByTestId('api-key-form-name').fill(keyName)
 
-      await expect(dlg.getByTestId('api-key-form-scopes'), '权限区应有 9 个勾选项').toBeVisible()
+      await expect(dlg.getByTestId('api-key-form-scopes'), '权限区应渲染出勾选框（目录是运行时从 GET /admin/api-keys/scopes 读的：13 个可授予 + 5 个置灰不可授予）').toBeVisible()
       const orderRead = dlg.getByTestId('api-key-form-scope-order:read')
       const catalogRead = dlg.getByTestId('api-key-form-scope-catalog:read')
       await orderRead.click()

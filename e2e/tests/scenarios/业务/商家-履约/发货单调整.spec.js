@@ -271,7 +271,7 @@ test.describe('业务 › 商家-履约 › 发货单调整', () => {
       // 服务端原话（DeliveryEditService#requirePending）
       expect(body.code, '预演失败的业务码').toBe(1)
       expect(body.message, '预演失败的服务端原话')
-        .toBe('只有待下发包裹可以编辑（当前状态 1，已下发的只能取消）')
+        .toBe('只有待下发包裹可以编辑（当前状态 1；已下发的包裹不能编辑，取消入口只在待下发时可用，已下发后的状态只能由 WMS 回传推进）')
 
       // 表单必须留在原地（不是「先收起表单再预演」）
       await expect(dlg, '预演失败时编辑表单不应收起').toBeVisible()
@@ -279,7 +279,7 @@ test.describe('业务 › 商家-履约 › 发货单调整', () => {
       const err = tid(page, 'delivery-form-preview-error')
       await expect(err, '预演失败原因应显示在表单内').toBeVisible()
       await expect(err, '表单内原因应是服务端原话').toHaveText(
-        '预演失败：只有待下发包裹可以编辑（当前状态 1，已下发的只能取消）'
+        '预演失败：只有待下发包裹可以编辑（当前状态 1；已下发的包裹不能编辑，取消入口只在待下发时可用，已下发后的状态只能由 WMS 回传推进）'
       )
       // 用户填的内容一个都没被重置
       const qtyInput = dlg.locator('.el-table__body tr').nth(0).locator('input').first()
@@ -347,13 +347,13 @@ test.describe('业务 › 商家-履约 › 发货单调整', () => {
 
       expect(body.code, '预演失败的业务码').toBe(1)
       expect(body.message, '预演失败的服务端原话')
-        .toBe('只有待下发包裹可以合并（当前状态 1，已下发的只能取消）')
+        .toBe('只有待下发包裹可以合并（当前状态 1；已下发的包裹不能合并，取消入口只在待下发时可用，已下发后的状态只能由 WMS 回传推进）')
 
       await expect(mergeDialog, '预演失败时合并弹窗不应收起').toBeVisible()
       const err = tid(page, 'delivery-merge-preview-error')
       await expect(err, '预演失败原因应显示在合并弹窗内').toBeVisible()
       await expect(err, '弹窗内原因应是服务端原话')
-        .toHaveText('预演失败：只有待下发包裹可以合并（当前状态 1，已下发的只能取消）')
+        .toHaveText('预演失败：只有待下发包裹可以合并（当前状态 1；已下发的包裹不能合并，取消入口只在待下发时可用，已下发后的状态只能由 WMS 回传推进）')
       await expect(tid(page, 'delivery-merge-target'), '已选的目标包裹不能被清空').toContainText(targetSn)
       await expect(dangerDialog(page), '预演失败后确认弹窗应收起').toBeHidden({ timeout: 10_000 })
     })

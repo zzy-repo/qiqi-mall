@@ -2,12 +2,13 @@
  * 商家侧 · 业务/账号与会员（admin-web /member 及两个子页）真实 UI 操作 + 该场景需要的只读查询。
  *
  * 规则与 support/admin-ui.js、ui.js 一致：业务动作只走真实点击；
- * 唯一例外是 deleteMemberApi()——会员列表**页面上没有删除入口**（操作列只有
- * 收货地址 / 购物车 / 编辑三项），所以「删除会员」与测试后的数据清理只能走接口，
- * 见该函数注释里的自查说明。
+ * 唯一例外是 deleteMemberApi()——页面**有**删除入口（操作列最后一个，testid
+ * member-row-delete-<id>，先弹 useDangerConfirm 的高危确认框），但用例自己建（e2e_member_
+ * 前缀）的账号在测试收尾时用它**清数据**，比再点一遍雷同的 UI 更省一步；
+ * 业务路径上的「删除会员」仍走真实点击，见该函数注释里的自查说明。
  *
  * 页面事实（admin-web/src/views/member/）：
- * - 列表：新增（member-list-create）、行内 收货地址/购物车/编辑（跳路由，不是弹窗/抽屉）
+ * - 列表：新增（member-list-create）、行内 收货地址/购物车/编辑/删除（前三项跳路由或开弹窗，删除弹高危确认框）
  * - 新增/编辑弹窗：登录名（必填）、昵称、手机号、状态开关 —— **没有密码字段**
  *   （member.password 在库里是 NOT NULL DEFAULT ''，PortalAuthController 对空密码直接判登录失败）
  * - 子页是独立路由 /member/:memberId/addresses、/member/:memberId/carts，按 memberId 各查各的
@@ -202,13 +203,14 @@ export async function getMemberDetailApi(request, token, id) {
 }
 
 /**
- * 删除会员 —— **页面无入口，仅补操作**。
+ * 删除会员 —— **接口直删，仅用于补操作/清数据**（页面是有入口的，见下）。
  *
  * 自查（按 support/data.js 的三条规则）：
- * 1. 页面上确实没有入口：admin-web/src/views/member/index.vue 操作列只有
- *    收货地址 / 购物车 / 编辑，全站也没有会员删除按钮；接口 MemberController.delete 存在；
- * 2. 因此「删除会员」这个能力只能从接口触发，用例据此断言前端列表的真实变化
- *    （删完 reload 列表 → 行消失）与登录失败，不伪造 UI；
+ * 1. 页面入口：admin-web/src/views/member/index.vue 操作列最后一个是「删除」
+ *    （testid `member-row-delete-<id>`，type=danger），点击先弹 useDangerConfirm 的高危确认框
+ *    （写明「地址与购物车一并删除、不可恢复」），确认后才打 DELETE /admin/members/{id}。
+ *    业务路径上的删除用例走真实点击；本函数只处理「用例自己造的账号」的收尾清理。
+ * 2. 因此用例仍要断言前端列表的真实变化（删完 reload 列表 → 行消失）与登录失败，不伪造 UI；
  * 3. 只用于删除本用例自己建（e2e_member_ 前缀）的账号，绝不删种子会员。
  */
 export async function deleteMemberApi(request, token, id) {

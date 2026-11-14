@@ -51,10 +51,12 @@ import {
  *     所以「后台新建的会员能不能登录 C 端」的答案是**不能**——这不是用例漏测，
  *     用例把它当现状断言（见测试②/③）。真正可登录的账号走 C 端注册（register 会 BCrypt 入库）。
  *
- *  2) 列表**没有「详情」按钮，也没有「删除」按钮**。操作列只有 收货地址 / 购物车 / 编辑，
- *     聚合详情以两个独立子路由呈现（/member/:id/addresses、/member/:id/carts）。
- *     因此「详情」按子页走，「删除」只能走接口（support/admin-ui-member.js 里 deleteMemberApi
- *     有「页面无入口」的自查说明），删完用真实 reload 断言列表变化。
+ *  2) 列表**没有「详情」按钮，但有「删除」**。操作列是 收货地址 / 购物车 / 编辑 / 删除
+ *     （删除最后一个，testid `member-row-delete-<id>`，走 useDangerConfirm 的高危确认框：
+ *     地址与购物车一并删除、不可恢复）。聚合详情以两个独立子路由呈现
+ *     （/member/:id/addresses、/member/:id/carts），所以「详情」按子页走。
+ *     本用例的删除断言仍用 support/admin-ui-member.js 的 deleteMemberApi 直调接口 + 真实 reload
+ *     核对列表变化：那里补的是「用例自建账号的收尾清理」，不是「页面没有入口」。
  */
 
 /**
@@ -309,7 +311,8 @@ test.describe('业务 › 账号与会员 › 会员管理', () => {
       expect(m.status, '服务端应记为禁用(0)').toBe(0)
     })
 
-    await test.step('⑧ 删除：页面无删除入口，走接口删除后列表 reload 真的少一行', async () => {
+    // 删除入口在操作列最后一个（先弹高危确认框）；这里用接口直删是为了避开与 ① 相同的确认框流程，断言口径不变：真 reload 列表少一行
+    await test.step('⑧ 删除：走接口删除后列表 reload 真的少一行', async () => {
       const adminToken = await adminTokenOf(page)
       const [m] = await listMembersApi(request, adminToken, username)
       const res = await deleteMemberApi(request, adminToken, m.id)

@@ -8,6 +8,7 @@ import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.shared.ledger.AdminAuditWriter;
 import com.qiqi.mall.shared.ledger.ReasonCodes;
+import com.qiqi.mall.shared.security.ApiKeyAuthFilter;
 import com.qiqi.mall.shared.security.CurrentUser;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -20,6 +21,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * AI 接口访问密钥管理（人用：本组接口只认管理员 JWT，API Key 一律 403，见 ApiKeyAuthFilter 红线）。
@@ -35,6 +37,29 @@ public class ApiKeyAdminController {
     private static final List<DateTimeFormatter> DATE_TIME_FORMATS = List.of(
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss"));
+
+    /**
+     * 中文标签的两个零件：域（冒号前）× 动作（冒号后）。
+     *
+     * <p>为什么是「拼」而不是「一张 scope → 中文」的表：后一张表就是又抄一遍目录 ——
+     * 后端哪天加了 {@code refund:read}，抄本里没有它，页面就退化成显示生值。
+     * 按域拼则只要域是认识的（10 个域基本不动），新增 scope 的标签**自动**是对的；
+     * 域不认识就原样返回 value，宁可显示生值，也不许编一个像样的中文糊过去。
+     */
+    private static final Map<String, String> DOMAIN_LABELS = Map.ofEntries(
+            Map.entry("order", "订单"),
+            Map.entry("catalog", "商品"),
+            Map.entry("member", "会员"),
+            Map.entry("config", "配置"),
+            Map.entry("dashboard", "概览"),
+            Map.entry("ledger", "台账"),
+            Map.entry("stock", "库存"),
+            Map.entry("audit", "审核"),
+            Map.entry("channel", "渠道"),
+            Map.entry("payment", "支付"));
+
+    /** 动作后缀 → 中文（{@code ALL_SCOPES} 里只有这两种后缀） */
+    private static final Map<String, String> ACTION_LABELS = Map.of("read", "读", "write", "写");
 
     private final AiApiKeyService apiKeyService;
     private final AiApiKeyMapper apiKeyMapper;
@@ -56,6 +81,45 @@ public class ApiKeyAdminController {
         List<ApiKeyView> views = new ArrayList<>(rows.size());
         for (AiApiKey row : rows) views.add(ApiKeyView.of(row));
         return Result.ok(views);
+    }
+
+    /**
+     * 权限目录：令牌管理页渲染勾选框的**唯一来源**（前端不再抄一份 scope 清单）。
+     *
+     * <p>为什么要这个接口：目录原本是前端 {@code scopeCatalog.js} 抄的一份后端镜像，
+     * 而后端 2026-11-13 给 MCP 补了 {@code ledger:read / stock:read / audit:read / channel:read}
+     * 四个只读域时，抄本没跟上 —— 页面上勾不到这四个域，整整一天只能由接口直接写库。
+     * 「抄一遍必然走散」不是自觉问题，所以这里把目录本身变成接口：前端只在运行时读，
+     * 后端加一个 scope，页面当天就多一个勾选框，没有第二处需要改。
+     *
+     * <p>数据**直接**来自 {@link AiApiKeyService#ALL_SCOPES}（13 个可授予 = 9 读 + 4 写）与
+     * {@link ApiKeyAuthFilter#unGrantableWriteScopes()}（5 个刻意不可授予的写 scope），
+     * 本类不另立清单 —— 这里加一张表，就等于再造一个抄本。
+     *
+     * <p>权限口径：本组端点整体在 {@code ApiKeyAuthFilter} 的 {@code JWT_ONLY_PREFIXES} 里
+     * （{@code /admin/api-keys**}），所以**任何 API Key 都是 403**，这个目录只给管理端 JWT 看，
+     * 不挂任何 API Key scope；如果哪天红线放开要给它一个 scope，该是 {@code config:read}
+     * （它是权限配置的元数据，不是订单数据，与配置文件同档），不是 {@code order:read}。
+     *
+     * <p>{@code grantable} 原样回 {@code ALL_SCOPES}（顺序 = 页面顺序），前端拿它当保存白名单：
+     * 后端没授予的值，前端连提交都不会提交。
+     */
+    @GetMapping("/scopes")
+    public Result<ScopeCatalog> scopes() {
+        List<ScopeOption> read = new ArrayList<>();
+        List<ScopeOption> write = new ArrayList<>();
+        for (String scope : AiApiKeyService.ALL_SCOPES) {
+            // ALL_SCOPES 只有 :read / :write 两种后缀；万一将来出现别的后缀，归到「可写」组
+            // —— 让它被看见（并随保存进白名单）比静默丢在页面上看不见更安全。
+            ScopeOption option = new ScopeOption(scope, labelOf(scope));
+            if (scope.endsWith(":read")) read.add(option);
+            else write.add(option);
+        }
+        List<ScopeOption> unGrantable = new ArrayList<>();
+        for (String scope : ApiKeyAuthFilter.unGrantableWriteScopes()) {
+            unGrantable.add(new ScopeOption(scope, labelOf(scope)));
+        }
+        return Result.ok(new ScopeCatalog(read, write, unGrantable, AiApiKeyService.ALL_SCOPES));
     }
 
     /** 新建：明文 key 只在此响应里出现一次 */
@@ -164,7 +228,29 @@ public class ApiKeyAdminController {
                              LocalDateTime expiresAt) {
     }
 
+    /** 目录里的一项：{@code value} 是落库/提交用的 scope 值，{@code label} 是页面上的中文 */
+    public record ScopeOption(String value, String label) {
+    }
+
+    /**
+     * 权限目录：{@code read}（9）+ {@code write}（4）+ {@code unGrantable}（5）。
+     * {@code grantable} = read + write 的全部 value，前端拿它当保存白名单与「可勾」判据。
+     */
+    public record ScopeCatalog(List<ScopeOption> read, List<ScopeOption> write,
+                              List<ScopeOption> unGrantable, List<String> grantable) {
+    }
+
     // ------------------------------------------------------------------ 校验
+
+    /** scope → 页面中文：按「域-动作」拼，不维护 scope 级抄本（见 DOMAIN_LABELS 的说明） */
+    private static String labelOf(String scope) {
+        int sep = scope.indexOf(':');
+        if (sep <= 0 || sep == scope.length() - 1) return scope;      // 形态不认识：原样返回
+        String domain = DOMAIN_LABELS.get(scope.substring(0, sep));
+        String action = ACTION_LABELS.get(scope.substring(sep + 1));
+        if (domain == null || action == null) return scope;            // 域/动作不认识：不编中文
+        return domain + "-" + action;
+    }
 
     private String normalizeName(String name) {
         if (name == null || name.isBlank()) throw new IllegalArgumentException("用途名称不能为空");

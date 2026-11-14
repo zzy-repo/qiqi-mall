@@ -105,11 +105,31 @@
           <span class="muted key-hint">Key 本身不可修改</span>
         </el-form-item>
 
-        <!-- 权限：按后端 ALL_SCOPES 分组渲染（读 / 写 / 不可授予），不写死项数 -->
+        <!-- 权限：目录在运行时从 GET /admin/api-keys/scopes 读（前端不留抄本），按读 / 写 / 不可授予分组渲染 -->
         <el-form-item label="权限">
           <div data-testid="api-key-form-scopes" class="scope-groups">
+            <!-- 目录没拉到时只能报错：绝不回落到一份写死的前端清单 -->
+            <el-alert
+              v-if="catalogError"
+              type="error"
+              :closable="false"
+              show-icon
+              class="scope-error"
+              data-testid="api-key-form-scopes-error"
+              title="权限目录加载失败，暂时无法保存"
+              :description="`${catalogError}（目录只从后端读，不用本地兜底；请点「重试」或在网络恢复后重新打开本页）`"
+            />
+            <el-button
+              v-if="catalogError"
+              size="small"
+              :loading="catalogLoading"
+              data-testid="api-key-form-scopes-retry"
+              @click="loadScopeCatalog"
+            >重试</el-button>
+            <div v-else-if="catalogLoading" class="scope-loading" data-testid="api-key-form-scopes-loading">正在读取权限目录…</div>
+
             <div
-              v-for="group in SCOPE_GROUPS"
+              v-for="group in scopeGroups"
               :key="group.key"
               class="scope-group-block"
               :data-testid="`api-key-form-scope-group-${group.key}`"
@@ -171,7 +191,13 @@
       </el-form>
       <template #footer>
         <el-button data-testid="api-key-form-cancel" @click="visible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" data-testid="api-key-form-submit" @click="submit">确定</el-button>
+        <el-button
+          type="primary"
+          :loading="saving"
+          :disabled="!catalogReady"
+          data-testid="api-key-form-submit"
+          @click="submit"
+        >{{ catalogReady ? '确定' : '目录未加载' }}</el-button>
       </template>
     </el-dialog>
 
@@ -206,15 +232,16 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus, CopyDocument } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listApiKeys, createApiKey, updateApiKey, deleteApiKey } from '../../api/apiKey'
-import { SCOPE_GROUPS, GRANTABLE_SCOPE_VALUES, SCOPE_LABEL } from './scopeCatalog'
+import { fetchScopeCatalog, buildScopeGroups, grantableValuesOf, scopeLabelsOf } from './scopeCatalog'
 
 /**
- * 权限项不在这里写死：全部来自 scopeCatalog.js（= 后端 ALL_SCOPES 的镜像，13 个可授予
- * + 5 个不可授予）。这里只保留「列表里权限超过几个就折叠成 +N」这一个展示参数。
+ * 权限项不在这里写死，也不在前端文件里写死：全部来自 `GET /admin/api-keys/scopes`
+ * （后端 ALL_SCOPES 的 13 个可授予 + ApiKeyAuthFilter 的 5 个不可授予）。
+ * 这里只保留「列表里权限超过几个就折叠成 +N」这一个展示参数。
  */
 const SCOPE_FOLD_LIMIT = 3
 
@@ -229,21 +256,48 @@ const rules = {
   name: [{ required: true, message: '请输入令牌名称', trigger: 'blur' }]
 }
 
+/* ---------------- 权限目录（运行时读，失败即禁止保存） ---------------- */
+
+/** 接口原样回的目录：{ read, write, unGrantable, grantable }；null = 还没拉到 */
+const scopeCatalog = ref(null)
+const catalogLoading = ref(false)
+const catalogError = ref('')
+/** 只有目录到手才允许保存 —— 不许用一份前端写死的清单顶上 */
+const catalogReady = computed(() => !!scopeCatalog.value && !catalogError.value)
+const scopeGroups = computed(() => buildScopeGroups(scopeCatalog.value))
+const grantableValues = computed(() => grantableValuesOf(scopeCatalog.value))
+const labelOfScope = computed(() => scopeLabelsOf(scopeCatalog.value))
+
+const loadScopeCatalog = async () => {
+  catalogLoading.value = true
+  catalogError.value = ''
+  try {
+    scopeCatalog.value = await fetchScopeCatalog()
+  } catch (e) {
+    // 关键：不 fallback。目录拿不到就明确失败，保存按钮随之禁用。
+    scopeCatalog.value = null
+    catalogError.value = '权限目录加载失败：' + (e.message || '未知错误')
+    ElMessage.error(catalogError.value)
+  } finally {
+    catalogLoading.value = false
+  }
+}
+
 const revealVisible = ref(false)
 const revealKey = ref('')
 
 /* ---------------- 展示辅助 ---------------- */
 
-/** scope → 中文标签；未知 scope 原样显示，避免后端新增权限时前端空白 */
-const scopeLabel = (scope) => SCOPE_LABEL[scope] || scope
+/** scope → 中文标签；标签也来自接口目录，目录里没有的值原样显示（后端删了 scope 时一眼看得见） */
+const scopeLabel = (scope) => labelOfScope.value(scope)
 const scopesOf = (row) => (Array.isArray(row.scopes) ? row.scopes : [])
 
 /**
- * 只保留后端真能授予的 scope（= 页面上可勾的那 13 个）。
+ * 只保留后端真能授予的 scope（= 接口 grantable 的那 13 个）。
  * 库里若残留了目录外的值（例如某天后端删掉了某个 scope），编辑时不会把它悄悄带回请求体里
  * —— 后端对未知 scope 直接回「未知权限：…」，那样一次正常保存都会失败。
  */
-const grantableOnly = (scopes) => scopes.filter((scope) => GRANTABLE_SCOPE_VALUES.includes(scope))
+const grantableOnly = (scopes) => scopes.filter((scope) => grantableValues.value.includes(scope))
 
 /**
  * status 兼容：后端契约只写了 status，未固定字面量。
@@ -342,6 +396,11 @@ const setExpiresPreset = (days) => {
 }
 
 const submit = async () => {
+  // 目录没到手就没有「哪些能勾」的事实依据：直接拒，绝不用前端写死的清单兜底（按钮也已禁用）
+  if (!catalogReady.value) {
+    ElMessage.error(catalogError.value || '权限目录尚未加载，无法保存')
+    return
+  }
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
   // 后端 normalizeScopes 对空数组回「权限不能为空」，先在页面上拦一句更直白的话
@@ -456,7 +515,11 @@ const copyRevealKey = async () => {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  // 目录与列表并行拉：任一失败都只影响自己那块（目录失败 ⇒ 保存禁用）
+  loadScopeCatalog()
+})
 </script>
 
 <style scoped>
@@ -468,6 +531,8 @@ onMounted(load)
 .scope-tag { margin: 2px 6px 2px 0; }
 .scope-tag-more { cursor: default; }
 .scope-groups { width: 100%; }
+.scope-error { margin-bottom: 8px; }
+.scope-loading { font-size: 13px; color: #909399; line-height: 22px; }
 .scope-group-block { margin-bottom: 10px; }
 .scope-group-block:last-child { margin-bottom: 0; }
 .scope-group-title { display: flex; align-items: center; gap: 6px; line-height: 20px; }

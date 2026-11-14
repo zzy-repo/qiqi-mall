@@ -37,7 +37,7 @@ import { receiverOf } from '../../../support/fixtures.js'
  * 拒绝原因按**实际返回**断言（不写死）：编辑是「预演 → 确认 → 执行」两段式，
  *   PUT /admin/deliveries/{id}?dryRun=true 的预演阶段就会跑业务守卫
  *   `requirePending`（DeliveryEditService）—— 包裹已经出库，预演直接失败；
- *   所以这里拿到的是 **HTTP 200 + code=1 + 「只有待下发包裹可以编辑（当前状态 3，已下发的只能取消）」**。
+ *   所以这里拿到的是 **HTTP 200 + code=1 + 「只有待下发包裹可以编辑（当前状态 3；已下发的包裹不能编辑，取消入口只在待下发时可用，已下发后的状态只能由 WMS 回传推进）」**。
  *   （409 是「版本号对不上」那条路，它在执行阶段才会发生；本次状态守卫先一步拦下，
  *    因此断言按实际写 code=1，同时把 body 原样落盘，不假装是 409。）
  *
@@ -134,7 +134,7 @@ test.describe('并发与竞态 › 双向竞态 › 发货单与仓库回传', (
       expect(resp.status(), '预演请求本身是 HTTP 200（业务失败用 code 表达）').toBe(200)
       expect(body.code, '业务守卫拒绝的业务码是 1').toBe(1)
       expect(body.message, '守卫拒因应是服务端原话（当前状态=已出库=3）')
-        .toBe('只有待下发包裹可以编辑（当前状态 3，已下发的只能取消）')
+        .toBe('只有待下发包裹可以编辑（当前状态 3；已下发的包裹不能编辑，取消入口只在待下发时可用，已下发后的状态只能由 WMS 回传推进）')
 
       // 证据：把甲这次的真实响应体落盘
       mkdirSync(EVIDENCE_DIR, { recursive: true })
@@ -161,7 +161,7 @@ test.describe('并发与竞态 › 双向竞态 › 发货单与仓库回传', (
       const inlineError = tid(pageA, 'delivery-form-preview-error')
       await expect(inlineError, '预演失败的原因应显示在编辑表单里').toBeVisible({ timeout: 20_000 })
       await expect(inlineError, '表单里的原因应是服务端原话')
-        .toHaveText('预演失败：只有待下发包裹可以编辑（当前状态 3，已下发的只能取消）')
+        .toHaveText('预演失败：只有待下发包裹可以编辑（当前状态 3；已下发的包裹不能编辑，取消入口只在待下发时可用，已下发后的状态只能由 WMS 回传推进）')
       await expect(dlg, '预演失败时编辑表单不应收起').toBeVisible()
       await expect(tid(pageA, 'delivery-form-warehouse'), '刚选的仓不能被重置')
         .toContainText(pickedWh)

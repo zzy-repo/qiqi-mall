@@ -420,8 +420,13 @@ public class DeliveryEditService {
         DeliveryOrder delivery = deliveryOrderService.getById(deliveryId);
         if (delivery == null) throw new IllegalStateException("发货单不存在：" + deliveryId);
         if (delivery.getStatus() == null || delivery.getStatus() != DeliveryOrder.PENDING) {
+            // 提示必须与入口一致：已下发状态下页面上编辑/拆分/合并/删除/取消五个按钮都不渲染
+            // （发货单调整.spec.js 第 ⑨ 步逐个数 count=0），只剩「模拟 WMS 回传」；
+            // 取消也只对 status=0 放行（DeliveryStatusService 的 0 → 9）。旧文案「已下发的只能取消」
+            // 是在教人去点一个不存在的按钮，已按现状改掉。
             throw new IllegalStateException("只有待下发包裹可以" + action
-                    + "（当前状态 " + delivery.getStatus() + "，已下发的只能取消）");
+                    + "（当前状态 " + delivery.getStatus() + "；已下发的包裹不能" + action
+                    + "，取消入口只在待下发时可用，已下发后的状态只能由 WMS 回传推进）");
         }
         return delivery;
     }

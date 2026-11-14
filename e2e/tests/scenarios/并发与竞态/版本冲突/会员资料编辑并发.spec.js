@@ -221,7 +221,7 @@ test.describe('并发与竞态 › 版本冲突 › 会员资料编辑并发', (
         })
       })
     } finally {
-      // 清掉本用例自造的会员（页面无删除入口，只能走接口，见 deleteMemberApi 注释）
+      // 清掉本用例自造的会员（页面其实有删除入口：操作列最后一个 → 高危确认框；这里直调接口只为收尾清数据，见 deleteMemberApi 注释）
       try {
         if (memberId) {
           const token = tokenA ?? (await adminTokenForCleanup(request))
