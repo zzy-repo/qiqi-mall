@@ -104,7 +104,7 @@
 
       <el-table-column label="原因" min-width="200">
         <template #default="{ row }">
-          <div class="reason">{{ row.reason || '—' }}</div>
+          <div class="reason">{{ reasonText(row.reason) }}</div>
           <div v-if="row.reasonDetail" class="muted">{{ row.reasonDetail }}</div>
         </template>
       </el-table-column>
@@ -221,6 +221,18 @@ const fmtTime = (value) => {
   if (!value) return '—'
   return String(value).replace('T', ' ').slice(0, 19)
 }
+
+/**
+ * 「原因」列的 action → 中文映射（**只补读的人会卡住的那几个**，其余原样显示机器码）。
+ *
+ * 为什么不是全量字典：这一列投影的是后端 `ReasonCodes` 里的动作码，全量抄一份到前端必然
+ * 跟后端走散（新增动作码时页面静默显示旧文案，比显示机器码更坏）。所以只给
+ * 「光看机器码读不出发生了什么」的动作用一句中文补上，未收录的一律 `reason` 原样输出。
+ *
+ * PAYMENT_PURGE：删单时清理支付流水（先写审计行再删），台账「审计」那一支会出现这个码。
+ */
+const REASON_TEXT = { PAYMENT_PURGE: '清理支付流水' }
+const reasonText = (reason) => REASON_TEXT[reason] || reason || '—'
 
 /** 时间范围 → from / to：日期选择器只到天，补足当天首尾时刻，避免漏当天的记录 */
 const rangeParams = () => {
