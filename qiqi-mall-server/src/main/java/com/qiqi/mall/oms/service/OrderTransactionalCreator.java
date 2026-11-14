@@ -1,6 +1,5 @@
 package com.qiqi.mall.oms.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.order.entity.OrderItem;
 import com.qiqi.mall.catalog.entity.Product;
@@ -68,14 +67,24 @@ public class OrderTransactionalCreator {
     public record ItemInput(Long skuId, Integer quantity) {}
 
     /**
-     * 建单结果：订单本体 + **在同一个事务里回读到的明细**。
+     * 建单结果：订单本体 + **刚写入的明细实体（内存里就是库里的终态，不做任何回读）**。
      *
-     * <p><b>为什么明细由这里带出来（本轮唯一改的那处事务边界）</b>：原来是 controller 在建单事务
-     * 提交之后又发一条 {@code SELECT ... FROM order_item WHERE order_id=?} 去拼响应 —— 那条 SELECT
-     * 是自动提交的，于是**一单变成两个事务事件**（性能实测：1 个建单事务 + 1 个只读事务）。
-     * 那条只读事务没有任何正确性理由：它读的就是本事务刚写进去的行，既不跨请求、也不需要
-     * 看见别人后来的提交。把它挪进建单事务里，事务数从 2 降到 1，响应内容一字不变
-     * （同一事务快照看到的就是刚写的那些行，列值/顺序 {@code orderByAsc(id)} 完全相同）。
+     * <p><b>明细的来路改过两次，别按旧版本理解</b>：
+     * <ol>
+     *   <li>最早：controller 在**建单事务提交之后**另发一条 {@code SELECT ... FROM order_item
+     *       WHERE order_id=? ORDER BY id ASC} 拼响应 —— 那条 SELECT 是自动提交的，于是
+     *       **一单变成两个事务事件**（1 个建单事务 + 1 个只读事务）；</li>
+     *   <li>第一次改（事务数 2.19 → 1.19）：把它**挪进建单事务**。响应内容一字不变，但代价是一次
+     *       **失败语义变更**——这条 SELECT 原先失败只影响拼响应，订单早已提交、客户端拿 500
+     *       （「已提交 + 500」）；挪进事务后它一失败就是**整单回滚**。当时如实记下的取舍是：
+     *       回滚比「订单成了却告诉用户失败」更自洽；</li>
+     *   <li>现在：那条 SELECT **整条删掉**。{@code saveBatch} 已把自增 id 回填进内存的 {@code items}，
+     *       回显所需的数据在内存里就完整了，于是「事务内回读」这一步本身也不存在，
+     *       连带「回读失败要不要回滚」这个问题一起消失（失败语义只剩：事务内任何一步异常 = 整单回滚）。
+     *       等价性不靠肉眼：{@code OrderItemInMemoryReturnEquivalenceTest} 逐列 + JSON 逐字节守着。</li>
+     * </ol>
+     * 结论：明细**没有**独立的读事务/读语句，它就是本事务刚写进去的那批实体；
+     * 顺序 = 插入顺序 = 自增 id 分配顺序（与旧 SQL 的 {@code ORDER BY id ASC} 是同一序列）。
      */
     public record CreatedOrder(Order order, List<OrderItem> items) {}
 
@@ -147,13 +156,23 @@ public class OrderTransactionalCreator {
 
         orderItemService.saveBatch(items);
 
-        // 明细回读放进**本事务**（原来在 controller 里、提交之后另开一个自动提交事务）：
-        // 同一份 SQL、同一份结果，少一个事务事件与一次往返。见 {@link CreatedOrder} 的说明。
-        List<OrderItem> persisted = orderItemService.list(new LambdaQueryWrapper<OrderItem>()
-                .eq(OrderItem::getOrderId, order.getId()).orderByAsc(OrderItem::getId));
+        // 明细**不再回读**：{@code saveBatch} 走 MyBatis-Plus 的批量 Executor，主键生成策略是
+        // {@code IdType.AUTO}，所以每条 INSERT 的自增 id 会在执行时回填进上面这个 {@code items} 列表
+        // （MyBatis 的 Jdbc3KeyGenerator 在 BATCH 执行器里按语句顺序回填）。既然如此，
+        // 「回显刚写的明细」这件事在内存里就已经完整了 —— 原来的那条
+        // {@code SELECT ... FROM order_item WHERE order_id=? ORDER BY id ASC} 是**纯多余的一次往返**
+        // （上一轮已把它从"提交后另开事务"挪进本事务，这一轮直接删掉）。
+        //
+        // 等价性不是靠肉眼担保的：{@code OrderItemInMemoryReturnEquivalenceTest} 用
+        // ①反射遍历 DB 的**每一个列**逐字段对比 ②同一份 Jackson ObjectMapper 序列化
+        // 「内存 items」与「DB 回查 items」，要求 JSON 逐字节相等。id 回填不全（漏字段 / 只有 DB 默认值）
+        // 会在那里直接失败 —— 失败就说明这条改动不能做。
+        //
+        // 顺序也等价：{@code items} 的插入顺序就是自增 id 的分配顺序，原来 {@code orderByAsc(id)} 的
+        // 结果与它就是同一个序列（同一批 INSERT 在同一事务里按列表顺序执行）。
 
         // 清购物车已上移到 portal 侧（下单事务后执行）：
         // 购物车是「意图清单」而非账务数据，允许与订单存在轻微不一致，以此解除 oms→member 的模块依赖。
-        return new CreatedOrder(order, persisted);
+        return new CreatedOrder(order, items);
     }
 }

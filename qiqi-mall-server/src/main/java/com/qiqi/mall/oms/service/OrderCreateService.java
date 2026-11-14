@@ -35,7 +35,7 @@ public class OrderCreateService {
     }
 
     /**
-     * @return 建单结果（订单 + 事务内回读到的明细）—— 明细由事务内带出，见
+     * @return 建单结果（订单 + 刚写入的明细实体）—— 明细由建单事务直接带出，**不回读**，见
      *         {@link OrderTransactionalCreator.CreatedOrder}
      */
     public OrderTransactionalCreator.CreatedOrder createWithRetry(

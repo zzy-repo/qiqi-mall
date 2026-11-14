@@ -117,7 +117,7 @@ public class PortalOrderController {
         }
 
         // 事务在 OrderTransactionalCreator 内（每次全新事务），此处负责死锁重试。
-        // 明细随建单结果一起带出（**事务内**回读），不再在提交后另开一个只读事务去查 —— 见 CreatedOrder。
+        // 明细随建单结果一起带出（**刚写入的实体，不回读**），不再在提交后另开一个只读事务去查 —— 见 CreatedOrder。
         OrderTransactionalCreator.CreatedOrder created = orderCreateService.createWithRetry(
                 memberId, request.getReceiverName(),
                 request.getReceiverPhone(), request.getReceiverAddress(), inputs,
@@ -212,7 +212,7 @@ public class PortalOrderController {
                 .eq(OrderItem::getOrderId, order.getId()).orderByAsc(OrderItem::getId)));
     }
 
-    /** 明细已由调用方提供（建单路径：明细是**事务内**回读的，不再多发一次往返） */
+    /** 明细已由调用方提供（建单路径：明细是**建单事务刚写入的实体**，不回读、不多发一次往返） */
     private Map<String, Object> detailBody(Order order, List<OrderItem> items) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("order", order);
