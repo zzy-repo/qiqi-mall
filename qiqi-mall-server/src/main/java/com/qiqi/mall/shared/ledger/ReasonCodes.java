@@ -97,6 +97,16 @@ public final class ReasonCodes {
     /** 售价与库存同一次都变了：一条审计记两处改动，比发两条更好读（同一次点击是一件事） */
     public static final String ACTION_SKU_PRICE_STOCK_CHANGE = "SKU_PRICE_STOCK_CHANGE";
     public static final String ACTION_ORDER_DELETE = "ORDER_DELETE";
+    /**
+     * 删单流水线里**清理该订单号的支付流水**（{@code payment_record} 没有外键，必须显式删）。
+     *
+     * <p>为什么单独一个动作码、不并进 {@link #ACTION_ORDER_DELETE}：删单审计只说「删了一张单」，
+     * 而「删之前这单收过几次钱、每次多少钱」是另一件事实 —— 支付流水删掉之后，
+     * 它只剩这条审计可查（{@code payment_record} 每次支付只记一行、被删即不可恢复）。
+     * 两个动作同一次请求里各留一条，用 {@code request_id:序号} 区分，正好落在
+     * {@code AdminAuditWriter} 「一次请求可有多条审计」的口径里。
+     */
+    public static final String ACTION_PAYMENT_PURGE = "PAYMENT_PURGE";
     public static final String ACTION_ORDER_SPLIT = "ORDER_SPLIT";
     public static final String ACTION_ORDER_SHIP = "ORDER_SHIP";
     public static final String ACTION_DELIVERY_DISPATCH = "DELIVERY_DISPATCH";

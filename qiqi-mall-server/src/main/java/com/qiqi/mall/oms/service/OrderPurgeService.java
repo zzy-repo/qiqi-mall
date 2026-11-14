@@ -9,6 +9,8 @@ import com.qiqi.mall.oms.entity.ReturnApply;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.order.entity.OrderItem;
 import com.qiqi.mall.catalog.service.SkuService;
+import com.qiqi.mall.shared.ledger.AdminAuditWriter;
+import com.qiqi.mall.shared.ledger.ReasonCodes;
 import com.qiqi.mall.stock.StockLedgerContext;
 import com.qiqi.mall.stock.entity.StockLedger;
 import com.qiqi.mall.stock.mapper.StockLedgerMapper;
@@ -18,6 +20,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,10 +39,14 @@ import java.util.Map;
  *       （含运单号、已出库包裹张数），告诉调用方该走「作废物流」「等签收」或「关闭订单」；</li>
  *   <li><b>确实可删的</b> → 按依赖顺序<b>显式</b>逐层删，每层判影响行数（0 行不等于成功）；</li>
  *   <li>{@code payment_record} 按 {@code order_sn} 字符串关联、没有外键，所以必须显式清理，
- *       且删之前先打一条审计日志（单号 / 金额 / 流水号）留证。</li>
+ *       且删之前先往 {@code admin_audit_log} 写一条 {@code PAYMENT_PURGE}（订单号 / 条数 / 金额合计 /
+ *       每条的 {@code tradeNo·type·amount}）留证 —— 流水删了，「这单收过几次钱」在台账七类的
+ *       「审计」那一支里仍然查得到（{@link #purgePaymentRecords}）。</li>
  *   <li>{@code stock_ledger}（库存台账）同样**故意不加外键** —— 台账是「同一件货有没有被补两次」
  *       的审计证据，不该被 CASCADE 静默带走。副作用是硬删订单会留下孤儿台账行，
- *       所以在删主单之前显式按 {@code order_id} 清掉，且同样**先打审计日志**（行数 + 各 reason 的件数合计）。</li>
+ *       所以在删主单之前显式按 {@code order_id} 清掉，且删前先打一条 warn 日志留摘要
+ *       （行数 + 各 reason 的件数合计）。<b>这一支只有应用日志、没有 {@code admin_audit_log} 行</b> ——
+ *       与支付流水那一支不同，别把两者当成同一个口径。</li>
  *   <li><b>删台账之前必须先把这单扣掉的货还回去</b>（{@link #settleStockLedger}）：台账一行行记的是
  *       「这单进出过多少件」，删了账却不还货，库存就随删单**永久消失**（「扣了、账也抹了」）。
  *       回补按台账**净额**算，且走库存接口（不裸 UPDATE）。</li>
@@ -81,6 +88,8 @@ public class OrderPurgeService {
     private final StockLedgerMapper stockLedgerMapper;
     private final SkuService skuService;
     private final StockLedgerService stockLedgerService;
+    /** 后台操作审计（{@code admin_audit_log}）：删单会**物理销毁**支付流水，那条证据只能落在这里 */
+    private final AdminAuditWriter auditWriter;
 
     public OrderPurgeService(OrderService orderService, OrderItemService orderItemService,
                              DeliveryOrderService deliveryOrderService, DeliveryItemService deliveryItemService,
@@ -89,7 +98,8 @@ public class OrderPurgeService {
                              PaymentRecordService paymentRecordService,
                              StockLedgerMapper stockLedgerMapper,
                              SkuService skuService,
-                             StockLedgerService stockLedgerService) {
+                             StockLedgerService stockLedgerService,
+                             AdminAuditWriter auditWriter) {
         this.orderService = orderService;
         this.orderItemService = orderItemService;
         this.deliveryOrderService = deliveryOrderService;
@@ -100,6 +110,7 @@ public class OrderPurgeService {
         this.stockLedgerMapper = stockLedgerMapper;
         this.skuService = skuService;
         this.stockLedgerService = stockLedgerService;
+        this.auditWriter = auditWriter;
     }
 
     // ------------------------------------------------------------------ 只读：能不能删
@@ -245,7 +256,7 @@ public class OrderPurgeService {
                 .eq(OrderItem::getOrderId, orderId));
         requireExactly("订单明细", items, deletedItems);
 
-        // ⑧ 支付流水（无外键，按 order_sn 字符串关联）：**先留审计日志再删**
+        // ⑧ 支付流水（无外键，按 order_sn 字符串关联）：**先往 admin_audit_log 记 PAYMENT_PURGE 再删**
         purgePaymentRecords(order);
 
         // ⑨ 订单本体
@@ -309,7 +320,8 @@ public class OrderPurgeService {
         }
 
         log.warn("删除订单前清理库存台账：orderSn={} orderId={} 共 {} 行，按 reason 合计 [{}]，"
-                        + "按台账净额将回补 {} 件{}（台账是审计证据，已先落审计日志再回补并删除）",
+                        + "按台账净额将回补 {} 件{}（台账是审计证据，删前先把这行摘要打进应用日志；"
+                        + "库存台账这一支没有 admin_audit_log 行）",
                 order.getOrderSn(), order.getId(), before.size(), String.join(", ", reasonParts),
                 planned, netParts.isEmpty() ? "（无台账行）" : "：[" + String.join("、", netParts) + "]");
 
@@ -384,24 +396,76 @@ public class OrderPurgeService {
     }
 
     /**
-     * 清理该订单号下的支付流水：删之前先打一条 warn 审计日志（单号 / 金额 / 流水号），
-     * 保证「钱发生过」这件事在应用日志里仍然可查 —— 流水行删了，证据链没断。
+     * 清理该订单号下的支付流水：**先在 {@code admin_audit_log} 记一条 {@code PAYMENT_PURGE}，再删**。
+     *
+     * <h3>为什么这条审计是必需的（不是「多记一条更保险」）</h3>
+     * {@code payment_record} 没有外键，删单必须显式清理它 —— 而它删掉就是**不可恢复**的：
+     * 「这单删之前收过几次钱、每次多少钱」在库里只剩这一条 {@code admin_audit_log} 可查
+     * （台账七类里的「审计」那一支直接读这张表）。原来这里只有一条 {@code log.warn}（应用日志，
+     * 会轮转、会随容器消失、台账页查不到），所以「钱发生过」这件事**在台账里没有凭证**。
+     *
+     * <h3>顺序与失败后果（先记账后动手，同一事务）</h3>
+     * <ol>
+     *   <li><b>先</b> {@link AdminAuditWriter#record}（INSERT {@code admin_audit_log}），
+     *       <b>再</b> DELETE {@code payment_record}；</li>
+     *   <li>两者在**同一个事务**里（{@code purge} 的 {@code @Transactional}）：审计写入失败
+     *       （例如序列化炸了 / 列超宽）→ 整笔删除回滚，流水一行不动 ——
+     *       「宁可这次删单失败，也不许让台账少一条」；</li>
+     *   <li>反过来，若 DELETE 影响行数不符抛异常 → 整笔回滚，**审计行也一起回滚**：
+     *       于是「有审计行」恰好等价于「这次清理真的提交了」，不会留下
+     *       「审计说删了 3 条、流水其实还在」的假凭证（{@code payment_record} 没删就不可能丢证据链）。</li>
+     * </ol>
+     *
+     * <h3>幂等（为什么不需要业务键幂等）</h3>
+     * 审计的 {@code idem_key} 由 {@code request_id} 派生（{@code AdminAuditWriter} 的红线，
+     * 这次落在 {@code request_id:序号}），**绝不由 order_sn 派生** —— 理由见该类的说明。
+     * 而「重复删单不多写」是靠**业务前置条件**保证的，不是靠幂等键：
+     * 流水数为 0 时本方法直接返回（一行不写）；第二次删同一张单在
+     * {@code OrderController#delete} 的「订单不存在」处就返回了，连 {@code purge} 都进不去。
+     * 两条合起来：一次真删 ⇔ 一条 {@code PAYMENT_PURGE}。
      */
     private void purgePaymentRecords(Order order) {
         List<PaymentRecord> records = paymentRecordsOf(order.getOrderSn());
         if (records.isEmpty()) return;
 
+        // ① 先把证据攒出来：一条人话摘要（台账列表页直接展示）+ 一份逐条快照（金额/流水号/类型的全量事实）
         List<String> lines = new ArrayList<>();
+        List<Map<String, Object>> rows = new ArrayList<>();
+        BigDecimal amountTotal = BigDecimal.ZERO;
         for (PaymentRecord r : records) {
-            lines.add("tradeNo=" + r.getTradeNo() + " type=" + r.getType()
-                    + " amount=" + r.getAmount());
+            lines.add("tradeNo=" + r.getTradeNo() + " type=" + r.getType() + " amount=" + r.getAmount());
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", r.getId());
+            row.put("tradeNo", r.getTradeNo());
+            row.put("type", r.getType());
+            row.put("amount", r.getAmount());
+            row.put("channel", r.getChannel());
+            rows.add(row);
+            if (r.getAmount() != null) amountTotal = amountTotal.add(r.getAmount());
         }
-        log.warn("删除订单前清理支付流水：orderSn={} orderId={} 共 {} 条 [{}]（流水属于对账证据，已先落审计日志再删除）",
-                order.getOrderSn(), order.getId(), records.size(), String.join("; ", lines));
 
+        // ② 先记账（与 DELETE 同事务，且**必定**在 DELETE 之前）：
+        //    summary 里带订单号 / 条数 / 金额合计 / 每条的 tradeNo+type+amount（超长按列宽裁，全量在 before_json）
+        //    target 记成 ORDER + 订单 id/单号：被清理的是「这张单名下的流水」，且删完之后
+        //    只有订单维度还能按 target_id / order_id 反查（payment_record 自己的 id 删完就没有意义了）
+        auditWriter.record(new AdminAuditWriter.Event(
+                ReasonCodes.ACTION_PAYMENT_PURGE, ReasonCodes.TARGET_ORDER, order.getId(), order.getOrderSn(),
+                "删除订单 " + order.getOrderSn() + "（id=" + order.getId() + "）前清理 " + records.size()
+                        + " 条支付流水，金额合计 ¥" + amountTotal + "：" + String.join("; ", lines),
+                null, order.getId(),
+                AdminAuditWriter.snapshot("count", records.size(), "amountTotal", amountTotal, "records", rows),
+                AdminAuditWriter.snapshot("purgedCount", records.size(), "deleted", Boolean.TRUE)));
+
+        // ③ 再动手（先记账后动手：删完之后这条事实在库里就只有上面那一行了）
         int deleted = paymentRecordService.getBaseMapper().delete(new LambdaQueryWrapper<PaymentRecord>()
                 .eq(PaymentRecord::getOrderSn, order.getOrderSn()));
         requireExactly("支付流水", records.size(), deleted);
+
+        // 伴随日志（**审计已在上面的 admin_audit_log 里，这条 warn 只是排障时顺眼**）：
+        // 文案与实现一致 —— 当初这里写「已先落审计日志再删除」而代码里根本没有审计写入，是句假话
+        log.warn("删除订单前清理支付流水：orderSn={} orderId={} 共 {} 条 [{}]（对账证据：已在同一事务内先写入 "
+                        + "admin_audit_log 的 PAYMENT_PURGE（含订单号/条数/金额/流水号）再删除）",
+                order.getOrderSn(), order.getId(), records.size(), String.join("; ", lines));
     }
 
     // ------------------------------------------------------------------ 小工具
