@@ -1655,10 +1655,12 @@ if not samples:
 else:
     print("    主清单抽检 %d 条（HEAD 一次，记录 X-Cache/Age 供人工复核）" % len(samples))
     hit_samples = []
-    for r in samples:
+    base_age = {}            # 每条抽检对象的 Age 基线：Age 是"该副本在边缘已存在多少秒"，
+    for r in samples:        # 刷新生效后边缘会重新拉一份、Age 归零再重新增长 ⇒ **Age 变小**即为生效
         st, xc, age, _sv = head_once(url_of(r))
         if (xc or "").startswith("HIT"):
             hit_samples.append(r)
+            base_age[r] = age
         print("      %-58s HTTP %-3s X-Cache: %-22s Age: %s"
               % (encode_object_path(r), st or "-", xc or "-", age if age is not None else "-"))
     if not hit_samples:
@@ -1671,20 +1673,28 @@ else:
             time.sleep(10)
             for r in sorted(pending):
                 st, xc, age, _sv = head_once(url_of(r))
-                ok = bool(xc) and not xc.startswith("HIT")
+                # 两个都算"刷新生效"：
+                #   a) X-Cache 离开 HIT（回源中/未命中）
+                #   b) Age 比基线小 —— 边缘重新拉了一份，Age 归零后重新增长；
+                #      30 天缓存的对象刚回源完很快就又变回 HIT，此时 Age 很小，
+                #      只认"非 HIT"会把它判成没刷（2026-11-14 实测：探针拉热后 Age 0→11→21→31 稳定 HIT）
+                _b = base_age.get(r)
+                ok = (bool(xc) and not xc.startswith("HIT")) or (
+                    age is not None and _b is not None and age < _b)
                 print("      [t+%3ds] %-58s HTTP %-3s X-Cache: %-22s Age: %s  %s"
                       % (int(time.time() - started), encode_object_path(r), st or "-",
                          xc or "-", age if age is not None else "-", "✓" if ok else "…"))
                 if ok:
                     pending.discard(r)
         if pending and len(pending) == len(hit_samples):
-            fail("抽检 %d 条**全部**仍是 HIT → 刷新没有真正生效：%s"
+            fail("抽检 %d 条**全部**既没离开 HIT、Age 也没变小 → 刷新没有真正生效：%s"
                  % (len(pending), ", ".join(sorted(encode_object_path(r) for r in pending))[:300]))
         if pending:
             print("    ⚠ 仍有 %d 条抽检对象在 %d 秒内没看到 X-Cache 变化；CDN 传播有快有慢，"
                   "稍后 curl -I 复核即可（不阻塞发布）" % (len(pending), VERIFY_TIMEOUT))
         else:
-            print("    ✓ 抽检 %d 条全部在 %d 秒内离开 HIT" % (len(hit_samples), int(time.time() - started)))
+            print("    ✓ 抽检 %d 条全部在 %d 秒内确认刷新生效（离开 HIT 或 Age 归零重算）"
+                  % (len(hit_samples), int(time.time() - started)))
 PY
   then
     err "CDN 刷新失败（文档已上传，只是缓存可能还没失效；可手动刷或稍后重跑）"
