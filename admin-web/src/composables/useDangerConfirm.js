@@ -100,6 +100,13 @@ const cancel = () => {
  * - 成功：关弹窗 + 提示 + 刷新（onSuccess）
  * - 失败：**不关弹窗**，把后端中文原因显示在弹窗里（用户能看着原因决定关不关）；
  *   若调用方给了 onError 且它返回 true（例如 409 冲突已交给统一冲突弹窗处理），则由它接管、本次收起。
+ *
+ * <p><b>onError 必须**同步** return true / false</b>：下面判定写的是 `_onError(e) === true`，**不 await**。
+ * 写成 `onError: async (e) => { … return true }` 会返回 Promise，`Promise === true` 恒为 false ⇒
+ * 接管失效、真正的原因被塞进弹窗红色错误区。2026-11-14 实际踩过：台账页的「重放渠道通知」按
+ * 后端 `data.outcome` 分三态提示，异步写法让 `outcome=DUPLICATE`（**不是错误**，是渠道的正常重复投递）
+ * 掉进错误分支，把「重复通知，已忽略」显示成了执行失败 —— 正好把这条功能的核心语义做反。
+ * 钩子里要刷新列表就「发起式」调用（`load()`，不 await），不要把钩子本身写成 async。
  */
 const execute = async () => {
   if (!canExecute.value) return
@@ -122,6 +129,8 @@ const execute = async () => {
     let handled = false
     if (dangerState._onError) {
       try {
+        // 这里**故意不 await**：onError 的契约是同步返回 boolean（见 execute() 的注释）。
+        // 传 async 函数会拿到 Promise，`Promise === true` 为 false → 接管静默失效。
         handled = dangerState._onError(e) === true
       } catch (hookError) {
         handled = false
@@ -160,7 +169,10 @@ const failureText = (e) => {
  * @param {(version?: any) => Promise<any>} exec 执行接口；需要乐观锁的入口用 version 拼进 body
  * @param {any} [version] 行级版本号（乐观锁）；exec 会收到它，纯状态流转类接口不用给
  * @param {() => any} [onSuccess] 执行成功后的刷新（关窗 + 成功提示之后调用）
- * @param {(err: any) => boolean} [onError] 执行失败时的接管钩子：返回 true 表示「已自行处理」（弹窗收起）
+ * @param {(err: any) => boolean} [onError] 执行失败时的接管钩子：返回 true 表示「已自行处理」（弹窗收起）。
+ *   <b>必须同步 return true / false</b> —— 判定处写的是 `_onError(e) === true`，不 await；返回 Promise
+ *   一律被判为 false，原因会落进弹窗红色错误区（2026-11-14 踩过：把「重复通知」显示成了「失败」）。
+ *   需要刷新列表时在钩子里「发起式」调用（`load()`，不 await）。
  * @param {() => any} [onPreviewOk] **预演成功后**调用（带业务表单的入口在这一刻才收起表单）
  * @param {(err: any) => any} [onPreviewError] 预演就失败时调用（把原因留在业务表单里，而不是只发一条会消失的 toast）
  * @param {string} [title] 弹窗标题
