@@ -232,6 +232,12 @@ delete from return_apply       where order_id    in (select id from lg_o);
 delete p from payment_record p join \`order\` o on o.order_sn = p.order_sn where o.member_id in (select id from lg_m);
 delete from order_item         where order_id    in (select id from lg_o);
 delete from stock_ledger       where order_id    in (select id from lg_o);
+-- 三张「只追加」状态台账：reset 语义必须是「删掉属于被 reset 订单的那些行」，
+-- 不能 TRUNCATE 全表（台账是证据表，可能含非压测订单/历史行）。
+-- 2026-11-14 事故：这三张漏删，单日堆到 5,717,917 行孤儿，/admin/ledgers 挂 25s。
+delete from order_status_ledger    where order_id in (select id from lg_o);
+delete from delivery_status_ledger where order_id in (select id from lg_o);
+delete from return_status_ledger   where order_id in (select id from lg_o);
 delete from \`order\`            where id          in (select id from lg_o);
 delete from cart               where member_id   in (select id from lg_m);
 -- 孤儿台账兜底（历史误删订单留下的、订单已不存在的库存台账；只扫压测用到的 SKU 区间）
@@ -239,6 +245,15 @@ delete l from stock_ledger l left join \`order\` o on o.id = l.order_id where o.
 update sku set stock = $SKU_STOCK where id = @sku_id;
 update sku set stock = $SKU_STOCK where id between $COLD_FROM and $COLD_TO;
 select concat('sku ', id, ': stock=', stock, ' version=', version) from sku where id = @sku_id;
+-- 注意：MySQL 不允许同一条查询里多次引用同一张 TEMPORARY 表（ERROR 1137），
+-- 所以这里把三张台账 UNION 起来、只引用 lg_o 一次。
+select concat('台账自检 lg_o 残留(应为 0)=', count(*)) as ledger_reset_check
+  from (select order_id from order_status_ledger
+        union all select order_id from delivery_status_ledger
+        union all select order_id from return_status_ledger) t
+ where t.order_id in (select id from lg_o);
+select concat('台账历史孤儿(参考值,非本次负责,可非 0)=', (select count(*) from order_status_ledger l left join \`order\` o on o.id=l.order_id where o.id is null))
+       as ledger_orphan_ref;
 "
   echo "（Redis 令牌不清理：30 分钟自然过期；如需立刻清，见 README 里的 redis-cli 一行）"
 }
