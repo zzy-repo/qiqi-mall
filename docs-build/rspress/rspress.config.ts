@@ -49,9 +49,9 @@ if (IS_BUILD && process.env.RSPRESS_ALLOW_SPOKEN !== '1') {
  *   node build-material.mjs --target=rspress --mode=dev|prod   （真身 = /root/docsify/build-material.mjs）
  *
  * 为什么侧边栏用 config 里的生成数组、而不用 _meta.json：
- *   _meta.json 只能反映目录层级（material → scenarios → 01-买家侧），而侧边栏要的是
+ *   _meta.json 只能反映目录层级（material → scenarios → 业务/买家侧），而侧边栏要的是
  *   `**项目材料** → 一、功能场景（图 + 视频） → 买家侧` 这种与目录不同构的语义层，
- *   且分组名（「二、状态机」）与目录名（01-状态机）本就不同 —— 用目录树表达不出来。
+ *   且分组名（「二、状态机」）与目录名（04-状态机）本就不同 —— 用目录树表达不出来。
  */
 export default defineConfig({
   root: 'doc',
