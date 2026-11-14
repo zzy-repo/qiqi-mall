@@ -2,8 +2,13 @@
 #
 # 重置 e2e 专用库（每个 Playwright shard 一套），可反复重跑。
 #
-#   ./scripts/reset-e2e-db.sh qiqi_mall_e2e_a     # 重置单个库
-#   ./scripts/reset-e2e-db.sh --all               # 重置 qiqi_mall_e2e_a / _b（按 E2E_SHARD_N）
+#   ./scripts/reset-e2e-db.sh qiqi_mall_e2e_a     # 重置单个库（**并自动重启** shard a 的后端）
+#   ./scripts/reset-e2e-db.sh --all               # 重置 qiqi_mall_e2e_a / _b（按 E2E_SHARD_N），并重启对应后端
+#   SKIP_BACKEND_RESTART=1 ./scripts/reset-e2e-db.sh ...   # 只重置库、不重启（⚠ 只给对照实验用，会红）
+#
+# ⚠ reset 库会让被测服务 JVM 里缓存的主数据（如平台买家 member_id）变悬空，所以 reset 之后
+#   必须重启后端；否则连续两次跑批会在 09-多平台接入/1-接入最小闭环 上红一次（code=1，fk_order_member）。
+#   本脚本默认就把这两件事绑在一起做（见文件末尾「步骤 5」），不是为了"顺手"，是因为只做一半必红。
 #
 # 结构从哪来：Flyway（qiqi-mall-server/src/main/resources/db/migration/V*.sql）。
 #   · 以前是 `sed 库名 < sql/testdb/01-schema.sql | mysql` —— 那份 DDL 是手抄的第二份副本，
@@ -142,5 +147,97 @@ for DB in "${TARGETS[@]}"; do
   echo
 done
 
-echo "✅ 完成：${TARGETS[*]}"
+# ════════════════════════════════════════════════════════════════════════════
+# 步骤 5：重启对应分片的后端（**默认必做**，和 DROP DATABASE 是同一个动作的两半）
+#
+# 为什么这一步不是"优化"而是"正确性"（2026-11-14 事故，连续两跑必红一次）：
+#   被测服务 ChannelOrderImporter.platformBuyerId() 把「平台买家」的 member_id 缓存在
+#   JVM 的 volatile 字段里。第一次跑批拿到 31 并缓存；两次跑批之间本脚本 DROP DATABASE，
+#   那个 member 跟着没了 ⇒ 缓存里的 31 成了**悬空外键** ⇒ INSERT order 撞 fk_order_member
+#   ⇒ 「MALL 拉单接口应返回成功」code=1。证据：不重启后端重跑 13.1s 同样失败；
+#   `restart-e2e-backends.sh --only b` 清掉缓存后重跑 1 passed。
+#   所以：**reset 之后必须重启后端**，否则第二次跑批会在 09-多平台接入/1-接入最小闭环 上红。
+#
+# 边界（都不越过铁律）：
+#   · 只用 systemd unit 名重启（restart-e2e-backends.sh 内部只 systemctl restart），不 pkill -f；
+#   · 分片后端**没在跑**（瞬态 unit 被 --collect 回收 / 还没 start）→ 跳过该分片并说明原因：
+#     没有运行中的 JVM 就没有缓存可清，此时不重启是对的，不能因此让 reset 失败
+#     （start-e2e-backends.sh 头部就要求"先 reset 建库、再起后端"，那条路必须继续可用）；
+#   · restart-e2e-backends.sh 的 --only 只认 a|b；c/d 分片会显式告警并提示手工重启，不静默放过。
+# ════════════════════════════════════════════════════════════════════════════
+SKIP_BACKEND_RESTART="${SKIP_BACKEND_RESTART:-0}"
+RESTART_TARGETS=()          # 收集「有跑着的后端」且 restart 脚本支持的分片
+SKIPPED_NO_JVM=()           # 后端没在跑、无需重启的分片
+UNSUPPORTED=()              # restart 脚本 --only 不支持的分片
+for DB in "${TARGETS[@]}"; do
+  shard="${DB#qiqi_mall_e2e_}"
+  unit="qiqi-e2e-server-$shard"
+  load="$(systemctl show -p LoadState --value "$unit" 2>/dev/null || echo not-found)"
+  pid="$(systemctl show -p MainPID --value "$unit" 2>/dev/null || echo 0)"
+  if [[ "$load" != "loaded" ]] || [[ ! "$pid" =~ ^[0-9]+$ ]] || [[ "$pid" == "0" ]]; then
+    SKIPPED_NO_JVM+=("$shard")
+    continue
+  fi
+  case "$shard" in
+    a|b) RESTART_TARGETS+=("$shard") ;;
+    *)   UNSUPPORTED+=("$shard") ;;
+  esac
+done
+
+if [[ "$SKIP_BACKEND_RESTART" == "1" ]]; then
+  cat >&2 <<'SKIP_RESTART_EOF'
+
+████████████████████████████████████████████████████████████████████████
+⚠  SKIP_BACKEND_RESTART=1：库已重置，但**后端没重启** —— 这是一条已知会红的半成品路径。
+   JVM 里缓存的主数据（如 ChannelOrderImporter.platformBuyerId 的 member_id）现在指向刚被
+   DROP 掉的 member，下一次拉单会撞 fk_order_member ⇒ 09-多平台接入/1-接入最小闭环 红（code=1）。
+   只有"故意要复现这个红"的对照实验才该这么用；正常跑批请去掉这个开关（默认就是重启）。
+████████████████████████████████████████████████████████████████████████
+
+SKIP_RESTART_EOF
+  for s in "${SKIPPED_NO_JVM[@]}"; do
+    echo "  · shard $s：后端没在跑（无 JVM 缓存可清），无需重启"
+  done
+  echo "✅ 完成：${TARGETS[*]}（⚠ 未重启后端：SKIP_BACKEND_RESTART=1）"
+  echo "   结构来源：db/migration/V1__baseline.sql（Flyway）；数据来源：sql/testdb/02-seed.sql"
+  exit 0
+fi
+
+if [[ "${#RESTART_TARGETS[@]}" -eq 0 ]]; then
+  echo "▶ 无需重启后端：${SKIPPED_NO_JVM[*]:-（无目标）} 的后端都没在跑（没有 JVM 缓存可清）"
+  for s in "${UNSUPPORTED[@]}"; do
+    echo "  ⚠ shard $s：restart-e2e-backends.sh --only 只支持 a|b，无法自动重启 —— 请手工重启该分片后端" >&2
+  done
+  FINAL_NOTE="（库已重置；目标分片没有运行中的后端，未重启）"
+else
+  echo "▶ 重启后端（清 JVM 内缓存：reset 把库删了，缓存里的主数据 id 会变悬空外键）"
+  restart_start="$(date +%s)"
+  if [[ "${#RESTART_TARGETS[@]}" -eq 2 ]]; then
+    # a+b 一起重启：restart-e2e-backends.sh 不带 --only 就是两个都动，只编译一次
+    if ! ( cd "$REPO_DIR" && ./scripts/restart-e2e-backends.sh ); then
+      echo "✗ 后端重启失败（库已重置但后端还是旧 JVM ⇒ 缓存里的 member_id 是悬空外键，现在跑必红）" >&2
+      echo "  处理：bash scripts/restart-e2e-backends.sh（会先 mvn compile 再重启）；单元被回收时先 scripts/start-e2e-backends.sh" >&2
+      exit 1
+    fi
+  else
+    for s in "${RESTART_TARGETS[@]}"; do
+      if ! ( cd "$REPO_DIR" && ./scripts/restart-e2e-backends.sh --only "$s" ); then
+        echo "✗ shard $s 的后端重启失败（库已重置但后端还是旧 JVM ⇒ 缓存里的 member_id 是悬空外键，现在跑必红）" >&2
+        echo "  处理：bash scripts/restart-e2e-backends.sh --only $s" >&2
+        exit 1
+      fi
+    done
+  fi
+  restart_secs=$(( $(date +%s) - restart_start ))
+  for s in "${SKIPPED_NO_JVM[@]}"; do
+    echo "  · shard $s：后端没在跑（无 JVM 缓存可清），无需重启"
+  done
+  for s in "${UNSUPPORTED[@]}"; do
+    echo "  ⚠ shard $s：restart-e2e-backends.sh --only 只支持 a|b，无法自动重启 —— 请手工重启该分片后端" >&2
+  done
+  echo "✓ 已重启后端（清 JVM 内缓存）：shard ${RESTART_TARGETS[*]}  耗时 ${restart_secs}s"
+  FINAL_NOTE="（库已重置 + 后端已重启：${RESTART_TARGETS[*]}）"
+fi
+
+echo "✅ 完成：${TARGETS[*]}${FINAL_NOTE:-}"
 echo "   结构来源：db/migration/V1__baseline.sql（Flyway）；数据来源：sql/testdb/02-seed.sql"

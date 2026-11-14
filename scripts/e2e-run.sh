@@ -6,10 +6,16 @@
 #   scripts/e2e-run.sh "tests/scenarios/03-商家-履约/1-订单审核与发货.spec.js"
 #   scripts/e2e-run.sh --affected                        # 只跑被 git 改动波及的 spec（日常用这个）
 #   scripts/e2e-run.sh --affected --base=HEAD~3           # 换对比基准（默认 origin/main...HEAD + 工作区）
-#   scripts/e2e-run.sh --no-reset                        # 不重置库（调试单条时快一些）
+#   scripts/e2e-run.sh --no-reset                        # 不重置库（调试单条时快一些；也不重启后端）
 #   E2E_SHARDS=1 scripts/e2e-run.sh                      # 降级：单 shard 单后端
 #   E2E_WORKERS=2 scripts/e2e-run.sh                     # 每个 shard 内再开 2 个 worker
 #   E2E_FRONT_MODE=dev scripts/e2e-run.sh                # 回退：前端打 4 套 vite dev server（旧默认）
+#
+# ⚠ reset 库会让被测服务 JVM 里缓存的主数据（如平台买家 member_id）变悬空，所以 reset 之后
+#   必须重启后端；否则连续两次跑批会在 09-多平台接入/1-接入最小闭环 上红一次（code=1，fk_order_member）。
+#   本脚本不给"reset 了但没重启"留路径：跑前的 reset 由 scripts/reset-e2e-db.sh 做，它**默认自动
+#   重启**对应分片后端；--no-reset 不重启（没 DROP 就没有悬空缓存）；SKIP_BACKEND_RESTART=1
+#   在 reset 生效时会被直接拒绝，除非同时显式给 E2E_ALLOW_SKIP_BACKEND_RESTART=1（只给对照实验用）。
 #
 # 前端模式默认已是 build（前端打**构建产物** + preview-server，实测墙钟 −15%，代价是构建 +20s）。
 # 直接跑 `scripts/e2e-run.sh` 拿到的就是快的那一版；只有需要「改前端源码即时生效」时才用 E2E_FRONT_MODE=dev。
@@ -81,6 +87,31 @@ for a in "$@"; do
     *) PASS_ARGS+=("$a") ;;
   esac
 done
+
+# ── SKIP_BACKEND_RESTART 护栏：本脚本不允许"reset 了但没重启" ────────────────
+# reset（DROP DATABASE）会让被测服务 JVM 里缓存的主数据（如 ChannelOrderImporter.platformBuyerId()
+# 的 member_id）变成悬空外键，只 reset 不重启 ⇒ 下一次拉单撞 fk_order_member ⇒ 09/1 红。
+# 所以这里把"半成品路径"堵住：想在 reset 生效时跳过重启，必须再显式加一层
+# E2E_ALLOW_SKIP_BACKEND_RESTART=1（那只有"故意复现这个红"的对照实验才该做）。
+if [[ "$DO_RESET" == "1" && "${SKIP_BACKEND_RESTART:-0}" == "1" ]]; then
+  if [[ "${E2E_ALLOW_SKIP_BACKEND_RESTART:-0}" != "1" ]]; then
+    echo "✗ SKIP_BACKEND_RESTART=1 与 reset 一起用被拒绝：这样跑出来的红/绿都不算数。" >&2
+    echo "  reset 会 DROP DATABASE，而后端 JVM 里缓存的主数据（平台买家 member_id 等）会变悬空外键，" >&2
+    echo "  下一次拉单撞 fk_order_member → 09-多平台接入/1-接入最小闭环 红（这就是本次要修的那个坑）。" >&2
+    echo "  · 正常跑批：去掉 SKIP_BACKEND_RESTART（默认就是 reset 后自动重启）" >&2
+    echo "  · 非要复现这个红：再加 E2E_ALLOW_SKIP_BACKEND_RESTART=1（结论只用于对照，不能当验收）" >&2
+    exit 5
+  fi
+  cat >&2 <<'ALLOW_SKIP_EOF'
+
+████████████████████████████████████████████████████████████████████████
+⚠  E2E_ALLOW_SKIP_BACKEND_RESTART=1：库会重置，但**后端不会重启**。
+   JVM 缓存的主数据会指向已被 DROP 的 member ⇒ 第二次跑批大概率在 09/1 上红。
+   这条路径只用于"证明红就是因为它"的对照实验，不要拿它的结论当验收。
+████████████████████████████████████████████████████████████████████████
+
+ALLOW_SKIP_EOF
+fi
 
 # ── 入口先清掉 ADMIN_PASSWORD ────────────────────────────────────────────────
 # e2e 分片库的 admin 口令是 sql/testdb/02-seed.sql 里的种子默认值（123456），不走强口令。
@@ -450,17 +481,43 @@ for s in "${SHARDS[@]:$SHARD_FROM:$WANT_SHARDS}"; do
 done
 
 # 前置：重置库（独立库的最大好处就是可以随便重置）
+#
+# ⚠ 这一段的调用顺序被钉死了，别改成"只 reset 不重启"：
+#   reset-e2e-db.sh 在**它自己内部**（步骤 5）就把「重启对应分片后端」做完 —— DROP DATABASE
+#   会让被测服务 JVM 里缓存的主数据（ChannelOrderImporter.platformBuyerId() 的 member_id 等）
+#   变成悬空外键，只 reset 不重启 ⇒ 连续两次跑批时第二次会在 09-多平台接入/1-接入最小闭环
+#   上红一次（code=1，fk_order_member）。所以这里：
+#     · 不传 SKIP_BACKEND_RESTART（默认就是重启，见上方护栏：想跳过必须再加一层显式开关）；
+#     · reset 的退出码**不再被 `|| true` 吞掉** —— reset/重启失败就停，绝不在半成品状态上跑批
+#       （旧写法 `| grep ... || true` 会把失败静默变成"重置过了"，然后红在后面，指错地方）；
+#     · 单分片只重置/重启自己那个分片，双分片走 --all（restart 脚本一次编译、两个分片一起起）。
+_reset_log_re='^(▶|✓|✗|✅|❌|⚠|  ▶|  ✓|  ✗|  ·)'
+run_reset() {
+  local desc="$1"; shift
+  local log rc=0
+  log="$(mktemp /tmp/e2e-reset-XXXXXX.log)"
+  echo "$desc"
+  ( cd "$REPO_DIR" && "$@" ) >"$log" 2>&1 || rc=$?
+  grep -E "$_reset_log_re" "$log" || true
+  if [[ "$rc" -ne 0 ]]; then
+    echo "✗ reset（含自动重启后端）失败 exit=$rc；完整日志：$log" >&2
+    echo "  reset 与重启后端是同一个动作，只做一半必红（09/1 的 fk_order_member 就是这么来的）—— 不继续跑批。" >&2
+    tail -25 "$log" >&2
+    exit 8
+  fi
+  rm -f "$log"
+}
 if [[ "$DO_RESET" == "1" ]]; then
   # 单分片时只重置自己要用的那个库：`--all` 会把**另一个分片的库**也 TRUNCATE，
   # 而单分片跑批不拿机器级互斥锁（见下方 flock 段），可能正好把别人正在跑的 shard b 库清掉。
   # 重置本身一点没少（本次要用的库仍然是完整重置），只是不再误伤不用的那个。
   if [[ "$WANT_SHARDS" -eq 1 ]]; then
     _only_shard="$(printf '%s' "${SHARDS[@]:$SHARD_FROM:1}" | cut -d: -f1)"
-    echo "▶ 重置 e2e 库（仅 shard $_only_shard）"
-    ( cd "$REPO_DIR" && ./scripts/reset-e2e-db.sh "qiqi_mall_e2e_$_only_shard" ) | grep -E '^▶|^✓|^✅|^❌' || true
+    run_reset "▶ 重置 e2e 库（仅 shard $_only_shard）+ 重启该分片后端" \
+      ./scripts/reset-e2e-db.sh "qiqi_mall_e2e_$_only_shard"
   else
-    echo "▶ 重置 e2e 库"
-    ( cd "$REPO_DIR" && ./scripts/reset-e2e-db.sh --all ) | grep -E '^▶|^✓|^✅|^❌' || true
+    run_reset "▶ 重置 e2e 库（--all）+ 重启对应分片后端" \
+      ./scripts/reset-e2e-db.sh --all
   fi
 fi
 
