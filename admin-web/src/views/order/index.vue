@@ -1058,9 +1058,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.card-header { display: flex; justify-content: space-between; align-items: center; }
 .filters { display: flex; gap: 8px; margin-bottom: 12px; }
-.pager { display: flex; justify-content: flex-end; margin-top: 12px; }
 .add-item { margin-top: 10px; width: 100%; }
 .snapshot { color: #606266; }
 /* 编辑态只读状态 / 明细提示：正文明说「不能改」，别让人以为是自己没点上 */

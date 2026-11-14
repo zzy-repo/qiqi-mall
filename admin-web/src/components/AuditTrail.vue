@@ -2,7 +2,7 @@
   <div class="audit-trail" data-testid="audit-trail">
     <!-- 三段图例：决策 / 状态台账 / 操作审计 —— 点一下只留那一段（默认三段全开） -->
     <div class="trail-legend">
-      <span class="legend-label">按时间拼接的三段证据：</span>
+      <el-text type="info">按时间拼接的三段证据：</el-text>
       <el-check-tag
         v-for="seg in SEGMENTS"
         :key="seg"
@@ -10,10 +10,10 @@
         :data-testid="`audit-trail-legend-${seg}`"
         @change="toggle(seg)"
       >
-        <el-tag :type="auditSegmentTag(seg)" size="small" effect="dark" class="legend-tag">
+        <el-tag :type="auditSegmentTag(seg)" size="small" effect="dark" >
           {{ auditSegmentText(seg) }}
         </el-tag>
-        <span class="legend-count">{{ countOf(seg) }}</span>
+        <el-text size="small">{{ countOf(seg) }}</el-text>
       </el-check-tag>
       <el-button link type="primary" size="small" data-testid="audit-trail-refresh" @click="load">刷新</el-button>
     </div>
@@ -31,13 +31,13 @@
           :hollow="e.segment === 'AUDIT'"
         >
           <el-card shadow="never" class="trail-card" :class="`trail-${e.segment.toLowerCase()}`">
-            <div class="trail-head">
+            <el-space :size="8">
               <el-tag :type="auditSegmentTag(e.segment)" size="small" effect="dark">
                 {{ auditSegmentText(e.segment) }}
               </el-tag>
               <!-- 三种段各自的标题：决策段用中文结局替换后端的英文码，台账段翻成订单状态中文 -->
-              <span class="trail-title" :data-testid="trailTestid(e.segment)">{{ titleOf(e) }}</span>
-            </div>
+              <el-text tag="b" :data-testid="trailTestid(e.segment)">{{ titleOf(e) }}</el-text>
+            </el-space>
 
             <!-- 决策段：命中策略 + 版本 + 留痕原因 -->
             <template v-if="e.segment === 'DECISION'">
@@ -277,21 +277,15 @@ watch(() => props.orderId, load)
   padding: 8px 10px; margin-bottom: 12px;
   background: #fafafa; border: 1px solid #ebeef5; border-radius: 4px;
 }
-.legend-label { font-size: 13px; color: #909399; }
-.legend-tag { margin-right: 4px; }
-.legend-count { font-size: 12px; color: #606266; }
+.trail-body { min-height: 40px; }
 .trail-card { border-left-width: 3px; }
 .trail-decision { border-left-color: #409eff; }
 .trail-status { border-left-color: #67c23a; }
 .trail-audit { border-left-color: #e6a23c; }
-.trail-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.trail-title { font-weight: 600; font-size: 14px; color: #303133; }
 .trail-line { font-size: 13px; color: #303133; line-height: 22px; }
 .trail-line .label { color: #909399; }
 .trail-line .value { color: #303133; }
 .trail-line .arrow { color: #909399; margin: 0 4px; }
 .trail-detail { font-size: 12px; color: #909399; line-height: 20px; margin-top: 4px; word-break: break-all; }
 .trail-align { margin-top: 6px; }
-.muted { color: #909399; font-size: 12px; }
-.mono { font-family: Consolas, Monaco, monospace; }
 </style>

@@ -1,7 +1,7 @@
 <template>
   <el-card shadow="never">
     <template #header>
-      <div class="card-header">
+      <div class="card-header card-header--baseline">
         <span>台账查询</span>
         <span class="header-tip">
           全链路状态变更流水（订单 / 包裹 / 售后 / 审计 / WMS / 库存 / 支付）· 只读，按时间倒序
@@ -88,7 +88,7 @@
 
       <el-table-column label="业务单号" min-width="180">
         <template #default="{ row }">
-          <div class="biz-sn">{{ row.bizSn || '—' }}</div>
+          <div class="mono">{{ row.bizSn || '—' }}</div>
           <div class="muted">ID {{ row.bizId ?? '—' }}</div>
         </template>
       </el-table-column>
@@ -96,22 +96,24 @@
       <!-- 变更：同一个数字在不同 type 下含义不同，必须带上 row.type 才能翻译（见 constants/status.js） -->
       <el-table-column label="变更（前态 → 后态）" min-width="230">
         <template #default="{ row }">
-          <span class="state-from">{{ ledgerStatusText(row.type, row.fromStatus) }}</span>
-          <span class="state-arrow">→</span>
-          <span class="state-to">{{ ledgerStatusText(row.type, row.toStatus) }}</span>
+          <el-space :size="6">
+            <el-text type="info">{{ ledgerStatusText(row.type, row.fromStatus) }}</el-text>
+            <el-text type="info">→</el-text>
+            <el-text tag="b">{{ ledgerStatusText(row.type, row.toStatus) }}</el-text>
+          </el-space>
         </template>
       </el-table-column>
 
       <el-table-column label="原因" min-width="200">
         <template #default="{ row }">
-          <div class="reason">{{ reasonText(row.reason) }}</div>
+          <div class="ledger-strong">{{ reasonText(row.reason) }}</div>
           <div v-if="row.reasonDetail" class="muted">{{ row.reasonDetail }}</div>
         </template>
       </el-table-column>
 
       <el-table-column label="操作人" width="150">
         <template #default="{ row }">
-          <div class="operator">{{ row.operatorName || '—' }}</div>
+          <div class="ledger-strong">{{ row.operatorName || '—' }}</div>
           <el-tag :type="operatorTypeTag(row.operatorType)" size="small" effect="plain">
             {{ operatorTypeText(row.operatorType) }}
           </el-tag>
@@ -120,7 +122,7 @@
 
       <el-table-column label="摘要" min-width="220">
         <template #default="{ row }">
-          <div class="summary">{{ row.summary || '—' }}</div>
+          <div class="ledger-strong">{{ row.summary || '—' }}</div>
           <div v-if="row.refType || row.refId" class="muted">
             关联：{{ row.refType || '—' }}#{{ row.refId ?? '—' }}
           </div>
@@ -369,18 +371,8 @@ onMounted(load)
 </script>
 
 <style scoped>
-.card-header { display: flex; justify-content: space-between; align-items: baseline; }
-.header-tip { font-size: 12px; color: #909399; }
 .filters { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-.pager { display: flex; justify-content: flex-end; margin-top: 12px; }
 .tip { margin-top: 10px; font-size: 12px; color: #909399; line-height: 1.7; }
-.datetime { font-size: 13px; color: #606266; }
-.biz-sn { font-family: 'SFMono-Regular', Consolas, Monaco, monospace; font-size: 13px; color: #303133; }
-.muted { color: #909399; font-size: 12px; }
-.state-from { color: #909399; }
-.state-arrow { margin: 0 6px; color: #c0c4cc; }
-.state-to { color: #303133; font-weight: 600; }
-.reason { color: #303133; }
-.operator { color: #303133; margin-bottom: 2px; }
-.summary { color: #303133; }
+/* 台账正文比表格默认字色深一档：#303133 不是 el-text 的任何一个 type，只能自己给 */
+.ledger-strong { color: var(--el-text-color-primary); }
 </style>

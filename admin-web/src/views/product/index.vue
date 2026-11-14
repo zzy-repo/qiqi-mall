@@ -278,7 +278,6 @@ onMounted(() => { load(); loadRefs() })
 </script>
 
 <style scoped>
-.card-header { display: flex; justify-content: space-between; align-items: center; }
 .thumb { width: 44px; height: 44px; border-radius: 4px; }
 .empty-pic { color: #c0c4cc; }
 .gallery { width: 100%; display: flex; flex-direction: column; gap: 8px; }

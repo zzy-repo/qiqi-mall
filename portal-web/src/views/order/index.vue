@@ -307,6 +307,5 @@ onMounted(async () => {
 
 <style scoped>
 .title { margin: 0 0 12px; font-size: 16px; }
-.pager { display: flex; justify-content: flex-end; margin-top: 12px; }
 h4 { margin: 16px 0 8px; font-size: 14px; }
 </style>

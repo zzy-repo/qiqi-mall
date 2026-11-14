@@ -178,7 +178,7 @@ export const ledgerStatusTag = (type, raw) => {
  *
  * 颜色口径（一句话记：绿=系统自己过了 / 黄=等人 / 红=拦死 / 紫=冻住 / 灰=没命中）：
  *   AUTO_PASS 绿 success · MANUAL 黄 warning · BLOCKED 红 danger
- *   FROZEN    紫（el-tag 没有紫档，用 AUDIT_RESULT_CLASS 里带的自定义 class 覆盖成紫色）
+ *   FROZEN    紫（el-tag 没有紫档 → 用官方 CSS 变量补一档，见下方 auditResultStyle）
  *   NO_MATCH  灰 info      · SKIPPED 灰 info（未参与本轮，不属于五类计数）
  * 三重冗余：颜色 + 文案 + data-result（e2e 与色盲用户都不靠颜色识别）。
  * ------------------------------------------------------------------------- */
@@ -190,7 +190,7 @@ export const AUDIT_RESULT_TEXT = {
   NO_MATCH: '不命中',
   SKIPPED: '未参与'
 }
-/** el-tag 的 type 档位（紫色没有档位，见 AUDIT_RESULT_CLASS） */
+/** el-tag 的 type 档位（紫色没有档位 → FROZEN 走 primary，再由 auditResultStyle 覆成紫） */
 export const AUDIT_RESULT_TAG = {
   AUTO_PASS: 'success',
   MANUAL: 'warning',
@@ -199,15 +199,27 @@ export const AUDIT_RESULT_TAG = {
   NO_MATCH: 'info',
   SKIPPED: 'info'
 }
-/** 需要额外 class 才能出效果的两档：FROZEN 紫色、SKIPPED 更淡的灰 */
-export const AUDIT_RESULT_CLASS = {
-  AUTO_PASS: 'badge-auto-pass',
-  MANUAL: 'badge-manual',
-  BLOCKED: 'badge-blocked',
-  FROZEN: 'badge-frozen',
-  NO_MATCH: 'badge-no-match',
-  SKIPPED: 'badge-skipped'
-}
+/**
+ * FROZEN 紫：EP 的 el-tag `type` 只有 5 档（primary/success/info/warning/danger），没有紫色。
+ *
+ * 之前这里是 `AUDIT_RESULT_CLASS`（一张 badge-* 类名表）+ 页面里 `:deep(.badge-frozen){...!important}`。
+ * 两个问题：① 6 个类名里只有 2 个真有样式，另外 4 个是死类；② `:deep` 撬的是 el-tag 的私有 DOM，
+ * 升级就碎。
+ *
+ * 现在改成：**用 el-tag 官方主题变量补一档紫**（`--el-tag-bg-color` / `-border-color` / `-text-color`
+ * 是 EP 文档里公开的 CSS 变量，属于支持的定制口，不是内部类名）。仍然只挂在 props 上，不碰 DOM。
+ *
+ * 为什么不能只给 el-tag 的 `color` prop：`color` 在模板里只落成 `style="background-color: X"`，
+ * 边框仍读 `--el-tag-border-color`（= type 的色），只给 color 会留一圈蓝边。
+ */
+export const auditResultStyle = (raw) =>
+  String(raw) === 'FROZEN'
+    ? {
+        '--el-tag-bg-color': 'var(--qiqi-color-frozen)',
+        '--el-tag-border-color': 'var(--qiqi-color-frozen)',
+        '--el-tag-text-color': 'var(--el-color-white)'
+      }
+    : undefined
 /** 「被拦」= 阻止 + 冻结：只用于分组标题与合计，**不能**当成 queue 的筛选值（后端只收单值） */
 export const AUDIT_BLOCKED_GROUP = ['BLOCKED', 'FROZEN']
 
@@ -255,7 +267,6 @@ export const AUDIT_OP_NO_VALUE = ['EXISTS', 'NOT_EXISTS']
 
 export const auditResultText = (raw) => statusText(AUDIT_RESULT_TEXT, raw)
 export const auditResultTag = (raw) => statusTag(AUDIT_RESULT_TAG, raw)
-export const auditResultClass = (raw) => AUDIT_RESULT_CLASS[String(raw)] || 'badge-no-match'
 export const auditResultHint = (raw) => AUDIT_RESULT_HINT[String(raw)] || ''
 export const auditPolicyTypeText = (raw) => statusText(AUDIT_POLICY_TYPE_TEXT, raw)
 export const auditPolicyTypeTag = (raw) => statusTag(AUDIT_POLICY_TYPE_TAG, raw)

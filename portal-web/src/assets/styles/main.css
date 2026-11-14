@@ -6,3 +6,40 @@ body {
   background: #f5f7fa;
   color: #303133;
 }
+
+/* ===========================================================================
+ * 设计令牌（只放 Element Plus 色板里没有的东西）
+ * 规则：本文件只允许 var(--el-*) / var(--qiqi-*)，不再写裸 hex（令牌定义处除外）。
+ * 与 admin-web 保持同名同值，方便以后抽成公共包。
+ * ========================================================================= */
+:root {
+  --qiqi-font-mono: Consolas, Monaco, 'SFMono-Regular', 'Courier New', monospace;
+  --qiqi-font-size-xs: 11px;
+  --qiqi-color-ink: #1f2d3d;
+}
+
+/* ===========================================================================
+ * 布局工具类（原先散在各页 scoped <style> 里各写一份）
+ * ========================================================================= */
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 表格下面的右对齐分页条 */
+.pager {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+/* 次要说明文字 */
+.muted {
+  font-size: var(--el-font-size-extra-small);
+  color: var(--el-text-color-secondary);
+}
+
+/* 等宽（单号 / 金额） */
+.mono { font-family: var(--qiqi-font-mono); }

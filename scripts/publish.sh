@@ -232,6 +232,20 @@
 #     · 8.5 会被 --skip-docs 整个跳过（"这次不发文档"），源码门禁跟着消失就是漏洞；
 #     · preflight 失败时**连 tag 都不打、镜像也不构建**，这是源码类约束唯一正确的位置。
 #   回滚模式跳过本项（紧急通道不重跑源码门禁，且回滚用的是老镜像、新 yml 不参与）。
+#
+# 【十四】前端样式纪律 = 「不侵入组件」的**可执行前提**（scripts/check-style-discipline.mjs）
+#   admin/portal 的 scoped <style> 里一度有自己重写的一整套组件外观：筛选胶囊 23 行 CSS
+#   重新发明了 EP 已有的交互，五色语义散在 4 个页面各写一份，6 个 badge-* 类名里 4 个从没定义，
+#   10 处 :deep() 直接撬 el-tag / el-table / el-card / el-checkbox 的内部类名。
+#   代价是看得见的：紫色只活在 order-audit 一个 scoped 块里，别的页拿到同一个类名什么也不会发生；
+#   而 :deep() 的目标是组件的私有 DOM，EP 一次升级就可能全碎，且碎法是"样式静默失效"。
+#   于是把它变成一条可执行的分档约束（不是"以后注意点"）：
+#     · :deep() > 0        → **fail**（撬组件内部 = 升级即碎，一处都不允许；当前是 0）
+#     · 外观声明 > 0       → warn（自有样式里有 color/font-size 是正常的，EP 只有 5 档字号、
+#                            没有等宽/斜体/紫档语义，该留就得留；这一档只看趋势向下）
+#   为什么挂 preflight 而不是 docs_gate：与【十三】同理 —— 判的是源码不是产物字节，
+#   而且 preflight 失败时连 tag 都不打，是源码类约束唯一正确的位置。
+#   回滚模式同样跳过。
 # =============================================================================
 
 set -uo pipefail
@@ -655,6 +669,37 @@ check_jdbc_session_safety() {
   return 1
 }
 
+# 前端样式纪律（见【十四】）：:deep() > 0 硬拦，外观声明只 warn。
+# 只读 .vue 源码、不跑构建、不需要容器，几十毫秒。
+check_style_discipline() {
+  local checker="$REPO_ROOT/scripts/check-style-discipline.mjs" out rc=0
+  if [ ! -f "$checker" ]; then
+    err "门禁脚本缺失：$checker"
+    info "没有门禁就不能声称「0 处 :deep() 覆盖」—— 这条必须是可执行的约束，不是一句口号。"
+    return 1
+  fi
+  if ! command -v node >/dev/null 2>&1; then
+    err "找不到 node，无法执行前端样式门禁（$checker）"
+    info "这一项判的是前端源码，machine 上没有 node 说明构建前置不满足，按失败处理。"
+    return 1
+  fi
+  out="$(node "$checker" --brief 2>&1)" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    # 通过时只留一行事实：外观声明 N 处（warn）、:deep 0 处 ✓
+    info "前端样式纪律 ✓ $(printf '%s' "$out" | tail -n 1)"
+    return 0
+  fi
+  # 命中：把违规的 file + 选择器原样打出来，再给修法
+  printf '%s\n' "$out" | sed 's/^/      /' >&2
+  err "前端样式门禁未通过（EXIT=$rc）→ 有 :deep() 撬了 Element Plus 的内部样式"
+  info "修法（三选一，按优先级）："
+  info "  ① 组件有等价 props → 改纯 props（row-style / body-style / el-col :span …）"
+  info "  ② 组件没有该语义，但有公开 CSS 变量 → 绑 --el-* 变量（--el-tag-bg-color 这类，属官方主题 API）"
+  info "  ③ 组件确实没有 → 退回一小段自有样式，别去撬内部 DOM"
+  info "判据与白名单（含每条的理由）见 scripts/check-style-discipline.mjs 头部注释。"
+  return 1
+}
+
 check_build_inputs() {
   local ok=0 f
   for f in \
@@ -698,6 +743,8 @@ preflight() {
     check_build_inputs || bad=1
     # useLocalSessionState=true 的**可执行前提**：0 处绕过驱动改会话状态（见【十三】）
     check_jdbc_session_safety || bad=1
+    # 「不侵入组件」的可执行前提：0 处 :deep() 覆盖（见【十四】）
+    check_style_discipline || bad=1
     [ "$SKIP_DOCS" -eq 1 ] || check_credentials || bad=1
   else
     # 回滚是紧急操作：不要求工作区干净、不要求 main（本地镜像 tag 存在即可）

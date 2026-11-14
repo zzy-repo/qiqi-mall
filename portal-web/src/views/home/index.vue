@@ -92,7 +92,6 @@ onMounted(async () => {
   display: flex; align-items: center; justify-content: center; color: #c0c4cc; margin-bottom: 10px;
 }
 .cover { width: 100%; height: 100%; }
-.cover :deep(img) { width: 100%; height: 100%; object-fit: cover; }
 .name { font-size: 14px; color: #303133; min-height: 40px; }
 .cta { font-size: 12px; color: #409eff; margin-top: 8px; }
 </style>

@@ -157,8 +157,3 @@ const remove = async (row) => {
 
 onMounted(load)
 </script>
-
-<style scoped>
-.card-header { display: flex; justify-content: space-between; align-items: center; }
-.title-group { display: flex; align-items: center; gap: 8px; }
-</style>

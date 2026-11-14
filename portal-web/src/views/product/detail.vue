@@ -189,7 +189,6 @@ onMounted(load)
   display: flex; align-items: center; justify-content: center; color: #c0c4cc;
 }
 .cover { width: 100%; height: 100%; }
-.cover :deep(img) { width: 100%; height: 100%; object-fit: cover; }
 .gallery-fallback { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: #f0f2f5; color: #c0c4cc; font-size: 11px; }
 .gallery { display: flex; gap: 6px; width: 220px; overflow-x: auto; }
 .gallery-item {

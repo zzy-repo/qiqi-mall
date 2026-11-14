@@ -141,25 +141,29 @@
               <div class="scope-group-hint">{{ group.hint }}</div>
 
               <el-checkbox-group v-if="group.grantable" v-model="form.scopes" class="scope-group">
-                <el-checkbox
-                  v-for="opt in group.scopes"
-                  :key="opt.value"
-                  :value="opt.value"
-                  :data-testid="`api-key-form-scope-${opt.value}`"
-                >{{ opt.label }}</el-checkbox>
+                <el-row>
+                  <el-col v-for="opt in group.scopes" :key="opt.value" :span="8">
+                    <el-checkbox
+                      :value="opt.value"
+                      class="scope-cb"
+                      :data-testid="`api-key-form-scope-${opt.value}`"
+                    >{{ opt.label }}</el-checkbox>
+                  </el-col>
+                </el-row>
               </el-checkbox-group>
 
-              <!-- 不可授予：只展示、永远勾不上（后端 ALL_SCOPES 里根本没有这些值） -->
-              <div v-else class="scope-group">
-                <el-checkbox
-                  v-for="opt in group.scopes"
-                  :key="opt.value"
-                  :disabled="true"
-                  :model-value="false"
-                  class="scope-checkbox-denied"
-                  :data-testid="`api-key-form-scope-denied-${opt.value}`"
-                >{{ opt.label }}</el-checkbox>
-              </div>
+              <!-- 不可授予：只展示、永远勾不上（后端 ALL_SCOPES 里根本没有这些值）。
+                   置灰/禁用光标都由 el-checkbox 的 :disabled 自带，不再用 :deep 重画内部 label。 -->
+              <el-row v-else class="scope-group">
+                <el-col v-for="opt in group.scopes" :key="opt.value" :span="8">
+                  <el-checkbox
+                    :disabled="true"
+                    :model-value="false"
+                    class="scope-cb"
+                    :data-testid="`api-key-form-scope-denied-${opt.value}`"
+                  >{{ opt.label }}</el-checkbox>
+                </el-col>
+              </el-row>
             </div>
           </div>
         </el-form-item>
@@ -523,9 +527,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.card-header { display: flex; justify-content: space-between; align-items: center; }
 .tip { margin-top: 10px; font-size: 12px; color: #909399; }
-.muted { color: #909399; font-size: 13px; }
 .key-prefix { font-family: 'SFMono-Regular', Consolas, Monaco, monospace; font-size: 13px; }
 .key-hint { margin-left: 8px; }
 .scope-tag { margin: 2px 6px 2px 0; }
@@ -547,12 +549,10 @@ onMounted(() => {
   text-align: center;
 }
 .scope-group-hint { font-size: 12px; color: #909399; line-height: 18px; margin: 2px 0 4px; }
-.scope-group { display: flex; flex-wrap: wrap; gap: 0 4px; }
-.scope-group :deep(.el-checkbox) { width: 30%; margin-right: 0; }
-/* 不可授予：置灰 + 不可点，鼠标上给「不让点」的手势 */
-.scope-checkbox-denied :deep(.el-checkbox__label) { color: #c0c4cc; }
-.scope-checkbox-denied :deep(.el-checkbox__inner) { cursor: not-allowed; }
-.datetime { font-size: 13px; color: #606266; }
+/* 一行三个由 <el-col :span="8"> 决定；这里只把 el-checkbox 默认的 30px 右外边距归零，
+   并让它铺满列宽。类挂在 el-checkbox 的根元素上，不是 :deep 撬内部。 */
+.scope-group { width: 100%; }
+.scope-cb { width: 100%; margin-right: 0; }
 .datetime-expired { color: #f56c6c; margin-left: 6px; }
 .expires-row { width: 100%; }
 .preset-row { margin-top: 6px; display: flex; gap: 8px; }

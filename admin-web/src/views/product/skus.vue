@@ -262,8 +262,6 @@ onMounted(load)
 </script>
 
 <style scoped>
-.card-header { display: flex; justify-content: space-between; align-items: center; }
-.title-group { display: flex; align-items: center; gap: 8px; }
 .thumb { width: 44px; height: 44px; border-radius: 4px; }
 .empty-pic { color: #c0c4cc; }
 .spec-list { width: 100%; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }

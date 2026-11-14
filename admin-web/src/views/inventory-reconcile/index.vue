@@ -2,7 +2,7 @@
   <div ref="pageRef" class="reconcile">
     <el-card shadow="never">
       <template #header>
-        <div class="card-header">
+        <div class="card-header card-header--baseline">
           <span>库存对账</span>
           <span class="header-tip">
             库存桶（sku_bucket）是权威事实源，sku.stock 只是展示缓存；对账就是把两者摆在一起看偏差
@@ -51,7 +51,7 @@
             <div class="stat-value" data-testid="reconcile-bucket-sum">{{ num(detail.bucketSum) }}</div>
             <div class="stat-foot">
               桶数 {{ detail.bucketCount ?? '—' }} 个
-              <span v-if="bucketCountOff" class="stat-warn">（与默认 {{ EXPECTED_BUCKET_COUNT }} 个不一致，检查桶配置/是否被误删）</span>
+              <el-text type="warning">（与默认 {{ EXPECTED_BUCKET_COUNT }} 个不一致，检查桶配置/是否被误删）</el-text>
             </div>
           </div>
 
@@ -70,9 +70,9 @@
 
           <div class="stat-card" :class="drift === 0 ? 'stat-ok' : 'stat-bad'">
             <div class="stat-label">偏差（权威 − 缓存）</div>
-            <div class="stat-value" :class="drift === 0 ? 'value-ok' : 'value-bad'" data-testid="reconcile-drift">
+            <el-text class="stat-value" :type="drift === 0 ? 'success' : 'danger'" data-testid="reconcile-drift">
               {{ drift > 0 ? '+' : '' }}{{ drift }}
-            </div>
+            </el-text>
             <div class="stat-foot">
               {{ drift === 0 ? '两者一致，缓存没有滞后' : '缓存与权威不一致：正的偏差＝缓存少记，负＝缓存多记' }}
             </div>
@@ -98,7 +98,7 @@
         </div>
 
         <!-- 最近 20 条流水 -->
-        <div class="section-title">最近 {{ ledgerRows.length }} 条库存流水</div>
+        <el-text tag="b" size="small" class="block-title">最近 {{ ledgerRows.length }} 条库存流水</el-text>
         <el-table
           :data="ledgerRows"
           border
@@ -114,9 +114,9 @@
           </el-table-column>
           <el-table-column label="增减" width="100">
             <template #default="{ row }">
-              <span :class="Number(row.delta) >= 0 ? 'delta-plus' : 'delta-minus'">
+              <el-text tag="b" :type="Number(row.delta) >= 0 ? 'success' : 'danger'">
                 {{ Number(row.delta) > 0 ? '+' : '' }}{{ row.delta }}
-              </span>
+              </el-text>
             </template>
           </el-table-column>
           <el-table-column label="落点桶" width="90">
@@ -138,14 +138,14 @@
     <!-- 全库偏差 TOP -->
     <el-card shadow="never" class="drift-card">
       <template #header>
-        <div class="card-header">
+        <div class="card-header card-header--baseline">
           <span>全库偏差 TOP</span>
           <span class="header-tip">|偏差| ≥ 阈值的 SKU，按偏差倒序；点行可跳到该 SKU 的对账</span>
         </div>
       </template>
 
       <div class="filters">
-        <span class="threshold-label">偏差阈值</span>
+        <el-text>偏差阈值</el-text>
         <el-input-number
           v-model="threshold"
           data-testid="reconcile-drift-threshold"
@@ -180,7 +180,7 @@
         </el-table-column>
         <el-table-column label="偏差" width="110">
           <template #default="{ row }">
-            <span class="value-bad">{{ Number(row.drift) > 0 ? '+' : '' }}{{ row.drift }}</span>
+            <el-text tag="b" type="danger">{{ Number(row.drift) > 0 ? '+' : '' }}{{ row.drift }}</el-text>
           </template>
         </el-table-column>
       </el-table>
@@ -334,10 +334,7 @@ onMounted(() => {
 
 <style scoped>
 .reconcile { display: flex; flex-direction: column; gap: 16px; }
-.card-header { display: flex; justify-content: space-between; align-items: baseline; }
-.header-tip { font-size: 12px; color: #909399; }
 .filters { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
-.threshold-label { font-size: 13px; color: #606266; }
 .sku-line { margin: 4px 0 14px; font-size: 13px; color: #606266; }
 
 /* 三块卡片：权威值 / 展示缓存 / 偏差 —— 前两块才是应当相等的一对 */
@@ -353,11 +350,8 @@ onMounted(() => {
 .stat-label { font-size: 13px; color: #606266; margin-bottom: 6px; }
 .stat-value { font-size: 26px; font-weight: 600; color: #303133; line-height: 1.2; }
 .stat-foot { margin-top: 8px; font-size: 12px; color: #909399; line-height: 1.6; }
-.stat-warn { color: #e6a23c; }
 .stat-ok { border-color: #c2e7b0; background: #f0f9eb; }
 .stat-bad { border-color: #fbc4c4; background: #fef0f0; }
-.value-ok { color: #67c23a; }
-.value-bad { color: #f56c6c; font-weight: 600; }
 
 /* 台账净额：故意单独一块、视觉上与上面三块隔开，避免被当成「第四个应当对平的数」 */
 .net-block {
@@ -372,11 +366,8 @@ onMounted(() => {
 .net-value { font-size: 20px; font-weight: 600; color: #b88230; }
 .net-note { margin-top: 8px; font-size: 12px; color: #8a6d3b; line-height: 1.8; }
 
-.section-title { font-size: 13px; font-weight: 600; color: #303133; margin: 0 0 8px; }
-.muted { color: #909399; font-size: 12px; }
+/* 区块小标题：字重/字号交给 el-text，这里只剩"独占一行 + 下边距" */
+.block-title { display: block; margin: 0 0 8px; }
 .idem { display: block; }
-.delta-plus { color: #67c23a; font-weight: 600; }
-.delta-minus { color: #f56c6c; font-weight: 600; }
-.pager { display: flex; justify-content: flex-end; margin-top: 12px; }
 .drift-card { margin-bottom: 8px; }
 </style>

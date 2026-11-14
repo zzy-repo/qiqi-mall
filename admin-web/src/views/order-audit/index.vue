@@ -8,40 +8,45 @@
             每单只显示<b>最新一轮</b>的判定结论 · 徽标颜色 + 文案 + data-result 三重冗余
           </span>
         </div>
-        <div class="header-actions">
+        <el-space :size="8">
           <el-button :icon="Refresh" data-testid="audit-queue-refresh" @click="refreshAll">刷新</el-button>
           <el-button :icon="Tickets" data-testid="audit-queue-runs" @click="openRuns">执行记录</el-button>
           <el-button type="primary" :icon="VideoPlay" :loading="running" data-testid="audit-queue-run" @click="runNow">
             立即审核一轮
           </el-button>
-        </div>
+        </el-space>
       </div>
     </template>
 
-    <!-- 筛选 chips：既是筛选器也是计数（点一下只看这一类，再点一下取消） -->
+    <!-- 筛选器：既是筛选器也是计数（点一下只看这一类，再点一下取消）
+         ------------------------------------------------------------------
+         为什么没用组件（el-segmented / el-check-tag 都试过，有对照截图）：
+           · el-segmented：只有一个绝对定位的滑动指示器、读单一背景色变量 → 做不到一档一色；
+             选项上挂不住 data-testid；标签容器 nowrap+ellipsis，窄屏把「自动过审」截成「自动…」。
+           · el-check-tag：五色只能靠 type，但它的模型是「未选中一律中性灰 + 选中一条浅底彩字」。
+             实测未选中的五支全变成同一个 #f4f4f5 且没有边框 → 「五色与表格徽标一眼对上」这个
+             设计意图直接消失；选中态也从实心彩底退成浅底，反而更难看出当前筛的是哪一类。
+         结论：这一排是「按状态着色的筛选胶囊」，EP 没有这个组件 → 按"不为用而用"留自有样式。
+         但把 10 条「两态彩边规则」压成 5 条变量对 + 1 条选中态，色值全部走 EP 令牌。 -->
     <div class="chips" data-testid="audit-queue-chips">
       <button
-        class="chip chip-all"
+        class="chip chip--all"
         :class="{ 'chip-active': !query.result }"
+        :aria-pressed="!query.result"
         data-testid="audit-chip-all"
         @click="setFilter(null)"
-      >
-        <span class="chip-text">全部</span>
-        <b class="chip-count">{{ counts.all }}</b>
-      </button>
+      >全部 <b class="chip-count">{{ counts.all }}</b></button>
 
       <button
         v-for="chip in headChips"
         :key="chip.result"
         class="chip"
-        :class="[`chip-${chip.result.toLowerCase()}`, { 'chip-active': query.result === chip.result }]"
+        :class="[`chip--${chip.result.toLowerCase()}`, { 'chip-active': query.result === chip.result }]"
+        :aria-pressed="query.result === chip.result"
         :data-testid="`audit-chip-${chip.result}`"
         :data-result="chip.result"
         @click="setFilter(chip.result)"
-      >
-        <span class="chip-text">{{ chip.label }}</span>
-        <b class="chip-count">{{ counts[chip.result] }}</b>
-      </button>
+      >{{ chip.label }} <b class="chip-count">{{ counts[chip.result] }}</b></button>
 
       <!-- 「被拦」展开两支：阻止（运营谈单）与冻结（客服跟进）处理人不同，必须分开派活 -->
       <span class="chip-group" data-testid="audit-chip-BLOCKED_GROUP">
@@ -50,34 +55,30 @@
           v-for="chip in blockedChips"
           :key="chip.result"
           class="chip chip-sub"
-          :class="[`chip-${chip.result.toLowerCase()}`, { 'chip-active': query.result === chip.result }]"
+          :class="[`chip--${chip.result.toLowerCase()}`, { 'chip-active': query.result === chip.result }]"
+          :aria-pressed="query.result === chip.result"
           :data-testid="`audit-chip-${chip.result}`"
           :data-result="chip.result"
           :title="auditResultHint(chip.result)"
           @click="setFilter(chip.result)"
-        >
-          <span class="chip-text">{{ chip.label }}</span>
-          <b class="chip-count">{{ counts[chip.result] }}</b>
-        </button>
+        >{{ chip.label }} <b class="chip-count">{{ counts[chip.result] }}</b></button>
       </span>
 
       <button
         v-for="chip in tailChips"
         :key="chip.result"
         class="chip"
-        :class="[`chip-${chip.result.toLowerCase()}`, { 'chip-active': query.result === chip.result }]"
+        :class="[`chip--${chip.result.toLowerCase()}`, { 'chip-active': query.result === chip.result }]"
+        :aria-pressed="query.result === chip.result"
         :data-testid="`audit-chip-${chip.result}`"
         :data-result="chip.result"
         @click="setFilter(chip.result)"
-      >
-        <span class="chip-text">{{ chip.label }}</span>
-        <b class="chip-count">{{ counts[chip.result] }}</b>
-      </button>
+      >{{ chip.label }} <b class="chip-count">{{ counts[chip.result] }}</b></button>
 
-      <span class="chip-note">
+      <el-text size="small" type="info" class="chip-note">
         阻止 = 拦截下单，需人工联系客户；冻结 = 已打标等客服处理
-        <span v-if="counts.skipped" class="muted">· 另有 {{ counts.skipped }} 笔未参与本轮</span>
-      </span>
+        <span v-if="counts.skipped">· 另有 {{ counts.skipped }} 笔未参与本轮</span>
+      </el-text>
     </div>
 
     <el-table
@@ -113,7 +114,7 @@
 
       <el-table-column label="应收" width="110" align="right">
         <template #default="{ row }">
-          <span class="money">{{ money(row.totalAmount) }}</span>
+          <el-text class="mono">{{ money(row.totalAmount) }}</el-text>
         </template>
       </el-table-column>
 
@@ -125,7 +126,7 @@
 
       <el-table-column label="毛利" width="110" align="right">
         <template #default="{ row }">
-          <span :class="isNegative(row.grossProfit) ? 'money-negative' : 'money'">{{ money(row.grossProfit) }}</span>
+          <el-text class="mono" :type="isNegative(row.grossProfit) ? 'danger' : undefined">{{ money(row.grossProfit) }}</el-text>
         </template>
       </el-table-column>
 
@@ -134,7 +135,7 @@
         <template #default="{ row }">
           <el-tag
             :type="auditResultTag(row.result)"
-            :class="auditResultClass(row.result)"
+            :style="auditResultStyle(row.result)"
             effect="dark"
             size="small"
             data-testid="audit-row-badge"
@@ -147,17 +148,23 @@
            第三行（可选）是「假如没被拦本来会怎样」—— 只有被拦/冻结的行才有 -->
       <el-table-column label="原因" min-width="320">
         <template #default="{ row }">
-          <div class="reason-main" data-testid="audit-row-reason">
-            {{ reasonHead(row) }}
-          </div>
-          <div class="reason-sub">{{ row.reason || '—' }}</div>
-          <!-- QT-1004 的核心叙事：策略条件其实满足了，只是被前一条策略先拦下 —— 必须看得见 -->
-          <div v-if="wouldBeText(row)" class="reason-would-be" data-testid="audit-row-would-be">
-            {{ wouldBeText(row) }}
-          </div>
-          <!-- 但「本可自动过审」只按 MATCH+排除 算过，**没跑库存预检** —— 缺货时要当场说清 -->
-          <div v-if="wouldBeText(row) && stockWarnText(row)" class="reason-stock-warn" data-testid="audit-row-would-be-stock">
-            {{ stockWarnText(row) }}
+          <!-- 四层是必要的语义分层（结论 / 后端原话 / 本可怎样 / 缺货附注），
+               但前两层的字色字号正好等于 el-text 的 size+type，不再自己写：
+                 reason-main → <el-text>（默认 14px + 正文字色；原来 13px，上浮 1px）
+                 reason-sub  → size=small(12px) + type=info(#909399)，与原来一字不差
+               只有 would-be 的「斜体+左竖线」和 stock-warn 的 11px 是 EP 表达不了的，留在样式块里。 -->
+          <div class="reason-cell">
+            <el-text class="reason-main" data-testid="audit-row-reason">{{ reasonHead(row) }}</el-text>
+            <!-- .reason-sub 这个类名别改：e2e 的 support/audit-ui.js reasonSubOf() 用它定位这一行 -->
+            <el-text size="small" type="info" class="reason-sub">{{ row.reason || '—' }}</el-text>
+            <!-- QT-1004 的核心叙事：策略条件其实满足了，只是被前一条策略先拦下 —— 必须看得见 -->
+            <el-text v-if="wouldBeText(row)" size="small" type="info" class="reason-would-be" data-testid="audit-row-would-be">
+              {{ wouldBeText(row) }}
+            </el-text>
+            <!-- 但「本可自动过审」只按 MATCH+排除 算过，**没跑库存预检** —— 缺货时要当场说清 -->
+            <el-text v-if="wouldBeText(row) && stockWarnText(row)" size="small" type="warning" class="reason-stock-warn" data-testid="audit-row-would-be-stock">
+              {{ stockWarnText(row) }}
+            </el-text>
           </div>
         </template>
       </el-table-column>
@@ -228,26 +235,26 @@
         <div class="why-head">
           <el-tag
             :type="auditResultTag(whyRow.result)"
-            :class="auditResultClass(whyRow.result)"
+            :style="auditResultStyle(whyRow.result)"
             effect="dark"
             size="small"
             data-testid="audit-why-badge"
             :data-result="whyRow.result"
           >{{ auditResultText(whyRow.result) }}</el-tag>
-          <span class="why-hint" data-testid="audit-why-hint">{{ auditResultHint(whyRow.result) }}</span>
+          <el-text size="small" type="info" class="why-hint" data-testid="audit-why-hint">{{ auditResultHint(whyRow.result) }}</el-text>
         </div>
         <!-- 与队列行同一句：被拦/冻结时才有的「本来会怎样」（放在判定徽标 / hint 行正下方） -->
-        <div v-if="wouldBeText(whyRow)" class="why-would-be" data-testid="audit-why-would-be">
+        <el-text v-if="wouldBeText(whyRow)" size="small" type="info" class="why-would-be" data-testid="audit-why-would-be">
           {{ wouldBeText(whyRow) }}
-        </div>
+        </el-text>
         <!-- 同一句的缺货附注（与队列行一字不差） -->
-        <div v-if="wouldBeText(whyRow) && stockWarnText(whyRow)" class="why-stock-warn" data-testid="audit-why-would-be-stock">
+        <el-text v-if="wouldBeText(whyRow) && stockWarnText(whyRow)" size="small" type="warning" class="why-stock-warn" data-testid="audit-why-would-be-stock">
           {{ stockWarnText(whyRow) }}
-        </div>
+        </el-text>
         <!-- 阻止命中即返回 → EXCEPTION 段没跑过；要说出「这单还挂着退款申请」只能靠后端给的 other_gates -->
-        <div v-if="otherGatesText(whyRow)" class="why-other-gates" data-testid="audit-why-other-gates">
+        <el-text v-if="otherGatesText(whyRow)" size="small" type="danger" class="why-line" data-testid="audit-why-other-gates">
           {{ otherGatesText(whyRow) }}
-        </div>
+        </el-text>
         <div class="why-reason">{{ whyRow.reason || '后端没有给出原因' }}</div>
 
         <div class="why-meta">
@@ -264,7 +271,7 @@
 
         <div v-for="g in whyGroups" :key="`${g.policyId}`" class="why-group" :data-testid="`audit-why-policy-${g.policyId}`">
           <div class="why-group-head">
-            <span class="why-policy-name" :data-testid="`audit-why-policy-name-${g.policyId ?? 'unknown'}`">「{{ g.policyName }}」</span>
+            <el-text tag="b" :data-testid="`audit-why-policy-name-${g.policyId ?? 'unknown'}`">「{{ g.policyName }}」</el-text>
             <el-tag size="small" effect="plain">优先级 {{ g.priority ?? '—' }}</el-tag>
             <el-tag size="small" effect="plain">第 {{ g.versionNo ?? '—' }} 版</el-tag>
             <el-tag v-if="g.allSatisfied" size="small" type="success" effect="plain">条件全部满足</el-tag>
@@ -281,6 +288,7 @@
             border
             size="small"
             :row-class-name="whyRowClass"
+            :row-style="whyRowStyle"
             empty-text="这条策略没有可对照的条件"
           >
             <el-table-column label="序号" width="60" align="center">
@@ -322,7 +330,7 @@
       <!-- 全局排除：不分策略，判定时并入每条自动策略；留人工的单很多就是被它挡掉的 -->
       <div v-if="whyTargets.length && globalExclusions.length" class="why-global" data-testid="audit-why-global">
         <div class="why-group-head">
-          <span class="why-policy-name">全局排除</span>
+          <el-text tag="b">全局排除</el-text>
           <span class="muted">以下条件对每条自动策略一并求值：任一条成立，那条策略就被排除（结论转人工）</span>
         </div>
         <div v-for="g in globalExclusions" :key="`g-${g.seq}`" class="why-backend-line">· 排除：{{ condText(g) }}</div>
@@ -352,7 +360,7 @@
             <el-descriptions-item label="单号">{{ orderRow.orderSn }}</el-descriptions-item>
             <el-descriptions-item label="第几轮">第 {{ orderRow.roundNo ?? '—' }} 轮</el-descriptions-item>
             <el-descriptions-item label="判定">
-              <el-tag :type="auditResultTag(orderRow.result)" :class="auditResultClass(orderRow.result)" effect="dark" size="small">
+              <el-tag :type="auditResultTag(orderRow.result)" :style="auditResultStyle(orderRow.result)" effect="dark" size="small">
                 {{ auditResultText(orderRow.result) }}
               </el-tag>
             </el-descriptions-item>
@@ -372,19 +380,19 @@
         </el-table-column>
         <el-table-column label="范围内" width="90" prop="total" align="right" />
         <el-table-column label="自动过审" width="100" align="right">
-          <template #default="{ row }"><span class="c-green">{{ row.autoPass }}</span></template>
+          <template #default="{ row }"><el-text type="success">{{ row.autoPass }}</el-text></template>
         </el-table-column>
         <el-table-column label="留人工" width="90" align="right">
-          <template #default="{ row }"><span class="c-yellow">{{ row.manual }}</span></template>
+          <template #default="{ row }"><el-text type="warning">{{ row.manual }}</el-text></template>
         </el-table-column>
         <el-table-column label="阻止" width="80" align="right">
-          <template #default="{ row }"><span class="c-red">{{ row.blocked }}</span></template>
+          <template #default="{ row }"><el-text type="danger">{{ row.blocked }}</el-text></template>
         </el-table-column>
         <el-table-column label="冻结" width="80" align="right">
-          <template #default="{ row }"><span class="c-purple">{{ row.frozen }}</span></template>
+          <template #default="{ row }"><el-text class="c-frozen">{{ row.frozen }}</el-text></template>
         </el-table-column>
         <el-table-column label="不命中" width="90" align="right">
-          <template #default="{ row }"><span class="c-gray">{{ row.noMatch }}</span></template>
+          <template #default="{ row }"><el-text type="info">{{ row.noMatch }}</el-text></template>
         </el-table-column>
         <el-table-column label="未参与" width="90" align="right" prop="skipped" />
         <el-table-column label="时间" min-width="165">
@@ -420,7 +428,7 @@ import { auditPassDryRun, auditPassOrder } from '../../api/delivery'
 import { useDangerConfirm } from '../../composables/useDangerConfirm'
 import { explainRow, policiesForResult, expectedText } from '../../composables/useAuditExplain'
 import {
-  AUDIT_RESULT_TEXT, auditResultText, auditResultTag, auditResultClass, auditResultHint,
+  AUDIT_RESULT_TEXT, auditResultText, auditResultTag, auditResultStyle, auditResultHint,
   auditOpText, auditTriggerText
 } from '../../constants/status'
 
@@ -579,10 +587,7 @@ const condText = (c) => {
  * 行 class：跳过本轮的行整体降透明度；同时带一个 `audit-row-<单号>` 的类名，
  * 作为「行锚点」的**声明式兜底**（tr 挂不了属性时，e2e 也可以 `tr.audit-row-QT-1004` 定位）。
  */
-const rowClass = ({ row }) => [
-  row.result === 'SKIPPED' ? 'row-skipped' : '',
-  row.orderSn ? `audit-row-${row.orderSn}` : ''
-].filter(Boolean).join(' ')
+const rowClass = ({ row }) => (row.orderSn ? `audit-row-${row.orderSn}` : '')
 
 // ---------------------------------------------------------------- 行锚点
 
@@ -743,7 +748,24 @@ const whySource = computed(() => {
   return groups.some((g) => g.source === 'BACKEND') ? 'BACKEND' : 'LOCAL'
 })
 
-const whyRowClass = ({ row }) => (row.status === 'unsatisfied' ? 'why-row-miss' : row.status === 'unevaluated' ? 'why-row-unevaluated' : '')
+/**
+ * 「差在哪」条件表的行类名：只是**语义钩子**（e2e 用 `tr.why-row-miss` 断言、
+ * 调试时也能一眼看出这行是什么状态），不承担任何样式 —— 颜色由下面的 whyRowStyle 给。
+ */
+const whyRowClass = ({ row }) =>
+  row.status === 'unsatisfied' ? 'why-row-miss' : row.status === 'unevaluated' ? 'why-row-unevaluated' : ''
+
+/**
+ * 「差在哪」条件表的行底色：不满足 = 红底，未求值 = 灰底灰字。
+ *
+ * 用 el-table 的 `row-style`（公开 prop，直接给 <tr> 落内联样式），而不是「row-class-name +
+ * `:deep(.why-row-miss)`」——后者撬的是 el-table 内部渲染出来的 <tr>，scoped 选不中，只能 :deep。
+ */
+const whyRowStyle = ({ row }) => row.status === 'unsatisfied'
+  ? { background: 'var(--el-color-danger-light-9)' }
+  : row.status === 'unevaluated'
+    ? { background: 'var(--el-fill-color-lighter)', color: 'var(--el-text-color-secondary)' }
+    : undefined
 
 /** 去改这条策略：带上策略 id 与第一条「差在哪」的条件 seq，策略页会高亮那一行 */
 const gotoPolicy = () => {
@@ -881,93 +903,85 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.card-header .header-tip { margin-left: 10px; font-size: 12px; color: #909399; }
-.header-actions { display: flex; gap: 8px; }
+/* 与全局 .header-tip 只差一个左边距：字号/字色已在 main.css */
+.card-header .header-tip { margin-left: 10px; }
 
-/* ---- chips：既是筛选器也是计数 ---- */
+/* ---- 筛选器：既是筛选器也是计数 ----
+ * 五色用一对变量表达：--chip-c（边 + 选中底色）、--chip-d（未选中字色）。
+ * 原先每支两态各写一条（10 条彩边规则），现在 5 条变量 + 1 条选中态就够，且色值全是 EP 令牌。 */
 .chips { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
 .chip {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 6px 14px; border-radius: 16px; cursor: pointer;
-  border: 1px solid #dcdfe6; background: #fff; font-size: 13px; color: #303133;
-  transition: all .15s;
+  border: 1px solid var(--chip-c, var(--el-border-color));
+  background: var(--el-bg-color);
+  font-size: var(--el-font-size-small); color: var(--chip-d, var(--el-text-color-primary));
+  transition: var(--el-transition-all);
 }
-.chip:hover { border-color: #c0c4cc; }
+.chip:hover { border-color: var(--chip-c, var(--el-border-color-hover)); }
+.chip-active { background: var(--chip-c); border-color: var(--chip-c); color: var(--el-color-white); }
 .chip-count { font-weight: 700; }
-.chip-active { color: #fff; }
-.chip-all.chip-active { background: #303133; border-color: #303133; }
-/* 绿 / 黄 / 红 / 紫 / 灰 —— 与表格徽标同色系，一眼对上 */
-.chip-auto_pass { border-color: #67c23a; color: #529b2e; }
-.chip-auto_pass.chip-active { background: #67c23a; border-color: #67c23a; color: #fff; }
-.chip-manual { border-color: #e6a23c; color: #b88230; }
-.chip-manual.chip-active { background: #e6a23c; border-color: #e6a23c; color: #fff; }
-.chip-blocked { border-color: #f56c6c; color: #c45656; }
-.chip-blocked.chip-active { background: #f56c6c; border-color: #f56c6c; color: #fff; }
-.chip-frozen { border-color: #722ed1; color: #5b21b6; }
-.chip-frozen.chip-active { background: #722ed1; border-color: #722ed1; color: #fff; }
-.chip-no_match { border-color: #909399; color: #606266; }
-.chip-no_match.chip-active { background: #909399; border-color: #909399; color: #fff; }
+/* 全部 = 深色中性档（绿/黄/红/紫/灰之外的第 6 档） */
+.chip--all { --chip-d: var(--el-text-color-primary); }
+.chip--all.chip-active { --chip-c: var(--el-text-color-primary); }
+/* 绿 / 黄 / 红 / 紫 / 灰 —— 与表格里的判定徽标同源，一眼对上 */
+.chip--auto_pass { --chip-c: var(--el-color-success); --chip-d: var(--el-color-success-dark-2); }
+.chip--manual { --chip-c: var(--el-color-warning); --chip-d: var(--el-color-warning-dark-2); }
+.chip--blocked { --chip-c: var(--el-color-danger); --chip-d: var(--el-color-danger-dark-2); }
+.chip--frozen { --chip-c: var(--qiqi-color-frozen); --chip-d: var(--qiqi-color-frozen-dark-2); }
+.chip--no_match { --chip-c: var(--el-color-info); --chip-d: var(--el-text-color-regular); }
+
+/* 「被拦」把阻止/冻结圈在一起：处理人不同必须分两支，但同属被拦 */
 .chip-group {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 10px; border-radius: 18px; background: #fdf6ec; border: 1px dashed #f0c78a;
+  padding: 4px 10px; border-radius: 18px;
+  background: var(--el-color-warning-light-9);
+  border: 1px dashed var(--el-color-warning-light-5);
 }
-.chip-group-label { font-size: 12px; color: #b88230; }
+.chip-group-label { font-size: var(--el-font-size-extra-small); color: var(--el-color-warning-dark-2); }
 .chip-sub { padding: 4px 12px; }
-.chip-note { font-size: 12px; color: #909399; }
-.chip-note .muted { color: #c0c4cc; }
+.chip-note { margin-left: 2px; }
 
-.muted { color: #909399; font-size: 12px; }
-.datetime { font-size: 13px; color: #606266; }
-.money { font-family: Consolas, Monaco, monospace; }
-.money-negative { font-family: Consolas, Monaco, monospace; color: #f56c6c; font-weight: 600; }
-.mono { font-family: Consolas, Monaco, monospace; }
-.reason-main { font-size: 13px; color: #303133; }
-.reason-sub { font-size: 12px; color: #909399; margin-top: 2px; word-break: break-all; }
-/* 「本可自动过审」：与 reason-sub 同为灰字，但斜体 + 左侧细线，避免被当成第二行原因 */
-.reason-would-be {
-  font-size: 12px; color: #909399; margin-top: 2px; word-break: break-all;
-  font-style: italic; border-left: 2px solid #dcdfe6; padding-left: 6px;
+/* 原因列只剩 4 条：字号/字色都已交给 el-text，这里只管「层级标记」和间距。
+   word-break 可继承，所以一条就给整列（只对长单号/长 SKU 有意义，CJK 本来能断行）。 */
+.reason-cell { display: flex; flex-direction: column; gap: 2px; word-break: break-all; }
+.reason-main { color: var(--el-text-color-primary); }
+/* 与 reason-sub 同为 12px 灰字，必须再给一个"这不是结论"的标记 —— 斜体 + 左竖线。
+   EP 的 el-text 没有 italic / border 语义，这一条表达不了，只能自己写。 */
+.reason-would-be { font-style: italic; border-left: 2px solid var(--el-border-color); padding-left: 6px; }
+/* 比 would-be 更小一号（11px，EP 没有这一档），属于「提醒」不是「结论」 */
+.reason-stock-warn { font-size: var(--qiqi-font-size-xs); padding-left: 8px; }
+
+.why-global {
+  margin-bottom: 18px; padding: 10px 12px; border-radius: 4px;
+  background: var(--el-color-warning-light-9); border: 1px dashed var(--el-color-warning-light-5);
 }
-/* 缺货附注：比 would_be 更小一号、橙色，属于「提醒」不是「结论」 */
-.reason-stock-warn {
-  font-size: 11px; color: #b88230; margin-top: 2px; word-break: break-all;
-  padding-left: 8px;
-}
-.row-skipped { opacity: .6; }
-.pager { display: flex; justify-content: flex-end; margin-top: 12px; }
-
-.why-global { margin-bottom: 18px; padding: 10px 12px; background: #fff8f0; border: 1px dashed #f0c78a; border-radius: 4px; }
-.why-global .why-backend-line { color: #b88230; }
-
-/* ---- 徽标五色（FROZEN 用紫色：el-tag 没有紫档，这里覆盖） ---- */
-:deep(.badge-frozen) { background: #722ed1 !important; border-color: #722ed1 !important; color: #fff !important; }
-:deep(.badge-skipped) { opacity: .75; }
+.why-global .why-backend-line { color: var(--el-color-warning-dark-2); }
 
 /* ---- 「差在哪」抽屉 ---- */
 .why-head { display: flex; align-items: center; gap: 10px; }
-.why-hint { font-size: 12px; color: #909399; }
-/* 抽屉里的同一句 would_be：紧跟徽标行，灰字斜体，与队列行同款视觉 */
+/* 抽屉里与队列行同款的「本可怎样」：斜体 + 左竖线（同上，el-text 表达不了） */
 .why-would-be {
-  margin-top: 6px; font-size: 12px; color: #909399; font-style: italic;
-  border-left: 2px solid #dcdfe6; padding-left: 6px;
+  display: block; margin-top: 6px;
+  font-style: italic; border-left: 2px solid var(--el-border-color); padding-left: 6px;
 }
-.why-stock-warn { margin-top: 4px; font-size: 11px; color: #b88230; padding-left: 8px; }
-.why-other-gates { margin-top: 4px; font-size: 12px; color: #c45656; padding-left: 8px; }
-.why-reason { margin-top: 8px; padding: 8px 10px; background: #fafafa; border-left: 3px solid #dcdfe6; font-size: 13px; color: #303133; }
-.why-meta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 12px 0; font-size: 13px; color: #606266; }
+/* 抽屉里的小字行（缺货附注 / 其它闸门 / 抽屉内的说明） */
+.why-stock-warn, .why-line { display: block; margin-top: 4px; }
+.why-reason {
+  margin-top: 8px; padding: 8px 10px; font-size: var(--el-font-size-small);
+  background: var(--el-fill-color-lighter); border-left: 3px solid var(--el-border-color);
+}
+.why-meta {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin: 12px 0; font-size: var(--el-font-size-small); color: var(--el-text-color-regular);
+}
+.why-hint { margin-left: 2px; }
 .why-group { margin-bottom: 20px; }
 .why-group-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.why-policy-name { font-weight: 600; font-size: 14px; }
-.why-backend-lines { font-size: 12px; color: #606266; margin-bottom: 6px; }
+.why-backend-lines { font-size: var(--el-font-size-extra-small); color: var(--el-text-color-regular); margin-bottom: 6px; }
 .why-backend-line { line-height: 20px; }
-.why-mark { color: #f56c6c; font-weight: 600; white-space: nowrap; }
-:deep(.why-row-miss) { background: #fef0f0; }
-:deep(.why-row-unevaluated) { background: #fafafa; color: #909399; }
+.why-mark { color: var(--el-color-danger); font-weight: 600; white-space: nowrap; }
 .why-footer { display: flex; justify-content: flex-end; gap: 10px; }
-.c-green { color: #529b2e; font-weight: 600; }
-.c-yellow { color: #b88230; font-weight: 600; }
-.c-red { color: #c45656; font-weight: 600; }
-.c-purple { color: #5b21b6; font-weight: 600; }
-.c-gray { color: #606266; font-weight: 600; }
+/* 执行记录里 FROZEN 的数字：EP 无紫档，退回一行自有色（令牌） */
+.c-frozen { color: var(--qiqi-color-frozen-dark-2); font-weight: 600; }
 </style>

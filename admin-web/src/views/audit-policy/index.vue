@@ -169,121 +169,139 @@
         <!-- 首行四个字段的宽度分配：md 档 7+8+5+4=24 保证「优先级」有真实可用宽度
              （span=4 时 131px 里 96px 被标签吃掉，内层 input 被压成 0 宽 → 看不见、点不到）；
              xs/sm 档折行：窄屏下 类型/名称 各占整行、优先级/启用 并排一行 -->
-        <el-row :gutter="12">
-          <el-col :xs="24" :sm="12" :md="7">
-            <el-form-item label="类型">
-              <el-select v-model="editing.type" data-testid="policy-form-type" style="width: 100%">
-                <el-option v-for="t in TYPES" :key="t" :label="auditPolicyTypeText(t)" :value="t" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :md="8">
-            <el-form-item label="名称">
-              <el-input v-model="editing.name" data-testid="policy-form-name" placeholder="同类型内唯一" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="14" :sm="6" :md="5">
-            <!-- 标签宽度按内容（3 个字 ≈ 42px）单独收窄，别跟着表单的 96px 吃宽度 -->
-            <el-form-item label="优先级" label-width="56px">
-              <el-input-number v-model="editing.priority" :min="1" :max="9999" controls-position="right" data-testid="policy-form-priority" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="10" :sm="6" :md="4">
-            <el-form-item label="启用" label-width="56px">
-              <el-switch v-model="editing.enabled" data-testid="policy-form-enabled" />
-            </el-form-item>
-          </el-col>
-        </el-row>
+        <div class="form-row">
+          <el-row :gutter="12">
+            <el-col :xs="24" :sm="12" :md="7">
+              <el-form-item label="类型">
+                <el-select v-model="editing.type" data-testid="policy-form-type">
+                  <el-option v-for="t in TYPES" :key="t" :label="auditPolicyTypeText(t)" :value="t" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12" :md="8">
+              <el-form-item label="名称">
+                <el-input v-model="editing.name" data-testid="policy-form-name" placeholder="同类型内唯一" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="14" :sm="6" :md="5">
+              <!-- 标签宽度按内容（3 个字 ≈ 42px）单独收窄，别跟着表单的 96px 吃宽度 -->
+              <el-form-item label="优先级" label-width="56px">
+                <!-- el-input-number 默认 150px，EP 没有 width prop，这一处要铺满栅格列只能留内联宽度 -->
+                <el-input-number v-model="editing.priority" :min="1" :max="9999" controls-position="right" data-testid="policy-form-priority" style="width: 100%" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="10" :sm="6" :md="4">
+              <el-form-item label="启用" label-width="56px">
+                <el-switch v-model="editing.enabled" data-testid="policy-form-enabled" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
 
-        <el-row v-if="editing.type === 'EXCEPTION'" :gutter="12">
-          <el-col :xs="24" :sm="10">
-            <el-form-item label="冻结标码">
-              <el-input v-model="editing.actionTag" data-testid="policy-form-action-tag" placeholder="FROZEN" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="14">
-            <el-form-item label="冻结原因">
-              <el-input v-model="editing.actionReason" data-testid="policy-form-action-reason" placeholder="留空则用策略名" />
-            </el-form-item>
-          </el-col>
-        </el-row>
+        <div v-if="editing.type === 'EXCEPTION'" class="form-row">
+          <el-row :gutter="12">
+            <el-col :xs="24" :sm="10">
+              <el-form-item label="冻结标码">
+                <el-input v-model="editing.actionTag" data-testid="policy-form-action-tag" placeholder="FROZEN" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="14">
+              <el-form-item label="冻结原因">
+                <el-input v-model="editing.actionReason" data-testid="policy-form-action-reason" placeholder="留空则用策略名" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
 
         <el-form-item label="匹配条件">
           <div class="cond-editor" data-testid="cond-editor">
             <div v-if="!editing.conditions.length" class="muted">还没有条件：一条条件都没有的策略永远不会命中</div>
 
+            <!-- 一行一条条件：列宽由 el-col 的 :span 按比例给，不再给每个控件写死 px。
+                 旧写法（写死 86/190/110/130/240 + flex）在窄弹窗里必然横向溢出，
+                 「优先级被压成 0 宽」就是同一类问题；栅格化后是「先分列、控件铺满列」，
+                 窄屏只会换行，不会挤出弹窗。 -->
             <div
               v-for="(c, i) in editing.conditions"
               :key="`cond-${i}`"
               class="cond-row"
               :data-testid="`cond-row-${i}`"
             >
-              <span class="cond-seq">{{ i }}</span>
+              <el-row :gutter="8">
+                <el-col :span="1"><span class="cond-seq">{{ i }}</span></el-col>
 
-              <el-select v-model="c.kind" size="small" style="width: 86px" :data-testid="`cond-kind-${i}`">
-                <el-option label="匹配" value="MATCH" />
-                <el-option label="排除" value="EXCLUDE" />
-              </el-select>
+                <el-col :xs="24" :sm="6" :md="3">
+                  <el-select v-model="c.kind" size="small" :data-testid="`cond-kind-${i}`">
+                    <el-option label="匹配" value="MATCH" />
+                    <el-option label="排除" value="EXCLUDE" />
+                  </el-select>
+                </el-col>
 
-              <!-- 字段下拉：选项来自后端 FieldRegistry（GET /admin/audit-policies 的 fields） -->
-              <el-select
-                v-model="c.fieldCode"
-                size="small"
-                filterable
-                placeholder="字段"
-                style="width: 190px"
-                :data-testid="`cond-field-${i}`"
-                @change="(v) => onFieldChange(c, v)"
-              >
-                <el-option v-for="f in fieldsMeta" :key="f.code" :label="f.label" :value="f.code">
-                  <span>{{ f.label }}</span>
-                  <span class="opt-code">{{ f.code }} · {{ f.valueType }}</span>
-                </el-option>
-              </el-select>
+                <!-- 字段下拉：选项来自后端 FieldRegistry（GET /admin/audit-policies 的 fields）。
+                     字段码/值类型用小字跟在名称后面，交给 el-text 上色，不再手写 .opt-code -->
+                <el-col :xs="24" :sm="10" :md="6">
+                  <el-select
+                    v-model="c.fieldCode"
+                    size="small"
+                    filterable
+                    placeholder="字段"
+                    :data-testid="`cond-field-${i}`"
+                    @change="(v) => onFieldChange(c, v)"
+                  >
+                    <el-option v-for="f in fieldsMeta" :key="f.code" :label="f.label" :value="f.code">
+                      <span>{{ f.label }}</span>
+                      <el-text size="small" type="info">{{ f.code }} · {{ f.valueType }}</el-text>
+                    </el-option>
+                  </el-select>
+                </el-col>
 
-              <!-- 操作符：按字段值类型过滤（NUM 才有 LT/GT…，TEXT 才有 含/不含，布尔只有 =/≠） -->
-              <el-select v-model="c.opCode" size="small" style="width: 110px" :data-testid="`cond-op-${i}`">
-                <el-option
-                  v-for="op in opsOf(c)"
-                  :key="op"
-                  :label="`${auditOpText(op)} ${op}`"
-                  :value="op"
-                />
-              </el-select>
+                <!-- 操作符：按字段值类型过滤（NUM 才有 LT/GT…，TEXT 才有 含/不含，布尔只有 =/≠） -->
+                <el-col :xs="24" :sm="6" :md="4">
+                  <el-select v-model="c.opCode" size="small" :data-testid="`cond-op-${i}`">
+                    <el-option
+                      v-for="op in opsOf(c)"
+                      :key="op"
+                      :label="`${auditOpText(op)} ${op}`"
+                      :value="op"
+                    />
+                  </el-select>
+                </el-col>
 
-              <!-- 值控件：按值类型切换（数字 / 文本 / 布尔）；EXISTS/NOT_EXISTS 不需要值 -->
-              <template v-if="needsValue(c)">
-                <el-input-number
-                  v-if="typeOf(c) === 'NUM'"
-                  v-model="c.valueNum"
-                  size="small"
-                  :controls="false"
-                  placeholder="数值"
-                  style="width: 130px"
-                  :data-testid="`cond-value-num-${i}`"
-                />
-                <el-select
-                  v-else-if="typeOf(c) === 'BOOL'"
-                  v-model="c.valueNum"
-                  size="small"
-                  style="width: 130px"
-                  :data-testid="`cond-value-bool-${i}`"
-                >
-                  <el-option label="是" :value="1" />
-                  <el-option label="否" :value="0" />
-                </el-select>
-                <el-input
-                  v-else
-                  v-model="c.valueText"
-                  size="small"
-                  placeholder="文本（含/不含 按原样比较，% 不是通配符）"
-                  style="width: 240px"
-                  :data-testid="`cond-value-text-${i}`"
-                />
-              </template>
-              <span v-else class="muted no-value">（该操作符不需要值）</span>
+                <!-- 值控件：按值类型切换（数字 / 文本 / 布尔）；EXISTS/NOT_EXISTS 不需要值 -->
+                <el-col :xs="24" :sm="12" :md="7">
+                  <template v-if="needsValue(c)">
+                    <el-input-number
+                      v-if="typeOf(c) === 'NUM'"
+                      v-model="c.valueNum"
+                      size="small"
+                      :controls="false"
+                      placeholder="数值"
+                      :data-testid="`cond-value-num-${i}`"
+                    />
+                    <el-select
+                      v-else-if="typeOf(c) === 'BOOL'"
+                      v-model="c.valueNum"
+                      size="small"
+                      :data-testid="`cond-value-bool-${i}`"
+                    >
+                      <el-option label="是" :value="1" />
+                      <el-option label="否" :value="0" />
+                    </el-select>
+                    <el-input
+                      v-else
+                      v-model="c.valueText"
+                      size="small"
+                      placeholder="文本（含/不含 按原样比较，% 不是通配符）"
+                      :data-testid="`cond-value-text-${i}`"
+                    />
+                  </template>
+                  <span v-else class="muted">（该操作符不需要值）</span>
+                </el-col>
 
-              <el-button link type="danger" size="small" :data-testid="`cond-remove-${i}`" @click="removeCondition(i)">删除</el-button>
+                <el-col :span="3">
+                  <el-button link type="danger" size="small" :data-testid="`cond-remove-${i}`" @click="removeCondition(i)">删除</el-button>
+                </el-col>
+              </el-row>
             </div>
 
             <el-button size="small" :icon="Plus" data-testid="cond-add" @click="addCondition">添加条件</el-button>
@@ -303,38 +321,54 @@
               class="cond-row"
               :data-testid="`global-cond-row-${i}`"
             >
-              <span class="cond-seq">G{{ i }}</span>
-              <span class="cond-chip-kind">排除</span>
-              <el-select
-                v-model="c.fieldCode"
-                size="small"
-                filterable
-                placeholder="字段"
-                style="width: 190px"
-                :data-testid="`global-cond-field-${i}`"
-                @change="(v) => onFieldChange(c, v)"
-              >
-                <el-option v-for="f in fieldsMeta" :key="f.code" :label="f.label" :value="f.code" />
-              </el-select>
-              <el-select v-model="c.opCode" size="small" style="width: 110px" :data-testid="`global-cond-op-${i}`">
-                <el-option v-for="op in opsOf(c)" :key="op" :label="`${auditOpText(op)} ${op}`" :value="op" />
-              </el-select>
-              <template v-if="needsValue(c)">
-                <el-input-number
-                  v-if="typeOf(c) === 'NUM'"
-                  v-model="c.valueNum"
-                  size="small"
-                  :controls="false"
-                  style="width: 130px"
-                  :data-testid="`global-cond-value-num-${i}`"
-                />
-                <el-select v-else-if="typeOf(c) === 'BOOL'" v-model="c.valueNum" size="small" style="width: 130px">
-                  <el-option label="是" :value="1" />
-                  <el-option label="否" :value="0" />
-                </el-select>
-                <el-input v-else v-model="c.valueText" size="small" style="width: 240px" :data-testid="`global-cond-value-text-${i}`" />
-              </template>
-              <el-button link type="danger" size="small" @click="editing.globalExclusions.splice(i, 1)">删除</el-button>
+              <el-row :gutter="8">
+                <el-col :span="1"><span class="cond-seq">G{{ i }}</span></el-col>
+
+                <el-col :xs="24" :sm="6" :md="3">
+                  <el-tag size="small" type="danger" effect="plain">排除</el-tag>
+                </el-col>
+
+                <el-col :xs="24" :sm="10" :md="6">
+                  <el-select
+                    v-model="c.fieldCode"
+                    size="small"
+                    filterable
+                    placeholder="字段"
+                    :data-testid="`global-cond-field-${i}`"
+                    @change="(v) => onFieldChange(c, v)"
+                  >
+                    <el-option v-for="f in fieldsMeta" :key="f.code" :label="f.label" :value="f.code" />
+                  </el-select>
+                </el-col>
+
+                <el-col :xs="24" :sm="6" :md="4">
+                  <el-select v-model="c.opCode" size="small" :data-testid="`global-cond-op-${i}`">
+                    <el-option v-for="op in opsOf(c)" :key="op" :label="`${auditOpText(op)} ${op}`" :value="op" />
+                  </el-select>
+                </el-col>
+
+                <el-col :xs="24" :sm="12" :md="7">
+                  <template v-if="needsValue(c)">
+                    <el-input-number
+                      v-if="typeOf(c) === 'NUM'"
+                      v-model="c.valueNum"
+                      size="small"
+                      :controls="false"
+                      :data-testid="`global-cond-value-num-${i}`"
+                    />
+                    <el-select v-else-if="typeOf(c) === 'BOOL'" v-model="c.valueNum" size="small">
+                      <el-option label="是" :value="1" />
+                      <el-option label="否" :value="0" />
+                    </el-select>
+                    <el-input v-else v-model="c.valueText" size="small" :data-testid="`global-cond-value-text-${i}`" />
+                  </template>
+                  <span v-else class="muted">（该操作符不需要值）</span>
+                </el-col>
+
+                <el-col :span="3">
+                  <el-button link type="danger" size="small" @click="editing.globalExclusions.splice(i, 1)">删除</el-button>
+                </el-col>
+              </el-row>
             </div>
             <el-button size="small" :icon="Plus" data-testid="global-cond-add" @click="addGlobalCondition">添加全局排除</el-button>
             <div class="muted cond-tip">
@@ -746,8 +780,8 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.card-header .header-tip { margin-left: 10px; font-size: 12px; color: #909399; }
+/* 与全局 .header-tip 只差一个左边距：字号/字色已在 main.css */
+.card-header .header-tip { margin-left: 10px; }
 .header-actions { display: flex; gap: 8px; }
 .tab-tip { font-size: 12px; color: #909399; margin-bottom: 8px; }
 .priority-note {
@@ -756,9 +790,6 @@ onMounted(async () => {
   background: #fafafa; border-left: 3px solid #dcdfe6; border-radius: 2px;
 }
 .policy-name { font-weight: 600; }
-.muted { color: #909399; font-size: 12px; }
-.datetime { font-size: 13px; color: #606266; }
-.opt-code { float: right; color: #c0c4cc; font-size: 12px; margin-left: 12px; }
 
 .cond-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .cond-chip {
@@ -774,19 +805,24 @@ onMounted(async () => {
 .global-card { margin-top: 14px; background: #fcfcfd; }
 .global-head { display: flex; align-items: baseline; gap: 10px; }
 
+/* el-row 的 gutter 会在左右各拉出 -(gutter/2) 的负外边距，容器没有内边距时会溢出
+   （弹窗里表现为一条 6px 的横向滚动条）。给这些行套一层带 padding 的壳吸收掉。 */
+.form-row { padding: 0 6px; }
+
 .cond-editor { width: 100%; }
+/* 条件行只负责"把这个条件圈成一组"的外观；布局（display/flex-wrap）由内层 el-row 给，
+   列宽由 el-col 的 :span 给。gutter 的负外边距被这里的 padding 吃掉，不会外溢弹窗。 */
 .cond-row {
-  display: flex; align-items: center; gap: 8px;
-  /* 窄屏（<~520px 弹窗内容宽）里子控件是固定宽度的，不换行就会横向溢出弹窗；
-     宽松屏一行放得下，flex-wrap 不产生任何视觉变化 */
-  flex-wrap: wrap;
   padding: 6px 8px; margin-bottom: 6px;
-  background: #fafafa; border: 1px solid #ebeef5; border-radius: 4px;
+  background: var(--el-fill-color-lighter);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 4px;
 }
-/* 子控件多为固定宽（字段 190 / 操作符 110 / 值 240），窄屏换行后允许被压缩，不外溢出行框 */
-.cond-row > * { min-width: 0; }
-.cond-seq { width: 26px; text-align: center; color: #909399; font-size: 12px; font-family: Consolas, Monaco, monospace; }
-.no-value { width: 130px; }
+.cond-seq {
+  display: block; text-align: center;
+  color: var(--el-text-color-secondary); font-size: var(--el-font-size-extra-small);
+  font-family: var(--qiqi-font-mono);
+}
 .cond-tip { margin-top: 6px; }
 .editor-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .editor-footer .impact { font-size: 12px; color: #606266; text-align: left; flex: 1; }

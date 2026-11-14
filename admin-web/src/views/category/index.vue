@@ -150,6 +150,5 @@ onMounted(load)
 </script>
 
 <style scoped>
-.card-header { display: flex; justify-content: space-between; align-items: center; }
 .tip { font-size: 12px; color: #909399; line-height: 1.6; }
 </style>

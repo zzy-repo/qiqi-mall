@@ -6,3 +6,86 @@ body {
   background: #f5f7fa;
   color: #303133;
 }
+
+/* ===========================================================================
+ * 设计令牌（只放 Element Plus 色板里**没有**的东西；能对上的一律直接用 --el-*）
+ * ---------------------------------------------------------------------------
+ * 为什么集中在这里：全站唯一"EP 没有的语义"都在这一块，改色只改这一处。
+ * 规则：本文件只允许出现 var(--el-*) 与 var(--qiqi-*)，不再写裸 hex（下方令牌定义处除外）。
+ * ========================================================================= */
+:root {
+  /* FROZEN（冻结）紫：EP 的 5 个 type 档里没有紫色。
+     基底 #722ed1 与 --el-color-primary 同一饱和/明度档位，其余各档用 EP 的 mix 算法派生
+     （light-N = 混 N0% 白，dark-2 = 混 20% 黑；已用 primary #409eff 反向校验算法一致）。 */
+  --qiqi-color-frozen: #722ed1;
+  --qiqi-color-frozen-light-3: #9c6ddf;
+  --qiqi-color-frozen-light-5: #b896e8;
+  --qiqi-color-frozen-light-7: #d5c0f1;
+  --qiqi-color-frozen-light-8: #e3d5f6;
+  --qiqi-color-frozen-light-9: #f1eafa;
+  --qiqi-color-frozen-dark-2: #5b25a7;
+
+  /* 等宽：EP 没有 monospace 语义（theme-chalk 里 0 命中），只能自己定一个 */
+  --qiqi-font-mono: Consolas, Monaco, 'SFMono-Regular', 'Courier New', monospace;
+
+  /* EP 没有的两档字号：11px 附注、22px 指标数字 */
+  --qiqi-font-size-xs: 11px;
+  --qiqi-font-size-num: 22px;
+
+  /* 侧栏深色（layout 的菜单底/logo 底）：EP 没有这两个深色档 */
+  --qiqi-color-ink: #1f2d3d;
+  --qiqi-color-ink-deep: #16222e;
+}
+
+/* ===========================================================================
+ * 布局工具类
+ * ---------------------------------------------------------------------------
+ * 这些原先在 19 / 7 / 6 / 4 / 4 个 .vue 的 scoped <style> 里各写了一份（含两种
+ * align-items 的漂移版本）。收成一份后：改一次全站生效，且 scoped 选择器带
+ * [data-v-x] 特异性更高，页面想局部覆盖依然覆盖得动。
+ *
+ * ⚠️ 这里只允许"位置"类声明（display/gap/margin/width）。颜色/字号属于外观，
+ *    外观要么来自 EP props，要么来自上面的令牌 —— 见 scripts/check-style-discipline.mjs。
+ * ========================================================================= */
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+/* 需要基线对齐的卡片头（台账 / 库存对账）：标题与右上角小字按文字底线对齐 */
+.card-header--baseline { align-items: baseline; }
+
+.header-tip {
+  font-size: var(--el-font-size-extra-small);
+  color: var(--el-text-color-secondary);
+}
+
+/* 次要说明文字：全站统一 12px + secondary 灰（原先有 12/13px、#909399/#c0c4cc 四种写法） */
+.muted {
+  font-size: var(--el-font-size-extra-small);
+  color: var(--el-text-color-secondary);
+}
+
+/* 表格下面的右对齐分页条 */
+.pager {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+/* 表格里的时间列 */
+.datetime {
+  font-size: var(--el-font-size-small);
+  color: var(--el-text-color-regular);
+}
+
+/* 标题 + 徽标的横排（"SKU 管理" + 数量这类） */
+.title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 等宽（单号 / SKU 码 / 金额 / 条件值） */
+.mono { font-family: var(--qiqi-font-mono); }

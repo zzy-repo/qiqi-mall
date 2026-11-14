@@ -7,6 +7,7 @@
         :key="m.key"
         shadow="hover"
         class="metric"
+        :body-style="{ padding: '16px 18px' }"
         :data-testid="`dashboard-metric-${m.key}`"
       >
         <div class="metric-body">
@@ -27,7 +28,7 @@
 
     <!-- 趋势 + 状态分布 -->
     <div class="row">
-      <el-card shadow="never" class="panel grow">
+      <el-card shadow="never" class="panel">
         <template #header>
           <div class="panel-header">
             <span>近 7 天订单与成交额</span>
@@ -51,7 +52,7 @@
 
     <!-- Top5 + 库存告警 -->
     <div class="row">
-      <el-card shadow="never" class="panel grow">
+      <el-card shadow="never" class="panel">
         <template #header><span>热销商品 Top 5（按销量）</span></template>
         <div v-if="topProducts.length" class="chart" data-testid="dashboard-chart-top">
           <v-chart :option="topOption" autoresize />
@@ -218,7 +219,6 @@ onMounted(load)
 /* 指标卡：窄屏自动换行 */
 .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
 .metric { border-radius: 10px; }
-.metric :deep(.el-card__body) { padding: 16px 18px; }
 .metric-body { display: flex; align-items: center; gap: 14px; }
 .metric-icon { width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex: none; }
 .metric-title { font-size: 13px; color: #909399; }
