@@ -27,10 +27,10 @@
           </div>
         </div>
         <div class="info">
-          <h2 data-testid="product-detail-name">{{ product.name }}</h2>
-          <div class="price" data-testid="product-detail-price">¥ {{ currentSku ? Number(currentSku.price).toFixed(2) : '—' }}</div>
+          <el-text class="name" tag="h2" data-testid="product-detail-name">{{ product.name }}</el-text>
+          <el-text class="price" tag="div" type="danger" data-testid="product-detail-price">¥ {{ currentSku ? Number(currentSku.price).toFixed(2) : '—' }}</el-text>
           <div class="specs">
-            <span class="label">规格：</span>
+            <el-text class="label" type="info">规格：</el-text>
             <el-radio-group v-model="skuId">
               <el-radio-button
                 v-for="s in skus"
@@ -43,11 +43,11 @@
             </el-radio-group>
           </div>
           <div class="desc" v-if="product.description">
-            <span class="label">商品描述：</span>
-            <p class="desc-text" data-testid="product-detail-desc">{{ product.description }}</p>
+            <el-text class="label" type="info">商品描述：</el-text>
+            <el-text class="desc-text" tag="p" data-testid="product-detail-desc">{{ product.description }}</el-text>
           </div>
           <div class="qty">
-            <span class="label">数量：</span>
+            <el-text class="label" type="info">数量：</el-text>
             <!-- 上限跟当前规格库存：以前没有 max，能填 99999，加购/下单时才失败（体验差且无提示） -->
             <el-input-number
               v-model="quantity"
@@ -56,7 +56,7 @@
               :max="currentSku?.stock || 1"
               :precision="0"
             />
-            <span class="stock" v-if="currentSku" data-testid="product-detail-stock">库存 {{ currentSku.stock }}</span>
+            <el-text v-if="currentSku" class="stock" type="info" data-testid="product-detail-stock">库存 {{ currentSku.stock }}</el-text>
           </div>
           <el-button
             type="primary"
@@ -196,11 +196,15 @@ onMounted(load)
   border: 2px solid transparent; cursor: pointer;
 }
 .gallery-item.active { border-color: #409eff; }
-.info h2 { margin: 0 0 12px; font-size: 20px; }
-.price { color: #f56c6c; font-size: 24px; font-weight: 600; margin-bottom: 16px; }
+/* 标题 20px = --el-font-size-extra-large；字重 600 承自 <h2> 标签语义 */
+.name { margin: 0 0 12px; --el-text-font-size: var(--el-font-size-extra-large); }
+/* 价格 24px：EP 字号档里没有 24，走 el-text 官方变量；红字用 type="danger"。
+   字重 600 是 el-text 唯一表达不了的一位（$text 只有 font-size/color），保留一行自有声明。 */
+.price { margin-bottom: 16px; font-weight: 600; --el-text-font-size: 24px; }
 .specs, .qty { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
-.label { color: #909399; font-size: 13px; }
-.stock { color: #909399; font-size: 13px; margin-left: 8px; }
+/* 13px 走 el-text 变量，灰字用 type="info"；align-self:auto 保住 flex 的原有对齐 */
+.label { --el-text-font-size: var(--el-font-size-small); align-self: auto; }
+.stock { margin-left: 8px; --el-text-font-size: var(--el-font-size-small); align-self: auto; }
 .desc { display: flex; gap: 8px; margin-bottom: 16px; align-items: flex-start; }
-.desc-text { margin: 0; color: #606266; font-size: 13px; line-height: 1.7; }
+.desc-text { margin: 0; line-height: 1.7; --el-text-font-size: var(--el-font-size-small); }
 </style>

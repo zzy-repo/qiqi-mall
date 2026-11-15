@@ -1,10 +1,10 @@
 <template>
   <div class="login-page">
     <el-card class="login-card">
-      <div class="brand">
+      <el-text class="brand" tag="div">
         <el-icon :size="24"><Shop /></el-icon>
         <span>七七商城</span>
-      </div>
+      </el-text>
 
       <el-tabs v-model="tab" stretch>
         <el-tab-pane name="login">
@@ -56,9 +56,9 @@
         <el-button type="primary" size="large" class="submit" data-testid="auth-submit" :loading="loading" @click="submit">
           {{ tab === 'login' ? '登录' : '注册并登录' }}
         </el-button>
-        <div class="tip">
+        <el-text class="tip" tag="div" size="small" type="info">
           {{ tab === 'login' ? '还没有账号？点上方「注册」' : '注册成功后将自动登录' }}
-        </div>
+        </el-text>
       </el-form>
     </el-card>
   </div>
@@ -133,11 +133,14 @@ const submit = async () => {
   background: linear-gradient(135deg, #eef4ff 0%, #f7faff 100%);
 }
 .login-card { width: 400px; padding: 8px 12px; }
+/* 18px = --el-font-size-large，墨色走 --qiqi-color-ink；字重 600 el-text 无 API，保留 */
 .brand {
   display: flex; align-items: center; gap: 8px; justify-content: center;
-  font-size: 18px; font-weight: 600; color: #1f2d3d; margin-bottom: 12px;
+  font-weight: 600; margin-bottom: 12px;
+  --el-text-font-size: var(--el-font-size-large);
+  --el-text-color: var(--qiqi-color-ink);
 }
 .submit { width: 100%; margin-top: 8px; }
 .error { margin-bottom: 12px; }
-.tip { margin-top: 12px; font-size: 12px; color: #909399; text-align: center; }
+.tip { margin-top: 12px; text-align: center; }
 </style>

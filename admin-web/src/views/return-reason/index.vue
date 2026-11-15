@@ -20,7 +20,7 @@
       </el-table-column>
     </el-table>
 
-    <div class="tip">退货原因用于买家申请退货时选择；已被退货申请使用的原因不能删除。</div>
+    <el-text class="tip" tag="div" size="small" type="info">退货原因用于买家申请退货时选择；已被退货申请使用的原因不能删除。</el-text>
 
     <el-dialog v-model="visible" :title="form.id ? '编辑退货原因' : '新增退货原因'" width="460px" data-testid="return-reason-form-dialog">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
@@ -116,5 +116,5 @@ onMounted(load)
 </script>
 
 <style scoped>
-.tip { margin-top: 10px; font-size: 12px; color: #909399; }
+.tip { margin-top: 10px; }
 </style>

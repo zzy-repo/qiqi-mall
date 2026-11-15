@@ -38,7 +38,7 @@
         :label="`${auditPolicyTypeText(t)}（${policiesOf(t).length}）`"
         :data-testid="`policy-tab-${t}`"
       >
-        <div class="tab-tip">{{ AUDIT_POLICY_TYPE_TIP[t] }}</div>
+        <el-text class="tab-tip" tag="div" size="small" type="info">{{ AUDIT_POLICY_TYPE_TIP[t] }}</el-text>
 
         <el-table
           v-loading="loading"
@@ -54,7 +54,7 @@
 
           <el-table-column label="名称" min-width="170">
             <template #default="{ row }">
-              <span :data-testid="`policy-row-${row.id}`" class="policy-name">{{ row.name }}</span>
+              <el-text :data-testid="`policy-row-${row.id}`" class="policy-name">{{ row.name }}</el-text>
               <div class="muted">ID {{ row.id }}</div>
             </template>
           </el-table-column>
@@ -91,7 +91,7 @@
                   :data-testid="`why-miss-${row.id}-${c.seq}`"
                   :title="`第 ${c.seq} 条条件`"
                 >
-                  <span v-if="isFocused(row.id, c.seq)" class="why-mark">← 差在哪</span>
+                  <el-text v-if="isFocused(row.id, c.seq)" class="why-mark" tag="b" type="danger">← 差在哪</el-text>
                   <span v-if="c.kind === 'EXCLUDE'" class="cond-chip-kind">排除</span>
                   {{ conditionSummary(c) }}
                 </span>
@@ -221,10 +221,10 @@
                  旧写法（写死 86/190/110/130/240 + flex）在窄弹窗里必然横向溢出，
                  「优先级被压成 0 宽」就是同一类问题；栅格化后是「先分列、控件铺满列」，
                  窄屏只会换行，不会挤出弹窗。 -->
-            <div
+            <el-card
               v-for="(c, i) in editing.conditions"
               :key="`cond-${i}`"
-              class="cond-row"
+              class="cond-row" shadow="never" :body-style="condRowBodyStyle">
               :data-testid="`cond-row-${i}`"
             >
               <el-row :gutter="8">
@@ -302,7 +302,7 @@
                   <el-button link type="danger" size="small" :data-testid="`cond-remove-${i}`" @click="removeCondition(i)">删除</el-button>
                 </el-col>
               </el-row>
-            </div>
+            </el-card>
 
             <el-button size="small" :icon="Plus" data-testid="cond-add" @click="addCondition">添加条件</el-button>
             <div class="muted cond-tip">
@@ -315,10 +315,10 @@
         <el-form-item v-if="editing.type === 'AUTO'" label="全局排除">
           <div class="cond-editor" data-testid="global-cond-editor">
             <div v-if="!editing.globalExclusions.length" class="muted">没有全局排除条件</div>
-            <div
+            <el-card
               v-for="(c, i) in editing.globalExclusions"
               :key="`global-${i}`"
-              class="cond-row"
+              class="cond-row" shadow="never" :body-style="condRowBodyStyle">
               :data-testid="`global-cond-row-${i}`"
             >
               <el-row :gutter="8">
@@ -369,7 +369,7 @@
                   <el-button link type="danger" size="small" @click="editing.globalExclusions.splice(i, 1)">删除</el-button>
                 </el-col>
               </el-row>
-            </div>
+            </el-card>
             <el-button size="small" :icon="Plus" data-testid="global-cond-add" @click="addGlobalCondition">添加全局排除</el-button>
             <div class="muted cond-tip">
               全局排除随<b>本次保存</b>整组替换（后端 PolicyRequest.globalExclusions：null 表示不动，非 null 表示整套替换）
@@ -381,7 +381,7 @@
       <template #footer>
         <div class="editor-footer">
           <!-- 影响预演：保存前 dry-run（当前队列里会命中几笔、其中几笔动作会变） -->
-          <span v-if="impactText" class="impact" data-testid="policy-impact-preview">{{ impactText }}</span>
+          <el-text v-if="impactText" class="impact" size="small" data-testid="policy-impact-preview">{{ impactText }}</el-text>
           <div class="footer-buttons">
             <el-button data-testid="policy-impact-dryrun" :loading="previewing" @click="dryRun">影响预演</el-button>
             <el-button data-testid="policy-editor-cancel" @click="editorVisible = false">取消</el-button>
@@ -466,6 +466,9 @@ const editorVisible = ref(false)
 const saving = ref(false)
 const previewing = ref(false)
 const impactText = ref('')
+
+/* 条件行的内距：走 Card 的 body-style（官方 Attributes），不用 :deep 撬 .el-card__body */
+const condRowBodyStyle = { padding: '6px 8px' }
 
 const editing = reactive({
   id: null,
@@ -783,7 +786,7 @@ onMounted(async () => {
 /* 与全局 .header-tip 只差一个左边距：字号/字色已在 main.css */
 .card-header .header-tip { margin-left: 10px; }
 .header-actions { display: flex; gap: 8px; }
-.tab-tip { font-size: 12px; color: #909399; margin-bottom: 8px; }
+.tab-tip { margin-bottom: 8px; }
 .priority-note {
   font-size: 12px; color: #909399; line-height: 20px;
   margin: 4px 0 10px; padding: 4px 10px;
@@ -800,9 +803,10 @@ onMounted(async () => {
 .cond-chip-exclude { background: #fff5f5; border-color: #fbc4c4; color: #b23232; }
 .cond-chip-focus { background: #fef0f0; border: 1px solid #f56c6c; color: #c45656; font-weight: 600; }
 .cond-chip-kind { font-size: 11px; padding: 0 4px; border-radius: 3px; background: rgba(0, 0, 0, .06); }
-.why-mark { color: #f56c6c; font-weight: 700; }
+/* 红 + 700：el-text 的 tag="b" 就是 700，type="danger" 就是 #f56c6c，两个字面量都不必自己写 */
 
-.global-card { margin-top: 14px; background: #fcfcfd; }
+/* 已挂 el-card，底色走它的公开变量（#fcfcfd 不是令牌值，故按原值写进变量，保证像素不变） */
+.global-card { margin-top: 14px; --el-card-bg-color: #fcfcfd; }
 .global-head { display: flex; align-items: baseline; gap: 10px; }
 
 /* el-row 的 gutter 会在左右各拉出 -(gutter/2) 的负外边距，容器没有内边距时会溢出
@@ -812,11 +816,12 @@ onMounted(async () => {
 .cond-editor { width: 100%; }
 /* 条件行只负责"把这个条件圈成一组"的外观；布局（display/flex-wrap）由内层 el-row 给，
    列宽由 el-col 的 :span 给。gutter 的负外边距被这里的 padding 吃掉，不会外溢弹窗。 */
+/* 条件行 = el-card：底色/边框/圆角走公开变量，内距走 :body-style */
 .cond-row {
-  padding: 6px 8px; margin-bottom: 6px;
-  background: var(--el-fill-color-lighter);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 4px;
+  margin-bottom: 6px;
+  --el-card-bg-color: var(--el-fill-color-lighter);
+  --el-card-border-color: var(--el-border-color-lighter);
+  --el-card-border-radius: var(--el-border-radius-base);
 }
 .cond-seq {
   display: block; text-align: center;
@@ -825,6 +830,6 @@ onMounted(async () => {
 }
 .cond-tip { margin-top: 6px; }
 .editor-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.editor-footer .impact { font-size: 12px; color: #606266; text-align: left; flex: 1; }
+.editor-footer .impact { text-align: left; flex: 1; }
 .footer-buttons { display: flex; gap: 8px; }
 </style>

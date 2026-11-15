@@ -16,15 +16,15 @@
       <el-table-column label="图片" width="90">
         <template #default="{ row }">
           <el-image v-if="row.pic" :src="row.pic" fit="cover" class="thumb" data-testid="sku-row-thumb">
-            <template #error><span class="empty-pic">无图</span></template>
+            <template #error><el-text class="empty-pic" type="info">无图</el-text></template>
           </el-image>
-          <span v-else class="empty-pic">—</span>
+          <el-text v-else class="empty-pic" type="info">—</el-text>
         </template>
       </el-table-column>
       <el-table-column label="规格" min-width="220">
         <template #default="{ row }">
           <span v-if="row.specText" data-testid="sku-row-spec">{{ row.specText }}</span>
-          <span v-else class="empty-pic">未设置</span>
+          <el-text v-else class="empty-pic" type="info">未设置</el-text>
         </template>
       </el-table-column>
       <el-table-column label="价格" width="130">
@@ -90,7 +90,7 @@
             >
               添加规格值
             </el-button>
-            <div v-if="!attributes.length" class="tip">该商品所属类型还没有属性，先去「商品类型 → 属性」里添加</div>
+            <el-text class="tip" tag="div" size="small" type="warning" v-if="!attributes.length">该商品所属类型还没有属性，先去「商品类型 → 属性」里添加</el-text>
           </div>
         </el-form-item>
 
@@ -263,8 +263,8 @@ onMounted(load)
 
 <style scoped>
 .thumb { width: 44px; height: 44px; border-radius: 4px; }
-.empty-pic { color: #c0c4cc; }
+/* 灰字：el-text 的 5 个 type 里没有"禁用灰"，用它的公开变量 --el-text-color */
+.empty-pic { --el-text-color: var(--el-text-color-disabled); }
 .spec-list { width: 100%; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .spec-row { display: flex; gap: 8px; width: 100%; align-items: center; }
-.tip { font-size: 12px; color: #e6a23c; }
 </style>

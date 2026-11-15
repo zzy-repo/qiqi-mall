@@ -53,7 +53,7 @@
             effect="plain"
             @click="openDetail(row)"
           >{{ packageCount(row.id) }} 个包裹</el-tag>
-          <span v-else class="snapshot">—</span>
+          <el-text v-else class="snapshot">—</el-text>
         </template>
       </el-table-column>
       <el-table-column label="支付方式" width="100">
@@ -158,8 +158,8 @@
             状态只能靠审核/发货/收货等真实流程流转，所以编辑态直接不给改的入口。
           -->
           <div v-if="isEdit" class="readonly-block">
-            <span class="readonly-value" data-testid="order-form-status-readonly">{{ statusText[form.status] ?? '—' }}</span>
-            <div class="form-hint" data-testid="order-form-status-hint">状态由审核/发货/收货等流程流转，不能在此修改</div>
+            <el-text class="readonly-value" data-testid="order-form-status-readonly">{{ statusText[form.status] ?? '—' }}</el-text>
+            <el-text class="form-hint" tag="div" size="small" type="warning" data-testid="order-form-status-hint">状态由审核/发货/收货等流程流转，不能在此修改</el-text>
           </div>
           <!-- 新建态保留下拉：createOrderViaUi 造单要指定初始状态 -->
           <el-select v-else v-model="form.status" data-testid="order-form-status" style="width: 100%">
@@ -177,9 +177,9 @@
           totalAmount 也没有重算路径 → 用户改完看到「保存成功」，其实一条都没变。
           要看清细走列表行的「明细」抽屉（只读、带真实数据）。
         -->
-        <div v-if="isEdit" class="form-hint" data-testid="order-form-items-hint">
+        <el-text v-if="isEdit" class="form-hint" tag="div" size="small" type="warning" data-testid="order-form-items-hint">
           订单明细不支持修改；如需查看，请在列表中打开「明细」
-        </div>
+        </el-text>
         <template v-else>
           <el-divider content-position="left">订单明细</el-divider>
           <el-table :data="form.items" border size="small">
@@ -1060,12 +1060,11 @@ onMounted(async () => {
 <style scoped>
 .filters { display: flex; gap: 8px; margin-bottom: 12px; }
 .add-item { margin-top: 10px; width: 100%; }
-.snapshot { color: #606266; }
 /* 编辑态只读状态 / 明细提示：正文明说「不能改」，别让人以为是自己没点上 */
 .drawer-toolbar { display: flex; justify-content: space-between; align-items: center; }
 .drawer-toolbar h4 { margin: 8px 0; }
 .readonly-block { display: flex; flex-direction: column; gap: 2px; }
-.readonly-value { color: #303133; }
-.form-hint { color: #e6a23c; font-size: 12px; line-height: 1.6; }
+.readonly-value { --el-text-color: var(--el-text-color-primary); }
+.form-hint { line-height: 1.6; }
 .pkg-tag { cursor: pointer; }
 </style>

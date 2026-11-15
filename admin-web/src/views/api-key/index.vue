@@ -45,7 +45,7 @@
         <template #default="{ row }">
           <template v-if="row.expiresAt">
             <el-tag v-if="isExpired(row)" type="danger" size="small" data-testid="api-key-row-expired">已过期</el-tag>
-            <span class="datetime" :class="{ 'datetime-expired': isExpired(row) }">{{ formatDateTime(row.expiresAt) }}</span>
+            <el-text class="datetime" :type="isExpired(row) ? 'danger' : ''">{{ formatDateTime(row.expiresAt) }}</el-text>
           </template>
           <span v-else class="muted">永不过期</span>
         </template>
@@ -82,9 +82,9 @@
       </el-table-column>
     </el-table>
 
-    <div class="tip">
+    <el-text class="tip" tag="div" size="small" type="info">
       Key 仅在创建时明文显示一次，关闭弹窗后无法再次查看，列表里只能看到前缀；如需更换请新建一条并删除旧的。
-    </div>
+    </el-text>
 
     <!-- 新增 / 编辑弹窗 -->
     <el-dialog
@@ -126,7 +126,7 @@
               data-testid="api-key-form-scopes-retry"
               @click="loadScopeCatalog"
             >重试</el-button>
-            <div v-else-if="catalogLoading" class="scope-loading" data-testid="api-key-form-scopes-loading">正在读取权限目录…</div>
+            <el-text v-else-if="catalogLoading" class="scope-loading" tag="div" type="info" data-testid="api-key-form-scopes-loading">正在读取权限目录…</el-text>
 
             <div
               v-for="group in scopeGroups"
@@ -135,10 +135,10 @@
               :data-testid="`api-key-form-scope-group-${group.key}`"
             >
               <div class="scope-group-title">
-                <span class="scope-group-name">{{ group.title }}</span>
+                <el-text class="scope-group-name">{{ group.title }}</el-text>
                 <span class="scope-group-count">{{ group.scopes.length }}</span>
               </div>
-              <div class="scope-group-hint">{{ group.hint }}</div>
+              <el-text class="scope-group-hint" tag="div" size="small" type="info">{{ group.hint }}</el-text>
 
               <el-checkbox-group v-if="group.grantable" v-model="form.scopes" class="scope-group">
                 <el-row>
@@ -224,10 +224,10 @@
         title="请立即复制保存，关闭后无法再次查看"
         description="这是唯一一次显示该 Key 的明文，之后列表里只能看到前缀。丢失后只能删除重建。"
       />
-      <div class="reveal-box">
+      <el-card class="reveal-box" shadow="never" :body-style="revealBodyStyle">
         <code class="reveal-value" data-testid="api-key-reveal-value">{{ revealKey }}</code>
         <el-button type="primary" :icon="CopyDocument" data-testid="api-key-reveal-copy" @click="copyRevealKey">复制</el-button>
-      </div>
+      </el-card>
       <template #footer>
         <el-button type="primary" data-testid="api-key-reveal-close" @click="revealVisible = false">我已保存，关闭</el-button>
       </template>
@@ -288,6 +288,9 @@ const loadScopeCatalog = async () => {
 }
 
 const revealVisible = ref(false)
+/* 一次性明文框的行内布局：走 Card 的 body-style（官方 Attributes），不用 :deep 撬 .el-card__body */
+const revealBodyStyle = { display: 'flex', alignItems: 'center', gap: '10px', padding: '12px' }
+
 const revealKey = ref('')
 
 /* ---------------- 展示辅助 ---------------- */
@@ -527,18 +530,25 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.tip { margin-top: 10px; font-size: 12px; color: #909399; }
+.tip { margin-top: 10px; }
 .key-prefix { font-family: 'SFMono-Regular', Consolas, Monaco, monospace; font-size: 13px; }
 .key-hint { margin-left: 8px; }
 .scope-tag { margin: 2px 6px 2px 0; }
 .scope-tag-more { cursor: default; }
 .scope-groups { width: 100%; }
 .scope-error { margin-bottom: 8px; }
-.scope-loading { font-size: 13px; color: #909399; line-height: 22px; }
+/* 13px 走 el-text 变量，灰字用 type="info" */
+.scope-loading { line-height: 22px; --el-text-font-size: var(--el-font-size-small); }
 .scope-group-block { margin-bottom: 10px; }
 .scope-group-block:last-child { margin-bottom: 0; }
 .scope-group-title { display: flex; align-items: center; gap: 6px; line-height: 20px; }
-.scope-group-name { font-size: 13px; font-weight: 600; color: #303133; }
+/* 13px 走变量；600 是 el-text 唯一表达不了的一位（$text map 只有 font-size/color），保留 */
+.scope-group-name {
+  font-weight: 600;
+  --el-text-font-size: var(--el-font-size-small);
+  --el-text-color: var(--el-text-color-primary);
+  align-self: auto;
+}
 .scope-group-count {
   min-width: 18px;
   padding: 0 5px;
@@ -548,23 +558,22 @@ onMounted(() => {
   font-size: 12px;
   text-align: center;
 }
-.scope-group-hint { font-size: 12px; color: #909399; line-height: 18px; margin: 2px 0 4px; }
+.scope-group-hint { line-height: 18px; margin: 2px 0 4px; }
 /* 一行三个由 <el-col :span="8"> 决定；这里只把 el-checkbox 默认的 30px 右外边距归零，
    并让它铺满列宽。类挂在 el-checkbox 的根元素上，不是 :deep 撬内部。 */
 .scope-group { width: 100%; }
 .scope-cb { width: 100%; margin-right: 0; }
-.datetime-expired { color: #f56c6c; margin-left: 6px; }
+
 .expires-row { width: 100%; }
 .preset-row { margin-top: 6px; display: flex; gap: 8px; }
+/* 容器 = el-card：底色/圆角走它的公开变量；行内布局走 :body-style。
+   ⚠️ 虚线边框无出口：card.scss:13 的 border 写死 1px solid，也没有 --el-card-border-style，
+   所以 dashed 这一行只能留着（见白名单反证）。 */
 .reveal-box {
   margin-top: 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px;
-  background: #f5f7fa;
-  border: 1px dashed #dcdfe6;
-  border-radius: 4px;
+  border: 1px dashed var(--el-border-color);
+  --el-card-bg-color: var(--el-fill-color-light);
+  --el-card-border-radius: var(--el-border-radius-base);
 }
 .reveal-value {
   flex: 1;

@@ -106,14 +106,14 @@
 
       <el-table-column label="原因" min-width="200">
         <template #default="{ row }">
-          <div class="ledger-strong">{{ reasonText(row.reason) }}</div>
+          <el-text class="ledger-strong" tag="div">{{ reasonText(row.reason) }}</el-text>
           <div v-if="row.reasonDetail" class="muted">{{ row.reasonDetail }}</div>
         </template>
       </el-table-column>
 
       <el-table-column label="操作人" width="150">
         <template #default="{ row }">
-          <div class="ledger-strong">{{ row.operatorName || '—' }}</div>
+          <el-text class="ledger-strong" tag="div">{{ row.operatorName || '—' }}</el-text>
           <el-tag :type="operatorTypeTag(row.operatorType)" size="small" effect="plain">
             {{ operatorTypeText(row.operatorType) }}
           </el-tag>
@@ -122,7 +122,7 @@
 
       <el-table-column label="摘要" min-width="220">
         <template #default="{ row }">
-          <div class="ledger-strong">{{ row.summary || '—' }}</div>
+          <el-text class="ledger-strong" tag="div">{{ row.summary || '—' }}</el-text>
           <div v-if="row.refType || row.refId" class="muted">
             关联：{{ row.refType || '—' }}#{{ row.refId ?? '—' }}
           </div>
@@ -159,14 +159,14 @@
       />
     </div>
 
-    <div class="tip">
+    <el-text class="tip" tag="div" size="small" type="info">
       台账是追加型流水：记录的是「谁在什么时候把状态从哪改到哪、为什么」，
       所以它可解释、但不可改。查到空结果＝这段时间内确实没有对应变更，不是页面出错。
       <br />
       「支付流水」类型下的每一行都可以<b>重放渠道通知</b>（沙箱动作，只在非生产环境开着）：
       它拿这条流水的原 trade_no 再走一遍渠道回调，模拟「第三方把同一笔通知又发了一次」。
       已入过的账不会再记一次 —— 所以点完**行数不变才是正确结果**。
-    </div>
+    </el-text>
   </el-card>
 </template>
 
@@ -372,7 +372,7 @@ onMounted(load)
 
 <style scoped>
 .filters { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-.tip { margin-top: 10px; font-size: 12px; color: #909399; line-height: 1.7; }
+.tip { margin-top: 10px; line-height: 1.7; }
 /* 台账正文比表格默认字色深一档：#303133 不是 el-text 的任何一个 type，只能自己给 */
-.ledger-strong { color: var(--el-text-color-primary); }
+.ledger-strong { --el-text-color: var(--el-text-color-primary); }
 </style>

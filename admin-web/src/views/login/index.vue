@@ -1,10 +1,10 @@
 <template>
   <div class="login-page">
     <el-card class="login-card" shadow="always">
-      <div class="brand">
+      <el-text class="brand" tag="div">
         <el-icon :size="26"><Shop /></el-icon>
         <span>七七商城 · 管理后台</span>
-      </div>
+      </el-text>
 
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="submit">
         <el-form-item label="用户名" prop="username">
@@ -45,7 +45,7 @@
         <el-alert v-if="errorText" :title="errorText" type="error" :closable="false" show-icon class="error" />
 
         <el-button type="primary" size="large" class="submit" data-testid="login-form-submit" :loading="loading" @click="submit">登录</el-button>
-        <div class="tip">连续输错 5 次后将要求输入验证码</div>
+        <el-text class="tip" tag="div" size="small" type="info">连续输错 5 次后将要求输入验证码</el-text>
       </el-form>
     </el-card>
   </div>
@@ -144,14 +144,20 @@ onMounted(async () => {
   background: linear-gradient(135deg, #1f2d3d 0%, #2c3e50 100%);
 }
 .login-card { width: 400px; padding: 8px 12px 4px; }
+/* 18px = --el-font-size-large，墨色走 --qiqi-color-ink；字重 600 el-text 无 API，保留 */
 .brand {
   display: flex; align-items: center; gap: 8px;
-  font-size: 18px; font-weight: 600; color: #1f2d3d;
-  justify-content: center; margin-bottom: 20px;
+  font-weight: 600; justify-content: center; margin-bottom: 20px;
+  --el-text-font-size: var(--el-font-size-large);
+  --el-text-color: var(--qiqi-color-ink);
 }
 .captcha-row { display: flex; gap: 10px; width: 100%; }
+/* 边框/圆角：Image 组件的 Attributes 全表没有 border/radius，也没有 --el-image-* 变量
+   （官方 Image Attributes: src/fit/loading/lazy/scroll-container/alt/referrerpolicy/crossorigin/
+    preview-src-list/z-index/initial-index/close-on-press-escape/preview-teleported/infinite/
+    zoom-rate/scale/min-scale/max-scale/show-progress），故保留这两行。 */
 .captcha-img { height: 40px; border-radius: 4px; cursor: pointer; border: 1px solid #dcdfe6; }
 .submit { width: 100%; margin-top: 6px; }
 .error { margin-bottom: 12px; }
-.tip { margin-top: 12px; font-size: 12px; color: #909399; text-align: center; }
+.tip { margin-top: 12px; text-align: center; }
 </style>

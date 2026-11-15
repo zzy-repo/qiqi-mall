@@ -9,7 +9,7 @@
           :precision="0"
           style="width: 100%"
         />
-        <div class="tip">发货后 N 天自动确认收货</div>
+        <el-text class="tip" tag="div" size="small" type="info">发货后 N 天自动确认收货</el-text>
       </el-form-item>
       <el-form-item label="未付款自动关单（分钟）" prop="autoCloseMinutes">
         <el-input-number
@@ -19,7 +19,7 @@
           :precision="0"
           style="width: 100%"
         />
-        <div class="tip">下单后 N 分钟未付款自动关闭订单</div>
+        <el-text class="tip" tag="div" size="small" type="info">下单后 N 分钟未付款自动关闭订单</el-text>
       </el-form-item>
       <el-form-item>
         <el-button type="primary" :loading="saving" data-testid="order-setting-form-submit" @click="submit">保存</el-button>
@@ -72,5 +72,5 @@ onMounted(load)
 </script>
 
 <style scoped>
-.tip { font-size: 12px; color: #909399; line-height: 1.6; }
+.tip { line-height: 1.6; }
 </style>

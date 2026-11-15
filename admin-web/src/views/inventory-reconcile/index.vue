@@ -46,55 +46,61 @@
       <template v-if="detail">
         <!-- ① 应当相等的一对：权威值 vs 展示缓存；② 偏差＝两者之差 -->
         <div class="cards">
-          <div class="stat-card">
-            <div class="stat-label">权威值（SUM 库存桶）</div>
-            <div class="stat-value" data-testid="reconcile-bucket-sum">{{ num(detail.bucketSum) }}</div>
-            <div class="stat-foot">
+          <el-card class="stat-card" shadow="never" :body-style="statCardBodyStyle">
+            <el-text class="stat-label" tag="div">权威值（SUM 库存桶）</el-text>
+            <el-statistic class="stat-value" :value="num(detail.bucketSum)" group-separator="" data-testid="reconcile-bucket-sum" />
+            <el-text class="stat-foot" tag="div" size="small" type="info">
               桶数 {{ detail.bucketCount ?? '—' }} 个
               <el-text type="warning">（与默认 {{ EXPECTED_BUCKET_COUNT }} 个不一致，检查桶配置/是否被误删）</el-text>
-            </div>
-          </div>
+            </el-text>
+          </el-card>
 
-          <div class="stat-card">
-            <div class="stat-label">展示缓存（sku.stock）</div>
-            <div class="stat-value" data-testid="reconcile-sku-stock">{{ num(detail.skuStock) }}</div>
+          <el-card class="stat-card" shadow="never" :body-style="statCardBodyStyle">
+            <el-text class="stat-label" tag="div">展示缓存（sku.stock）</el-text>
+            <el-statistic class="stat-value" :value="num(detail.skuStock)" group-separator="" data-testid="reconcile-sku-stock" />
             <!-- 不是「缓存最后回写」：sku 表没有回写时间列，后端给的是 MAX(sku_bucket.updated_at) -->
-            <div class="stat-foot">
+            <el-text class="stat-foot" tag="div" size="small" type="info">
               桶最近变动：{{ detail.lastRefreshAt ? fmtTime(detail.lastRefreshAt) : '无记录' }}
-              <div class="muted">
+              <el-text class="muted" tag="div">
                 数据来源 MAX(sku_bucket.updated_at)（该 SKU 库存桶最近一次变动）；
                 库里没有「缓存回写时间」列，所以这不是缓存回写时刻
-              </div>
-            </div>
-          </div>
-
-          <div class="stat-card" :class="drift === 0 ? 'stat-ok' : 'stat-bad'">
-            <div class="stat-label">偏差（权威 − 缓存）</div>
-            <el-text class="stat-value" :type="drift === 0 ? 'success' : 'danger'" data-testid="reconcile-drift">
-              {{ drift > 0 ? '+' : '' }}{{ drift }}
+              </el-text>
             </el-text>
-            <div class="stat-foot">
+          </el-card>
+
+          <el-card class="stat-card" :class="drift === 0 ? 'stat-ok' : 'stat-bad'" shadow="never" :body-style="statCardBodyStyle">
+            <el-text class="stat-label" tag="div">偏差（权威 − 缓存）</el-text>
+            <!-- 偏差的正负号与红绿：formatter 决定文本（与改前逐字一致），色值走统计数字的公开变量 -->
+            <el-statistic
+              class="stat-value"
+              :value="drift"
+              :formatter="signedInt"
+              group-separator=""
+              :style="{ '--el-statistic-content-color': drift === 0 ? 'var(--el-color-success)' : 'var(--el-color-danger)' }"
+              data-testid="reconcile-drift"
+            />
+            <el-text class="stat-foot" tag="div" size="small" type="info">
               {{ drift === 0 ? '两者一致，缓存没有滞后' : '缓存与权威不一致：正的偏差＝缓存少记，负＝缓存多记' }}
-            </div>
-          </div>
+            </el-text>
+          </el-card>
         </div>
 
-        <div class="sku-line">
+        <el-text class="sku-line" tag="div">
           SKU #{{ detail.skuId }} · {{ detail.skuName || '（无名称）' }} · {{ detail.skuCode || '（无编码）' }}
-        </div>
+        </el-text>
 
         <!-- ③ 台账净额：单独一块，且必须写清「不是余额」，不能与上面的权威值对平 -->
         <div class="net-block" data-testid="reconcile-ledger-net">
           <div class="net-head">
-            <span class="net-label">台账净额（SUM stock_ledger.delta）</span>
-            <span class="net-value">{{ num(detail.ledgerNet) > 0 ? '+' : '' }}{{ num(detail.ledgerNet) }}</span>
+            <el-text class="net-label">台账净额（SUM stock_ledger.delta）</el-text>
+            <el-statistic class="net-value" :value="num(detail.ledgerNet)" :formatter="signedInt" group-separator="" />
           </div>
-          <div class="net-note">
+          <el-text class="net-note" tag="div">
             <strong>这是全生命周期进出和，不是余额。</strong>
             它把该 SKU 历史上所有流水增减累加在一起（进多少、出多少全算），
             所以<strong>不能与上面的「权威值」相互对平</strong>，两者本就不应相等。
             它只用来说明一件事：这单到底补过库存没有、补了多少。
-          </div>
+          </el-text>
         </div>
 
         <!-- 最近 20 条流水 -->
@@ -226,6 +232,12 @@ const threshold = ref(100)
 const driftQuery = reactive({ page: 1, size: 10 })
 
 const num = (v) => (v === null || v === undefined || v === '' ? 0 : Number(v))
+
+/* 带正号展示：el-statistic 的 formatter 返回值原样输出（statistic.vue:15） */
+const signedInt = (v) => (Number(v) > 0 ? '+' : '') + Number(v)
+
+/* 对比卡片 body 的行内布局：内距由这里给，Card 的 body-style 是官方 Attributes */
+const statCardBodyStyle = { padding: '14px 16px' }
 /** 偏差：权威值 − 缓存。后端已给 drift 字段，这里只做兜底计算 */
 const drift = computed(() => {
   const d = detail.value
@@ -335,23 +347,37 @@ onMounted(() => {
 <style scoped>
 .reconcile { display: flex; flex-direction: column; gap: 16px; }
 .filters { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
-.sku-line { margin: 4px 0 14px; font-size: 13px; color: #606266; }
+/* 13px 走 el-text 变量，灰字取 el-text 默认的 regular */
+.sku-line { margin: 4px 0 14px; --el-text-font-size: var(--el-font-size-small); }
 
 /* 三块卡片：权威值 / 展示缓存 / 偏差 —— 前两块才是应当相等的一对 */
 .cards { display: flex; gap: 14px; flex-wrap: wrap; }
+/* 卡片 = el-card：边框/圆角/底色走公开变量（逐值命中令牌）；内距走 :body-style */
 .stat-card {
   flex: 1 1 220px;
   min-width: 220px;
-  padding: 14px 16px;
-  border: 1px solid #e4e7ed;
-  border-radius: 6px;
-  background: #fafafa;
+  --el-card-border-color: var(--el-border-color-light);
+  --el-card-border-radius: 6px;
+  --el-card-bg-color: var(--el-fill-color-lighter);
 }
-.stat-label { font-size: 13px; color: #606266; margin-bottom: 6px; }
-.stat-value { font-size: 26px; font-weight: 600; color: #303133; line-height: 1.2; }
-.stat-foot { margin-top: 8px; font-size: 12px; color: #909399; line-height: 1.6; }
-.stat-ok { border-color: #c2e7b0; background: #f0f9eb; }
-.stat-bad { border-color: #fbc4c4; background: #fef0f0; }
+.stat-label { margin-bottom: 6px; --el-text-font-size: var(--el-font-size-small); }
+/* 26px 走 --el-statistic-content-font-size；600 与深色正文同理（el-statistic 有这两个变量，纯文本的 el-text 没有） */
+.stat-value {
+  line-height: 1.2;
+  --el-statistic-content-font-size: 26px;
+  --el-statistic-content-font-weight: 600;
+  --el-statistic-content-color: var(--el-text-color-primary);
+}
+.stat-foot { margin-top: 8px; line-height: 1.6; }
+/* 整卡染色：el-card 没有 status 变体，但两个变量就是它的公开 API（#f0f9eb/#c2e7b0 等逐值命中 --el-color-*-light-9/-5） */
+.stat-ok {
+  --el-card-bg-color: var(--el-color-success-light-9);
+  --el-card-border-color: var(--el-color-success-light-5);
+}
+.stat-bad {
+  --el-card-bg-color: var(--el-color-danger-light-9);
+  --el-card-border-color: var(--el-color-danger-light-5);
+}
 
 /* 台账净额：故意单独一块、视觉上与上面三块隔开，避免被当成「第四个应当对平的数」 */
 .net-block {
@@ -362,9 +388,14 @@ onMounted(() => {
   border-radius: 4px;
 }
 .net-head { display: flex; align-items: baseline; gap: 10px; }
-.net-label { font-size: 13px; color: #7a5c1f; }
-.net-value { font-size: 20px; font-weight: 600; color: #b88230; }
-.net-note { margin-top: 8px; font-size: 12px; color: #8a6d3b; line-height: 1.8; }
+.net-label { --el-text-font-size: var(--el-font-size-small); --el-text-color: #7a5c1f; }
+/* 20px 正是 --el-font-size-extra-large（$font-size map），所以只改字重与色 */
+.net-value {
+  --el-statistic-content-font-size: var(--el-font-size-extra-large);
+  --el-statistic-content-font-weight: 600;
+  --el-statistic-content-color: #b88230;
+}
+.net-note { margin-top: 8px; line-height: 1.8; --el-text-font-size: var(--el-font-size-extra-small); --el-text-color: #8a6d3b; }
 
 /* 区块小标题：字重/字号交给 el-text，这里只剩"独占一行 + 下边距" */
 .block-title { display: block; margin: 0 0 8px; }

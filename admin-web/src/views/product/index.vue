@@ -11,9 +11,9 @@
       <el-table-column label="主图" width="90">
         <template #default="{ row }">
           <el-image v-if="row.pic" :src="row.pic" fit="cover" class="thumb" data-testid="product-row-cover">
-            <template #error><span class="empty-pic">无图</span></template>
+            <template #error><el-text class="empty-pic" type="info">无图</el-text></template>
           </el-image>
-          <span v-else class="empty-pic">—</span>
+          <el-text v-else class="empty-pic" type="info">—</el-text>
         </template>
       </el-table-column>
       <el-table-column prop="name" label="商品名称" min-width="200" />
@@ -279,7 +279,8 @@ onMounted(() => { load(); loadRefs() })
 
 <style scoped>
 .thumb { width: 44px; height: 44px; border-radius: 4px; }
-.empty-pic { color: #c0c4cc; }
+/* 灰字：el-text 的 5 个 type 里没有"禁用灰"，用它的公开变量 --el-text-color（$text map 只有 font-size/color） */
+.empty-pic { --el-text-color: var(--el-text-color-disabled); }
 .gallery { width: 100%; display: flex; flex-direction: column; gap: 8px; }
 .gallery-row { display: flex; gap: 8px; align-items: flex-start; }
 .grow { flex: 1; }

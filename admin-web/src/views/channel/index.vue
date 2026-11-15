@@ -13,39 +13,41 @@
 
       <!-- 三张店铺卡：平台 / 启用 / 水位 / 上次拉单 / 今日成功·失败 -->
       <div class="shop-cards" v-loading="shopsLoading">
-        <div
+        <el-card
           v-for="shop in shops"
           :key="shop.id"
           class="shop-card"
+          shadow="never"
+          :body-style="shopCardBodyStyle"
           :data-testid="`channel-shop-card-${shop.platformType}`"
         >
           <div class="shop-head">
-            <span class="shop-platform">{{ platformText[shop.platformType] || shop.platformType }}</span>
+            <el-text class="shop-platform">{{ platformText[shop.platformType] || shop.platformType }}</el-text>
             <el-tag :type="shop.enabled === 1 ? 'success' : 'info'" size="small" effect="plain">
               {{ shop.enabled === 1 ? '启用' : '停用' }}
             </el-tag>
           </div>
-          <div class="shop-name">{{ shop.shopName }}<span class="shop-code">{{ shop.shopCode }}</span></div>
+          <el-text class="shop-name" tag="div">{{ shop.shopName }}<el-text class="shop-code" size="small" type="info">{{ shop.shopCode }}</el-text></el-text>
 
           <div class="shop-meta">
             <div class="meta-row">
-              <span class="meta-label">拉单水位</span>
-              <span class="meta-value" :data-testid="`channel-shop-watermark-${shop.platformType}`">
+              <el-text class="meta-label" type="info">拉单水位</el-text>
+              <el-text class="meta-value" :data-testid="`channel-shop-watermark-${shop.platformType}`">
                 {{ fmtTime(shop.watermarkAt) }}
-              </span>
+              </el-text>
             </div>
             <div class="meta-row">
-              <span class="meta-label">上次拉单</span>
-              <span class="meta-value">{{ fmtTime(shop.lastPullAt) }}</span>
+              <el-text class="meta-label" type="info">上次拉单</el-text>
+              <el-text class="meta-value">{{ fmtTime(shop.lastPullAt) }}</el-text>
             </div>
             <div class="meta-row">
-              <span class="meta-label">今日成功 / 失败</span>
-              <span class="meta-value">
+              <el-text class="meta-label" type="info">今日成功 / 失败</el-text>
+              <el-text class="meta-value">
                 <el-text tag="b" type="success">{{ shop.todayOk ?? 0 }}</el-text>
                 <el-text type="info">/</el-text>
                 <el-text tag="b" type="danger">{{ shop.todayFail ?? 0 }}</el-text>
                 <el-text size="small" type="info" class="skip-num">（跳过 {{ shop.todaySkip ?? 0 }}）</el-text>
-              </span>
+              </el-text>
             </div>
           </div>
 
@@ -57,9 +59,9 @@
               :data-testid="`channel-pull-btn-${shop.platformType}`"
               @click="pull(shop)"
             >立即拉单</el-button>
-            <span class="action-hint">回传发货 → 订单明细抽屉</span>
+            <el-text class="action-hint" size="small">回传发货 → 订单明细抽屉</el-text>
           </div>
-        </div>
+        </el-card>
         <el-empty v-if="!shopsLoading && shops.length === 0" description="还没有渠道店铺（先跑 sql/migrate-channel.sql）" />
       </div>
     </el-card>
@@ -129,10 +131,10 @@
         </el-table-column>
         <el-table-column label="失败原因" min-width="220">
           <template #default="{ row }">
-            <span v-if="row.reason" :data-testid="`channel-log-reason-${row.id}`" :class="{ 'reason-text': row.result === 'FAIL' }">
+            <el-text v-if="row.reason" :data-testid="`channel-log-reason-${row.id}`" :type="row.result === 'FAIL' ? 'danger' : ''">
               {{ row.reason }}
-            </span>
-            <span v-else class="muted">—</span>
+            </el-text>
+            <el-text v-else class="muted-dash">—</el-text>
           </template>
         </el-table-column>
         <el-table-column label="重试次数" width="100" align="center">
@@ -200,6 +202,9 @@ const toastSuccess = (message) =>
   ElMessage({ type: 'success', message, offset: MESSAGE_OFFSET, grouping: true, duration: 3000, customClass: MESSAGE_CLASS })
 const toastError = (message) =>
   ElMessage({ type: 'error', message, offset: MESSAGE_OFFSET, grouping: true, duration: 6000, customClass: MESSAGE_CLASS })
+
+/* 店铺卡的 body 内距：走 Card 的 body-style（官方 Attributes） */
+const shopCardBodyStyle = { padding: '14px' }
 
 const shops = ref([])
 const shopsLoading = ref(false)
@@ -288,20 +293,28 @@ onMounted(async () => {
 .filters { display: flex; gap: 8px; align-items: center; }
 
 .shop-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
-.shop-card { border: 1px solid #ebeef5; border-radius: 8px; padding: 14px; background: #fafcff; }
+/* 店铺卡 = el-card：边框/圆角/底色走公开变量（#ebeef5=--el-border-color-lighter、
+   #fafcff=--el-fill-color-extra-light，逐值命中）；内距走 :body-style。 */
+.shop-card {
+  --el-card-border-color: var(--el-border-color-lighter);
+  --el-card-border-radius: 8px;
+  --el-card-bg-color: var(--el-fill-color-extra-light);
+}
 .shop-head { display: flex; justify-content: space-between; align-items: center; }
-.shop-platform { font-weight: 600; font-size: 15px; }
-.shop-name { margin: 8px 0 10px; color: #303133; }
-.shop-code { margin-left: 8px; color: #909399; font-size: 12px; }
-.shop-meta { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+/* 15px 是 EP 六档外的值，走 el-text 字号变量；600 无 API，保留 */
+.shop-platform { font-weight: 600; --el-text-font-size: 15px; align-self: auto; }
+.shop-name { margin: 8px 0 10px; --el-text-color: var(--el-text-color-primary); }
+.shop-code { margin-left: 8px; }
+.shop-meta { display: flex; flex-direction: column; gap: 6px; --el-text-font-size: var(--el-font-size-small); }
 .meta-row { display: flex; justify-content: space-between; gap: 8px; }
-.meta-label { color: #909399; }
-.meta-value { color: #303133; }
+.meta-label { align-self: auto; }
+.meta-value { --el-text-color: var(--el-text-color-primary); align-self: auto; }
 .skip-num { margin-left: 6px; }
 .shop-actions { margin-top: 12px; display: flex; align-items: center; gap: 8px; }
-.action-hint { color: #c0c4cc; font-size: 12px; }
+/* 12px 由 size="small" 给；"禁用灰"用 --el-text-color-disabled（el-text 的 5 个 type 里没有这一档） */
+.action-hint { --el-text-color: var(--el-text-color-disabled); }
 
 .log-card { margin-bottom: 12px; }
-.reason-text { color: var(--el-color-danger); }
-.muted { color: #c0c4cc; }
+
+.muted-dash { --el-text-color: var(--el-text-color-disabled); }
 </style>

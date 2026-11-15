@@ -43,8 +43,8 @@
           </el-image>
           <el-icon v-else :size="40"><Goods /></el-icon>
         </div>
-        <div class="name" data-testid="home-product-card-name">{{ p.name }}</div>
-        <div class="cta">查看详情 →</div>
+        <el-text class="name" tag="div" data-testid="home-product-card-name">{{ p.name }}</el-text>
+        <el-text class="cta" tag="div" size="small" type="primary">查看详情 →</el-text>
       </el-card>
       <el-empty v-if="!loading && !products.length" description="暂无商品" data-testid="home-empty" />
     </div>
@@ -92,6 +92,7 @@ onMounted(async () => {
   display: flex; align-items: center; justify-content: center; color: #c0c4cc; margin-bottom: 10px;
 }
 .cover { width: 100%; height: 100%; }
-.name { font-size: 14px; color: #303133; min-height: 40px; }
-.cta { font-size: 12px; color: #409eff; margin-top: 8px; }
+/* 14px 是 el-text 默认档；深色正文用 --el-text-color-primary（el-text 的 type 里没有"正文深色"这一档） */
+.name { min-height: 40px; --el-text-color: var(--el-text-color-primary); }
+.cta { margin-top: 8px; }
 </style>

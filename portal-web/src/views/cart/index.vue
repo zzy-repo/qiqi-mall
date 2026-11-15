@@ -1,8 +1,10 @@
 <template>
   <div>
-    <h3 class="title">
-      购物车<span v-if="!logged" class="hint" data-testid="cart-local-hint">（未登录，暂存在本浏览器）</span>
-    </h3>
+    <!-- 标题与提示分成两个 el-text：h3 的粗体只作用于标题，提示不必再用 font-weight:normal 去抵消 -->
+    <div class="title-row">
+      <el-text class="title" tag="h3" size="large">购物车</el-text>
+      <el-text v-if="!logged" class="hint" size="small" type="info" data-testid="cart-local-hint">（未登录，暂存在本浏览器）</el-text>
+    </div>
 
     <el-card shadow="never">
       <el-table v-loading="loading" :data="rows" border data-testid="cart-list-table">
@@ -38,7 +40,7 @@
       </el-table>
 
       <div class="footer">
-        <span class="total" data-testid="cart-total">合计：<b>¥ {{ total }}</b></span>
+        <el-text class="total" data-testid="cart-total">合计：<el-text class="total-num" tag="b" type="danger">¥ {{ total }}</el-text></el-text>
         <el-button
           type="primary"
           size="large"
@@ -115,9 +117,11 @@ onMounted(load)
 </script>
 
 <style scoped>
-.title { margin: 0 0 12px; font-size: 16px; }
-.hint { font-size: 12px; color: #909399; font-weight: normal; }
+.title-row { display: flex; align-items: baseline; margin: 0 0 12px; }
+.title { margin: 0; }
+.hint { margin: 0; }
+.total { margin: 0; }
+/* 金额 18px：--el-font-size-large 就是 18px（$font-size map），字色用 el-text 的 danger 档 */
+.total-num { --el-text-font-size: var(--el-font-size-large); }
 .footer { display: flex; justify-content: flex-end; align-items: center; gap: 16px; margin-top: 16px; }
-.total { font-size: 14px; color: #606266; }
-.total b { color: #f56c6c; font-size: 18px; }
 </style>

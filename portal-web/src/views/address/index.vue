@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="head">
-      <h3 class="title">收货地址</h3>
+      <el-text class="title" tag="h3" size="large">收货地址</el-text>
       <el-button type="primary" :icon="Plus" data-testid="addresses-create" @click="openForm()">新增地址</el-button>
     </div>
 
@@ -145,5 +145,5 @@ onMounted(load)
 
 <style scoped>
 .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-.title { margin: 0; font-size: 16px; }
+.title { margin: 0; }
 </style>

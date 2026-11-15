@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h3 class="title">结算</h3>
+    <el-text class="title" tag="h3" size="large">结算</el-text>
 
     <el-card shadow="never" class="block">
       <template #header>收货信息</template>
@@ -23,9 +23,14 @@
           </el-select>
         </el-form-item>
         <!-- 清空下拉后三项会被一起置空，这里明说一句，免得用户以为还带着上一个地址 -->
-        <div v-if="addressCleared" class="addr-hint" data-testid="checkout-address-cleared-hint">
-          已取消选择地址，请手动填写收货信息
-        </div>
+        <el-text
+          v-if="addressCleared"
+          class="addr-hint"
+          tag="div"
+          size="small"
+          type="warning"
+          data-testid="checkout-address-cleared-hint"
+        >已取消选择地址，请手动填写收货信息</el-text>
         <el-form-item label="收货人" required>
           <el-input v-model="form.receiverName" data-testid="checkout-input-receiver" maxlength="50" />
         </el-form-item>
@@ -63,7 +68,7 @@
       </el-table>
 
       <div class="footer">
-        <span class="total" data-testid="checkout-total">应付：<b>¥ {{ total }}</b></span>
+        <el-text class="total" data-testid="checkout-total">应付：<el-text class="total-num" tag="b" type="danger">¥ {{ total }}</el-text></el-text>
         <el-button
           type="primary"
           size="large"
@@ -174,10 +179,10 @@ onMounted(load)
 </script>
 
 <style scoped>
-.title { margin: 0 0 12px; font-size: 16px; }
+.title { margin: 0 0 12px; }
 .block { margin-bottom: 16px; }
-.addr-hint { color: #e6a23c; font-size: 12px; line-height: 1.6; margin: 0 0 12px 90px; }
+/* 12px + warning 字色全部由 el-text 的 size/type 表达，这里只剩位置 */
+.addr-hint { line-height: 1.6; margin: 0 0 12px 90px; }
 .footer { display: flex; justify-content: flex-end; align-items: center; gap: 16px; margin-top: 16px; }
-.total { color: #606266; }
-.total b { color: #f56c6c; font-size: 18px; }
+.total-num { --el-text-font-size: var(--el-font-size-large); }
 </style>

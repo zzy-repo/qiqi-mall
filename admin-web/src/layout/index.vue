@@ -4,7 +4,7 @@
     <el-aside :width="isCollapse ? '64px' : '220px'" class="layout-aside">
       <div class="logo">
         <el-icon :size="24" color="#fff"><Shop /></el-icon>
-        <span v-show="!isCollapse" class="logo-text">七七商城</span>
+        <el-text v-show="!isCollapse" class="logo-text">七七商城</el-text>
       </div>
       <el-menu
         :default-active="activeMenu"
@@ -95,7 +95,7 @@
           <el-dropdown>
             <span class="user-info">
               <el-avatar :size="28">{{ avatarText }}</el-avatar>
-              <span class="user-name">{{ displayName }}</span>
+              <el-text class="user-name">{{ displayName }}</el-text>
               <el-icon><CaretBottom /></el-icon>
             </span>
             <template #dropdown>
@@ -182,8 +182,19 @@ const breadcrumbs = computed(() => {
   color: #fff;
   white-space: nowrap;
 }
-.logo-text { font-size: 17px; font-weight: 600; letter-spacing: 1px; }
-.layout-menu { border-right: none; flex: 1; }
+/* 17px 走 el-text 的公开变量；白字 + 600 + 字距 el-text 都表达不了（$text map 只有 font-size/color），保留 */
+.logo-text {
+  font-weight: 600;
+  letter-spacing: 1px;
+  --el-text-font-size: 17px;
+  --el-text-color: var(--el-color-white);
+}
+/* el-menu 的下边框走自己的公开变量（menu.scss:54 用 --el-menu-border-color），
+   与改前的 border-right:none 渲染等价（1px 透明）。 */
+.layout-menu {
+  flex: 1;
+  --el-menu-border-color: transparent;
+}
 .layout-body { flex-direction: column; overflow: hidden; }
 .layout-header {
   height: 56px;
@@ -198,14 +209,16 @@ const breadcrumbs = computed(() => {
 .collapse-btn { cursor: pointer; color: #606266; }
 .collapse-btn:hover { color: #409eff; }
 .header-right { display: flex; align-items: center; gap: 18px; }
+/* 这里原来有 outline: none —— 那是把键盘焦点环抹掉，属于 a11y 反模式，已按裁决删除。
+   现在 el-dropdown 的触发器在键盘聚焦时会显示焦点环，这是修复而不是退化。 */
 .user-info {
   display: flex;
   align-items: center;
   gap: 8px;
   cursor: pointer;
-  outline: none;
 }
-.user-name { font-size: 14px; color: #303133; }
+/* 14px 是 el-text 默认档；深色正文用它的变量（type 五档里没有"正文深"这一档） */
+.user-name { --el-text-color: var(--el-text-color-primary); }
 .layout-main {
   padding: 20px;
   background: #f5f7fa;

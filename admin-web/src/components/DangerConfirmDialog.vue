@@ -18,12 +18,21 @@
       </p>
 
       <!-- 可选明细区：例如「审核通过」的拆单方案（哪个仓、几条明细、分别是哪些商品） -->
-      <div v-if="dangerState.details.length" class="details" data-testid="danger-confirm-details">
-        <div v-for="(d, i) in dangerState.details" :key="i" class="detail-row">
-          <span class="detail-label">{{ d.label }}</span>
-          <span class="detail-value">{{ d.value }}</span>
-        </div>
-      </div>
+      <!-- 标签:值 成对展示 = el-descriptions（border 模式下 label 才是 regular 灰 + 700、
+           content 才是 primary 深色，见 index.css 的 .el-descriptions__label/.is-bordered-*）。
+           代价：cell 字号只有 12(small)/14(default)，13px 不可达，所以这里用 size="small"（13→12）。 -->
+      <el-descriptions
+        v-if="dangerState.details.length"
+        class="details"
+        :column="1"
+        size="small"
+        border
+        data-testid="danger-confirm-details"
+      >
+        <el-descriptions-item v-for="(d, i) in dangerState.details" :key="i" :label="d.label">
+          {{ d.value }}
+        </el-descriptions-item>
+      </el-descriptions>
 
       <!-- 执行失败：不关弹窗，直接把后端的中文原因摆在这里 -->
       <el-alert
@@ -93,9 +102,7 @@ const visible = computed({
   border-radius: 4px;
   border-left: 3px solid #e6a23c;
 }
-.detail-row { display: flex; gap: 10px; font-size: 13px; line-height: 1.8; user-select: text; }
-.detail-label { flex: 0 0 auto; color: #606266; font-weight: 600; }
-.detail-value { flex: 1; color: #303133; word-break: break-word; }
+/* 明细的标签/取值样式全部由 el-descriptions 的 border 模式给，这里不再有字号/字色声明 */
 /* 失败时留一点呼吸：倒数第二块（willdo / details）与错误条之间 */
 .tip { margin-top: 12px; }
 </style>

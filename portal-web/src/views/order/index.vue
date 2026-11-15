@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h3 class="title">我的订单</h3>
+    <el-text class="title" tag="h3" size="large">我的订单</el-text>
 
     <el-card shadow="never">
       <el-table v-loading="loading" :data="orders" border data-testid="order-list-table">
@@ -86,7 +86,7 @@
           <el-descriptions-item label="地址" :span="2">{{ detail.order.receiverAddress }}</el-descriptions-item>
         </el-descriptions>
 
-        <h4>商品明细</h4>
+        <el-text tag="h4">商品明细</el-text>
         <el-table :data="detail.items" border size="small">
           <el-table-column prop="productName" label="商品" min-width="160" />
           <el-table-column label="单价" width="100">
@@ -306,6 +306,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.title { margin: 0 0 12px; font-size: 16px; }
-h4 { margin: 16px 0 8px; font-size: 14px; }
+.title { margin: 0 0 12px; }
+/* h4 小标题：字号 14px 是 el-text 的默认档，粗体由 <h4> 标签语义给 */
+h4 { margin: 16px 0 8px; }
 </style>

@@ -11,8 +11,8 @@
   >
     <div class="conflict-body">
       <!-- 主文案：409=「数据已被他人修改（可能其他人在编辑）」，400=「页面数据已过期，请刷新后重试」 -->
-      <p class="conflict-message" data-testid="conflict-message">{{ conflictState.message }}</p>
-      <p v-if="conflictState.hint" class="conflict-hint" data-testid="conflict-hint">{{ conflictState.hint }}</p>
+      <el-text class="conflict-message" tag="p" data-testid="conflict-message">{{ conflictState.message }}</el-text>
+      <el-text v-if="conflictState.hint" class="conflict-hint" tag="p" data-testid="conflict-hint">{{ conflictState.hint }}</el-text>
     </div>
 
     <template #footer>
@@ -50,18 +50,20 @@ const visible = computed({
 
 <style scoped>
 .conflict-body { min-height: 48px; }
+/* 15px/13px 都不在 EP 的六档里，走 el-text 的字号变量；
+   深色正文与灰字分别用 --el-text-color-primary / el-text 默认的 regular。
+   主句的 600 无法用 el-text 表达（$text 只有 font-size/color），保留这一行。 */
 .conflict-message {
   margin: 0;
-  font-size: 15px;
   line-height: 1.7;
-  color: #303133;
   font-weight: 600;
   word-break: break-word;
+  --el-text-font-size: 15px;
+  --el-text-color: var(--el-text-color-primary);
 }
 .conflict-hint {
   margin: 10px 0 0;
-  font-size: 13px;
   line-height: 1.7;
-  color: #606266;
+  --el-text-font-size: var(--el-font-size-small);
 }
 </style>

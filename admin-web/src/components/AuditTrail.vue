@@ -1,7 +1,7 @@
 <template>
   <div class="audit-trail" data-testid="audit-trail">
     <!-- 三段图例：决策 / 状态台账 / 操作审计 —— 点一下只留那一段（默认三段全开） -->
-    <div class="trail-legend">
+    <el-card class="trail-legend" shadow="never" :body-style="legendBodyStyle">
       <el-text type="info">按时间拼接的三段证据：</el-text>
       <el-check-tag
         v-for="seg in SEGMENTS"
@@ -16,7 +16,7 @@
         <el-text size="small">{{ countOf(seg) }}</el-text>
       </el-check-tag>
       <el-button link type="primary" size="small" data-testid="audit-trail-refresh" @click="load">刷新</el-button>
-    </div>
+    </el-card>
 
     <div v-loading="loading" class="trail-body">
       <el-empty v-if="!loading && !entries.length" description="这张单还没有审核记录" data-testid="audit-trail-empty" />
@@ -41,19 +41,19 @@
 
             <!-- 决策段：命中策略 + 版本 + 留痕原因 -->
             <template v-if="e.segment === 'DECISION'">
-              <div class="trail-line">
-                <span class="label">命中策略：</span>
+              <el-text class="trail-line" tag="div">
+                <el-text class="label" type="info">命中策略：</el-text>
                 <span v-if="rawOf(e).matched_policy_name || rawOf(e).matchedPolicyName" class="value">
                   「{{ rawOf(e).matched_policy_name || rawOf(e).matchedPolicyName }}」
                   <span class="muted">（第 {{ rawOf(e).matched_policy_version_no ?? rawOf(e).matchedPolicyVersionNo ?? '—' }} 版）</span>
                 </span>
                 <span v-else class="muted">无（没命中任何策略）</span>
-              </div>
-              <div v-if="rawOf(e).downgrade_reason || rawOf(e).downgradeReason" class="trail-line">
-                <span class="label">预检降级：</span>
+              </el-text>
+              <el-text v-if="rawOf(e).downgrade_reason || rawOf(e).downgradeReason" class="trail-line" tag="div">
+                <el-text class="label" type="info">预检降级：</el-text>
                 <span class="value">{{ downgradeText(rawOf(e).downgrade_reason || rawOf(e).downgradeReason) }}</span>
-              </div>
-              <div v-if="e.detail" class="trail-detail">{{ e.detail }}</div>
+              </el-text>
+              <el-text v-if="e.detail" class="trail-detail" tag="div" size="small" type="info">{{ e.detail }}</el-text>
               <!-- 决策 ↔ 台账：直接读后端每段的 aligned（旧载荷没有时退回按 raw 算，见 alignTag） -->
               <div class="trail-align">
                 <el-tag
@@ -67,42 +67,42 @@
 
             <!-- 状态台账段：7 → 8 —— 同一个数字在不同台账里含义不同，必须走 ledgerStatusText('ORDER_STATUS') -->
             <template v-else-if="e.segment === 'STATUS'">
-              <div class="trail-line">
-                <span class="label">状态变化：</span>
+              <el-text class="trail-line" tag="div">
+                <el-text class="label" type="info">状态变化：</el-text>
                 <span class="value">
                   {{ orderStatusText(rawOf(e).from_status ?? rawOf(e).fromStatus) }}
-                  <span class="arrow">→</span>
+                  <el-text class="arrow" type="info">→</el-text>
                   {{ orderStatusText(rawOf(e).to_status ?? rawOf(e).toStatus) }}
                 </span>
-              </div>
-              <div class="trail-line">
-                <span class="label">流转原因：</span>
+              </el-text>
+              <el-text class="trail-line" tag="div">
+                <el-text class="label" type="info">流转原因：</el-text>
                 <span class="value mono">{{ rawOf(e).reason || '—' }}</span>
                 <span v-if="rawOf(e).reason_detail" class="muted">（{{ rawOf(e).reason_detail }}）</span>
-              </div>
-              <div class="trail-line">
-                <span class="label">操作人：</span>
+              </el-text>
+              <el-text class="trail-line" tag="div">
+                <el-text class="label" type="info">操作人：</el-text>
                 <span class="value">{{ rawOf(e).operator_name || '—' }}</span>
                 <el-tag :type="operatorTypeTag(rawOf(e).operator_type)" size="small" effect="plain">
                   {{ operatorTypeText(rawOf(e).operator_type) }}
                 </el-tag>
-              </div>
+              </el-text>
             </template>
 
             <!-- 操作审计段：谁点了什么（策略改动 / 人工冻结解冻） -->
             <template v-else>
-              <div class="trail-line">
-                <span class="label">动作：</span>
+              <el-text class="trail-line" tag="div">
+                <el-text class="label" type="info">动作：</el-text>
                 <span class="value mono">{{ rawOf(e).action || '—' }}</span>
-              </div>
-              <div v-if="e.detail" class="trail-detail">{{ e.detail }}</div>
-              <div class="trail-line">
-                <span class="label">操作人：</span>
+              </el-text>
+              <el-text v-if="e.detail" class="trail-detail" tag="div" size="small" type="info">{{ e.detail }}</el-text>
+              <el-text class="trail-line" tag="div">
+                <el-text class="label" type="info">操作人：</el-text>
                 <span class="value">{{ rawOf(e).operator_name || '—' }}</span>
                 <el-tag :type="operatorTypeTag(rawOf(e).operator_type)" size="small" effect="plain">
                   {{ operatorTypeText(rawOf(e).operator_type) }}
                 </el-tag>
-              </div>
+              </el-text>
             </template>
           </el-card>
         </el-timeline-item>
@@ -126,6 +126,16 @@ const props = defineProps({
 
 const SEGMENTS = ['DECISION', 'STATUS', 'AUDIT']
 const DOWNGRADE_TEXT = { STOCK_SHORT: '库存不足（SUM 库存桶 < 需求）', COST_MISSING: '成本价缺失，毛利无法确认' }
+
+/* 图例条的行内布局：Card 的 body-style 是官方 Attributes，比 :deep 撬 .el-card__body 稳。
+   这里只有居中/间距/内距，没有颜色字号。 */
+const legendBodyStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  flexWrap: 'wrap',
+  gap: '10px',
+  padding: '8px 10px'
+}
 
 const loading = ref(false)
 const entries = ref([])
@@ -272,20 +282,34 @@ watch(() => props.orderId, load)
 
 <style scoped>
 .audit-trail { width: 100%; }
+/* 图例条 = el-card：底色/边框/圆角全部走它的公开变量（card.scss:12-14 消费
+   --el-card-border-radius / -border-color / -bg-color，默认值见 common/var.scss:1245-1254）。
+   行内布局走 :body-style（Card 的官方 Attributes），不能用 :deep 撬 .el-card__body。 */
 .trail-legend {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  padding: 8px 10px; margin-bottom: 12px;
-  background: #fafafa; border: 1px solid #ebeef5; border-radius: 4px;
+  margin-bottom: 12px;
+  --el-card-bg-color: var(--el-fill-color-lighter);
+  --el-card-border-color: var(--el-border-color-lighter);
+  --el-card-border-radius: var(--el-border-radius-base);
 }
 .trail-body { min-height: 40px; }
 .trail-card { border-left-width: 3px; }
 .trail-decision { border-left-color: #409eff; }
 .trail-status { border-left-color: #67c23a; }
 .trail-audit { border-left-color: #e6a23c; }
-.trail-line { font-size: 13px; color: #303133; line-height: 22px; }
-.trail-line .label { color: #909399; }
-.trail-line .value { color: #303133; }
-.trail-line .arrow { color: #909399; margin: 0 4px; }
-.trail-detail { font-size: 12px; color: #909399; line-height: 20px; margin-top: 4px; word-break: break-all; }
+/* 轨迹行 = el-text：13px 走 --el-text-font-size，深色正文走 --el-text-color-primary。
+   子元素（label/arrow）再用 type="info" 拿 secondary 灰；.value 不写任何类 ——
+   它直接继承父 el-text 的 13px + primary，正好与改前一致。 */
+.trail-line {
+  line-height: 22px;
+  --el-text-font-size: var(--el-font-size-small);
+  --el-text-color: var(--el-text-color-primary);
+}
+.trail-line .label,
+.trail-line .arrow {
+  --el-text-font-size: var(--el-font-size-small);
+}
+.trail-line .arrow { margin: 0 4px; }
+/* 12px + secondary 灰都由 el-text 的 size/type 给 */
+.trail-detail { line-height: 20px; margin-top: 4px; word-break: break-all; }
 .trail-align { margin-top: 6px; }
 </style>
