@@ -60,7 +60,7 @@
       :row-class-name="rowClass"
       data-testid="audit-queue-table"
     >
-      <el-table-column label="单号" min-width="170">
+      <el-table-column label="单号" min-width="235">
         <template #default="{ row }">
           <!-- el-table 的 <tr> 无法在模板上挂属性（没有 row-attributes API），
                所以这里保留「单号格锚点」audit-queue-row-<单号>，
@@ -902,6 +902,10 @@ onMounted(() => {
 /* 原因列只剩 4 条：字号/字色都已交给 el-text，这里只管「层级标记」和间距。
    word-break 可继承，所以一条就给整列（只对长单号/长 SKU 有意义，CJK 本来能断行）。 */
 .reason-cell { display: flex; flex-direction: column; gap: 2px; word-break: break-all; }
+/* el-text 自带 align-self:center（EP 的 text.scss:12），在纵向 flex 里会把文字**水平居中**。
+   换 el-text 之后这一列的多行原因全歪到中间，读起来是散的 —— 必须拨回 stretch。
+   这是布局声明（不是外观），所以不算破例；用 `> *` 直选子元素，不碰 :deep。 */
+.reason-cell > * { align-self: stretch; }
 /* 「本可自动过审：命中…（被上面那条策略先拦下）」这句自己带着主谓宾，与上一行「后端原话」
    靠 type 区分（info / warning）就够了，不再靠斜体+竖线喊"这不是结论" —— 那是审美，不是信息。 */
 .reason-stock-warn { padding-left: 8px; }
