@@ -116,6 +116,9 @@ const PRIVATE_DOCS = [
   'project-intro.md', 'project-architecture.md', 'architecture-decisions.md', 'evolution.md',
   'concurrency.md', 'mysql-tuning.md', 'multi-instance.md',
   'oms-relation.md', 'oms-pipeline.md', 'oms-gap.md', 'oms-split.md', 'oms-algorithm.md',
+  // 2026-11-15 新增：各环境（容器栈 / 本地 dev / e2e 分片 / 买家账号）的地址 + 账号 + 口令与验证状态，
+  // 内网专用 —— 口令只对开发者有意义，公网演示页仍只留买家端 + 后台那四行。
+  'env-accounts.md',
 ]
 const OUT = join(OUT_ROOT, 'material')
 const SCENE_IMG_ROOT = 'flows/02-业务场景'                // 场景配图区（相对 SRC_DOCS）
@@ -1159,7 +1162,13 @@ function buildNavTree({ includeBusiness }) {
     navGroup('一、功能场景（图 + 视频）', sceneTree),
     ...diagramGroups,
   ]))
-  if (includeBusiness) tree.push(navSection('业务逻辑', businessTree(), true))
+  // dev 站专属一节：环境地址 / 账号 / 口令。env-accounts.md 与业务笔记同样在 PRIVATE_DOCS 里
+  // （prod 连文件都不拷），所以这一节也挂在 includeBusiness 分支下 —— prod 侧边栏不可能出现它，
+  // 构建后可用 sidebar.generated.mjs / _sidebar.md 复核（见 docs-build/docs-dev-refresh.sh 的 ⑨⑫ 项）。
+  if (includeBusiness) {
+    tree.push(navSection('环境与账号', [navPage('各环境地址 · 账号 · 口令', 'env-accounts.md')], true))
+    tree.push(navSection('业务逻辑', businessTree(), true))
+  }
   return tree
 }
 

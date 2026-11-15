@@ -28,9 +28,11 @@ printf "dev 站: index=%s  page=%s (%s)  页面数=%s  图页=%s\n" \
   "$(find "$OUT_DIR/material/diagrams" -name '*.html' 2>/dev/null | wc -l)"
 
 # 12 项体检（静态扫产物；dev 站豁免：--internal-ok 首页内网信息 + --private-ok 第 ⑩⑪ 项）
+# env-accounts 那页与首页是同一类：内网专用、正文必须列出各环境的内网地址与端口（读它就是为了拿地址），
+# 它走 PRIVATE_DOCS 通道、prod 产物里根本没有这个文件；所以第 ⑥ 项与首页一起豁免（仅 dev 站，prod 绝不带）。
 echo "▶ 12 项体检：$(basename "$CHECK") --root $OUT_DIR --skip-http --page-ext=html"
 CHECKOUT=$(node "$CHECK" --root "$OUT_DIR" --skip-http --page-ext=html \
-  --internal-ok --internal-ok-files=index.html,index.md --private-ok 2>&1)
+  --internal-ok --internal-ok-files=index.html,index.md,env-accounts.html,env-accounts.md --private-ok 2>&1)
 CHECK=$?
 echo "$CHECKOUT" | grep -E '^(✅|❌) 第|^(✅|❌) [0-9①-⑫]|^结论|^页面 |^孤儿图 |^── ' || echo "$CHECKOUT" | tail -20
 
