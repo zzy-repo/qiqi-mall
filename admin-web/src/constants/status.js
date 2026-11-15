@@ -220,6 +220,46 @@ export const auditResultStyle = (raw) =>
         '--el-tag-text-color': 'var(--el-color-white)'
       }
     : undefined
+/**
+ * 同上，但补的是 **未选中（plain）** 那一态：白底 + 本色边 + 深一档的字。
+ *
+ * 为什么需要它（不是"把自有 CSS 换个地方写"）：el-tag 的 plain 语义是
+ *   bg = --el-fill-color-blank（白底，对）
+ *   border = --el-color-{type}-light-5（浅两档的边）
+ *   text   = --el-color-{type}（本色字）
+ * 而这一排是**表格上方 12px 的筛选文字**，本色字白底只有 2.2~3.1:1（绿 2.24 / 黄 2.19 / 红 2.90 / 灰 3.08），
+ * 读不清 —— 组件选了正确的"两态模型"，但两个色槽的档位是按"标签"微调的，按"正文"用就偏浅。
+ * 所以这里只把这两个槽拨回**深一档**：边给本色（--el-color-{type}）、字给 dark-2（--el-color-{type}-dark-2），
+ * 边框宽度/圆角/padding/字号/两态切换全部仍由组件算。对比度回到本次改造前的数值（绿 3.45 / 黄 3.35 /
+ * 红 4.36 / 灰 6.11 / 紫 9.26）—— 也就是说这次换组件不会让文字变难读。
+ *
+ * info 一支单独走 --el-text-color-regular（**语义优先于机械对称**）：EP 的 info 本色就是"中性灰"，
+ * 它的 dark-2（#73767a，4.56:1）比正文灰（#606266，6.11:1）还浅，而「不命中」的语义恰恰是"什么都没发生"，
+ * 用正文灰既与改造前一字不差、也更清楚。其余四支走统一的 {type}-dark-2，是因为那才是各自色相的深档。
+ *
+ * 遗留口径（本轮明确不修）：EP 语义色的 dark-2 在 12px 文本上不满足 WCAG AA ——
+ * 绿 3.45 / 黄 3.35 / 红 4.36 / 灰 6.11，而表格里的判定徽标（dark 态白字压彩底）更低（2.19~3.08:1）。
+ * 只给这一排补深档会造成"胶囊达标、徽标更差"的不一致，所以留作**全局色系**决策，
+ * 候选修法：新增 --qiqi-color-*-dark-3（#468427 / #9a6d28 / #bf5454，均 4.55~4.57:1），
+ * 或 dark 态加粗加大字号，或整排改成"文字 + 色点"。不要只修这一处。
+ */
+export const auditResultPlainStyle = (raw) => {
+  const result = String(raw)
+  if (result === 'FROZEN') {
+    return {
+      '--el-tag-bg-color': 'var(--el-fill-color-blank)',
+      '--el-tag-border-color': 'var(--qiqi-color-frozen)',
+      '--el-tag-text-color': 'var(--qiqi-color-frozen-dark-2)'
+    }
+  }
+  const type = AUDIT_RESULT_TAG[result]
+  if (!type) return undefined
+  return {
+    '--el-tag-bg-color': 'var(--el-fill-color-blank)',
+    '--el-tag-border-color': `var(--el-color-${type})`,
+    '--el-tag-text-color': type === 'info' ? 'var(--el-text-color-regular)' : `var(--el-color-${type}-dark-2)`
+  }
+}
 /** 「被拦」= 阻止 + 冻结：只用于分组标题与合计，**不能**当成 queue 的筛选值（后端只收单值） */
 export const AUDIT_BLOCKED_GROUP = ['BLOCKED', 'FROZEN']
 
