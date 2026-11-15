@@ -10,7 +10,7 @@ import { defineConfig, devices } from '@playwright/test'
  *       ADMIN_BASE   http://127.0.0.1:5175
  *       API_BASE     http://127.0.0.1:8081
  *
- *  2) demo 档（`npm run demo`，即 DEMO=1）：跑容器栈 = 测试环境，1280x720 全量录制 + slowMo 400
+ *  2) demo 档（`npm run demo`，即 DEMO=1）：跑容器栈 = 测试环境，1960x1120 全量录制 + slowMo 400
  *       PORTAL_BASE  http://127.0.0.1:5174   (portal-web 容器 nginx)
  *       ADMIN_BASE   http://127.0.0.1:5176   (admin-web 容器 nginx)
  *       API_BASE     http://127.0.0.1:18080  (gateway → server-1/server-2 + Redis)
@@ -39,7 +39,30 @@ const E2E_OUT_DIR = process.env.E2E_OUT_DIR || './test-results'
 
 /** demo 档：全量录制 + 降速，方便人看；验收档保持快速干净 */
 const DEMO = !!process.env.DEMO
-const DEMO_VIEWPORT = { width: 1280, height: 720 }
+/**
+ * demo 录制的画幅：**1960×1120**（宽度是按「内容区必须容纳整张审核队列表」反算的，别往回调）。
+ *
+ * 为什么不是 1280×720（2026-11-15 改）：
+ *   审核队列表格总宽 = 单号235 + 店铺150 + 应收110 + 种类105 + 毛利110 + 判定132
+ *                    + 原因320 + 轮次90 + 时间165 + 操作230 = **1647px**，
+ *   而 1280 视口扣掉侧栏只剩约 1064px 内容区 ⇒ 超出 583px，
+ *   **「原因」列被水平滚动挤出画面**。而「原因」正是判定链/六笔单走查这两条线的核心证据，
+ *   视频里看不到它等于没演。
+ *
+ * 为什么是 1960 而不是 1600（2026-11-15 实测后修正，别再改回 1600）：
+ *   内容区宽度 = 视口 − 261（216 侧栏 + 45 内边距），不是「1600 下 1384」那个估数。
+ *   实测（Chromium 实测各列的 getBoundingClientRect）：
+ *     1280 → 内容区 1019，溢出 628；「原因」完全在画面外
+ *     1600 → 内容区 1298，溢出 349；「操作」是 fixed=right 钉在内容区右侧，
+ *            它的左边缘落在 原因 列内部 ⇒ **原因 每行尾部约 94px 被操作列压住**，句子断在半截
+ *     1700 → 内容区 1398，溢出 249；原因 刚好完整（余量 6px），但「轮次」只剩 26px 竖条
+ *     1940 → 内容区 1638，溢出 9；1960 → 内容区 1658 **溢出 0，整表 10 列一列不缺**
+ *   所以取 1960：1647 的表放进 1658 的内容区，没有横向滚动条，
+ *   原因 / 轮次 / 时间 三列都在画面里（时间那列正好是台账对齐要看的）。
+ *   高度沿用 1120（原先那两段 1600×1120 的纵向口径不变）。
+ *   改这一处即同时作用于 `video.size` 与 `viewport`（见下方 use），全站录制口径统一。
+ */
+const DEMO_VIEWPORT = { width: 1960, height: 1120 }
 
 export default defineConfig({
   testDir: './tests/scenarios',
@@ -70,5 +93,9 @@ export default defineConfig({
     }
   },
   // 只用来给报告标注当前 shard；真正的地址分流在进程级（见文件头说明）
-  projects: [{ name: `chromium-${E2E_SHARD_NAME}`, use: { ...devices['Desktop Chrome'] } }]
+  // ⚠️ 必须显式覆盖 viewport：devices['Desktop Chrome'] 自带 viewport 1280x720，
+  //    而 **project 级 use 会盖掉顶层 use 的同名项**（Playwright 的合并顺序是
+  //    顶层 use → project.use，后者赢）。只改顶层 viewport 的话，
+  //    录出来会是「1960x1120 的画布 + 1280x720 的页面内容 + 大片灰边」（已实测踩到）。
+  projects: [{ name: `chromium-${E2E_SHARD_NAME}`, use: { ...devices['Desktop Chrome'], viewport: DEMO ? DEMO_VIEWPORT : { width: 1440, height: 950 } } }]
 })
