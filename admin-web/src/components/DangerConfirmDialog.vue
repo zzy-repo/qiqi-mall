@@ -85,22 +85,21 @@ const visible = computed({
 
 <style scoped>
 .danger-body { min-height: 80px; }
-/* willDo 用正常字号正文样式：不缩小、不变灰，允许换行，允许选中复制 */
+/* willDo：正文默认档（14px + 正文字色由 main.css 给）+ 允许换行、允许选中复制。
+   只剩 white-space:pre-wrap 一条自有声明 —— 后端的多行说明必须按录入的换行显示，
+   挤成一段就把"哪条对哪条"读丢了（这是可读性，不是审美，见白名单 C 组）。 */
 .willdo {
   margin: 0;
-  font-size: 15px;
   line-height: 1.7;
-  color: #303133;
   white-space: pre-wrap;
   word-break: break-word;
   user-select: text;
 }
+/* 明细块 = el-descriptions(border)。原来外面还套了一层"浅底 + 4px 圆角 + 3px 橙线"，
+   那圈橙色是想说"注意，这是机器给的明细"—— border 模式的表格本身已经把它框出来了，
+   而"注意"这件事由对话框标题的 ⚠️ 与红色确认按钮承担。 */
 .details {
   margin: 12px 0 0;
-  padding: 8px 12px;
-  background: #f7f8fa;
-  border-radius: 4px;
-  border-left: 3px solid #e6a23c;
 }
 /* 明细的标签/取值样式全部由 el-descriptions 的 border 模式给，这里不再有字号/字色声明 */
 /* 失败时留一点呼吸：倒数第二块（willdo / details）与错误条之间 */

@@ -22,32 +22,32 @@
           :data-testid="`channel-shop-card-${shop.platformType}`"
         >
           <div class="shop-head">
-            <el-text class="shop-platform">{{ platformText[shop.platformType] || shop.platformType }}</el-text>
+            <el-text class="shop-platform" tag="b">{{ platformText[shop.platformType] || shop.platformType }}</el-text>
             <el-tag :type="shop.enabled === 1 ? 'success' : 'info'" size="small" effect="plain">
               {{ shop.enabled === 1 ? '启用' : '停用' }}
             </el-tag>
           </div>
-          <el-text class="shop-name" tag="div">{{ shop.shopName }}<el-text class="shop-code" size="small" type="info">{{ shop.shopCode }}</el-text></el-text>
+          <div class="shop-name">{{ shop.shopName }}<el-text class="shop-code" size="small" type="info">{{ shop.shopCode }}</el-text></div>
 
           <div class="shop-meta">
             <div class="meta-row">
               <el-text class="meta-label" type="info">拉单水位</el-text>
-              <el-text class="meta-value" :data-testid="`channel-shop-watermark-${shop.platformType}`">
+              <span class="meta-value" :data-testid="`channel-shop-watermark-${shop.platformType}`">
                 {{ fmtTime(shop.watermarkAt) }}
-              </el-text>
+              </span>
             </div>
             <div class="meta-row">
               <el-text class="meta-label" type="info">上次拉单</el-text>
-              <el-text class="meta-value">{{ fmtTime(shop.lastPullAt) }}</el-text>
+              <span class="meta-value">{{ fmtTime(shop.lastPullAt) }}</span>
             </div>
             <div class="meta-row">
               <el-text class="meta-label" type="info">今日成功 / 失败</el-text>
-              <el-text class="meta-value">
+              <span class="meta-value">
                 <el-text tag="b" type="success">{{ shop.todayOk ?? 0 }}</el-text>
                 <el-text type="info">/</el-text>
                 <el-text tag="b" type="danger">{{ shop.todayFail ?? 0 }}</el-text>
                 <el-text size="small" type="info" class="skip-num">（跳过 {{ shop.todaySkip ?? 0 }}）</el-text>
-              </el-text>
+              </span>
             </div>
           </div>
 
@@ -59,7 +59,7 @@
               :data-testid="`channel-pull-btn-${shop.platformType}`"
               @click="pull(shop)"
             >立即拉单</el-button>
-            <el-text class="action-hint" size="small">回传发货 → 订单明细抽屉</el-text>
+            <el-text class="action-hint" size="small" type="info">回传发货 → 订单明细抽屉</el-text>
           </div>
         </el-card>
         <el-empty v-if="!shopsLoading && shops.length === 0" description="还没有渠道店铺（先跑 sql/migrate-channel.sql）" />
@@ -134,7 +134,7 @@
             <el-text v-if="row.reason" :data-testid="`channel-log-reason-${row.id}`" :type="row.result === 'FAIL' ? 'danger' : ''">
               {{ row.reason }}
             </el-text>
-            <el-text v-else class="muted-dash">—</el-text>
+            <el-text v-else class="muted-dash" type="info">—</el-text>
           </template>
         </el-table-column>
         <el-table-column label="重试次数" width="100" align="center">
@@ -293,28 +293,20 @@ onMounted(async () => {
 .filters { display: flex; gap: 8px; align-items: center; }
 
 .shop-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
-/* 店铺卡 = el-card：边框/圆角/底色走公开变量（#ebeef5=--el-border-color-lighter、
-   #fafcff=--el-fill-color-extra-light，逐值命中）；内距走 :body-style。 */
-.shop-card {
-  --el-card-border-color: var(--el-border-color-lighter);
-  --el-card-border-radius: 8px;
-  --el-card-bg-color: var(--el-fill-color-extra-light);
-}
+/* 店铺卡 = 普通 el-card（圆角/边框/底色全默认）；内距走 :body-style。
+   原来钉了 8px 圆角 + #fafcff 近白底 —— 追旧值，且让 el-card 在本页与别页不同。 */
 .shop-head { display: flex; justify-content: space-between; align-items: center; }
-/* 15px 是 EP 六档外的值，走 el-text 字号变量；600 无 API，保留 */
-.shop-platform { font-weight: 600; --el-text-font-size: 15px; align-self: auto; }
-.shop-name { margin: 8px 0 10px; --el-text-color: var(--el-text-color-primary); }
+/* 平台名 = el-text tag="b"（700）+ 默认档；字号回退到 14px 标准档 */
+.shop-name { margin: 8px 0 10px; }
 .shop-code { margin-left: 8px; }
-.shop-meta { display: flex; flex-direction: column; gap: 6px; --el-text-font-size: var(--el-font-size-small); }
+.shop-meta { display: flex; flex-direction: column; gap: 6px; }
 .meta-row { display: flex; justify-content: space-between; gap: 8px; }
 .meta-label { align-self: auto; }
-.meta-value { --el-text-color: var(--el-text-color-primary); align-self: auto; }
+.meta-value { align-self: auto; }
 .skip-num { margin-left: 6px; }
 .shop-actions { margin-top: 12px; display: flex; align-items: center; gap: 8px; }
-/* 12px 由 size="small" 给；"禁用灰"用 --el-text-color-disabled（el-text 的 5 个 type 里没有这一档） */
-.action-hint { --el-text-color: var(--el-text-color-disabled); }
+/* 12px 由 size="small" 给；"还没做"的灰用 type="info"（组件档位，不再钉 --el-text-color-disabled） */
 
 .log-card { margin-bottom: 12px; }
 
-.muted-dash { --el-text-color: var(--el-text-color-disabled); }
 </style>

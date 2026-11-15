@@ -43,7 +43,7 @@
           </el-image>
           <el-icon v-else :size="40"><Goods /></el-icon>
         </div>
-        <el-text class="name" tag="div" data-testid="home-product-card-name">{{ p.name }}</el-text>
+        <div class="name" data-testid="home-product-card-name">{{ p.name }}</div>
         <el-text class="cta" tag="div" size="small" type="primary">查看详情 →</el-text>
       </el-card>
       <el-empty v-if="!loading && !products.length" description="暂无商品" data-testid="home-empty" />
@@ -87,12 +87,14 @@ onMounted(async () => {
 .toolbar { display: flex; gap: 16px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
 .card { cursor: pointer; }
+/* 封面位只管尺寸与居中（height/flex/overflow 都是布局）；灰底、灰字、4px 圆角删掉 ——
+   没有图时 el-icon 用继承色就够，占位灰底纯装饰。 */
 .thumb {
-  height: 110px; background: #f0f2f5; border-radius: 4px; overflow: hidden;
-  display: flex; align-items: center; justify-content: center; color: #c0c4cc; margin-bottom: 10px;
+  height: 110px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center; margin-bottom: 10px;
 }
 .cover { width: 100%; height: 100%; }
-/* 14px 是 el-text 默认档；深色正文用 --el-text-color-primary（el-text 的 type 里没有"正文深色"这一档） */
-.name { min-height: 40px; --el-text-color: var(--el-text-color-primary); }
+/* 14px 是 el-text 默认档，字色也用默认 regular（不再钉 --el-text-color-primary） */
+.name { min-height: 40px; }
 .cta { margin-top: 8px; }
 </style>

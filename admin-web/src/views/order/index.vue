@@ -158,7 +158,7 @@
             状态只能靠审核/发货/收货等真实流程流转，所以编辑态直接不给改的入口。
           -->
           <div v-if="isEdit" class="readonly-block">
-            <el-text class="readonly-value" data-testid="order-form-status-readonly">{{ statusText[form.status] ?? '—' }}</el-text>
+            <span class="readonly-value" data-testid="order-form-status-readonly">{{ statusText[form.status] ?? '—' }}</span>
             <el-text class="form-hint" tag="div" size="small" type="warning" data-testid="order-form-status-hint">状态由审核/发货/收货等流程流转，不能在此修改</el-text>
           </div>
           <!-- 新建态保留下拉：createOrderViaUi 造单要指定初始状态 -->
@@ -1064,7 +1064,6 @@ onMounted(async () => {
 .drawer-toolbar { display: flex; justify-content: space-between; align-items: center; }
 .drawer-toolbar h4 { margin: 8px 0; }
 .readonly-block { display: flex; flex-direction: column; gap: 2px; }
-.readonly-value { --el-text-color: var(--el-text-color-primary); }
 .form-hint { line-height: 1.6; }
 .pkg-tag { cursor: pointer; }
 </style>

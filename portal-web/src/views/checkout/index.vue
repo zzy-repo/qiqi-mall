@@ -68,7 +68,7 @@
       </el-table>
 
       <div class="footer">
-        <el-text class="total" data-testid="checkout-total">应付：<el-text class="total-num" tag="b" type="danger">¥ {{ total }}</el-text></el-text>
+        <el-text class="total" data-testid="checkout-total">应付：<el-text class="total-num" tag="b" size="large" type="danger">¥ {{ total }}</el-text></el-text>
         <el-button
           type="primary"
           size="large"
@@ -184,5 +184,5 @@ onMounted(load)
 /* 12px + warning 字色全部由 el-text 的 size/type 表达，这里只剩位置 */
 .addr-hint { line-height: 1.6; margin: 0 0 12px 90px; }
 .footer { display: flex; justify-content: flex-end; align-items: center; gap: 16px; margin-top: 16px; }
-.total-num { --el-text-font-size: var(--el-font-size-large); }
+/* 金额 = el-text size="large"(16px) + tag="b" + type="danger"；不再钉 18px */
 </style>

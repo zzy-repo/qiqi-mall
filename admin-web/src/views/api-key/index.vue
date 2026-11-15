@@ -13,7 +13,7 @@
       <!-- 只显示前缀，永远不展示完整 key -->
       <el-table-column label="Key" min-width="150">
         <template #default="{ row }">
-          <span class="key-prefix">{{ row.keyPrefix ? `${row.keyPrefix}…` : '—' }}</span>
+          <el-text class="key-prefix" size="small">{{ row.keyPrefix ? `${row.keyPrefix}…` : '—' }}</el-text>
         </template>
       </el-table-column>
 
@@ -101,7 +101,7 @@
 
         <!-- 编辑时只能看前缀，不能改 key -->
         <el-form-item v-if="form.id" label="Key">
-          <span class="key-prefix">{{ form.keyPrefix ? `${form.keyPrefix}…` : '—' }}</span>
+          <el-text class="key-prefix" size="small">{{ form.keyPrefix ? `${form.keyPrefix}…` : '—' }}</el-text>
           <span class="muted key-hint">Key 本身不可修改</span>
         </el-form-item>
 
@@ -135,8 +135,8 @@
               :data-testid="`api-key-form-scope-group-${group.key}`"
             >
               <div class="scope-group-title">
-                <el-text class="scope-group-name">{{ group.title }}</el-text>
-                <span class="scope-group-count">{{ group.scopes.length }}</span>
+                <b class="scope-group-name">{{ group.title }}</b>
+                <el-tag class="scope-group-count" size="small" type="info" effect="plain">{{ group.scopes.length }}</el-tag>
               </div>
               <el-text class="scope-group-hint" tag="div" size="small" type="info">{{ group.hint }}</el-text>
 
@@ -225,7 +225,7 @@
         description="这是唯一一次显示该 Key 的明文，之后列表里只能看到前缀。丢失后只能删除重建。"
       />
       <el-card class="reveal-box" shadow="never" :body-style="revealBodyStyle">
-        <code class="reveal-value" data-testid="api-key-reveal-value">{{ revealKey }}</code>
+        <el-text class="reveal-value" tag="code" size="small" data-testid="api-key-reveal-value">{{ revealKey }}</el-text>
         <el-button type="primary" :icon="CopyDocument" data-testid="api-key-reveal-copy" @click="copyRevealKey">复制</el-button>
       </el-card>
       <template #footer>
@@ -531,33 +531,20 @@ onMounted(() => {
 
 <style scoped>
 .tip { margin-top: 10px; }
-.key-prefix { font-family: 'SFMono-Regular', Consolas, Monaco, monospace; font-size: 13px; }
+/* 只剩等宽字体（字号走 el-text 的 size="small"）—— 见白名单 C 组 */
+.key-prefix { font-family: 'SFMono-Regular', Consolas, Monaco, monospace; }
 .key-hint { margin-left: 8px; }
 .scope-tag { margin: 2px 6px 2px 0; }
 .scope-tag-more { cursor: default; }
 .scope-groups { width: 100%; }
 .scope-error { margin-bottom: 8px; }
-/* 13px 走 el-text 变量，灰字用 type="info" */
-.scope-loading { line-height: 22px; --el-text-font-size: var(--el-font-size-small); }
+.scope-loading { line-height: 22px; }
 .scope-group-block { margin-bottom: 10px; }
 .scope-group-block:last-child { margin-bottom: 0; }
 .scope-group-title { display: flex; align-items: center; gap: 6px; line-height: 20px; }
-/* 13px 走变量；600 是 el-text 唯一表达不了的一位（$text map 只有 font-size/color），保留 */
-.scope-group-name {
-  font-weight: 600;
-  --el-text-font-size: var(--el-font-size-small);
-  --el-text-color: var(--el-text-color-primary);
-  align-self: auto;
-}
-.scope-group-count {
-  min-width: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
-  background: #f0f2f5;
-  color: #909399;
-  font-size: 12px;
-  text-align: center;
-}
+/* 组名 = el-text tag="b" + size="small"；计数 = el-tag(size=small, type=info)。
+   原来计数是一个自绘气泡（9px 圆角 + #f0f2f5 底 + #909399 字 + 12px），等于手写了一遍 el-tag。 */
+.scope-group-count { margin-left: 2px; }
 .scope-group-hint { line-height: 18px; margin: 2px 0 4px; }
 /* 一行三个由 <el-col :span="8"> 决定；这里只把 el-checkbox 默认的 30px 右外边距归零，
    并让它铺满列宽。类挂在 el-checkbox 的根元素上，不是 :deep 撬内部。 */
@@ -566,20 +553,13 @@ onMounted(() => {
 
 .expires-row { width: 100%; }
 .preset-row { margin-top: 6px; display: flex; gap: 8px; }
-/* 容器 = el-card：底色/圆角走它的公开变量；行内布局走 :body-style。
-   ⚠️ 虚线边框无出口：card.scss:13 的 border 写死 1px solid，也没有 --el-card-border-style，
-   所以 dashed 这一行只能留着（见白名单反证）。 */
-.reveal-box {
-  margin-top: 14px;
-  border: 1px dashed var(--el-border-color);
-  --el-card-bg-color: var(--el-fill-color-light);
-  --el-card-border-radius: var(--el-border-radius-base);
-}
+/* 明文框就是一张普通 el-card（虚线/浅灰底/圆角都不再钉）。"请立即复制"的语义已经由
+   上面那条 el-alert(warning) 承担，卡片这里再喊一遍没有多给信息。 */
+.reveal-box { margin-top: 14px; }
+/* 只剩等宽字体一位（见白名单 C 组）；user-select:all 与 word-break 是"能不能抄"的行为约束 */
 .reveal-value {
   flex: 1;
   font-family: 'SFMono-Regular', Consolas, Monaco, monospace;
-  font-size: 13px;
-  color: #303133;
   word-break: break-all;
   user-select: all;
 }

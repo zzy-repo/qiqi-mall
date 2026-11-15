@@ -30,7 +30,7 @@
           :type="auditSegmentTag(e.segment)"
           :hollow="e.segment === 'AUDIT'"
         >
-          <el-card shadow="never" class="trail-card" :class="`trail-${e.segment.toLowerCase()}`">
+          <el-card shadow="never">
             <el-space :size="8">
               <el-tag :type="auditSegmentTag(e.segment)" size="small" effect="dark">
                 {{ auditSegmentText(e.segment) }}
@@ -282,32 +282,16 @@ watch(() => props.orderId, load)
 
 <style scoped>
 .audit-trail { width: 100%; }
-/* 图例条 = el-card：底色/边框/圆角全部走它的公开变量（card.scss:12-14 消费
-   --el-card-border-radius / -border-color / -bg-color，默认值见 common/var.scss:1245-1254）。
+/* 图例条 = 普通 el-card（原来把三个 --el-card-* 逐值钉成"改前那张图例卡"的样子，
+   于是它和本页其它 el-card 不是同一个圆角/底色 —— 本轮回退成组件默认）。
    行内布局走 :body-style（Card 的官方 Attributes），不能用 :deep 撬 .el-card__body。 */
-.trail-legend {
-  margin-bottom: 12px;
-  --el-card-bg-color: var(--el-fill-color-lighter);
-  --el-card-border-color: var(--el-border-color-lighter);
-  --el-card-border-radius: var(--el-border-radius-base);
-}
+.trail-legend { margin-bottom: 12px; }
 .trail-body { min-height: 40px; }
-.trail-card { border-left-width: 3px; }
-.trail-decision { border-left-color: #409eff; }
-.trail-status { border-left-color: #67c23a; }
-.trail-audit { border-left-color: #e6a23c; }
-/* 轨迹行 = el-text：13px 走 --el-text-font-size，深色正文走 --el-text-color-primary。
-   子元素（label/arrow）再用 type="info" 拿 secondary 灰；.value 不写任何类 ——
-   它直接继承父 el-text 的 13px + primary，正好与改前一致。 */
-.trail-line {
-  line-height: 22px;
-  --el-text-font-size: var(--el-font-size-small);
-  --el-text-color: var(--el-text-color-primary);
-}
-.trail-line .label,
-.trail-line .arrow {
-  --el-text-font-size: var(--el-font-size-small);
-}
+/* 卡片左边那条 3px 分段色边删掉了：段类型已经用同一套 type 编码了两次
+   （el-timeline-item 的圆点 :type + 段名 el-tag 的 type），第三次用色边纯属重复。 */
+/* 轨迹行 = el-text 默认档（14px + regular 灰）；label/arrow 用 type="info" 再淡一档。
+   原来整行钉成 13px + primary 墨色 —— 为追旧值让 el-text 在全站出现第 4 种字号，本轮回退。 */
+.trail-line { line-height: 22px; }
 .trail-line .arrow { margin: 0 4px; }
 /* 12px + secondary 灰都由 el-text 的 size/type 给 */
 .trail-detail { line-height: 20px; margin-top: 4px; word-break: break-all; }

@@ -1,7 +1,7 @@
 <template>
   <div class="login-page">
     <el-card class="login-card">
-      <el-text class="brand" tag="div">
+      <el-text class="brand" tag="b" size="large">
         <el-icon :size="24"><Shop /></el-icon>
         <span>七七商城</span>
       </el-text>
@@ -128,17 +128,16 @@ const submit = async () => {
 </script>
 
 <style scoped>
+/* 前台登录页去掉那条浅蓝渐变：两档 #eef4ff→#f7faff 肉眼几乎不分，纯装饰；
+   页面底色由 main.css 的 body(#f5f7fa) 承担，登录卡仍是白色 el-card。 */
 .login-page {
   min-height: 100vh; display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #eef4ff 0%, #f7faff 100%);
 }
 .login-card { width: 400px; padding: 8px 12px; }
-/* 18px = --el-font-size-large，墨色走 --qiqi-color-ink；字重 600 el-text 无 API，保留 */
+/* 品牌名 = el-text size="large"(16px) + tag="b"；不再钉 18px + 墨色 */
 .brand {
   display: flex; align-items: center; gap: 8px; justify-content: center;
-  font-weight: 600; margin-bottom: 12px;
-  --el-text-font-size: var(--el-font-size-large);
-  --el-text-color: var(--qiqi-color-ink);
+  margin-bottom: 12px;
 }
 .submit { width: 100%; margin-top: 8px; }
 .error { margin-bottom: 12px; }

@@ -4,7 +4,7 @@
     <el-aside :width="isCollapse ? '64px' : '220px'" class="layout-aside">
       <div class="logo">
         <el-icon :size="24" color="#fff"><Shop /></el-icon>
-        <el-text v-show="!isCollapse" class="logo-text">七七商城</el-text>
+        <el-text v-show="!isCollapse" class="logo-text" tag="b" size="large">七七商城</el-text>
       </div>
       <el-menu
         :default-active="activeMenu"
@@ -179,14 +179,13 @@ const breadcrumbs = computed(() => {
   gap: 10px;
   padding: 0 18px;
   background: #16222e;
-  color: #fff;
+  /* 文字不换行：折叠到 64px 时 logo 文字必须留在一行被 overflow 裁掉，
+     换行会把它挤成 3 行、撑破 56px 的条。这是布局约束，不是外观。 */
   white-space: nowrap;
 }
-/* 17px 走 el-text 的公开变量；白字 + 600 + 字距 el-text 都表达不了（$text map 只有 font-size/color），保留 */
+/* 只剩"白字"一位：el-text 的 5 个 type 里没有白色（深色侧栏上必须白），
+   也不该为了白字去改全局 --el-text-color。字号用 size="large" 标准档、字重用 tag="b"。 */
 .logo-text {
-  font-weight: 600;
-  letter-spacing: 1px;
-  --el-text-font-size: 17px;
   --el-text-color: var(--el-color-white);
 }
 /* el-menu 的下边框走自己的公开变量（menu.scss:54 用 --el-menu-border-color），
@@ -206,8 +205,7 @@ const breadcrumbs = computed(() => {
   padding: 0 20px;
 }
 .header-left { display: flex; align-items: center; gap: 16px; }
-.collapse-btn { cursor: pointer; color: #606266; }
-.collapse-btn:hover { color: #409eff; }
+.collapse-btn { cursor: pointer; }
 .header-right { display: flex; align-items: center; gap: 18px; }
 /* 这里原来有 outline: none —— 那是把键盘焦点环抹掉，属于 a11y 反模式，已按裁决删除。
    现在 el-dropdown 的触发器在键盘聚焦时会显示焦点环，这是修复而不是退化。 */
@@ -217,8 +215,6 @@ const breadcrumbs = computed(() => {
   gap: 8px;
   cursor: pointer;
 }
-/* 14px 是 el-text 默认档；深色正文用它的变量（type 五档里没有"正文深"这一档） */
-.user-name { --el-text-color: var(--el-text-color-primary); }
 .layout-main {
   padding: 20px;
   background: #f5f7fa;

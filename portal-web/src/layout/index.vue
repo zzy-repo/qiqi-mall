@@ -11,23 +11,23 @@
 
         <nav class="nav">
           <router-link to="/" custom v-slot="{ href, navigate }">
-            <el-link class="nav-item" :class="{ active: route.path === '/' }" :href="href" underline="never" @click="navigate">首页</el-link>
+            <el-link class="nav-item" :type="route.path === '/' ? 'primary' : 'default'" :href="href" underline="never" @click="navigate">首页</el-link>
           </router-link>
           <router-link to="/cart" custom v-slot="{ href, navigate }">
-            <el-link class="nav-item" :class="{ active: route.path === '/cart' }" :href="href" underline="never" @click="navigate">
-              购物车<span v-if="cartCount" class="badge">{{ cartCount }}</span>
+            <el-link class="nav-item" :type="route.path === '/cart' ? 'primary' : 'default'" :href="href" underline="never" @click="navigate">
+              购物车<el-tag v-if="cartCount" class="badge" size="small" type="danger" effect="dark" round>{{ cartCount }}</el-tag>
             </el-link>
           </router-link>
           <router-link to="/orders" custom v-slot="{ href, navigate }">
-            <el-link class="nav-item" :class="{ active: route.path === '/orders' }" :href="href" underline="never" @click="navigate">我的订单</el-link>
+            <el-link class="nav-item" :type="route.path === '/orders' ? 'primary' : 'default'" :href="href" underline="never" @click="navigate">我的订单</el-link>
           </router-link>
           <router-link to="/addresses" custom v-slot="{ href, navigate }">
-            <el-link class="nav-item" :class="{ active: route.path === '/addresses' }" :href="href" underline="never" @click="navigate">收货地址</el-link>
+            <el-link class="nav-item" :type="route.path === '/addresses' ? 'primary' : 'default'" :href="href" underline="never" @click="navigate">收货地址</el-link>
           </router-link>
         </nav>
 
         <div class="right">
-          <el-text v-if="logged" class="hello" data-testid="header-nickname">你好，{{ displayName }}</el-text>
+          <el-text v-if="logged" class="hello" size="small" data-testid="header-nickname">你好，{{ displayName }}</el-text>
           <template v-if="logged">
             <el-button link type="primary" data-testid="header-logout" @click="logout">退出</el-button>
           </template>
@@ -93,35 +93,17 @@ onMounted(refreshCartCount)
   max-width: 1180px; margin: 0 auto; height: 60px;
   display: flex; align-items: center; gap: 32px; padding: 0 16px;
 }
-/* 品牌与导航的字号/字重/字色，全部由 el-link 的公开变量表达（link.scss:22-24 消费
-   --el-link-font-size/-font-weight/-text-color；定义见 common/var.scss:1480-1490）。
-   --el-link-hover-text-color 也钉回原色：改前悬停不变色，不钉就会变成 el-link 默认的主色。 */
+/* 品牌与导航的 el-link 不再覆盖任何一个 --el-link-* 变量：全站 el-link 一个样子（14px / 500 / regular，
+   悬停变主色）。「当前在哪一页」不再靠钉 color+weight，而是 el-link 的 type prop（当前页 = type="primary"）。
+   原来这里钉了 4+4+3 条变量，好处只是"和改前逐像素一样"。 */
 .logo {
   display: flex; align-items: center; gap: 6px;
-  --el-link-font-size: var(--el-font-size-large);
-  --el-link-font-weight: 600;
-  --el-link-text-color: var(--qiqi-color-ink);
-  --el-link-hover-text-color: var(--qiqi-color-ink);
 }
 .nav { display: flex; gap: 20px; flex: 1; }
-.nav-item {
-  padding: 4px 0;
-  --el-link-font-size: var(--el-font-size-base);
-  --el-link-font-weight: 400;
-  --el-link-text-color: var(--el-text-color-regular);
-  --el-link-hover-text-color: var(--el-text-color-regular);
-}
-.nav-item.active {
-  --el-link-text-color: var(--el-color-primary);
-  --el-link-font-weight: 600;
-  --el-link-hover-text-color: var(--el-color-primary);
-}
-.badge {
-  background: #f56c6c; color: #fff; font-size: 11px; border-radius: 8px;
-  padding: 0 5px; margin-left: 3px;
-}
+.nav-item { padding: 4px 0; }
+/* 购物车角标 = el-tag（danger dark round）：红底白字就是 el-tag 的语义色，不再自绘胶囊 */
+.badge { margin-left: 3px; }
 .right { display: flex; align-items: center; gap: 10px; }
-/* 13px 走 el-text 的官方变量（--el-font-size-small 就是 13px）；字色用 el-text 默认的 regular。 */
-.hello { --el-text-font-size: var(--el-font-size-small); }
+/* 12px 走 size="small"；字色用 el-text 默认的 regular */
 .content { max-width: 1180px; margin: 0 auto; padding: 20px 16px 40px; }
 </style>

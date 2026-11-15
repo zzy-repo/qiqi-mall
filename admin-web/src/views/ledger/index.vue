@@ -106,14 +106,14 @@
 
       <el-table-column label="原因" min-width="200">
         <template #default="{ row }">
-          <el-text class="ledger-strong" tag="div">{{ reasonText(row.reason) }}</el-text>
+          <div class="ledger-strong">{{ reasonText(row.reason) }}</div>
           <div v-if="row.reasonDetail" class="muted">{{ row.reasonDetail }}</div>
         </template>
       </el-table-column>
 
       <el-table-column label="操作人" width="150">
         <template #default="{ row }">
-          <el-text class="ledger-strong" tag="div">{{ row.operatorName || '—' }}</el-text>
+          <div class="ledger-strong">{{ row.operatorName || '—' }}</div>
           <el-tag :type="operatorTypeTag(row.operatorType)" size="small" effect="plain">
             {{ operatorTypeText(row.operatorType) }}
           </el-tag>
@@ -122,7 +122,7 @@
 
       <el-table-column label="摘要" min-width="220">
         <template #default="{ row }">
-          <el-text class="ledger-strong" tag="div">{{ row.summary || '—' }}</el-text>
+          <div class="ledger-strong">{{ row.summary || '—' }}</div>
           <div v-if="row.refType || row.refId" class="muted">
             关联：{{ row.refType || '—' }}#{{ row.refId ?? '—' }}
           </div>
@@ -373,6 +373,6 @@ onMounted(load)
 <style scoped>
 .filters { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 .tip { margin-top: 10px; line-height: 1.7; }
-/* 台账正文比表格默认字色深一档：#303133 不是 el-text 的任何一个 type，只能自己给 */
-.ledger-strong { --el-text-color: var(--el-text-color-primary); }
+/* 台账正文不再钉深一档：#303133 与 el-text 默认的 regular 差一档灰，
+   为追这一档让 el-text 在本页与别页不同不值得 —— 表格里并列的 <span> 仍是 #303133。 */
 </style>

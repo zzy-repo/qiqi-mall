@@ -12,23 +12,40 @@
             <el-icon v-else :size="60"><Goods /></el-icon>
           </div>
           <div v-if="gallery.length" class="gallery">
-            <el-image
+            <!-- 每个缩略图 = 一张 el-card：边框/圆角走组件默认，选中态只改 --el-card-border-color
+                 （公开变量）。原来是自己写 2px 透明边框 + .active 改 border-color，
+                 等于手写了一遍"卡片的边框"。 -->
+            <el-card
               v-for="g in gallery"
               :key="g.id"
-              :src="g.url"
-              data-testid="product-detail-gallery-item"
               class="gallery-item"
               :class="{ active: g.id === activeGallery }"
-              fit="cover"
+              shadow="never"
+              :body-style="{ padding: '0' }"
+              data-testid="product-detail-gallery-item"
               @click="activeGallery = g.id"
             >
-              <template #error><div class="gallery-fallback">无图</div></template>
-            </el-image>
+              <el-image :src="g.url" class="gallery-img" fit="cover">
+                <template #error><el-text class="gallery-fallback" size="small" type="info">无图</el-text></template>
+              </el-image>
+            </el-card>
           </div>
         </div>
         <div class="info">
-          <el-text class="name" tag="h2" data-testid="product-detail-name">{{ product.name }}</el-text>
-          <el-text class="price" tag="div" type="danger" data-testid="product-detail-price">¥ {{ currentSku ? Number(currentSku.price).toFixed(2) : '—' }}</el-text>
+          <el-text class="name" tag="h2" size="large" data-testid="product-detail-name">{{ product.name }}</el-text>
+          <!-- 价格 = el-statistic：与全站指标数字同一档（20px），比正文（14px）显著大，但不自造字号。
+               红色是 C 类保留：el-statistic 没有 type prop，只能走 --el-statistic-content-color。
+               group-separator="" 是数据语义：价格要逐字符核，且 e2e 按 Number(price).toFixed(2) 字面比对。 -->
+          <el-statistic
+            v-if="currentSku"
+            class="price"
+            :value="Number(currentSku.price)"
+            :precision="2"
+            prefix="¥ "
+            group-separator=""
+            data-testid="product-detail-price"
+          />
+          <el-text v-else class="price" tag="b" size="large" type="danger" data-testid="product-detail-price">—</el-text>
           <div class="specs">
             <el-text class="label" type="info">规格：</el-text>
             <el-radio-group v-model="skuId">
@@ -44,7 +61,7 @@
           </div>
           <div class="desc" v-if="product.description">
             <el-text class="label" type="info">商品描述：</el-text>
-            <el-text class="desc-text" tag="p" data-testid="product-detail-desc">{{ product.description }}</el-text>
+            <p class="desc-text" data-testid="product-detail-desc">{{ product.description }}</p>
           </div>
           <div class="qty">
             <el-text class="label" type="info">数量：</el-text>
@@ -184,27 +201,31 @@ onMounted(load)
 .detail { margin-top: 16px; }
 .head { display: flex; gap: 24px; }
 .left { display: flex; flex-direction: column; gap: 8px; }
+/* 主图位：只管尺寸与居中（灰底/圆角删掉——占位色由 el-icon 的继承色表达） */
 .thumb {
-  width: 220px; height: 220px; background: #f0f2f5; border-radius: 6px; overflow: hidden;
-  display: flex; align-items: center; justify-content: center; color: #c0c4cc;
+  width: 220px; height: 220px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
 }
-.cover { width: 100%; height: 100%; }
-.gallery-fallback { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: #f0f2f5; color: #c0c4cc; font-size: 11px; }
+.cover, .gallery-img { width: 100%; height: 100%; display: block; }
+.gallery-fallback { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 .gallery { display: flex; gap: 6px; width: 220px; overflow-x: auto; }
-.gallery-item {
-  width: 48px; height: 48px; object-fit: cover; border-radius: 4px;
-  border: 2px solid transparent; cursor: pointer;
+/* 缩略图 = el-card：48px 是布局，圆角/边框走组件默认 */
+.gallery-item { width: 48px; height: 48px; cursor: pointer; }
+/* 「当前主图是哪张」这个信息必须有指示器（相册里没有别的指示）；做法是把卡片边框改成主色，
+   用的是 el-card 的公开变量，不是自写边框。 */
+.gallery-item.active { --el-card-border-color: var(--el-color-primary); }
+/* 标题 = el-text size="large"(16px) + <h2> 标签语义；原来是钉死的 20px（EP 最大档是 16） */
+.name { margin: 0 0 12px; }
+/* 价格 = el-statistic 默认档（20px / 400），与全站其它数字同一个样子；
+   只留一条 C 类覆盖：红色（el-statistic 无 type prop，价格在电商里必须是红的）。 */
+.price {
+  display: block;
+  margin-bottom: 16px;
+  --el-statistic-content-color: var(--el-color-danger);
 }
-.gallery-item.active { border-color: #409eff; }
-/* 标题 20px = --el-font-size-extra-large；字重 600 承自 <h2> 标签语义 */
-.name { margin: 0 0 12px; --el-text-font-size: var(--el-font-size-extra-large); }
-/* 价格 24px：EP 字号档里没有 24，走 el-text 官方变量；红字用 type="danger"。
-   字重 600 是 el-text 唯一表达不了的一位（$text 只有 font-size/color），保留一行自有声明。 */
-.price { margin-bottom: 16px; font-weight: 600; --el-text-font-size: 24px; }
 .specs, .qty { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
 /* 13px 走 el-text 变量，灰字用 type="info"；align-self:auto 保住 flex 的原有对齐 */
-.label { --el-text-font-size: var(--el-font-size-small); align-self: auto; }
-.stock { margin-left: 8px; --el-text-font-size: var(--el-font-size-small); align-self: auto; }
+.stock { margin-left: 8px; }
 .desc { display: flex; gap: 8px; margin-bottom: 16px; align-items: flex-start; }
-.desc-text { margin: 0; line-height: 1.7; --el-text-font-size: var(--el-font-size-small); }
+.desc-text { margin: 0; line-height: 1.7; }
 </style>

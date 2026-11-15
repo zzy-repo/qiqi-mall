@@ -13,7 +13,7 @@
     </div>
     <div v-if="inner" class="preview">
       <el-image :src="inner" fit="cover" class="thumb">
-        <template #error><el-text class="err">无法加载</el-text></template>
+        <template #error><el-text type="info">无法加载</el-text></template>
       </el-image>
     </div>
   </div>
@@ -69,11 +69,6 @@ const doUpload = async ({ file }) => {
 .uploader { width: 100%; }
 .row { display: flex; gap: 8px; width: 100%; }
 .preview { margin-top: 8px; }
-.thumb { width: 72px; height: 72px; border-radius: 4px; border: 1px solid #ebeef5; }
-/* 11px 与"禁用灰"都没有 el-text 的字号档/type 档，但两者都是它的公开变量：
-   --el-text-font-size（$text map 的 font-size）+ --el-text-color（$text map 的 color）。 */
-.err {
-  --el-text-font-size: var(--qiqi-font-size-xs);
-  --el-text-color: var(--el-text-color-disabled);
-}
+/* 缩略图尺寸是布局；圆角/边框删掉（el-image 无此属性，为它钉两条自有样式不值） */
+.thumb { width: 72px; height: 72px; }
 </style>

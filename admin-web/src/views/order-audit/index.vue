@@ -18,97 +18,31 @@
       </div>
     </template>
 
-    <!-- 筛选器：既是筛选器也是计数（点一下只看这一类，再点一下取消）
+    <!-- 筛选器 = 单选控件：同一时刻只筛一个结局（+「全部」），标准组件就是 el-radio-group。
          ------------------------------------------------------------------
-         这一排要的语义恰好就是 el-tag 的两条轴，所以外观全部交给组件：
-           · type   → 一档一色：AUTO_PASS success / MANUAL warning / BLOCKED danger / NO_MATCH info
-                      （FROZEN 紫：EP 的 type 没有紫档 → 用公开的 --el-tag-* 变量补，见 status.js）
-           · effect → 两态：plain（未选中：白底 + 本色边 + dark-2 字）／dark（选中：实心彩底 + 白字）
-                      plain 的两个色槽要拨回深一档，否则 12px 本色字白底只有 2.2:1、读不清 → 见 status.js
-           · size="large" + round → 32px 高、圆头的胶囊（EP 的圆角是 --el-tag-border-radius-rounded）
-         上一轮审计的结论是「EP 实现不了这排五色胶囊」，于是退回 6 条变量规则的自有样式 —— **那是错的**：
-         当时只看了 el-segmented（单指示器、挂不住 testid）和 el-check-tag（未选中一律中性灰），
-         漏了 el-tag。el-tag 的 type 正好五档、effect 正好两态，两个状态都保住五色。
-         「全部」是中性档：不占五色里的任何一档，也不与 NO_MATCH 的灰撞色（用 type=info 会撞），
-         所以同样用 --el-tag-* 变量补一对深灰/白。
-         el-tag 不是表单控件：可点、可 Tab、可回车空格、可读屏，这四件事要自己补 props（见下）。 -->
-    <div class="chips" data-testid="audit-queue-chips">
-      <el-tag
-        class="chip"
-        size="large"
-        round
-        :effect="!query.result ? 'dark' : 'plain'"
-        :style="!query.result ? ALL_CHIP_ACTIVE_STYLE : ALL_CHIP_STYLE"
-        role="button"
-        tabindex="0"
-        :aria-pressed="!query.result"
-        data-testid="audit-chip-all"
-        @click="setFilter(null)"
-        @keydown.enter.prevent="setFilter(null)"
-        @keydown.space.prevent="setFilter(null)"
-      >全部 <b>{{ counts.all }}</b></el-tag>
-
-      <el-tag
-        v-for="chip in headChips"
-        :key="chip.result"
-        class="chip"
-        size="large"
-        round
-        :type="auditResultTag(chip.result)"
-        :effect="query.result === chip.result ? 'dark' : 'plain'"
-        :style="chipStyle(chip.result, query.result === chip.result)"
-        role="button"
-        tabindex="0"
-        :aria-pressed="query.result === chip.result"
-        :data-testid="`audit-chip-${chip.result}`"
-        :data-result="chip.result"
-        @click="setFilter(chip.result)"
-        @keydown.enter.prevent="setFilter(chip.result)"
-        @keydown.space.prevent="setFilter(chip.result)"
-      >{{ chip.label }} <b>{{ counts[chip.result] }}</b></el-tag>
-
-      <!-- 「被拦」展开两支：阻止（运营谈单）与冻结（客服跟进）处理人不同，必须分开派活 -->
-      <span class="chip-group" data-testid="audit-chip-BLOCKED_GROUP">
-        <el-text class="chip-group-label">被拦</el-text>
-        <el-tag
-          v-for="chip in blockedChips"
+         为什么不用 el-tag 当选择器（上一版的做法）：el-tag 是"标签"，不是表单控件 ——
+           · 语义不对（不是 label，是 filter）；
+           · plain 态的本色字压白底只有 2.2~3.1:1（绿 2.24 / 黄 2.19 / 红 2.90 / 灰 3.08），12px 读着费劲。
+         换成 el-radio-button 之后：键盘 / 读屏 / 互斥分组全部由组件给，一行 props 都不用补，
+         未选中态是白底深灰字（实测 6.11:1，改前是彩字 2.19~3.08:1，这是净改善）。
+         选中态是 EP 的主色实底白字（实测 2.78:1）—— 这是**全站 `el-button type="primary"` 同一个值**，
+         属 EP 主色本身的全局对比度问题，不是这一排引入的；要修就统一改主色或加深档，不在这里单独打补丁。
+         代价：整排不再五色 —— 但五色已经在表格的「判定」徽标上编码过一次，筛选器不必再编码一遍。
+         「被拦」不再单独圈一个分组框：阻止、冻结仍相邻（顺序 = 全部/自动过审/留人工/阻止/冻结/不命中，
+         与改造前一致），相邻本身就表达了"同属被拦"，右边那行小字再说明两者处理人不同。
+           （在单选组里套一个带标题的容器，会把"一整条分段控件"打成两块，反而更乱。） -->
+    <div class="chips">
+      <el-radio-group v-model="chipValue" size="large" data-testid="audit-queue-chips">
+        <el-radio-button value="" data-testid="audit-chip-all">全部 <b>{{ counts.all }}</b></el-radio-button>
+        <el-radio-button
+          v-for="chip in filterChips"
           :key="chip.result"
-          class="chip"
-          size="large"
-          round
-          :type="auditResultTag(chip.result)"
-          :effect="query.result === chip.result ? 'dark' : 'plain'"
-          :style="chipStyle(chip.result, query.result === chip.result)"
-          role="button"
-          tabindex="0"
-          :aria-pressed="query.result === chip.result"
+          :value="chip.result"
+          :title="auditResultHint(chip.result)"
           :data-testid="`audit-chip-${chip.result}`"
           :data-result="chip.result"
-          :title="auditResultHint(chip.result)"
-          @click="setFilter(chip.result)"
-          @keydown.enter.prevent="setFilter(chip.result)"
-          @keydown.space.prevent="setFilter(chip.result)"
-        >{{ chip.label }} <b>{{ counts[chip.result] }}</b></el-tag>
-      </span>
-
-      <el-tag
-        v-for="chip in tailChips"
-        :key="chip.result"
-        class="chip"
-        size="large"
-        round
-        :type="auditResultTag(chip.result)"
-        :effect="query.result === chip.result ? 'dark' : 'plain'"
-        :style="chipStyle(chip.result, query.result === chip.result)"
-        role="button"
-        tabindex="0"
-        :aria-pressed="query.result === chip.result"
-        :data-testid="`audit-chip-${chip.result}`"
-        :data-result="chip.result"
-        @click="setFilter(chip.result)"
-        @keydown.enter.prevent="setFilter(chip.result)"
-        @keydown.space.prevent="setFilter(chip.result)"
-      >{{ chip.label }} <b>{{ counts[chip.result] }}</b></el-tag>
+        >{{ chip.label }} <b>{{ counts[chip.result] }}</b></el-radio-button>
+      </el-radio-group>
 
       <el-text size="small" type="info" class="chip-note">
         阻止 = 拦截下单，需人工联系客户；冻结 = 已打标等客服处理
@@ -170,7 +104,6 @@
         <template #default="{ row }">
           <el-tag
             :type="auditResultTag(row.result)"
-            :style="auditResultStyle(row.result)"
             effect="dark"
             size="small"
             data-testid="audit-row-badge"
@@ -189,7 +122,7 @@
                  reason-sub  → size=small(12px) + type=info(#909399)，与原来一字不差
                只有 would-be 的「斜体+左竖线」和 stock-warn 的 11px 是 EP 表达不了的，留在样式块里。 -->
           <div class="reason-cell">
-            <el-text class="reason-main" data-testid="audit-row-reason">{{ reasonHead(row) }}</el-text>
+            <el-text data-testid="audit-row-reason">{{ reasonHead(row) }}</el-text>
             <!-- .reason-sub 这个类名别改：e2e 的 support/audit-ui.js reasonSubOf() 用它定位这一行 -->
             <el-text size="small" type="info" class="reason-sub">{{ row.reason || '—' }}</el-text>
             <!-- QT-1004 的核心叙事：策略条件其实满足了，只是被前一条策略先拦下 —— 必须看得见 -->
@@ -270,7 +203,6 @@
         <div class="why-head">
           <el-tag
             :type="auditResultTag(whyRow.result)"
-            :style="auditResultStyle(whyRow.result)"
             effect="dark"
             size="small"
             data-testid="audit-why-badge"
@@ -290,9 +222,9 @@
         <el-text v-if="otherGatesText(whyRow)" size="small" type="danger" class="why-line" data-testid="audit-why-other-gates">
           {{ otherGatesText(whyRow) }}
         </el-text>
-        <div class="why-reason">{{ whyRow.reason || '后端没有给出原因' }}</div>
+        <el-alert class="why-reason" type="info" :closable="false" :title="whyRow.reason || '后端没有给出原因'" />
 
-        <el-text class="why-meta" tag="div">
+        <div class="why-meta">
           <span>应收 {{ money(whyRow.totalAmount) }}</span>
           <span>商品种类数 {{ whyRow.itemKindCount ?? '—' }}</span>
           <span>毛利 {{ money(whyRow.grossProfit) }}</span>
@@ -300,7 +232,7 @@
           <el-tag size="small" :type="whySource === 'BACKEND' ? 'success' : 'info'" effect="plain" data-testid="audit-why-source">
             {{ whySource === 'BACKEND' ? '结论取自后端留痕' : '本地对照（队列未回传条件留痕）' }}
           </el-tag>
-        </el-text>
+        </div>
 
         <el-empty v-if="!whyGroups.length" description="这类结论没有可对照的策略（例如未参与本轮）" />
 
@@ -354,7 +286,7 @@
             </el-table-column>
             <el-table-column label="" width="120" fixed="right" align="center">
               <template #default="{ row }">
-                <span v-if="row.status === 'unsatisfied'" class="why-mark" data-testid="audit-why-mark">← 差在哪</span>
+                <el-text v-if="row.status === 'unsatisfied'" class="why-mark" tag="b" type="danger" data-testid="audit-why-mark">← 差在哪</el-text>
                 <span v-else-if="row.status === 'unevaluated'" class="muted">—</span>
               </template>
             </el-table-column>
@@ -363,19 +295,18 @@
       </template>
 
       <!-- 全局排除：不分策略，判定时并入每条自动策略；留人工的单很多就是被它挡掉的 -->
-      <el-card
+      <el-alert
         v-if="whyTargets.length && globalExclusions.length"
         class="why-global"
-        shadow="never"
-        :body-style="whyGlobalBodyStyle"
+        type="warning"
+        title="全局排除"
+        :closable="false"
+        show-icon
         data-testid="audit-why-global"
       >
-        <div class="why-group-head">
-          <el-text tag="b">全局排除</el-text>
-          <el-text class="muted">以下条件对每条自动策略一并求值：任一条成立，那条策略就被排除（结论转人工）</el-text>
-        </div>
+        <el-text class="muted" tag="div">以下条件对每条自动策略一并求值：任一条成立，那条策略就被排除（结论转人工）</el-text>
         <el-text v-for="g in globalExclusions" :key="`g-${g.seq}`" class="why-backend-line" tag="div">· 排除：{{ condText(g) }}</el-text>
-      </el-card>
+      </el-alert>
 
       <template #footer>
         <div class="why-footer">
@@ -401,7 +332,7 @@
             <el-descriptions-item label="单号">{{ orderRow.orderSn }}</el-descriptions-item>
             <el-descriptions-item label="第几轮">第 {{ orderRow.roundNo ?? '—' }} 轮</el-descriptions-item>
             <el-descriptions-item label="判定">
-              <el-tag :type="auditResultTag(orderRow.result)" :style="auditResultStyle(orderRow.result)" effect="dark" size="small">
+              <el-tag :type="auditResultTag(orderRow.result)" effect="dark" size="small">
                 {{ auditResultText(orderRow.result) }}
               </el-tag>
             </el-descriptions-item>
@@ -430,7 +361,7 @@
           <template #default="{ row }"><el-text type="danger">{{ row.blocked }}</el-text></template>
         </el-table-column>
         <el-table-column label="冻结" width="80" align="right">
-          <template #default="{ row }"><el-text class="c-frozen">{{ row.frozen }}</el-text></template>
+          <template #default="{ row }"><el-text tag="b">{{ row.frozen }}</el-text></template>
         </el-table-column>
         <el-table-column label="不命中" width="90" align="right">
           <template #default="{ row }"><el-text type="info">{{ row.noMatch }}</el-text></template>
@@ -469,7 +400,7 @@ import { auditPassDryRun, auditPassOrder } from '../../api/delivery'
 import { useDangerConfirm } from '../../composables/useDangerConfirm'
 import { explainRow, policiesForResult, expectedText } from '../../composables/useAuditExplain'
 import {
-  AUDIT_RESULT_TEXT, auditResultText, auditResultTag, auditResultStyle, auditResultPlainStyle, auditResultHint,
+  AUDIT_RESULT_TEXT, auditResultText, auditResultTag, auditResultHint,
   auditOpText, auditTriggerText
 } from '../../constants/status'
 
@@ -501,42 +432,35 @@ const stampMessageBoxButtons = (customClass, { confirm, cancel } = {}) => {
   tryStamp()
 }
 
-/** 四类结局（被拦拆成 阻止 / 冻结两支，所以共 5 个可筛选 chip） */
-const headChips = [
-  { result: 'AUTO_PASS', label: AUDIT_RESULT_TEXT.AUTO_PASS },
-  { result: 'MANUAL', label: AUDIT_RESULT_TEXT.MANUAL }
-]
-const tailChips = [{ result: 'NO_MATCH', label: AUDIT_RESULT_TEXT.NO_MATCH }]
-const blockedChips = [
-  { result: 'BLOCKED', label: AUDIT_RESULT_TEXT.BLOCKED },
-  { result: 'FROZEN', label: AUDIT_RESULT_TEXT.FROZEN }
-]
-
 /**
- * 胶囊的两态配色：选中 = el-tag 的 dark，未选中 = plain。
- * 两支的差别只有"底色/色槽档位"，都是 el-tag 官方公开变量（--el-tag-*），不碰内部类名：
- *   dark  ：实心彩底 + 白字（status.js 的 auditResultStyle）
- *   plain ：白底 + 本色边 + dark-2 字（status.js 的 auditResultPlainStyle —— 拨回深一档，白底上读得清）
- */
-const chipStyle = (result, active) => (active ? auditResultStyle(result) : auditResultPlainStyle(result))
-
-/**
- * 「全部」= 中性深灰档（五色之外的第 6 档）。
+ * 筛选器的五个可选结局（「全部」= 空值，直接写在模板里）。
  *
- * 为什么不给 type=info：info 的灰就是 NO_MATCH 的灰，选中时两支会长得一模一样，
- * 而「全部」和「不命中」恰恰是最需要分开的两个选项。深灰（--el-text-color-primary）不占五色里的任何一档。
- * 三个变量都是 el-tag 公开的定制口，不碰内部类名。
+ * ⚠️ 顺序是**沿用旧版**的：全部 → 自动过审 → 留人工 → 阻止 → 冻结 → 不命中。
+ * 它按"判定链的严重度"排（先被拦的、后不命中的），从改造前到现在一直没变，不该顺手改；
+ * 而且「阻止」「冻结」相邻本身就是原来那个虚线分组框想表达的意思（同属被拦、处理人不同），
+ * 顺序已经够了，不必再套一层容器。
  */
-const ALL_CHIP_STYLE = {
-  '--el-tag-bg-color': 'var(--el-fill-color-blank)',
-  '--el-tag-border-color': 'var(--el-border-color)',
-  '--el-tag-text-color': 'var(--el-text-color-primary)'
-}
-const ALL_CHIP_ACTIVE_STYLE = {
-  '--el-tag-bg-color': 'var(--el-text-color-primary)',
-  '--el-tag-border-color': 'var(--el-text-color-primary)',
-  '--el-tag-text-color': 'var(--el-color-white)'
-}
+const filterChips = [
+  { result: 'AUTO_PASS', label: AUDIT_RESULT_TEXT.AUTO_PASS },
+  { result: 'MANUAL', label: AUDIT_RESULT_TEXT.MANUAL },
+  { result: 'BLOCKED', label: AUDIT_RESULT_TEXT.BLOCKED },
+  { result: 'FROZEN', label: AUDIT_RESULT_TEXT.FROZEN },
+  { result: 'NO_MATCH', label: AUDIT_RESULT_TEXT.NO_MATCH }
+]
+
+/**
+ * 筛选值 ⇄ query.result 的桥：el-radio-group 的 v-model 用 '' 表示「全部」，
+ * 而"不筛"在请求参数里必须是 null（'' 会被后端当成一个不存在的结局）。
+ * set 里顺手做原来 setFilter 的两件事（回到第 1 页 + 重新拉队列），所以模板不必再绑 @change。
+ */
+const chipValue = computed({
+  get: () => query.result || '',
+  set: (v) => {
+    query.result = v || null
+    query.page = 1
+    loadQueue()
+  }
+})
 
 const rows = ref([])
 const total = ref(0)
@@ -741,12 +665,6 @@ const loadPolicies = async () => {
   }
 }
 
-const setFilter = (result) => {
-  query.result = query.result === result ? null : result
-  query.page = 1
-  loadQueue()
-}
-
 const onSizeChange = () => {
   query.page = 1
   loadQueue()
@@ -796,9 +714,6 @@ const openWhy = (row) => {
 }
 
 /** 抽屉里要对照的策略：按结局选类别（阻止看 BLOCK，冻结看 EXCEPTION，其余看 AUTO） */
-/* 全局排除块的内距：走 Card 的 body-style（官方 Attributes） */
-const whyGlobalBodyStyle = { padding: '10px 12px' }
-
 const whyTargets = computed(() => policiesForResult(whyRow.value?.result, policies.value))
 
 /**
@@ -976,79 +891,50 @@ onMounted(() => {
 /* 与全局 .header-tip 只差一个左边距：字号/字色已在 main.css */
 .card-header .header-tip { margin-left: 10px; }
 
-/* ---- 筛选器：外观全在 el-tag 里，这里只留三件组件表达不了的事 ----
- * 上一轮这里是一整套自有胶囊样式（.chip 的边框/底色/字色/圆角 + 5 条 --chip-c/--chip-d 变量对
- * + .chip-active 选中态，共 6 条变量规则），已被 el-tag 的 type × effect 取代，全部删掉。
- * 剩下两行只描述布局与交互，没有一条颜色/边框/字号：
- *   gap        el-tag 没有"文字与计数之间"的间距语义（--el-tag-* 里没有 gap），只能给容器补；
- *   cursor     el-tag 是标签不是按钮，不写就还是默认箭头，看不出可点；
- *   user-select 连点两下取消筛选时不要把标签文字选中。 */
+/* ---- 筛选器：外观全部由 el-radio-group / el-radio-button 给，这里只有布局 ----
+ * 分段控件自带：选中态 primary 实底白字、相邻按钮合并边框、圆角、间距、键盘焦点环。
+ * gap 是"控件与小字说明之间"的间距（组件内部按钮之间不该有 gap，否则合并边框会断）。 */
 .chips { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
-.chip { gap: 8px; cursor: pointer; user-select: none; }
 
-/* 「被拦」把阻止/冻结圈在一起：处理人不同必须分两支，但同属被拦 */
-.chip-group {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 10px; border-radius: 18px;
-  background: var(--el-color-warning-light-9);
-  border: 1px dashed var(--el-color-warning-light-5);
-}
-.chip-group-label {
-  --el-text-font-size: var(--el-font-size-extra-small);
-  --el-text-color: var(--el-color-warning-dark-2);
-}
+/* 「被拦」不再单独圈框：阻止 / 冻结 挨着排在末尾，由右边这句小字说明它们同属被拦、处理人不同 */
 .chip-note { margin-left: 2px; }
 
 /* 原因列只剩 4 条：字号/字色都已交给 el-text，这里只管「层级标记」和间距。
    word-break 可继承，所以一条就给整列（只对长单号/长 SKU 有意义，CJK 本来能断行）。 */
 .reason-cell { display: flex; flex-direction: column; gap: 2px; word-break: break-all; }
-.reason-main { --el-text-color: var(--el-text-color-primary); }
-/* 与 reason-sub 同为 12px 灰字，必须再给一个"这不是结论"的标记 —— 斜体 + 左竖线。
-   EP 的 el-text 没有 italic / border 语义，这一条表达不了，只能自己写。 */
-.reason-would-be { font-style: italic; border-left: 2px solid var(--el-border-color); padding-left: 6px; }
-/* 比 would-be 更小一号（11px，EP 没有这一档），属于「提醒」不是「结论」 */
-.reason-stock-warn { padding-left: 8px; --el-text-font-size: var(--qiqi-font-size-xs); }
+/* 「本可自动过审：命中…（被上面那条策略先拦下）」这句自己带着主谓宾，与上一行「后端原话」
+   靠 type 区分（info / warning）就够了，不再靠斜体+竖线喊"这不是结论" —— 那是审美，不是信息。 */
+.reason-stock-warn { padding-left: 8px; }
 
-/* 全局排除块 = el-card：底色/圆角/边框色走公开变量（card.scss:12-14），内距走 :body-style。
-   ⚠️ 只剩 border-style 一条无处表达：card.scss:13 把 border 写死 1px solid，也没有
-   --el-card-border-style（Card 文档 Attributes 只有 header/footer/body-style/header-class/
-   body-class/footer-class/shadow），所以虚线这一位留在这里。 */
-.why-global {
-  margin-bottom: 18px;
-  border-style: dashed;
-  --el-card-bg-color: var(--el-color-warning-light-9);
-  --el-card-border-color: var(--el-color-warning-light-5);
-  --el-card-border-radius: var(--el-border-radius-base);
-}
-.why-global .why-backend-line { --el-text-color: var(--el-color-warning-dark-2); }
+/* 全局排除块 = el-alert（warning）：浅黄底、警示图标、标题层级全由组件给。
+   原来是一张 el-card 自己染色 + 虚线边框，虚线和淡黄都是"这块不一样"的语气，不是信息：
+   标题「全局排除」+ 正文已经把话说清了。 */
+.why-global { margin-bottom: 18px; }
+.why-global .why-backend-line { line-height: 20px; }
 
 /* ---- 「差在哪」抽屉 ---- */
 .why-head { display: flex; align-items: center; gap: 10px; }
-/* 抽屉里与队列行同款的「本可怎样」：斜体 + 左竖线（同上，el-text 表达不了） */
+/* 抽屉里与队列行同款的「本可怎样」：只有块级与间距，外观全是 el-text 的 size/type */
 .why-would-be {
   display: block; margin-top: 6px;
-  font-style: italic; border-left: 2px solid var(--el-border-color); padding-left: 6px;
 }
 /* 抽屉里的小字行（缺货附注 / 其它闸门 / 抽屉内的说明） */
 .why-stock-warn, .why-line { display: block; margin-top: 4px; }
-.why-reason {
-  margin-top: 8px; padding: 8px 10px; font-size: var(--el-font-size-small);
-  background: var(--el-fill-color-lighter); border-left: 3px solid var(--el-border-color);
-}
-/* 13px 与灰字：字号走 el-text 变量，字色用 el-text 默认的 regular（两者都与改前逐字一致） */
+/* 后端原话 = el-alert(info)：浅底 + 图标，左边那条 3px 竖线删掉（信息量 0） */
+.why-reason { margin-top: 8px; }
+/* 字号回到 el-text 默认档（14px），原来是钉死的 13px —— 为追一个历史值让 el-text 在本页比别处小 1px 不值 */
 .why-meta {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
   margin: 12px 0;
-  --el-text-font-size: var(--el-font-size-small);
 }
 .why-hint { margin-left: 2px; }
 .why-group { margin-bottom: 20px; }
 .why-group-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .why-backend-lines { margin-bottom: 6px; }
 .why-backend-line { line-height: 20px; }
-.why-mark { color: var(--el-color-danger); font-weight: 600; white-space: nowrap; }
+/* 只剩"不折行"：'← 差在哪' 在 120px 的结论列里折行会读成两行、看不出是箭头指过来 */
+.why-mark { white-space: nowrap; }
 .why-footer { display: flex; justify-content: flex-end; gap: 10px; }
-/* 执行记录里 FROZEN 的数字：EP 无紫档，退回一行自有色（令牌） */
-/* 紫色 FROZEN 数字：色走 el-text 变量；600 字重是 el-text 唯一表达不了的一位（纯文本无 --el-*-font-weight），保留 */
-.c-frozen { font-weight: 600; --el-text-color: var(--qiqi-color-frozen-dark-2); }
+/* 冻结计数：与其它数字同款 el-text tag="b"，不再单独染紫 ——
+   紫是 FROZEN 徽标的色，而这一列是"冻结了几单"的数量，本来就不该跟徽标同色 */
 </style>

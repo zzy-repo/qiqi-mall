@@ -241,28 +241,24 @@ onMounted(load)
 
 /* 指标卡：窄屏自动换行 */
 .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
-/* 圆角走 el-card 自己的公开变量（card.scss:12）；body 内距已由 :body-style 给 */
-.metric { --el-card-border-radius: 10px; }
+/* 指标卡就是普通 el-card（圆角回到默认 4px）；body 内距已由 :body-style 给 */
 .metric-body { display: flex; align-items: center; gap: 14px; }
-/* 尺寸由 :size="44"、圆角由 --el-avatar-border-radius、底色/图标色由 --el-avatar-bg-color/-text-color 给 */
-.metric-icon { flex: none; --el-avatar-border-radius: 10px; }
-.metric-title { --el-text-font-size: var(--el-font-size-small); }
-/* 22px 是设计令牌（EP 六档里没有 22）；字重/字色走 --el-statistic-content-* */
+/* 尺寸由 :size="44"、底色/图标色由 --el-avatar-bg-color/-text-color 给；圆角回退到 avatar 默认档 */
+.metric-icon { flex: none; }
+/* 字号走 el-text 的 size="small"，不再额外钉 13px（钉了反而盖掉 size 档，让本页比别处大 1px） */
+/* 数字 = el-statistic 默认档（20px / 400 / primary）：原来 22px + 600 + 墨色，
+   于是同一个 el-statistic 在概览页 22、库存对账页 26、净额块 20 —— 本轮回退成一个样子 */
 .metric-value {
   margin-top: 4px;
   line-height: 1.2;
-  --el-statistic-content-font-size: var(--qiqi-font-size-num);
-  --el-statistic-content-font-weight: 600;
-  --el-statistic-content-color: var(--qiqi-color-ink);
 }
-/* el-statistic 的 suffix 插槽会继承 content 的 600 字重，而 el-text 没有 font-weight API，
-   所以这里只剩这一行（margin 由 .el-statistic__suffix 的 4px 给，字号/字色走 el-text）。 */
-.metric-value .suffix { font-weight: 400; }
+/* suffix（元/单/个）与数字同档同字重；原来为了"数字 600、单位 400"补了一行 font-weight: 400，
+   那是排版偏好，两者都在 20px 档时同字重反而更整齐 */
 .metric-hint { margin-top: 2px; }
 
 /* 图表区：宽屏两列、窄屏一列 */
 .row { display: flex; gap: 16px; flex-wrap: wrap; }
-.panel { flex: 1 1 420px; min-width: 320px; --el-card-border-radius: 10px; }
+.panel { flex: 1 1 420px; min-width: 320px; }
 .panel-header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 /* align-self:auto 是为了抵掉 .el-text 自带的 align-self:center —— 父级是 baseline 对齐，
    不写明就会从基线对齐变成居中（肉眼可辨）。 */
@@ -272,13 +268,8 @@ onMounted(load)
 .alerts-panel { flex: 0 1 340px; }
 
 .alerts { display: flex; flex-direction: column; gap: 10px; }
-/* 行框 = el-card：底色/圆角走它的公开变量，行内布局走 :body-style（见 alertRowBodyStyle） */
-.alert-row {
-  --el-card-bg-color: var(--el-fill-color-lighter);
-  --el-card-border-radius: 8px;
-}
+/* 行框 = 普通 el-card（原来钉了 fill-lighter 底 + 8px 圆角；行内布局仍走 :body-style） */
 .alert-main { min-width: 0; }
-/* 13px 走变量；单行省略交给 el-text 的 truncated 属性（Text 文档 Attributes 有此项），不再手写三件套 */
-.alert-name { --el-text-font-size: var(--el-font-size-small); --el-text-color: var(--qiqi-color-ink); }
+/* 单行省略交给 el-text 的 truncated 属性（Text 文档 Attributes 有此项），不再手写三件套 */
 
 </style>

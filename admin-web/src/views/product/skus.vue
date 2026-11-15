@@ -262,9 +262,7 @@ onMounted(load)
 </script>
 
 <style scoped>
-.thumb { width: 44px; height: 44px; border-radius: 4px; }
-/* 灰字：el-text 的 5 个 type 里没有"禁用灰"，用它的公开变量 --el-text-color */
-.empty-pic { --el-text-color: var(--el-text-color-disabled); }
+.thumb { width: 44px; height: 44px; }
 .spec-list { width: 100%; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .spec-row { display: flex; gap: 8px; width: 100%; align-items: center; }
 </style>

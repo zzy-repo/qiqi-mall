@@ -11,8 +11,8 @@
   >
     <div class="conflict-body">
       <!-- 主文案：409=「数据已被他人修改（可能其他人在编辑）」，400=「页面数据已过期，请刷新后重试」 -->
-      <el-text class="conflict-message" tag="p" data-testid="conflict-message">{{ conflictState.message }}</el-text>
-      <el-text v-if="conflictState.hint" class="conflict-hint" tag="p" data-testid="conflict-hint">{{ conflictState.hint }}</el-text>
+      <el-text class="conflict-message" tag="b" data-testid="conflict-message">{{ conflictState.message }}</el-text>
+      <el-text v-if="conflictState.hint" class="conflict-hint" tag="p" size="small" type="info" data-testid="conflict-hint">{{ conflictState.hint }}</el-text>
     </div>
 
     <template #footer>
@@ -50,20 +50,16 @@ const visible = computed({
 
 <style scoped>
 .conflict-body { min-height: 48px; }
-/* 15px/13px 都不在 EP 的六档里，走 el-text 的字号变量；
-   深色正文与灰字分别用 --el-text-color-primary / el-text 默认的 regular。
-   主句的 600 无法用 el-text 表达（$text 只有 font-size/color），保留这一行。 */
+/* 主句 = el-text tag="b"（700）+ 默认 14px；原来钉 15px/600/墨色三件。
+   "这是主句"由 tag="b" 与对话框标题共同表达，不必再造一个 15px 档。 */
 .conflict-message {
   margin: 0;
   line-height: 1.7;
-  font-weight: 600;
   word-break: break-word;
-  --el-text-font-size: 15px;
-  --el-text-color: var(--el-text-color-primary);
 }
+/* 副句 12px 走 size="small"（模板里已给），不再钉 13px */
 .conflict-hint {
   margin: 10px 0 0;
   line-height: 1.7;
-  --el-text-font-size: var(--el-font-size-small);
 }
 </style>

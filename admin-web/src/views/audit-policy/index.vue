@@ -28,9 +28,15 @@
       <!-- 优先级的作用域：只在同类型内比较。跨类型顺序写死在引擎里（AuditEngine：BLOCK → EXCEPTION → AUTO），
            把异常策略 priority 调到 5 也抢不过阻止策略 —— 不写明就会有人以为「数字小就一定先判」。
            放在 default slot 里 = 渲染在 tab 栏下方、表格上方，且全局只有这一行（不随 tab 复制）。 -->
-      <div class="priority-note" data-testid="policy-priority-scope-note">
+      <el-alert
+        class="priority-note"
+        type="info"
+        :closable="false"
+        show-icon
+        data-testid="policy-priority-scope-note"
+      >
         优先级只在<b>同类型</b>策略之间比较；跨类型的判定顺序固定为：阻止 → 异常 → 自动
-      </div>
+      </el-alert>
       <el-tab-pane
         v-for="t in TYPES"
         :key="t"
@@ -54,7 +60,7 @@
 
           <el-table-column label="名称" min-width="170">
             <template #default="{ row }">
-              <el-text :data-testid="`policy-row-${row.id}`" class="policy-name">{{ row.name }}</el-text>
+              <b :data-testid="`policy-row-${row.id}`" class="policy-name">{{ row.name }}</b>
               <div class="muted">ID {{ row.id }}</div>
             </template>
           </el-table-column>
@@ -80,21 +86,19 @@
           <el-table-column label="条件摘要" min-width="330">
             <template #default="{ row }">
               <div v-if="row.conditions.length" class="cond-chips">
-                <span
+                <el-tag
                   v-for="c in row.conditions"
                   :key="c.seq"
                   class="cond-chip"
-                  :class="{
-                    'cond-chip-exclude': c.kind === 'EXCLUDE',
-                    'cond-chip-focus': isFocused(row.id, c.seq)
-                  }"
+                  size="small"
+                  effect="plain"
+                  :type="chipType(row.id, c)"
                   :data-testid="`why-miss-${row.id}-${c.seq}`"
                   :title="`第 ${c.seq} 条条件`"
                 >
-                  <el-text v-if="isFocused(row.id, c.seq)" class="why-mark" tag="b" type="danger">← 差在哪</el-text>
-                  <span v-if="c.kind === 'EXCLUDE'" class="cond-chip-kind">排除</span>
-                  {{ conditionSummary(c) }}
-                </span>
+                  <el-text v-if="isFocused(row.id, c.seq)" tag="b" type="danger">← 差在哪</el-text>
+                  <template v-if="c.kind === 'EXCLUDE'">排除 </template>{{ conditionSummary(c) }}
+                </el-tag>
               </div>
               <span v-else class="muted">无条（命不中任何单）</span>
             </template>
@@ -147,10 +151,9 @@
             </div>
           </template>
           <div v-if="globalExclusions.length" class="cond-chips">
-            <span v-for="g in globalExclusions" :key="g.seq" class="cond-chip cond-chip-exclude">
-              <span class="cond-chip-kind">排除</span>
-              {{ conditionSummary(g) }}
-            </span>
+            <el-tag v-for="g in globalExclusions" :key="g.seq" class="cond-chip" size="small" effect="plain" type="danger">
+              排除 {{ conditionSummary(g) }}
+            </el-tag>
           </div>
           <div v-else class="muted">还没有配置全局排除</div>
         </el-card>
@@ -228,7 +231,7 @@
               :data-testid="`cond-row-${i}`"
             >
               <el-row :gutter="8">
-                <el-col :span="1"><span class="cond-seq">{{ i }}</span></el-col>
+                <el-col :span="1"><el-text class="cond-seq" size="small" type="info">{{ i }}</el-text></el-col>
 
                 <el-col :xs="24" :sm="6" :md="3">
                   <el-select v-model="c.kind" size="small" :data-testid="`cond-kind-${i}`">
@@ -322,7 +325,7 @@
               :data-testid="`global-cond-row-${i}`"
             >
               <el-row :gutter="8">
-                <el-col :span="1"><span class="cond-seq">G{{ i }}</span></el-col>
+                <el-col :span="1"><el-text class="cond-seq" size="small" type="info">G{{ i }}</el-text></el-col>
 
                 <el-col :xs="24" :sm="6" :md="3">
                   <el-tag size="small" type="danger" effect="plain">排除</el-tag>
@@ -441,6 +444,16 @@ const actionText = (row) => {
 const focusPolicy = computed(() => Number(route.query.focusPolicy) || null)
 const focusSeq = computed(() => (route.query.focusSeq === undefined ? null : Number(route.query.focusSeq)))
 const isFocused = (policyId, seq) => focusPolicy.value === Number(policyId) && focusSeq.value !== null && Number(seq) === focusSeq.value
+
+/**
+ * 条件胶囊的三档语义色，全部是 el-tag 的 type 档位（不用一条 --el-tag-* 覆盖）：
+ *   被指到（就是「差在哪」那条）→ warning：这一排里最该被看见的那个；
+ *   排除条件 → danger（与「排除」两个字同义）；
+ *   匹配条件 → primary（默认档）。
+ * 原来是自定义的"浅蓝底 + 深蓝字 / 浅红底 + 深红字"四组色对，等于在页面里重造了四档色阶。
+ */
+const chipType = (policyId, c) =>
+  isFocused(policyId, c) ? 'warning' : (c.kind === 'EXCLUDE' ? 'danger' : 'primary')
 
 const load = async () => {
   loading.value = true
@@ -787,26 +800,16 @@ onMounted(async () => {
 .card-header .header-tip { margin-left: 10px; }
 .header-actions { display: flex; gap: 8px; }
 .tab-tip { margin-bottom: 8px; }
-.priority-note {
-  font-size: 12px; color: #909399; line-height: 20px;
-  margin: 4px 0 10px; padding: 4px 10px;
-  background: #fafafa; border-left: 3px solid #dcdfe6; border-radius: 2px;
-}
-.policy-name { font-weight: 600; }
+/* 跨类型优先级说明 = el-alert(info)：浅底 + 图标；原来那套"12px 灰字 + 左侧 3px 竖线 + 2px 圆角"
+   是自己拼的引注块，删掉不丢信息（图标在这里起的作用比竖线强）。 */
+.priority-note { margin: 4px 0 10px; }
 
 .cond-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.cond-chip {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 2px 8px; border-radius: 4px; font-size: 12px;
-  background: #f4f8ff; border: 1px solid #d0e0ff; color: #1f4fa3;
-}
-.cond-chip-exclude { background: #fff5f5; border-color: #fbc4c4; color: #b23232; }
-.cond-chip-focus { background: #fef0f0; border: 1px solid #f56c6c; color: #c45656; font-weight: 600; }
-.cond-chip-kind { font-size: 11px; padding: 0 4px; border-radius: 3px; background: rgba(0, 0, 0, .06); }
-/* 红 + 700：el-text 的 tag="b" 就是 700，type="danger" 就是 #f56c6c，两个字面量都不必自己写 */
+/* 条件胶囊 = el-tag：三档语义色走 type，深浅走 effect；这里只留"标签之间对齐"的间距 */
+.cond-chip { gap: 4px; }
 
-/* 已挂 el-card，底色走它的公开变量（#fcfcfd 不是令牌值，故按原值写进变量，保证像素不变） */
-.global-card { margin-top: 14px; --el-card-bg-color: #fcfcfd; }
+/* 全局排除卡：就是一张普通 el-card（原来钉了一个 #fcfcfd 的近白底，与白底肉眼无差，纯追旧值） */
+.global-card { margin-top: 14px; }
 .global-head { display: flex; align-items: baseline; gap: 10px; }
 
 /* el-row 的 gutter 会在左右各拉出 -(gutter/2) 的负外边距，容器没有内边距时会溢出
@@ -816,16 +819,12 @@ onMounted(async () => {
 .cond-editor { width: 100%; }
 /* 条件行只负责"把这个条件圈成一组"的外观；布局（display/flex-wrap）由内层 el-row 给，
    列宽由 el-col 的 :span 给。gutter 的负外边距被这里的 padding 吃掉，不会外溢弹窗。 */
-/* 条件行 = el-card：底色/边框/圆角走公开变量，内距走 :body-style */
-.cond-row {
-  margin-bottom: 6px;
-  --el-card-bg-color: var(--el-fill-color-lighter);
-  --el-card-border-color: var(--el-border-color-lighter);
-  --el-card-border-radius: var(--el-border-radius-base);
-}
+/* 条件行 = el-card：底色/边框/圆角全部组件默认（4px），内距走 :body-style。
+   原来钉了 fill-lighter 底 + border-lighter 边 + 4px 圆角 —— 三条都是"追旧值"，与全站每张卡同一个样子。 */
+.cond-row { margin-bottom: 6px; }
+/* 字色/字号走 el-text 的 type=info + size=small；只剩等宽字体一位（见白名单 C 组） */
 .cond-seq {
   display: block; text-align: center;
-  color: var(--el-text-color-secondary); font-size: var(--el-font-size-extra-small);
   font-family: var(--qiqi-font-mono);
 }
 .cond-tip { margin-top: 6px; }

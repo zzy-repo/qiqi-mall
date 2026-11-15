@@ -278,9 +278,8 @@ onMounted(() => { load(); loadRefs() })
 </script>
 
 <style scoped>
-.thumb { width: 44px; height: 44px; border-radius: 4px; }
-/* 灰字：el-text 的 5 个 type 里没有"禁用灰"，用它的公开变量 --el-text-color（$text map 只有 font-size/color） */
-.empty-pic { --el-text-color: var(--el-text-color-disabled); }
+/* 缩略图尺寸是布局（width/height），圆角删掉 —— el-image 没有圆角属性，为 4px 圆角钉一条自有样式不值 */
+.thumb { width: 44px; height: 44px; }
 .gallery { width: 100%; display: flex; flex-direction: column; gap: 8px; }
 .gallery-row { display: flex; gap: 8px; align-items: flex-start; }
 .grow { flex: 1; }

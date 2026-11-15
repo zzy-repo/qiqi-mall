@@ -1,7 +1,7 @@
 <template>
   <div class="login-page">
     <el-card class="login-card" shadow="always">
-      <el-text class="brand" tag="div">
+      <el-text class="brand" tag="b" size="large">
         <el-icon :size="26"><Shop /></el-icon>
         <span>七七商城 · 管理后台</span>
       </el-text>
@@ -144,19 +144,14 @@ onMounted(async () => {
   background: linear-gradient(135deg, #1f2d3d 0%, #2c3e50 100%);
 }
 .login-card { width: 400px; padding: 8px 12px 4px; }
-/* 18px = --el-font-size-large，墨色走 --qiqi-color-ink；字重 600 el-text 无 API，保留 */
+/* 品牌名 = el-text size="large"(16px) + tag="b"；不再把字号/字色钉成 18px + 墨色 */
 .brand {
   display: flex; align-items: center; gap: 8px;
-  font-weight: 600; justify-content: center; margin-bottom: 20px;
-  --el-text-font-size: var(--el-font-size-large);
-  --el-text-color: var(--qiqi-color-ink);
+  justify-content: center; margin-bottom: 20px;
 }
 .captcha-row { display: flex; gap: 10px; width: 100%; }
-/* 边框/圆角：Image 组件的 Attributes 全表没有 border/radius，也没有 --el-image-* 变量
-   （官方 Image Attributes: src/fit/loading/lazy/scroll-container/alt/referrerpolicy/crossorigin/
-    preview-src-list/z-index/initial-index/close-on-press-escape/preview-teleported/infinite/
-    zoom-rate/scale/min-scale/max-scale/show-progress），故保留这两行。 */
-.captcha-img { height: 40px; border-radius: 4px; cursor: pointer; border: 1px solid #dcdfe6; }
+/* 验证码图：高度是布局；4px 圆角与 1px 灰边删掉（<img> 无此属性，为它钉两条自有样式不值） */
+.captcha-img { height: 40px; cursor: pointer; }
 .submit { width: 100%; margin-top: 6px; }
 .error { margin-bottom: 12px; }
 .tip { margin-top: 12px; text-align: center; }

@@ -47,7 +47,7 @@
         <!-- ① 应当相等的一对：权威值 vs 展示缓存；② 偏差＝两者之差 -->
         <div class="cards">
           <el-card class="stat-card" shadow="never" :body-style="statCardBodyStyle">
-            <el-text class="stat-label" tag="div">权威值（SUM 库存桶）</el-text>
+            <el-text class="stat-label" tag="div" size="small">权威值（SUM 库存桶）</el-text>
             <el-statistic class="stat-value" :value="num(detail.bucketSum)" group-separator="" data-testid="reconcile-bucket-sum" />
             <el-text class="stat-foot" tag="div" size="small" type="info">
               桶数 {{ detail.bucketCount ?? '—' }} 个
@@ -56,7 +56,7 @@
           </el-card>
 
           <el-card class="stat-card" shadow="never" :body-style="statCardBodyStyle">
-            <el-text class="stat-label" tag="div">展示缓存（sku.stock）</el-text>
+            <el-text class="stat-label" tag="div" size="small">展示缓存（sku.stock）</el-text>
             <el-statistic class="stat-value" :value="num(detail.skuStock)" group-separator="" data-testid="reconcile-sku-stock" />
             <!-- 不是「缓存最后回写」：sku 表没有回写时间列，后端给的是 MAX(sku_bucket.updated_at) -->
             <el-text class="stat-foot" tag="div" size="small" type="info">
@@ -69,7 +69,7 @@
           </el-card>
 
           <el-card class="stat-card" :class="drift === 0 ? 'stat-ok' : 'stat-bad'" shadow="never" :body-style="statCardBodyStyle">
-            <el-text class="stat-label" tag="div">偏差（权威 − 缓存）</el-text>
+            <el-text class="stat-label" tag="div" size="small">偏差（权威 − 缓存）</el-text>
             <!-- 偏差的正负号与红绿：formatter 决定文本（与改前逐字一致），色值走统计数字的公开变量 -->
             <el-statistic
               class="stat-value"
@@ -85,23 +85,29 @@
           </el-card>
         </div>
 
-        <el-text class="sku-line" tag="div">
+        <el-text class="sku-line" tag="div" size="small">
           SKU #{{ detail.skuId }} · {{ detail.skuName || '（无名称）' }} · {{ detail.skuCode || '（无编码）' }}
         </el-text>
 
         <!-- ③ 台账净额：单独一块，且必须写清「不是余额」，不能与上面的权威值对平 -->
-        <div class="net-block" data-testid="reconcile-ledger-net">
+        <el-alert
+          class="net-block"
+          type="warning"
+          title="台账净额（SUM stock_ledger.delta）"
+          :closable="false"
+          show-icon
+          data-testid="reconcile-ledger-net"
+        >
           <div class="net-head">
-            <el-text class="net-label">台账净额（SUM stock_ledger.delta）</el-text>
             <el-statistic class="net-value" :value="num(detail.ledgerNet)" :formatter="signedInt" group-separator="" />
           </div>
-          <el-text class="net-note" tag="div">
+          <el-text class="net-note" tag="div" size="small">
             <strong>这是全生命周期进出和，不是余额。</strong>
             它把该 SKU 历史上所有流水增减累加在一起（进多少、出多少全算），
             所以<strong>不能与上面的「权威值」相互对平</strong>，两者本就不应相等。
             它只用来说明一件事：这单到底补过库存没有、补了多少。
           </el-text>
-        </div>
+        </el-alert>
 
         <!-- 最近 20 条流水 -->
         <el-text tag="b" size="small" class="block-title">最近 {{ ledgerRows.length }} 条库存流水</el-text>
@@ -347,29 +353,24 @@ onMounted(() => {
 <style scoped>
 .reconcile { display: flex; flex-direction: column; gap: 16px; }
 .filters { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
-/* 13px 走 el-text 变量，灰字取 el-text 默认的 regular */
-.sku-line { margin: 4px 0 14px; --el-text-font-size: var(--el-font-size-small); }
+.sku-line { margin: 4px 0 14px; }
 
 /* 三块卡片：权威值 / 展示缓存 / 偏差 —— 前两块才是应当相等的一对 */
 .cards { display: flex; gap: 14px; flex-wrap: wrap; }
-/* 卡片 = el-card：边框/圆角/底色走公开变量（逐值命中令牌）；内距走 :body-style */
+/* 卡片 = el-card：边框/圆角/底色全部组件默认（原来钉了 6px 圆角 + fill-lighter 底，
+   于是同一个 el-card 在概览页 10px、在渠道页 8px、在这里 6px —— 三种样子，本轮回退成一种） */
 .stat-card {
   flex: 1 1 220px;
   min-width: 220px;
-  --el-card-border-color: var(--el-border-color-light);
-  --el-card-border-radius: 6px;
-  --el-card-bg-color: var(--el-fill-color-lighter);
 }
-.stat-label { margin-bottom: 6px; --el-text-font-size: var(--el-font-size-small); }
-/* 26px 走 --el-statistic-content-font-size；600 与深色正文同理（el-statistic 有这两个变量，纯文本的 el-text 没有） */
-.stat-value {
-  line-height: 1.2;
-  --el-statistic-content-font-size: 26px;
-  --el-statistic-content-font-weight: 600;
-  --el-statistic-content-color: var(--el-text-color-primary);
-}
+.stat-label { margin-bottom: 6px; }
+/* 数字 = el-statistic 默认档（20px / 400 / primary）：原来 26px + 600 是逐页调大的，
+   结果同一个 el-statistic 在本页 26、概览页 22、净额块 20。现在全站一个样子。 */
+.stat-value { line-height: 1.2; }
 .stat-foot { margin-top: 8px; line-height: 1.6; }
-/* 整卡染色：el-card 没有 status 变体，但两个变量就是它的公开 API（#f0f9eb/#c2e7b0 等逐值命中 --el-color-*-light-9/-5） */
+/* 整卡染色：**这不是追旧值，是语义色**（这张卡是"对上了"还是"对不上"）。
+   el-card 没有 status/type 变体（Card 文档 Attributes 只有 header/footer/body-style/*-class/shadow），
+   要染色只能走它的两个公开变量 → 归入白名单 B 组。 */
 .stat-ok {
   --el-card-bg-color: var(--el-color-success-light-9);
   --el-card-border-color: var(--el-color-success-light-5);
@@ -379,23 +380,13 @@ onMounted(() => {
   --el-card-border-color: var(--el-color-danger-light-5);
 }
 
-/* 台账净额：故意单独一块、视觉上与上面三块隔开，避免被当成「第四个应当对平的数」 */
-.net-block {
-  margin: 16px 0 18px;
-  padding: 12px 16px;
-  border-left: 4px solid #e6a23c;
-  background: #fdf6ec;
-  border-radius: 4px;
-}
+/* 台账净额：单独一块且必须与上面三块"长得不一样"，避免被当成第四个应当对平的数 ——
+   这件事 el-alert(warning) 一次就做到了（浅黄底 + 警示图标 + 标题层级），
+   原来是自己拼的 4px 左粗线 + #fdf6ec 底 + 三种棕色字。 */
+.net-block { margin: 16px 0 18px; }
 .net-head { display: flex; align-items: baseline; gap: 10px; }
-.net-label { --el-text-font-size: var(--el-font-size-small); --el-text-color: #7a5c1f; }
-/* 20px 正是 --el-font-size-extra-large（$font-size map），所以只改字重与色 */
-.net-value {
-  --el-statistic-content-font-size: var(--el-font-size-extra-large);
-  --el-statistic-content-font-weight: 600;
-  --el-statistic-content-color: #b88230;
-}
-.net-note { margin-top: 8px; line-height: 1.8; --el-text-font-size: var(--el-font-size-extra-small); --el-text-color: #8a6d3b; }
+/* .net-value 的类名必须留：e2e 用 reconcile-ledger-net .net-value 取这个数 */
+.net-note { margin-top: 8px; line-height: 1.8; }
 
 /* 区块小标题：字重/字号交给 el-text，这里只剩"独占一行 + 下边距" */
 .block-title { display: block; margin: 0 0 8px; }

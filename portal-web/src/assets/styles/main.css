@@ -14,8 +14,6 @@ body {
  * ========================================================================= */
 :root {
   --qiqi-font-mono: Consolas, Monaco, 'SFMono-Regular', 'Courier New', monospace;
-  --qiqi-font-size-xs: 11px;
-  --qiqi-color-ink: #1f2d3d;
 }
 
 /* ===========================================================================

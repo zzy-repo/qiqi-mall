@@ -40,7 +40,7 @@
       </el-table>
 
       <div class="footer">
-        <el-text class="total" data-testid="cart-total">合计：<el-text class="total-num" tag="b" type="danger">¥ {{ total }}</el-text></el-text>
+        <el-text class="total" data-testid="cart-total">合计：<el-text class="total-num" tag="b" size="large" type="danger">¥ {{ total }}</el-text></el-text>
         <el-button
           type="primary"
           size="large"
@@ -121,7 +121,6 @@ onMounted(load)
 .title { margin: 0; }
 .hint { margin: 0; }
 .total { margin: 0; }
-/* 金额 18px：--el-font-size-large 就是 18px（$font-size map），字色用 el-text 的 danger 档 */
-.total-num { --el-text-font-size: var(--el-font-size-large); }
+/* 金额 = el-text size="large"(16px) + tag="b" + type="danger"；不再钉 18px */
 .footer { display: flex; justify-content: flex-end; align-items: center; gap: 16px; margin-top: 16px; }
 </style>
