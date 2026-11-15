@@ -39,10 +39,10 @@ export const reasonMainOf = (row) => row.getByTestId('audit-row-reason')
 /** 行内原因第二行（后端原话，含具体数值差）—— 灰字没有 testid，按类名取 */
 export const reasonSubOf = (row) => row.locator('.reason-sub')
 
-/** 「差在哪」按钮（打不开就没得解释，所以点完必须断言抽屉真的开了） */
+/** 「判定依据」按钮（打不开就没得解释，所以点完必须断言抽屉真的开了） */
 export const whyButtonOf = (row) => row.getByTestId('audit-row-why')
 
-/** 「轨迹」按钮（打开单笔抽屉） */
+/** 「流转记录」按钮（打开单笔抽屉） */
 export const trailButtonOf = (row) => row.getByTestId('audit-row-trail')
 
 /**
@@ -86,10 +86,10 @@ export const clearResultFilter = async (page) => {
   await page.waitForTimeout(1000)
 }
 
-/* ------------------------------------------------------------------ 「差在哪」抽屉 */
+/* ------------------------------------------------------------------ 「判定依据」抽屉 */
 
 /**
- * 打开「差在哪」抽屉。
+ * 打开「判定依据」抽屉。
  * @returns {Promise<import('@playwright/test').Locator>} 抽屉根节点（后续断言都限定在它里面，避免读到页面上其它同名 testid）
  */
 export const openWhyDrawer = async (page, row) => {
@@ -108,7 +108,7 @@ export const closeWhyDrawer = async (page) => {
   }
 }
 
-/* ------------------------------------------------------------------ 「差在哪」的三态行
+/* ------------------------------------------------------------------ 「判定依据」的三态行
  *
  * ⚠️ 为什么按**行级 class** 数，而不是数 testid：
  * Element Plus 的 el-table 会把每一列的内容克隆一份到 `hidden-columns` 里（用于列宽测量）。
@@ -118,10 +118,10 @@ export const closeWhyDrawer = async (page) => {
  * 实测：QT-1003 的抽屉里真实未求值行 2 行，但 `getByTestId('audit-why-unevaluated')` 数出 5 个
  * （2 行 + 3 张策略表各 1 个克隆）。
  * 行级 class 由 `:row-class-name` 写在 <tr> 上，只有真实数据行才有：
- *   `.why-row-miss`（不满足，右侧标「← 差在哪」）/ `.why-row-unevaluated`（未求值）。
+ *   `.why-row-miss`（不满足，右侧标「← 此项未满足」）/ `.why-row-unevaluated`（未求值）。
  */
 
-/** 抽屉里「不满足」的真实数据行（每行右侧有「← 差在哪」） */
+/** 抽屉里「不满足」的真实数据行（每行右侧有「← 此项未满足」） */
 export const whyRowMiss = (root) => root.locator('.el-table__body tr.why-row-miss')
 
 /** 抽屉里「未求值」的真实数据行（灰色，不是「不满足」） */
@@ -137,7 +137,7 @@ export const whyRowUnevaluated = (root) => root.locator('.el-table__body tr.why-
 export const whyGroupOf = (drawer, policyId) => drawer.getByTestId(`audit-why-policy-${policyId}`)
 
 /**
- * 「差在哪」抽屉里某个策略组内、某个字段的那一行。
+ * 「判定依据」抽屉里某个策略组内、某个字段的那一行。
  * 字段列同时显示中文名与字段码（`.mono`），用**字段码**过滤最稳（中文名可能重复）。
  */
 export const whyCondRow = (group, fieldCode) =>
@@ -146,7 +146,7 @@ export const whyCondRow = (group, fieldCode) =>
 /* ------------------------------------------------------------------ 单笔抽屉（审核轨迹） */
 
 /**
- * 点队列行「轨迹」打开单笔抽屉，返回抽屉根节点；`audit-trail` 里的三段都在它下面。
+ * 点队列行「流转记录」打开单笔抽屉，返回抽屉根节点；`audit-trail` 里的三段都在它下面。
  */
 export const openTrailDrawer = async (page, row) => {
   await trailButtonOf(row).click()

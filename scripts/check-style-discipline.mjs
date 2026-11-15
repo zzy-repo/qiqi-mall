@@ -23,14 +23,16 @@
  *   被废弃的旧判据：「删掉之后像素会不会不同？不同就保留」。
  *   那等于说"任何视觉差异都值得永久维护一段自定义 CSS"：600 还是 700、虚线还是实线、
  *   浅蓝底还是 el-tag 的语义色 —— 不影响业务、不影响阅读、不影响任何人做事。
- *   按旧判据这个白名单曾有 41 个 key / 103 条声明；按新判据只剩 12 个 key / 15 条。
+ *   按旧判据这个白名单曾有 41 个 key / 103 条声明；按新判据只剩 7 个 key / 10 条。
  *
- * 两组分类（每条理由都必须落在其中一组）
- * --------------------------------------
- *   A 组「组件能力真缺」：EP 的 props / slots / CSS 变量 / 令牌确实表达不了，
- *        **且删了会丢信息或丢可读性**。目前只剩 3 类：等宽字体、white-space、nowrap。
- *   B 组「布局外壳」：页面骨架的底色与分界线（侧栏/顶栏/内容区/登录页入口面）。
- *        这些本来就不该由某个组件承担 —— el-container 不是"带底色的容器"，它是栅格。
+ * 三段式输出（三个数字必须分开看，混在一起就会把"分类错了"读成"组件做不到"）
+ * ----------------------------------------------------------------------------
+ *   ① 组件外观声明（未豁免）  目标 0。scoped <style> 里还剩多少条纯外观声明。
+ *   ② 组件能力缺（A 组）      目标 0~1。EP 的 props / slots / CSS 变量 / 令牌确实表达不了，
+ *        且删了会丢信息或丢可读性 —— **只有这一组的数字才叫"组件做不到"**。当前 0 条。
+ *   ③ 页面骨架（S 组）        侧栏/顶栏/内容区/登录入口面的底色与分界线，10 条。
+ *        这是骨架自己的事（el-container 是栅格，不是"带底色的容器"；任何 EP 后台模板都这么写），
+ *        不属"组件能力缺"，单独统计、单独打印。
  *
  * 与"视觉统一"的关系（本轮的第二条铁律）
  * --------------------------------------
@@ -82,80 +84,62 @@ const APPEARANCE = [
 ]
 
 /* ---------------------------------------------------------------------------
- * 2) 白名单：数组，每条 = 一条被豁免的"外观声明"
+ * 2) 豁免清单：两类，分开统计、分开打印 —— 永远不许混成一个"组件做不到"的数字
  *
- * 一条记录只豁免**一个选择器**下的外观声明，并且必须回答：
- *   · 这条规则描述的是什么？
- *   · 为什么 EP 的 props / slots / CSS 变量 / 令牌都表达不了？
- *   · 删了会丢什么信息 / 哪一处读不清？（写不出这句 = 它本来就该删）
+ *   A 组 COMPONENT_GAPS「组件能力真缺」
+ *       EP 的 props / slots / CSS 变量 / 令牌确实表达不了，**且删了会丢信息或丢可读性**。
+ *       只有这一组的数字才叫"组件能力缺"。
+ *   S 组 PAGE_SHELL「页面骨架」
+ *       侧栏 / 顶栏 / 内容区 / 登录入口面的底色与分界线。这是页面骨架自己的事
+ *       （任何 Element Plus 后台模板都这么写），**不是**某组件缺一个 prop。
  *
- * 凡是写"暂时保留""先这样""为了和改前像素一致"的一律不接受 —— 后者正是本轮清掉的那 88 条。
+ * 判据（唯一标准）：删掉这条声明之后，会不会丢**信息**或丢**可读性**？
+ *   会   → 留在 COMPONENT_GAPS，理由写清"删了会丢什么信息 / 哪一处读不清"
+ *   不会 → 接受组件默认样子，把自定义删掉
+ *   被废弃的旧判据：「删掉之后像素会不会不同？不同就保留」—— 那等于说"任何视觉差异都值得
+ *   永久维护一段自定义 CSS"，按它这个白名单曾长到 41 个 key / 103 条声明。
+ *
+ * 本轮把 4 类判错的从 A 组清掉（A 组 5 条 → 0 条），错在同一个地方：**没查组件自己给不给**。
+ *   ① 等宽字体 3 处（.key-prefix / .reveal-value / .cond-seq）—— 判错
+ *      el-text 有 `tag` prop（text.mjs，type String，default "span"）⇒ `el-text tag="code"`
+ *      渲染成 `<code class="el-text">`，等宽来自浏览器 UA 样式表对 `<code>` 的 font-family: monospace。
+ *      而 el-text 自己的 CSS 只有 font-size / color（el-text.css 全文无 font-family），
+ *      不会把 UA 的等宽覆盖掉 ⇒ 本项目一行 font-family 都不用写。
+ *      原来那句"EP 没有等宽语义"只对"没有 monospace 令牌"成立，对"用 <code> 渲染"不成立。
+ *   ② white-space: nowrap 1 处（.why-mark「← 此项未满足」）—— 判错
+ *      el-tag 的 CSS 本身就是 `display:inline-flex` + `white-space:nowrap`（el-tag.css），
+ *      换成 el-tag 之后"不折行"与"带边框/底色"都是组件自带，自定义规则可整条删。
+ *      原来那句"EP 没有'不折行但也不省略'的语义"漏了 el-tag 这个候选（只比了 el-text.truncated）。
+ *   ③ white-space: pre-wrap 1 处（.willdo「将要发生什么」）—— 不是"EP 做不到"，是守了个不存在的东西
+ *      后端 14 处 willDo 文案 + 前端 2 处本地构造的预演文案，全部是单行中文句子
+ *      （全仓 grep willDo 附近 0 个换行符）⇒ pre-wrap 在守一个从来不出现的换行。
+ *      改 `el-text tag="p"`（自带 margin:0 + overflow-wrap:break-word）即可，规则整条删。
+ *      若哪天真要按行分点 / 按仓分条：后端把 willDo 改成数组（见下面 WILLDO_TODO），
+ *      这不是"前端该用哪条 CSS"能解决的问题。
+ *   ④ 布局外壳 10 条 —— 不是"组件做不到"，是**分类错了**，已整体移进 PAGE_SHELL（S 组）。
  * ------------------------------------------------------------------------- */
-const WHITELIST = [
-  /* ================= A 组｜组件能力真缺（删了会丢信息 / 可读性）=================
-   * 只剩 3 类：等宽字体（长串逐字符比对）、white-space: pre-wrap（多行说明按录入换行显示）、
-   * white-space: nowrap（一行标记不许折行）。
+const COMPONENT_GAPS = [
+  /* 当前 0 条。
+   * 上一轮这里的 5 条（3 处等宽 + nowrap + pre-wrap）本轮全部证伪并改掉，
+   * 判错的经过与反证见上面的 ① ② ③。
+   *
+   * 想往这里加一条之前，先回答三个问题（本轮 4 条都是栽在前两个上）：
+   *   ① 真的把组件文档 / props 类型 / 该组件的 CSS 都读过了吗？（el-text 的 tag prop 就躺在 props 里）
+   *   ② 有没有**另一个**组件天然带这个能力？（nowrap ← el-tag；等宽 ← tag="code"）
+   *   ③ 这条声明守的那件事，在后端数据里真的会发生吗？（pre-wrap 守的换行从来没出现过）
    */
+]
 
-  /* ---- 等宽字体：3 处 ---- */
-  {
-    file: 'admin-web/src/views/api-key/index.vue',
-    sel: '.key-prefix',
-    group: 'A',
-    why: 'Key 前缀的等宽字体。前缀是 pk_live_9f3c… 这种大小写+数字+下划线混排的串，'
-       + '比例字体里 l / I / 1 与 0 / O 的字形和宽度都不同，两行前缀竖着比对（确认自己复制的是哪把 key）'
-       + '会串位。丢了等宽 = 核对时可能认错一把 key 的前缀，属于可读性问题。'
-       + 'EP 没有等宽语义：theme-chalk 全库 grep "monospace" 0 命中，$font-family 只有一档 sans-serif；'
-       + 'el-text 的 --el-text-font-size / -color 都不含字体族。'
-  },
-  {
-    file: 'admin-web/src/views/api-key/index.vue',
-    sel: '.reveal-value',
-    group: 'A',
-    why: '一次性明文 Key 的等宽字体。这串要被人逐字符抄进 SDK 配置，抄错一位这把 key 就废了，'
-       + '而明文只显示这一次（关掉只能删了重建）。等宽让 0/O、l/1/I 可辨，是"能不能抄对"的问题。'
-       + '同上：EP 无 monospace 语义。'
-  },
-  {
-    file: 'admin-web/src/views/audit-policy/index.vue',
-    sel: '.cond-seq',
-    group: 'A',
-    why: '条件序号列（0..9 与 G0..G10 混排）的等宽字体。列宽只有 1/24，同一列里个位数与 G10 两字符并排，'
-       + '比例字体下 G 与数字宽度不同，每行的数字左右不齐，竖着数行时容易串行 —— '
-       + '而这一列的数字正是抽屉里「第 N 条条件」与「← 差在哪」引用的那个 N。'
-       + '同上：EP 无 monospace 语义。'
-  },
-
-  /* ---- white-space：2 处 ---- */
-  {
-    file: 'admin-web/src/components/DangerConfirmDialog.vue',
-    sel: '.willdo',
-    group: 'A',
-    why: 'white-space: pre-wrap。「将要发生什么」是后端拼出来的多行说明（改成什么状态 / 拆几条明细 / '
-       + '分别进哪个仓），录入时就按行分了。删了它，浏览器把换行折叠成空格，四五条并列说明挤成一整段，'
-       + '"哪条对应哪个仓、哪几条明细"当场读不出来 —— 这正是这个弹窗要回答的问题。'
-       + 'el-text 没有 white-space 语义（truncated 给的是 nowrap + 省略号，语义相反）。'
-  },
-  {
-    file: 'admin-web/src/views/order-audit/index.vue',
-    sel: '.why-mark',
-    group: 'A',
-    why: 'white-space: nowrap。「← 差在哪」是结论列里指向"这一行就是差的那条"的标记，列宽 120px。'
-       + '删了 nowrap 会被折成「← 差在 / 哪」两行：箭头与文字分离，看不出它指的是哪一行，'
-       + '而且把表格行高撑高、整列参差。EP 没有"不折行但也不省略"的语义（truncated 会加省略号）。'
-  },
-
-  /* ================= B 组｜布局外壳（本来就不该由组件承担）=================
-   * 共同理由：这些是页面骨架的底色与分界线。el-container / el-aside / el-header / el-main
-   * 是**栅格**，不是"带底色的容器"：container.scss 全文没有 background，el-header 只有 height，
-   * 文档 Attributes 也只有 direction / width / height。给它们一个 background 不是"组件缺 prop"，
-   * 而是"这层骨架本来就该由页面自己画"。
-   */
-
+/* ---- S 组｜页面骨架（PAGE_SHELL）：不参与"组件能力缺"的统计 ----
+ * 共同理由：这些是页面骨架的底色与分界线。el-container / el-aside / el-header / el-main
+ * 是**栅格**，不是"带底色的容器"：container.scss 全文没有 background，el-header 只有 height，
+ * 文档 Attributes 也只有 direction / width / height。给骨架一层底色不是"组件缺 prop"，
+ * 而是"这层骨架本来就该由页面自己画"—— vue-element-admin 这类模板全这么写。
+ */
+const PAGE_SHELL = [
   {
     file: 'admin-web/src/layout/index.vue',
     sel: '.layout-aside',
-    group: 'B',
     why: '后台侧栏的深色底 #1f2d3d（= 令牌 --qiqi-color-ink，EP 六档灰里没有这个深度）。'
        + '这是"这是后台管理端"的第一层识别，删了侧栏变白，与内容区、卡片糊成一片，'
        + '导航区与工作区不再有边界。el-aside 只有 :width 一个属性（无 background/变量）。'
@@ -163,7 +147,6 @@ const WHITELIST = [
   {
     file: 'admin-web/src/layout/index.vue',
     sel: '.logo',
-    group: 'B',
     why: '含两条：① logo 条的深色底 #16222e（比侧栏再深一档，是骨架的第二层）；'
        + '② white-space: nowrap —— 侧栏折到 64px 时 logo 文字必须留在一行被 overflow 裁掉，'
        + '删了它会折成三行、撑破 56px 的条（布局约束，不是排版偏好）。'
@@ -172,7 +155,6 @@ const WHITELIST = [
   {
     file: 'admin-web/src/layout/index.vue',
     sel: '.layout-header',
-    group: 'B',
     why: '顶栏的白底 + 1px 下分界线。这条线是"内容区从哪开始"的边界：'
        + '删了之后白顶栏直接连上灰内容区，工作区起点看不清，且顶栏上的操作区（用户/退出）'
        + '看起来像浮在内容里。el-header 只有 height，没有底色/边框出口。'
@@ -180,7 +162,6 @@ const WHITELIST = [
   {
     file: 'admin-web/src/layout/index.vue',
     sel: '.layout-main',
-    group: 'B',
     why: '内容区灰底 #f5f7fa。白卡片靠它衬出边界：删了之后卡片与背景同为白色，'
        + '"哪里有卡、卡到哪儿结束"看不出来（整页一片白）。el-main 无 background 属性/变量'
        + '（container.scss 全文无 background）。'
@@ -188,7 +169,6 @@ const WHITELIST = [
   {
     file: 'admin-web/src/views/login/index.vue',
     sel: '.login-page',
-    group: 'B',
     why: '后台登录页的深色渐变入口面。这是全站唯一的深色页面：运营靠它一眼分清'
        + '"我在后台还是在前台"（两个端登录页的表单结构几乎一样）。删了会退化成白底卡片，'
        + '与前台登录页难以区分 —— 这是系统识别问题，不是"渐变更好看"。'
@@ -197,14 +177,12 @@ const WHITELIST = [
   {
     file: 'portal-web/src/layout/index.vue',
     sel: '.portal',
-    group: 'B',
     why: '前台页面灰底 #f5f7fa。与 .layout-main 同理：白商品卡片需要底色衬出边界。'
        + 'el-container 无 background 属性/变量。'
   },
   {
     file: 'portal-web/src/layout/index.vue',
     sel: '.topbar',
-    group: 'B',
     why: '前台顶栏白底 + 1px 下分界线。与 .layout-header 同理：这条线是导航区与商品区的分界，'
        + '删了两个白色区块连成一片，滚动时看不出顶栏到哪儿结束。el-header 只有 height。'
   }
@@ -217,7 +195,7 @@ const WHITELIST = [
  * `color:` / `font-size:` 这种真声明），所以它们不会出现在"未豁免"里 —— 但它们是同一件事：
  * 让组件在本页长得跟别处不一样。留着就必须有理由，否则下次又会悄悄长回来。
  *
- * 判据同上一节：删了会不会丢信息 / 可读性。目前只剩 6 条，全部是"组件缺这一档语义"。
+ * 判据同上一节：删了会不会丢信息 / 可读性。目前 7 条，全部是"组件缺这一档语义/语义色"。
  * ------------------------------------------------------------------------- */
 const RETAINED_OVERRIDES = [
   { file: 'admin-web/src/layout/index.vue', decl: '--el-text-color: var(--el-color-white)（.logo-text）',
@@ -245,6 +223,25 @@ const RETAINED_OVERRIDES = [
     decl: '--el-avatar-bg-color / -text-color（.metric-icon，inline）',
     why: '六个指标卡各一个语义色底片（金额红/订单蓝/商品绿/待审黄/待发紫/退货青），'
        + 'el-avatar 没有颜色属性 —— 这两个变量就是它的官方口子。' }
+]
+
+/* ---------------------------------------------------------------------------
+ * 2c) 待办：willDo 该是结构化数据，而不是一整串带换行的中文
+ *
+ * 这条**不是**样式问题，所以不进任何豁免清单 —— 记在这里是为了别再有人为了它往
+ * scoped <style> 里加一条 white-space。当前 willDo 全是单行句子，pre-wrap 已删（见 ① ② ③）。
+ * 一旦产品要求「将要发生什么」按行/按仓分点，正确改法在后端：
+ * ------------------------------------------------------------------------- */
+const WILLDO_TODO = [
+  {
+    file: 'qiqi-mall-server（PreviewResult.of / *WillDo 构造处，共 14 个 dryRun 站点）',
+    todo: '把 willDo 从 "拼接的长字符串" 改成结构化数组，例如 '
+        + '{ summary: "将把订单 SN… 审核通过：待审核→待发货", '
+        + 'steps: [{text: "…", warehouseId, warehouseName, lineCount}], notes: ["该规格未配置分仓库存…"] }。'
+        + '前端用 el-text/el-descriptions/<ul><li> 逐条渲染 —— 换行由结构产生，不靠 white-space。'
+        + '理由：一是真要分点就得靠 \\n 拼字符串（前端只能 pre-wrap 硬显示，抄走/复制/无障碍全是乱的）；'
+        + '二是拆单方案本来就已经有结构化数据（split-preview 的 plan[]），文案却在手拼一遍，两处必然会漂。'
+  }
 ]
 
 /* ---------------------------------------------------------------------------
@@ -288,6 +285,12 @@ const parseRules = (css, startLine) => {
   return rules
 }
 
+/** 扫描期只用这一张合并表；统计与打印时 A / S 两组严格分开 */
+const EXEMPT = [
+  ...COMPONENT_GAPS.map((e) => ({ ...e, group: 'A' })),
+  ...PAGE_SHELL.map((e) => ({ ...e, group: 'S' }))
+]
+
 const problems = []
 const deepHits = []
 const whitelisted = []
@@ -303,7 +306,7 @@ for (const app of APPS) {
   for (const file of files) {
     const rel = relative(ROOT, file).split(sep).join('/')
     const text = readFileSync(file, 'utf8')
-    const entries = WHITELIST.filter((e) => e.file === rel)
+    const entries = EXEMPT.filter((e) => e.file === rel)
 
     const styleRe = /<style[^>]*>([\s\S]*?)<\/style>/g
     let sm
@@ -351,18 +354,26 @@ for (const p of problems) {
 const ranked = [...byFile.entries()].sort((a, b) => b[1].length - a[1].length)
 
 const DEEP_FAIL = deepHits.length > 0
-const groupA = whitelisted.filter((w) => w.group === 'A').length
-const groupB = whitelisted.filter((w) => w.group === 'B').length
-const keysA = new Set(whitelisted.filter((w) => w.group === 'A').map((w) => w.file + w.selector)).size
-const keysB = new Set(whitelisted.filter((w) => w.group === 'B').map((w) => w.file + w.selector)).size
+
+/* 三段式统计（不许合并）：
+ *   ① 组件外观声明   = 未豁免的外观声明（problems）—— 目标 0
+ *   ② 组件能力缺     = A 组声明数 —— 目标 0~1（真·EP 表达不了）
+ *   ③ 页面骨架       = S 组声明数 —— 骨架自己的底色/分界线，本来就不算组件的事
+ */
+const gapsA = whitelisted.filter((w) => w.group === 'A')
+const shellS = whitelisted.filter((w) => w.group === 'S')
+const keysA = new Set(gapsA.map((w) => w.file + w.selector)).size
+const keysS = new Set(shellS.map((w) => w.file + w.selector)).size
 
 // preflight 用的单行摘要：不刷屏，只留一行可 grep 的事实
 if (process.argv.includes('--brief')) {
   const deepNote = DEEP_FAIL ? `:deep ${deepHits.length} 处 ❌` : ':deep 0 处 ✓'
-  // 两段式：未豁免的真残留 vs 已审过的豁免。只报前者会把"藏进白名单"误读成"改掉了"。
+  // 三段式：① 组件外观的未豁免残留 ② 组件能力真缺 ③ 页面骨架。
+  // 只报 ① 会把"藏进豁免表"误读成"改掉了"；把 ③ 混进 ② 会把"骨架底色"误读成"组件做不到"。
   console.log(
-    `样式纪律：外观声明 ${problems.length} 处（未豁免，warn，不阻塞）`
-    + ` + 白名单豁免 ${whitelisted.length} 条（A 组组件能力真缺 ${groupA} / B 组布局外壳 ${groupB}），`
+    `样式纪律：组件外观声明 ${problems.length} 处（未豁免，warn，不阻塞）`
+    + ` + 组件能力缺 ${gapsA.length} 条（${keysA} 个选择器）`
+    + ` + 页面骨架 ${shellS.length} 条（${keysS} 个选择器，不算组件的事），`
     + `${deepNote}`
   )
   if (DEEP_FAIL) {
@@ -376,11 +387,11 @@ if (process.argv.includes('--brief')) {
 console.log('\n样式纪律检查（scoped <style> 里只该有"位置"，不该有"外观"）')
 console.log('─'.repeat(72))
 console.log(`扫描：${APPS.join(' + ')} 的 .vue 文件`)
-console.log(`外观声明命中：${problems.length} 处（未豁免），分布在 ${ranked.length} 个文件`)
-console.log(`白名单豁免：${whitelisted.length} 条 / ${keysA + keysB} 个选择器`)
-console.log(`  A 组「组件能力真缺」（删了会丢信息/可读性）：${keysA} 个选择器 / ${groupA} 条声明`)
-console.log(`  B 组「布局外壳」（本来就不该由组件承担）：${keysB} 个选择器 / ${groupB} 条声明`)
-console.log(`保留的 --el-* 覆盖：${RETAINED_OVERRIDES.length} 处（不属外观声明，逐条写明了"删了会丢什么"）`)
+console.log(`① 组件外观声明（未豁免，目标 0）：${problems.length} 处，分布在 ${ranked.length} 个文件`)
+console.log(`② 组件能力缺 A 组（EP 表达不了且删了会丢信息，目标 0~1）：${gapsA.length} 条 / ${keysA} 个选择器`)
+console.log(`③ 页面骨架 S 组（侧栏/顶栏/内容区/登录入口面的底色与分界线，不算组件的事）：${shellS.length} 条 / ${keysS} 个选择器`)
+console.log(`   ②+③ 合计豁免 ${whitelisted.length} 条；保留的 --el-* 覆盖：${RETAINED_OVERRIDES.length} 处（不属外观声明，逐条写明了"删了会丢什么"）`)
+console.log(`   待办 ${WILLDO_TODO.length} 条（非样式问题，不参与上面的计数）：willDo 改结构化数组`)
 console.log(`:deep() 覆盖：${deepHits.length} 处（撬组件内部 DOM，应为 0）`)
 console.log('─'.repeat(72))
 
@@ -403,10 +414,13 @@ if (VERBOSE) {
     console.log(`\n  ${file}`)
     for (const p of list) console.log(`    L${p.line}  ${p.selector}  { ${p.prop}: ${p.value} }`)
   }
-  console.log('\n逐条（白名单豁免）：')
-  for (const w of whitelisted) {
-    console.log(`  [${w.group}] ${w.file}  L${w.line}  ${w.selector}  { ${w.prop} }`)
-  }
+  console.log('\n逐条（② 组件能力缺 A 组）：')
+  if (!gapsA.length) console.log('  （无 —— 这一组现在是空的）')
+  for (const w of gapsA) console.log(`  [A] ${w.file}  L${w.line}  ${w.selector}  { ${w.prop} }`)
+  console.log('\n逐条（③ 页面骨架 S 组）：')
+  for (const w of shellS) console.log(`  [S] ${w.file}  L${w.line}  ${w.selector}  { ${w.prop} }`)
+  console.log('\n待办（非样式问题）：')
+  for (const t of WILLDO_TODO) console.log(`  · ${t.file}\n    ${t.todo}`)
 }
 
 if (deepHits.length) {

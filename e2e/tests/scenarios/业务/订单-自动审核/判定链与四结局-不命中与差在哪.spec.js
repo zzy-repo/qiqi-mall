@@ -42,7 +42,7 @@ import {
 } from '../../../support/audit-ui.js'
 
 /**
- * 业务 / 订单-自动审核 / 判定链与四结局-不命中与差在哪
+ * 业务 / 订单-自动审核 / 判定链与四结局-不命中与判定依据
  *
  * 这个场景钉住判定链的最后一步 [6]：**没有任何 AUTO 策略命中 → NO_MATCH**，
  * 并且这个「不命中」必须是**可解释的**（逐策略、逐条件、expected vs actual），
@@ -57,7 +57,7 @@ import {
  *
  * ── 为什么「种类数不出现」这条要单独断 ────────────────────────────────────
  *   这是 AND 链的语义：QT-1003 的 抖音-标准单 前两条（渠道、应收）里应收已经不满足，
- *   种类数即使满足也不再决定结论。如果引擎把「差在哪几条」写成「全部条件都差」，
+ *   种类数即使满足也不再决定结论。如果引擎把「哪几条不满足」写成「全部条件都差」，
  *   运营就会去调一条根本没问题的条件。所以：原因行**只列真的不满足的**，
  *   抽屉里按三态分开标（未求值 ≠ 不满足）。
  *
@@ -66,10 +66,10 @@ import {
  *   **不会**补一条 order_audit_decision（决策行只由 run 写）。混在一起就再也说不清
  *   「这一轮引擎怎么判的」与「人后来又做了什么」。
  */
-test.describe('业务 › 订单-自动审核 › 判定链与四结局-不命中与差在哪', () => {
+test.describe('业务 › 订单-自动审核 › 判定链与四结局-不命中与判定依据', () => {
   test.beforeAll(() => {
     // eslint-disable-next-line no-console
-    console.log(`[业务 / 订单-自动审核 / 判定链与四结局-不命中与差在哪] API=${API} ADMIN=${ADMIN} DB=${dbOfApi()}`)
+    console.log(`[业务 / 订单-自动审核 / 判定链与四结局-不命中与判定依据] API=${API} ADMIN=${ADMIN} DB=${dbOfApi()}`)
     ensureAuditDemoSeed()
     quietAuditSchedule()
   })
@@ -78,7 +78,7 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-不命�
     restoreAuditSchedule()
   })
 
-  test('QT-1003/QT-1006 都不命中，差在哪给出具体差值与未求值；QT-1006 再人工审核 7→4', async ({ page, request }) => {
+  test('QT-1003/QT-1006 都不命中，判定依据给出具体差值与未求值；QT-1006 再人工审核 7→4', async ({ page, request }) => {
     test.setTimeout(300_000)
     await adminLoginHardened(page)
     const token = await adminTokenOf(page)
@@ -165,7 +165,7 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-不命�
           .not.toContainText('应收金额 420.00 < 500.00')
       })
 
-      await test.step('④ 差在哪抽屉（QT-1003）：逐策略逐条件 expected vs actual，未求值 ≠ 不满足', async () => {
+      await test.step('④ 判定依据抽屉（QT-1003）：逐策略逐条件 expected vs actual，未求值 ≠ 不满足', async () => {
         const drawer = await openWhyDrawer(page, auditQueueRow(page, 'QT-1003'))
 
         await expect(drawer.getByTestId('audit-why-badge'), '抽屉徽标应是 NO_MATCH')
@@ -189,12 +189,12 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-不命�
           .toContainText('客户标签 = 直营门店')
         await expect(drawer, '抽屉里应写出淘宝-标准单差在哪（渠道 = 淘宝，实际 抖音）')
           .toContainText('渠道 = 淘宝')
-        // 种类数这条在抖音-标准单里是「满足」的（1 ≤ 5），所以它不该出现在那条策略的「差在哪」文案里
+        // 种类数这条在抖音-标准单里是「满足」的（1 ≤ 5），所以它不该出现在那条策略的「判定依据」文案里
         const douyinGroup = whyGroupOf(drawer, douyinPolicy.id)
         await expect(douyinGroup, '抽屉里应有「抖音-标准单」这一组').toBeVisible()
         await expect(douyinGroup.locator('.why-backend-lines'), '抖音-标准单 的「差在哪」文案里不该有种类数那句')
           .not.toContainText('商品种类数')
-        // 字段级三态（这一条是本用例的核心）：渠道满足 → 无标记；应收不满足 → 标「差在哪」；种类数满足 → 无标记
+        // 字段级三态（这一条是本用例的核心）：渠道满足 → 无标记；应收不满足 → 标「此项未满足」；种类数满足 → 无标记
         await expect(whyCondRow(douyinGroup, 'CHANNEL').getByTestId('audit-why-mark'),
           '抖音-标准单 的渠道条件满足（抖音=抖音），不该标「差在哪」').toHaveCount(0)
         await expect(whyCondRow(douyinGroup, 'CHANNEL'), '该行要写清期望与实际（抖音 / 抖音）').toContainText('抖音')
@@ -208,7 +208,7 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-不命�
         await closeWhyDrawer(page)
       })
 
-      await test.step('⑤ 差在哪抽屉（QT-1006）：差在种类数 6 ≤ 5，且没有未求值行（它就是最后一条）', async () => {
+      await test.step('⑤ 判定依据抽屉（QT-1006）：差在种类数 6 ≤ 5，且没有未求值行（它就是最后一条）', async () => {
         const drawer = await openWhyDrawer(page, auditQueueRow(page, 'QT-1006'))
 
         const marks = drawer.getByTestId('audit-why-mark')
@@ -247,7 +247,7 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-不命�
           expect(orderFactOf(sn).status, `${sn} 状态应仍是 7（不命中不推进）`).toBe(7)
           expect(ledgerRowsOf(f.id), `${sn} 不该有状态台账行`).toHaveLength(0)
           expect(activeTagsOf(f.id), `${sn} 不该打标`).toHaveLength(0)
-          // miss_reason_json 是「逐条策略差在哪」的结构化留痕（不是一句人话）
+          // miss_reason_json 是「逐条策略判定依据」的结构化留痕（不是一句人话）
           const miss = decisionJsonOf(f.id, 1, 'miss_reason_json')
           expect(Array.isArray(miss), `${sn} 的 miss_reason_json 应是数组`).toBe(true)
           const groups = miss.map((g) => String(g.policyName))
@@ -255,7 +255,7 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-不命�
             .toEqual(expect.arrayContaining([POLICY_NAME.AUTO_DIRECT, POLICY_NAME.AUTO_TAOBAO, POLICY_NAME.AUTO_DOUYIN]))
         }
 
-        // ---- 逐字段：把「差在哪一条、期望多少、实际多少、有没有被求值」钉死 ----
+        // ---- 逐字段：把「哪一条不满足、期望多少、实际多少、有没有被求值」钉死 ----
         const id3 = orderFactOf('QT-1003').id
         const id6 = orderFactOf('QT-1006').id
 

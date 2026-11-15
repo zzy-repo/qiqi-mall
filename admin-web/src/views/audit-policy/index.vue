@@ -82,7 +82,7 @@
           </el-table-column>
 
           <!-- 条件摘要：一条条件一个 chip，chip 的 testid 就是 why-miss-${policyId}-${seq}
-               （从队列「差在哪」跳过来时，命中那条会被高亮并标出「← 差在哪」） -->
+               （从队列「判定依据」跳过来时，命中那条会被高亮并标出「← 此项未满足」） -->
           <el-table-column label="条件摘要" min-width="330">
             <template #default="{ row }">
               <div v-if="row.conditions.length" class="cond-chips">
@@ -96,7 +96,7 @@
                   :data-testid="`why-miss-${row.id}-${c.seq}`"
                   :title="`第 ${c.seq} 条条件`"
                 >
-                  <el-text v-if="isFocused(row.id, c.seq)" tag="b" type="danger">← 差在哪</el-text>
+                  <el-text v-if="isFocused(row.id, c.seq)" tag="b" type="danger">← 此项未满足</el-text>
                   <template v-if="c.kind === 'EXCLUDE'">排除 </template>{{ conditionSummary(c) }}
                 </el-tag>
               </div>
@@ -227,11 +227,11 @@
             <el-card
               v-for="(c, i) in editing.conditions"
               :key="`cond-${i}`"
-              class="cond-row" shadow="never" :body-style="condRowBodyStyle">
               :data-testid="`cond-row-${i}`"
+              class="cond-row" shadow="never" :body-style="condRowBodyStyle"
             >
               <el-row :gutter="8">
-                <el-col :span="1"><el-text class="cond-seq" size="small" type="info">{{ i }}</el-text></el-col>
+                <el-col :span="1"><el-text class="cond-seq" tag="code" size="small" type="info">{{ i }}</el-text></el-col>
 
                 <el-col :xs="24" :sm="6" :md="3">
                   <el-select v-model="c.kind" size="small" :data-testid="`cond-kind-${i}`">
@@ -321,11 +321,11 @@
             <el-card
               v-for="(c, i) in editing.globalExclusions"
               :key="`global-${i}`"
-              class="cond-row" shadow="never" :body-style="condRowBodyStyle">
               :data-testid="`global-cond-row-${i}`"
+              class="cond-row" shadow="never" :body-style="condRowBodyStyle"
             >
               <el-row :gutter="8">
-                <el-col :span="1"><el-text class="cond-seq" size="small" type="info">G{{ i }}</el-text></el-col>
+                <el-col :span="1"><el-text class="cond-seq" tag="code" size="small" type="info">G{{ i }}</el-text></el-col>
 
                 <el-col :xs="24" :sm="6" :md="3">
                   <el-tag size="small" type="danger" effect="plain">排除</el-tag>
@@ -440,14 +440,14 @@ const actionText = (row) => {
   return `冻结：${row.actionTag || 'FROZEN'}（${row.actionReason || row.name}）`
 }
 
-/** 高亮定位：从队列「差在哪」跳过来时会带 focusPolicy / focusSeq */
+/** 高亮定位：从队列「判定依据」跳过来时会带 focusPolicy / focusSeq */
 const focusPolicy = computed(() => Number(route.query.focusPolicy) || null)
 const focusSeq = computed(() => (route.query.focusSeq === undefined ? null : Number(route.query.focusSeq)))
 const isFocused = (policyId, seq) => focusPolicy.value === Number(policyId) && focusSeq.value !== null && Number(seq) === focusSeq.value
 
 /**
  * 条件胶囊的三档语义色，全部是 el-tag 的 type 档位（不用一条 --el-tag-* 覆盖）：
- *   被指到（就是「差在哪」那条）→ warning：这一排里最该被看见的那个；
+ *   被指到（就是「未满足」那条）→ warning：这一排里最该被看见的那个；
  *   排除条件 → danger（与「排除」两个字同义）；
  *   匹配条件 → primary（默认档）。
  * 原来是自定义的"浅蓝底 + 深蓝字 / 浅红底 + 深红字"四组色对，等于在页面里重造了四档色阶。
@@ -784,7 +784,7 @@ onMounted(async () => {
     activeType.value = String(route.query.type).toUpperCase()
   }
   await load()
-  // 从队列「差在哪 → 去改这条策略」跳过来：直接打开对应策略的编辑器，条件高亮由 isFocused 负责
+  // 从队列「判定依据 → 去改这条策略」跳过来：直接打开对应策略的编辑器，条件高亮由 isFocused 负责
   if (focusPolicy.value) {
     const target = policies.value.find((p) => p.id === focusPolicy.value)
     if (target) {
@@ -822,10 +822,10 @@ onMounted(async () => {
 /* 条件行 = el-card：底色/边框/圆角全部组件默认（4px），内距走 :body-style。
    原来钉了 fill-lighter 底 + border-lighter 边 + 4px 圆角 —— 三条都是"追旧值"，与全站每张卡同一个样子。 */
 .cond-row { margin-bottom: 6px; }
-/* 字色/字号走 el-text 的 type=info + size=small；只剩等宽字体一位（见白名单 C 组） */
+/* 字色/字号走 el-text 的 type=info + size=small；等宽由 tag="code" 提供（UA 的 <code> 自带 monospace），
+   这里只剩居中：列宽只有 1/24，序号要在列里居中才不会看起来像"飘在左边"。 */
 .cond-seq {
   display: block; text-align: center;
-  font-family: var(--qiqi-font-mono);
 }
 .cond-tip { margin-top: 6px; }
 .editor-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

@@ -105,7 +105,7 @@ export const mapQueueRow = (r) => ({
   reason: pick(r, 'reason', 'reason_text') ?? null,
   roundNo: num(pick(r, 'roundNo', 'round_no')),
   createdAt: pick(r, 'createdAt', 'created_at') ?? null,
-  // 「差在哪」的结构化留痕：后端补齐 miss_reason_json / evidence_json 后这里直接就有值，
+  // 「判定依据」的结构化留痕：后端补齐 miss_reason_json / evidence_json 后这里直接就有值，
   // 没有时页面降级为「按策略条件 + 队列可见字段本地对一遍」（见 views/order-audit/index.vue）。
   missReasons: pick(r, 'missReasons', 'miss_reasons'),
   matchedConditions: pick(r, 'matchedConditions', 'matched_conditions'),

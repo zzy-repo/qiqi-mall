@@ -13,7 +13,7 @@
       <!-- 只显示前缀，永远不展示完整 key -->
       <el-table-column label="Key" min-width="150">
         <template #default="{ row }">
-          <el-text class="key-prefix" size="small">{{ row.keyPrefix ? `${row.keyPrefix}…` : '—' }}</el-text>
+          <el-text class="key-prefix" tag="code" size="small">{{ row.keyPrefix ? `${row.keyPrefix}…` : '—' }}</el-text>
         </template>
       </el-table-column>
 
@@ -101,7 +101,7 @@
 
         <!-- 编辑时只能看前缀，不能改 key -->
         <el-form-item v-if="form.id" label="Key">
-          <el-text class="key-prefix" size="small">{{ form.keyPrefix ? `${form.keyPrefix}…` : '—' }}</el-text>
+          <el-text class="key-prefix" tag="code" size="small">{{ form.keyPrefix ? `${form.keyPrefix}…` : '—' }}</el-text>
           <span class="muted key-hint">Key 本身不可修改</span>
         </el-form-item>
 
@@ -531,8 +531,8 @@ onMounted(() => {
 
 <style scoped>
 .tip { margin-top: 10px; }
-/* 只剩等宽字体（字号走 el-text 的 size="small"）—— 见白名单 C 组 */
-.key-prefix { font-family: 'SFMono-Regular', Consolas, Monaco, monospace; }
+/* .key-prefix 上已无任何自有声明：等宽由 el-text 的 tag="code"（UA 给 <code> 的 monospace）提供，
+   字号走 size="small"，字色走默认。类名只留作 e2e 定位（.key-prefix），不再承载样式。 */
 .key-hint { margin-left: 8px; }
 .scope-tag { margin: 2px 6px 2px 0; }
 .scope-tag-more { cursor: default; }
@@ -556,10 +556,10 @@ onMounted(() => {
 /* 明文框就是一张普通 el-card（虚线/浅灰底/圆角都不再钉）。"请立即复制"的语义已经由
    上面那条 el-alert(warning) 承担，卡片这里再喊一遍没有多给信息。 */
 .reveal-box { margin-top: 14px; }
-/* 只剩等宽字体一位（见白名单 C 组）；user-select:all 与 word-break 是"能不能抄"的行为约束 */
+/* 等宽由 tag="code" 提供（UA 的 <code> 自带 monospace），这里只剩"能不能抄"的行为约束：
+   flex:1 撑满一行、word-break 让长 key 在弹窗内折行、user-select:all 一点全选。 */
 .reveal-value {
   flex: 1;
-  font-family: 'SFMono-Regular', Consolas, Monaco, monospace;
   word-break: break-all;
   user-select: all;
 }

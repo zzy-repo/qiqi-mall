@@ -370,7 +370,7 @@ onMounted(() => {
 .stat-foot { margin-top: 8px; line-height: 1.6; }
 /* 整卡染色：**这不是追旧值，是语义色**（这张卡是"对上了"还是"对不上"）。
    el-card 没有 status/type 变体（Card 文档 Attributes 只有 header/footer/body-style/*-class/shadow），
-   要染色只能走它的两个公开变量 → 归入白名单 B 组。 */
+   要染色只能走它的两个公开变量 → 归入 scripts/check-style-discipline.mjs 的 RETAINED_OVERRIDES（保留的 --el-* 覆盖）。 */
 .stat-ok {
   --el-card-bg-color: var(--el-color-success-light-9);
   --el-card-border-color: var(--el-color-success-light-5);

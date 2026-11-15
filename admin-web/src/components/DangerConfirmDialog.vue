@@ -12,10 +12,16 @@
   >
     <div v-loading="dangerState.previewing" class="danger-body">
       <!-- willDo：后端用「人话」说明将要发生什么（带单号 / 名称 / 数量）。
-           正常字号、可选中复制：用户要能一眼读清、也能截给同事看。 -->
-      <p class="willdo" data-testid="danger-confirm-willdo">
+           渲染 = el-text tag="p"：正文 14px + regular 字色（el-text 默认档）、margin 0、
+           overflow-wrap:break-word（长串自动折行）、可选中复制 —— 全部来自组件自身，
+           本文件对它不再有任何外观声明。
+           注：原来这里有一条 white-space: pre-wrap。经核对，后端 14 处 willDo 文案（OrderController /
+           ProductController / SkuController / ReturnApplyController / DeliveryController）与前端两处
+           本地构造的预演文案，全部是**单行**中文句子（全仓 grep willDo 附近 0 个换行符），
+           pre-wrap 是在守一个不存在的换行；真要按行分点，正确做法是后端回数组（见 check-style-discipline.mjs 的 WILLDO_TODO）。 -->
+      <el-text tag="p" data-testid="danger-confirm-willdo">
         {{ dangerState.previewing ? '正在预演，看看将要发生什么…' : dangerState.willDo }}
-      </p>
+      </el-text>
 
       <!-- 可选明细区：例如「审核通过」的拆单方案（哪个仓、几条明细、分别是哪些商品） -->
       <!-- 标签:值 成对展示 = el-descriptions（border 模式下 label 才是 regular 灰 + 700、
@@ -85,16 +91,6 @@ const visible = computed({
 
 <style scoped>
 .danger-body { min-height: 80px; }
-/* willDo：正文默认档（14px + 正文字色由 main.css 给）+ 允许换行、允许选中复制。
-   只剩 white-space:pre-wrap 一条自有声明 —— 后端的多行说明必须按录入的换行显示，
-   挤成一段就把"哪条对哪条"读丢了（这是可读性，不是审美，见白名单 C 组）。 */
-.willdo {
-  margin: 0;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  word-break: break-word;
-  user-select: text;
-}
 /* 明细块 = el-descriptions(border)。原来外面还套了一层"浅底 + 4px 圆角 + 3px 橙线"，
    那圈橙色是想说"注意，这是机器给的明细"—— border 模式的表格本身已经把它框出来了，
    而"注意"这件事由对话框标题的 ⚠️ 与红色确认按钮承担。 */

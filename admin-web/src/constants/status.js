@@ -220,7 +220,7 @@ export const AUDIT_BLOCKED_GROUP = ['BLOCKED', 'FROZEN']
 /** 徽标色一句话（抽屉/跑马灯里的补充说明用） */
 export const AUDIT_RESULT_HINT = {
   AUTO_PASS: '策略全部条件满足，已自动推进到待发货',
-  MANUAL: '条件满足但被排除 / 库存或成本预检降级，需要人看一眼',
+  MANUAL: '条件满足但被排除 / 库存或成本预检降级，需人工复核',
   BLOCKED: '被阻止策略前置拦截，不推进状态，需人工联系客户确认',
   FROZEN: '被异常策略命中并打上冻结标，客服处理前不会再参与自动审核',
   NO_MATCH: '没有任何自动策略命中，需要人工判断或补策略',

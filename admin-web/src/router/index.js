@@ -121,7 +121,7 @@ const routes = [
         meta: { title: '台账查询' }
       },
       {
-        // 销售单自动审核队列（chip 筛选 + 判定徽标 + 「差在哪」抽屉）
+        // 销售单自动审核队列（chip 筛选 + 判定徽标 + 「判定依据」抽屉）
         // 路由段**不能**叫 admin：nginx 的 location /admin/ 会把 /admin/** 全代理给后端，
         // 前端路由占用同名段会让 F5 直接吃到 401 白屏（见 /admins 那条注释）。
         path: 'order-audit',

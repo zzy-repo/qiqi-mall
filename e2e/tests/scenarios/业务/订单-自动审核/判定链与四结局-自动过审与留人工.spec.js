@@ -47,7 +47,7 @@ import {
  *   QT-1001 淘宝 268 元 2 件 毛利 62  → AUTO_PASS（命中「淘宝-标准单」，订单 7→8）
  *   QT-1002 同上 + 客服备注「客户改地址：…」→ MANUAL（条件全满足，但被**全局排除**挡住）
  *
- * 「差在哪」抽屉这一轮要钉三件事（对应后端 ConditionTrace 的三态）：
+ * 「判定依据」抽屉这一轮要钉三件事（对应后端 ConditionTrace 的三态）：
  *   ① hint 行 —— 这个结局是什么意思（留人工 = 条件满足但被排除 / 预检降级）；
  *   ② 满足 / 不满足 / **未求值** 三态分开：AND 链上首个不满足之后的条件标「未求值」，
  *      不能混进「不满足」（否则页面在替引擎猜哪些条件比过）；
@@ -75,7 +75,7 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-自动�
     restoreAuditSchedule()
   })
 
-  test('QT-1001 自动过审（7→8）与 QT-1002 被全局排除留人工，差在哪抽屉给出三态与具体数值差', async ({ page, request }) => {
+  test('QT-1001 自动过审（7→8）与 QT-1002 被全局排除留人工，判定依据抽屉给出三态与具体数值差', async ({ page, request }) => {
     test.setTimeout(240_000)
 
     // 后台走真实登录页登录；令牌只用于只读接口断言
@@ -172,8 +172,8 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-自动�
         await expect(auditQueueRow(page, 'QT-1001'), '取消筛选后 QT-1001 应回来').toBeVisible()
       })
 
-      // ================================================================ ⑤「差在哪」抽屉
-      await test.step('⑤ 差在哪抽屉：hint 行 + 未求值行 + 全局排除 + 具体差值，并能跳到策略页', async () => {
+      // ================================================================ ⑤「判定依据」抽屉
+      await test.step('⑤ 判定依据抽屉：hint 行 + 未求值行 + 全局排除 + 具体差值，并能跳到策略页', async () => {
         const row2 = auditQueueRow(page, 'QT-1002')
         const drawer = await openWhyDrawer(page, row2)
 
@@ -191,7 +191,7 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-自动�
         // ② 三态（按实测收紧）：这张单**恰好 2 条条件不满足** —— 直营-小单差客户标签、抖音-标准单差渠道；
         //    而「首个不满足之后」的那几条（直营的应收 268<300、抖音的应收 268<500 与种类数 1≤5）实际都**满足**，
         //    前端按 satisfied 优先渲染成「满足」，所以这张单的抽屉里**没有**「未求值」标签。
-        //    「未求值」出现在「首个不满足之后仍不满足」的条件上（见 3-不命中与差在哪 的 QT-1003）。
+        //    「未求值」出现在「首个不满足之后仍不满足」的条件上（见 3-不命中与判定依据 的 QT-1003）。
         await expect(drawer.getByTestId('audit-why-mark'), '恰好 2 条条件标「← 差在哪」（客户标签、渠道）')
           .toHaveCount(2)
         await expect(whyRowMiss(drawer), '「不满足」的真实数据行恰好 2 行').toHaveCount(2)
@@ -207,7 +207,7 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-自动�
         await expect(directGroup, '抽屉里应有「直营-小单」这一组').toBeVisible()
         await expect(directGroup.locator('.why-backend-lines'), '直营-小单 的留痕里应写出实际值「普通」')
           .toContainText('实际 普通')
-        // 字段级：客户标签那条是「差在哪」，应收 268<300 那条是「满足」→ 不该带标记
+        // 字段级：客户标签那条是「此项未满足」，应收 268<300 那条是「满足」→ 不该带标记
         await expect(whyCondRow(directGroup, 'CUSTOMER_TAG').getByTestId('audit-why-mark'),
           '客户标签那条（期望直营门店、实际 普通）应标「← 差在哪」').toHaveCount(1)
         await expect(whyCondRow(directGroup, 'RECEIVABLE_AMOUNT').getByTestId('audit-why-mark'),
@@ -332,7 +332,7 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-自动�
       })
 
       // ================================================================ ⑦ 接口回读
-      await test.step('⑦ 队列接口：留人工行带回结构与两份「差在哪」证据（不是一串字符串）', async () => {
+      await test.step('⑦ 队列接口：留人工行带回结构与两份「判定依据」证据（不是一串字符串）', async () => {
         const row = await getQueueRowOf(request, token, 'QT-1002')
         expect(row.result, '接口里 QT-1002 的最新结论应是 MANUAL').toBe('MANUAL')
         expect(row.round_no, '接口里应是第 1 轮').toBe(1)

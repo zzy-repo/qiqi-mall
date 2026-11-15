@@ -150,14 +150,14 @@
         </template>
       </el-table-column>
 
-      <!-- 固定右列：差在哪 / 轨迹 / 冻结解冻 -->
+      <!-- 固定右列：判定依据 / 流转记录 / 冻结解冻 -->
       <el-table-column label="操作" width="230" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" data-testid="audit-row-why" @click="openWhy(row)">
-            差在哪
+            判定依据
           </el-button>
           <el-button link type="primary" size="small" data-testid="audit-row-trail" @click="openOrderDrawer(row)">
-            轨迹
+            流转记录
           </el-button>
           <el-button
             v-if="row.result === 'FROZEN'"
@@ -192,10 +192,10 @@
       />
     </div>
 
-    <!-- ============ 「差在哪」抽屉：逐策略逐条件 expected vs actual ============ -->
+    <!-- ============ 「判定依据」抽屉：逐策略逐条件 expected vs actual ============ -->
     <el-drawer
       v-model="whyVisible"
-      :title="`差在哪 - ${whyRow?.orderSn || ''}`"
+      :title="`判定依据 - ${whyRow?.orderSn || ''}`"
       size="880px"
       data-testid="audit-why-drawer"
     >
@@ -222,7 +222,7 @@
         <el-text v-if="otherGatesText(whyRow)" size="small" type="danger" class="why-line" data-testid="audit-why-other-gates">
           {{ otherGatesText(whyRow) }}
         </el-text>
-        <el-alert class="why-reason" type="info" :closable="false" :title="whyRow.reason || '后端没有给出原因'" />
+        <el-alert class="why-reason" type="info" :closable="false" :title="whyRow.reason || '后端未回传原因'" />
 
         <div class="why-meta">
           <span>应收 {{ money(whyRow.totalAmount) }}</span>
@@ -286,7 +286,9 @@
             </el-table-column>
             <el-table-column label="" width="120" fixed="right" align="center">
               <template #default="{ row }">
-                <el-text v-if="row.status === 'unsatisfied'" class="why-mark" tag="b" type="danger" data-testid="audit-why-mark">← 差在哪</el-text>
+                <!-- 指向标 = el-tag：tag 本身 inline-flex + white-space:nowrap（不折行）、自带边框与底色，
+                     比裸文字更适合"箭头指向这一行"；不再需要一行 white-space: nowrap 的自定义样式。 -->
+                <el-tag v-if="row.status === 'unsatisfied'" size="small" type="danger" effect="plain" data-testid="audit-why-mark">← 此项未满足</el-tag>
                 <span v-else-if="row.status === 'unevaluated'" class="muted">—</span>
               </template>
             </el-table-column>
@@ -311,7 +313,7 @@
       <template #footer>
         <div class="why-footer">
           <el-button data-testid="audit-why-goto-policy" type="primary" plain @click="gotoPolicy">去改这条策略</el-button>
-          <el-button data-testid="audit-why-manual-pass" type="success" @click="manualPass">人工通过</el-button>
+          <el-button data-testid="audit-why-manual-pass" type="success" @click="manualPass">人工审核通过</el-button>
         </div>
       </template>
     </el-drawer>
@@ -703,7 +705,7 @@ const runNow = async () => {
   }
 }
 
-// ---------------------------------------------------------------- 差在哪
+// ---------------------------------------------------------------- 判定依据
 
 const whyVisible = ref(false)
 const whyRow = ref(null)
@@ -734,14 +736,14 @@ const whySource = computed(() => {
 })
 
 /**
- * 「差在哪」条件表的行类名：只是**语义钩子**（e2e 用 `tr.why-row-miss` 断言、
+ * 「判定依据」条件表的行类名：只是**语义钩子**（e2e 用 `tr.why-row-miss` 断言、
  * 调试时也能一眼看出这行是什么状态），不承担任何样式 —— 颜色由下面的 whyRowStyle 给。
  */
 const whyRowClass = ({ row }) =>
   row.status === 'unsatisfied' ? 'why-row-miss' : row.status === 'unevaluated' ? 'why-row-unevaluated' : ''
 
 /**
- * 「差在哪」条件表的行底色：不满足 = 红底，未求值 = 灰底灰字。
+ * 「判定依据」条件表的行底色：不满足 = 红底，未求值 = 灰底灰字。
  *
  * 用 el-table 的 `row-style`（公开 prop，直接给 <tr> 落内联样式），而不是「row-class-name +
  * `:deep(.why-row-miss)`」——后者撬的是 el-table 内部渲染出来的 <tr>，scoped 选不中，只能 :deep。
@@ -752,7 +754,7 @@ const whyRowStyle = ({ row }) => row.status === 'unsatisfied'
     ? { background: 'var(--el-fill-color-lighter)', color: 'var(--el-text-color-secondary)' }
     : undefined
 
-/** 去改这条策略：带上策略 id 与第一条「差在哪」的条件 seq，策略页会高亮那一行 */
+/** 去改这条策略：带上策略 id 与第一条「不满足」条件的 seq，策略页会高亮那一行 */
 const gotoPolicy = () => {
   const groups = whyGroups.value
   const target = groups.find((g) => g.conditions.some((c) => c.status === 'unsatisfied')) || groups[0]
@@ -771,14 +773,14 @@ const gotoPolicy = () => {
   })
 }
 
-/** 人工通过：走「预演 → 确认 → 执行」（7 → 8），不是无声写库 */
+/** 人工审核通过：走「预演 → 确认 → 执行」（7 → 8），不是无声写库 */
 const manualPass = async () => {
   const row = whyRow.value
   if (!row) return
   await danger.run({
     dryRun: () => auditPassDryRun(row.orderId),
     exec: () => auditPassOrder(row.orderId),
-    title: `人工通过订单 ${row.orderSn}`,
+    title: `人工审核通过订单 ${row.orderSn}`,
     confirmText: '确认通过',
     successText: `订单 ${row.orderSn} 已人工审核通过`,
     onSuccess: () => {
@@ -916,7 +918,7 @@ onMounted(() => {
 .why-global { margin-bottom: 18px; }
 .why-global .why-backend-line { line-height: 20px; }
 
-/* ---- 「差在哪」抽屉 ---- */
+/* ---- 「判定依据」抽屉 ---- */
 .why-head { display: flex; align-items: center; gap: 10px; }
 /* 抽屉里与队列行同款的「本可怎样」：只有块级与间距，外观全是 el-text 的 size/type */
 .why-would-be {
@@ -936,8 +938,8 @@ onMounted(() => {
 .why-group-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .why-backend-lines { margin-bottom: 6px; }
 .why-backend-line { line-height: 20px; }
-/* 只剩"不折行"：'← 差在哪' 在 120px 的结论列里折行会读成两行、看不出是箭头指过来 */
-.why-mark { white-space: nowrap; }
+/* 「← 此项未满足」的"不折行"由 el-tag 自带（.el-tag 就是 inline-flex + white-space:nowrap），
+   本文件不再为它保留任何外观声明。 */
 .why-footer { display: flex; justify-content: flex-end; gap: 10px; }
 /* 冻结计数：与其它数字同款 el-text tag="b"，不再单独染紫 ——
    紫是 FROZEN 徽标的色，而这一列是"冻结了几单"的数量，本来就不该跟徽标同色 */
