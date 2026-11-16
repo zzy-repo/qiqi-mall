@@ -277,7 +277,7 @@ class AuditConclusionExclusivityIntegrationTest {
      */
     @Test
     @Order(3)
-    @DisplayName("③人工放行：MANUAL → 审核通过 ⇒ active 结论标 == [AUDIT_PASSED]（旧标 superseded 且有解除痕迹）")
+    @DisplayName("③人工放行（V9）：MANUAL → 审核通过 ⇒ active 结论标 == []（旧标已解除，不补落「通过」标）")
     void manualPassClearsConclusionTags() {
         Long id = orderIdOf("QT-3003");
         assertThat(decisionResult("QT-3003")).isEqualTo("MANUAL");
@@ -288,17 +288,17 @@ class AuditConclusionExclusivityIntegrationTest {
         assertThat(result.getCode()).as("放行应成功：%s", result.getMessage()).isZero();
 
         assertThat(statusOf("QT-3003")).as("7 待审核 → 8 待发货").isEqualTo(8);
-        // ★ 期 3 步骤 2.5：结算不再等于「清空」—— 放行之后「当前结论」仍然存在，只是变成了
-        //   「它最后怎么了」= AUDIT_PASSED（人工放行通过，visible=0：过没过由状态 8 表达）。
+        // ★ V9（2026-11-16）：结算回到「只解不落」—— 放行之后身上**没有**结论标。
+        //   用户 16:38 拍板：「通过与否由状态表达，不由标表达」「绝不会有一个叫『已通过』的标」。
         assertThat(activeConclusionCodes("QT-3003"))
-                .as("放行后 active 结论标 == [AUDIT_PASSED]（不是空 —— 清空会让这张单答不出\"当前结论\"）")
-                .containsExactly(AuditTagCatalogService.CODE_AUDIT_PASSED);
-        assertThat(conclusionTagCount("QT-3003")).as("一单仍然只有一条 active 结论标（互斥没被破坏）").isEqualTo(1);
+                .as("放行后 active 结论标 == []（「过了」由状态 8 表达）").isEmpty();
+        assertThat(conclusionTagCount("QT-3003")).isZero();
         assertThat(blockingConclusionCount("QT-3003"))
-                .as("AUDIT_PASSED 的 blocking=0 ⇒ 已放行的单身上不再有任何 blocking 的结论标（下发保险不会被自己锁死）")
-                .isZero();
-        assertThat(activeTagCodes("QT-3003")).as("特征标一个都没有（本类没给它打）")
-                .containsExactly(AuditTagCatalogService.CODE_AUDIT_PASSED);
+                .as("已放行的单身上不许残留任何 blocking 的结论标（下发保险不会被自己锁死）").isZero();
+        assertThat(activeTagCodes("QT-3003")).as("一个标都没有（本类没给它打特征标，也不落「通过」标）").isEmpty();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM order_audit_tag "
+                        + "WHERE order_id = ? AND tag_code = 'AUDIT_PASSED'", Integer.class, id))
+                .as("不是「写了又被解掉」：AUDIT_PASSED 这条落标路径整段不存在").isZero();
 
         Map<String, Object> old = anyTagRow("QT-3003", "AUDIT_PENDING");
         assertThat(((Number) old.get("active")).intValue()).as("旧标必须真的被解除（不是留着两条）").isZero();
@@ -306,10 +306,6 @@ class AuditConclusionExclusivityIntegrationTest {
         assertThat(String.valueOf(old.get("released_by")))
                 .as("解除人要说清是「放行结算」而不是「被新结论取代」")
                 .isEqualTo(OrderAuditTagService.RELEASED_BY_AUDIT_PASS);
-        Map<String, Object> passedTag = anyTagRow("QT-3003", AuditTagCatalogService.CODE_AUDIT_PASSED);
-        assertThat(passedTag.get("released_at")).as("终局标是 active 的（还没被解除）").isNull();
-        assertThat(String.valueOf(passedTag.get("reason")))
-                .as("终局标要能自证出处（离开待审核 7→8）").contains("7→8");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM delivery_order WHERE order_id = ?", Integer.class, id))
                 .as("放行确实走完了拆单（证明不是绕开入口改的 status）").isGreaterThanOrEqualTo(1);
 
@@ -323,7 +319,7 @@ class AuditConclusionExclusivityIntegrationTest {
     /** 路径④：先被策略拦过（BLOCKED，{@code blocking=1}），再人工放行 —— 同样必须结算干净。 */
     @Test
     @Order(4)
-    @DisplayName("④被 BLOCK 过再人工放行 ⇒ active 结论标 == [AUDIT_PASSED]（BLOCKED 已 superseded）")
+    @DisplayName("④被 BLOCK 过再人工放行 ⇒ active 结论标 == []（BLOCKED 已解除，不补落「通过」标）")
     void blockedThenPassClearsConclusionTags() {
         assertThat(decisionResult("QT-3004")).isEqualTo("BLOCKED");
         assertThat(activeConclusionCodes("QT-3004")).as("起点：被拦").containsExactly("BLOCKED");
@@ -333,9 +329,9 @@ class AuditConclusionExclusivityIntegrationTest {
 
         assertThat(statusOf("QT-3004")).isEqualTo(8);
         assertThat(activeConclusionCodes("QT-3004"))
-                .as("放行后不该再挂着 BLOCKED（它就是那条会把已放行单锁死的标），只剩终局标 AUDIT_PASSED")
-                .containsExactly(AuditTagCatalogService.CODE_AUDIT_PASSED);
-        assertThat(conclusionTagCount("QT-3004")).as("一条 active 结论标（互斥）").isEqualTo(1);
+                .as("放行后不该再挂着 BLOCKED（它就是那条会把已放行单锁死的标），且不补落任何「通过」标")
+                .isEmpty();
+        assertThat(conclusionTagCount("QT-3004")).isZero();
         Map<String, Object> old = anyTagRow("QT-3004", "BLOCKED");
         assertThat(((Number) old.get("active")).intValue()).isZero();
         assertThat(old.get("released_at")).as("解除时间必须记下").isNotNull();
@@ -359,7 +355,7 @@ class AuditConclusionExclusivityIntegrationTest {
      */
     @Test
     @Order(5)
-    @DisplayName("⑤审核不通过（7→4）⇒ active 结论标 == [AUDIT_REJECTED]（「没过」由状态 4 表达，标说清是人工关的）")
+    @DisplayName("⑤审核不通过（7→4，V9）⇒ active 结论标 == []（「没过」由状态 4 表达，不落「不通过」标）")
     void auditRejectClearsConclusionTags() {
         assertThat(decisionResult("QT-3005")).isEqualTo("NO_MATCH");
         assertThat(activeConclusionCodes("QT-3005")).containsExactly("NO_POLICY_MATCH");
@@ -368,11 +364,10 @@ class AuditConclusionExclusivityIntegrationTest {
         assertThat(result.getCode()).as("审核不通过应成功：%s", result.getMessage()).isZero();
 
         assertThat(statusOf("QT-3005")).as("7 待审核 → 4 已关闭").isEqualTo(4);
-        // ★ 期 3 步骤 2.5：关单之后「当前结论」不是空的 —— 它是 AUDIT_REJECTED（审核不通过）。
-        //   状态 4 说"关了"，标说"是人工关的"（这条决策行 result=NO_MATCH 答不出）。
+        // ★ V9：关单之后身上**没有**结论标 —— 「没过」由状态 4（已关闭）表达。
         assertThat(activeConclusionCodes("QT-3005"))
-                .as("关单后 active 结论标 == [AUDIT_REJECTED]").containsExactly(AuditTagCatalogService.CODE_AUDIT_REJECTED);
-        assertThat(conclusionTagCount("QT-3005")).as("一条 active 结论标（互斥）").isEqualTo(1);
+                .as("关单后 active 结论标 == []").isEmpty();
+        assertThat(conclusionTagCount("QT-3005")).isZero();
         Map<String, Object> old = anyTagRow("QT-3005", "NO_POLICY_MATCH");
         assertThat(((Number) old.get("active")).intValue()).isZero();
         assertThat(old.get("released_at")).isNotNull();

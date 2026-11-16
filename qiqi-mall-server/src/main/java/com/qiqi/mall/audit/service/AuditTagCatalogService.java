@@ -64,34 +64,50 @@ public class AuditTagCatalogService {
     /** 待人工审核：result=MANUAL（被排除条件挡下来的那支） */
     public static final String CODE_AUDIT_PENDING = "AUDIT_PENDING";
     /**
-     * 自动过审通过：result=AUTO_PASS（<b>visible=0</b>，期 3 步骤 1 新增，见 V7）。
+     * 历史码（<b>V9 已停用：目录 {@code enabled=0}，代码一处都不再落它</b>）。
      *
-     * <p>为什么「最常见的结论」也要有标：期 3 要把结论改从标读，AUTO_PASS 若没有标，
-     * 任何"从标反推结论"的实现都会在这批单上给不出结论、只能回退读决策行 —— 等于把刚切掉的耦合接回来。
-     * 而"自动过审"落成一枚显眼的标又是噪声，所以：<b>数据上有标（事实），队列里不显示（visible=0）</b>。
+     * <p>保留这个常量只为一件事：让「这枚码曾经存在过」在代码里查得到出处 ——
+     * 历史单身上可能还留着 {@code active=0} 的这类行（V9 已把存量 active 全部解除），
+     * 排查时不该看见一个谁也不认识的字符串。
      *
-     * <p>⚠️ 它仍然是 {@code category='结论'}：互斥规则 / 结算规则 / 下发保险的 category 判据都按这一档走，
-     * 为了"不显示"把它塞进「特征」档会当场漏掉互斥（一单能同时 active AUTO_PASSED + NO_POLICY_MATCH）。
+     * <p>为什么停用它：用户 2026-11-16 16:38 明确拍过板「<b>自动过审的单身上可以有标，
+     * 但绝不会有一个叫『已通过』的标</b>」「<b>通过与否由状态表达，不由标表达</b>」。
+     * V7 曾让 AUTO_PASS 落这枚标（visible=0），是助手自己拍板、推翻用户决定的产物，V9 已收回。
+     *
+     * @deprecated V9 起停用；不要在任何落标路径上再用它。
      */
+    @Deprecated
     public static final String CODE_AUTO_PASSED = "AUTO_PASSED";
 
     /**
-     * 人工放行通过：7→8 且 {@code reason=AUDIT_PASS}（<b>visible=0</b>，期 3 步骤 2.5 新增，见 V8）。
+     * 历史码（<b>V9 已停用：目录 {@code enabled=0}，代码一处都不再落它</b>）。
      *
-     * <p>这是「结算 = 落终局标」这条新口径的第一条：单子离开待审核之后，它的"当前结论"不再是空的，
-     * 而是变成了「它最后怎么了」。为什么 visible=0：通过的判断由<b>订单状态</b>表达（吉客云口径），
-     * 而每张过审单都会有一条这个标 —— visible=1 会把队列刷成一屏"人工放行通过"，
-     * 真正要看的几条当场被淹掉（同 {@link #CODE_AUTO_PASSED} 的理由）。
+     * <p>V8 曾让「7→8 人工放行」落这枚标。它正是用户否决的那枚「已通过」标：
+     * 一张单过没过，由订单状态（8 待发货）表达就够了，标不必再说一遍。V9 已收回。
+     *
+     * @deprecated V9 起停用；不要在任何落标路径上再用它。
      */
+    @Deprecated
     public static final String CODE_AUDIT_PASSED = "AUDIT_PASSED";
 
-    /** 审核不通过：7→4 且 {@code reason=AUDIT_REJECT}（<b>visible=0</b>）。"没过"由状态 4 表达，标说明"是人工关的" */
+    /**
+     * 历史码（<b>V9 已停用：目录 {@code enabled=0}，代码一处都不再落它</b>）。
+     *
+     * <p>V8 曾让「7→4 审核不通过」落这枚标；同 {@link #CODE_AUDIT_PASSED}，它也是用户否决的
+     * 「通过与否由标表达」那一类 —— 没过由状态 4（已关闭）表达。V9 已收回。
+     *
+     * @deprecated V9 起停用；不要在任何落标路径上再用它。
+     */
+    @Deprecated
     public static final String CODE_AUDIT_REJECTED = "AUDIT_REJECTED";
 
     /**
-     * 已申请退货：7→5 且 {@code reason=RETURN_APPLY}（<b>visible=1</b>，三条终局标里唯一可见的一条）。
+     * 已申请退货：7→5 且 {@code reason=RETURN_APPLY}（<b>visible=1</b>）—— 唯一保留的"结算事实标"。
      *
-     * <p>为什么只有它可见：队列的「判定」列里<b>看不到订单状态</b>（队列是决策驱动的，
+     * <p>为什么它留着、上面三枚停用：它不回答「过没过」（用户否决的是这个），回答的是
+     * 「这单进了退货流程」这条<b>事实</b>，属于用户说的「标只装值得注意的事」。
+     *
+     * <p>为什么它可见：队列的「判定」列里<b>看不到订单状态</b>（队列是决策驱动的，
      * {@code order.status} 只在订单页），运营从队列里根本看不出这单已进退货流程；
      * 而退货是少数单，噪声风险与信息增量不对称。
      *

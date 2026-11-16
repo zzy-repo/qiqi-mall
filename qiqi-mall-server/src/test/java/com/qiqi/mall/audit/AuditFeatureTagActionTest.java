@@ -161,7 +161,7 @@ class AuditFeatureTagActionTest {
         ItCleanup.residueOfOrders(jdbc, "QT-300%")
                 .forEach((table, left) -> assertThat(left).as("清理后 `%s` 还有残留", table).isZero());
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM audit_tag_catalog WHERE builtin = 1", Integer.class))
-                .as("内置标目录项不许被碰（数量应与开跑前一致，不写死条数：V7 起加了 AUTO_PASSED）")
+                .as("内置标目录项不许被碰（数量应与开跑前一致，不写死条数：V7/V8 加过、V9 停用了几条）")
                 .isEqualTo(builtinCatalogSize);
     }
 
@@ -243,13 +243,13 @@ class AuditFeatureTagActionTest {
 
         // ---------------- 打标成功，且它对"过没过"零影响 ----------------
         assertThat(activeFeatureCodes("QT-3002")).as("AUTO 策略也能打特征标").containsExactly(FEATURE_RISK_ADDR);
-        // ⚠️ 口径变更（期 3 步骤 1，V7）：AUTO_PASS 现在**必须**落一条 AUTO_PASSED（visible=0），
-        //    否则"结论从标读"在最常见的那个结论上根本没有答案。特征标仍然不算结论标。
+        // ⚠️ 口径（V9，2026-11-16）：AUTO_PASS **不落结论标** —— 用户 16:38 拍板「通过与否由状态表达，
+        //    不由标表达」「绝不会有一个叫『已通过』的标」。打了特征标照样自动过审，但"过没过"只由状态 8 说。
         assertThat(conclusionTagCount("QT-3002"))
-                .as("AUTO_PASS 的结论标恰好一条（AUTO_PASSED）；特征标不算结论标").isEqualTo(1);
+                .as("AUTO_PASS 不产结论标；特征标不算结论标").isZero();
         assertThat(activeTagCodes("QT-3002"))
-                .as("这单身上是「一条结论标 + 那一个特征标」，两者并列、互不影响")
-                .containsExactlyInAnyOrder(FEATURE_RISK_ADDR, "AUTO_PASSED");
+                .as("这单身上就那一个特征标（不是「结论标 + 特征标」）")
+                .containsExactly(FEATURE_RISK_ADDR);
 
         // AUTO 的动作里没有 note（note 属于结论动作），所以 reason 走「策略「X」命中：<第一条条件人话>」
         Map<String, Object> row = activeTagRow("QT-3002", FEATURE_RISK_ADDR);

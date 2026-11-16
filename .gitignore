@@ -33,3 +33,6 @@ scripts/cdn-converge/*
 # 密钥备份/临时文件一律不入库
 .env.bak.*
 *.bak.*
+
+# AgentTeams 运行产物（团队编排状态、信箱、归档），不进提交
+.agent-teams/

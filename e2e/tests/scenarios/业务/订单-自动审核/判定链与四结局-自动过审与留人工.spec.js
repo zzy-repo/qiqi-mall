@@ -271,13 +271,14 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-自动�
         expect(led1[0].refType, '台账应记下「这次 run 推的」ref_type=AUDIT_RUN').toBe('AUDIT_RUN')
         expect(led1[0].refId, '台账的 ref_id 应是这一轮 run 的 id').toBe(Number(run.runId))
         expect(led1[0].idemKey, `台账幂等键应是 {orderId}:{status_seq} = ${id1}:1`).toBe(`${id1}:1`)
-        // ⚠️ 口径（2026-11-16 期 3 步骤 1 再修正）：AUTO_PASS **落一条** AUTO_PASSED 结论标，
-        //    但它是 visible=0 的 ⇒ 队列行不显示它。期 1 那条「AUTO_PASS 不产标」已被 V7 推翻
-        //    （理由：结论改从标读之后，最常见的那个结论不能是空的）。
-        //    仍然成立的是：自动过审的单可以**另外**带特征标（客诉客户/绿旗急发…），
-        //    那些与"过没过"无关，所以断言仍按 category='结论' 收窄，不写"没有任何标"。
-        expect(activeConclusionTagsOf(id1), 'AUTO_PASS 落 AUTO_PASSED 结论标（visible=0，不进队列显示）')
-          .toEqual(['AUTO_PASSED'])
+        // ⚠️ 口径（V9，2026-11-16 **退回用户 16:38 的拍板**）：AUTO_PASS **不落结论标**。
+        //    V7 曾让这一支落 AUTO_PASSED（visible=0），那是助手自己拍板、推翻用户决定的产物：
+        //    用户原话「自动过审的单身上可以有标，但绝不会有一个叫『已通过』的标」
+        //    「通过与否由状态表达，不由标表达」。所以「它过了」由上面那条 status=8 的断言表达，
+        //    标里一条都不落。自动过审的单仍然可以带**特征标**（客诉客户/绿旗急发…），
+        //    那些与"过没过"无关 —— 故断言按 category='结论' 收窄，不写"没有任何标"。
+        expect(activeConclusionTagsOf(id1), 'AUTO_PASS 不落任何结论标（「它过了」由状态 8 表达）')
+          .toEqual([])
 
         // 命中条件留痕（matched_condition_json 与 miss/excluded 同一形状：策略组 → 条件数组）
         // ⚠️ 必须 parse 后按字段断言：MySQL 输出 JSON 列时会规范化成 `"policy_name": "直营-小单"`（带空格），

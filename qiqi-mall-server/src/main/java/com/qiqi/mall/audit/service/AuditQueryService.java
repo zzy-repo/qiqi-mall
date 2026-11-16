@@ -312,12 +312,14 @@ public class AuditQueryService {
         ConclusionShadow shadow = conclusionShadow(safeTags, hasDecision);
         out.put("conclusionFromTag", shadow.fromTag());
         out.put("conclusionSource", shadow.source());
-        // ★ 期 3 步骤 2.5：终局轴。离开待审核之后标回答的不是"这一轮判成了什么"（那是 result /
-        //   conclusionFromTag），而是"它最后怎么了"（AUDIT_PASSED / AUDIT_REJECTED / RETURN_APPLIED）。
-        //   两者**取值域不同、也不该相等**（result=NO_MATCH + 终局标 AUDIT_REJECTED 完全正常），
-        //   所以单开一个字段而不是硬塞进 conclusionFromTag —— 硬塞就得给这三个码编一个最像的
+        // ★ V9：结算事实标（今天只有 RETURN_APPLIED「已申请退货」）。它回答的不是"这一轮判成了什么"
+        //   （那是 result / conclusionFromTag），而是"这单进了退货流程"这条事实。
+        //   两者**取值域不同、也不该相等**（result=NO_MATCH + 已申请退货完全正常），
+        //   所以单开一个字段而不是硬塞进 conclusionFromTag —— 硬塞就得给它编一个最像的
         //   AuditResult，那是伪造结论，会让对账把"两边都对"算成"冲突"。
-        out.put("conclusionTerminalTag", shadow.terminalFromTag());
+        //   ⚠️ 期 3 步骤 2.5 这里原本摆着 AUDIT_PASSED / AUDIT_REJECTED 两枚"过没过"标，
+        //   已由 V9 按用户 16:38 的拍板停用（通过与否由状态表达，不由标表达）。
+        out.put("conclusionSettlementFact", shadow.settlementFact());
         // 数据层事实：这单身上**全部** active 的结论标码（含 visible=0 的 AUTO_PASSED），按 id 升序
         out.put("conclusionTagCodes", shadow.tagCodes());
         // 一单多条 active 结论标（理论不该有）时为 true —— 让它在接口上"看得见"，而不是被静默压成一条
@@ -332,25 +334,26 @@ public class AuditQueryService {
     // ============================================================ 期 3：影子字段（标 → 结论）
 
     /**
-     * 「如果结论从标读，会是什么」的结果 —— <b>两个轴</b>（期 3 步骤 2.5 起）。
+     * 「如果结论从标读，会是什么」的结果（期 3 起；V9 之后只剩"判定结论 + 一枚结算事实标"）。
      *
      * @param fromTag     <b>判定轴</b>：从 active 结论标反推出来的结论值（取值域与 {@code result} 完全相同：
      *                    {@code AUTO_PASS / MANUAL / BLOCKED / FROZEN / NO_MATCH}）；
      *                    {@code null} = 判定轴上没有标，或标码在已知映射之外
-     * @param terminalFromTag <b>终局轴</b>：离开待审核之后它最后怎么了
-     *                    （{@code AUDIT_PASSED / AUDIT_REJECTED / RETURN_APPLIED}）；
-     *                    {@code null} = 身上没有终局标（还在待审核，或是规则生效前的历史单）。
-     *                    这两轴取值域不同、也不该相等：{@code result=NO_MATCH} 与终局标
-     *                    {@code AUDIT_REJECTED} 同时成立是完全正常的（"没命中"+"人工关单"）。
-     * @param source      结论的来路：{@code TAG}（判定轴读得出）/ {@code TERMINAL}（只有终局标：
-     *                    它回答的是"最后怎么了"，答案确定但与 result 不可比）/ {@code DECISION}
-     *                    （标里没有，只能退回决策行 —— 历史单的如实回答）/ {@code NONE}
+     * @param settlementFact <b>结算事实标</b>：离开待审核之后发生的那件值得注意的事，今天只可能是
+     *                    {@code RETURN_APPLIED}（已申请退货）；{@code null} = 身上没有它。
+     *                    <p>V9（2026-11-16）把它从"终局轴"缩成一枚事实标：原先那两枚
+     *                    {@code AUDIT_PASSED / AUDIT_REJECTED} 回答的是"过没过"，已按用户 16:38 的拍板停用
+     *                    （「通过与否由状态表达，不由标表达」）。它仍<b>不与 result 比</b>：
+     *                    {@code result=NO_MATCH} + 已申请退货同时成立完全正常。
+     * @param source      结论的来路：{@code TAG}（判定轴读得出）/ {@code SETTLEMENT_FACT}（只有结算事实标：
+     *                    答案确定但与 result 不可比）/ {@code DECISION}
+     *                    （标里没有，只能退回决策行 —— 终局单与历史单的如实回答）/ {@code NONE}
      *                    （连决策行都没有 —— 这张单**从未被判定过**）
-     * @param tagCodes    这单身上全部 active 结论标码（按 id 升序；含 visible=0 的 AUTO_PASSED / AUDIT_PASSED…）
+     * @param tagCodes    这单身上全部 active 结论标码（按 id 升序）
      * @param multiple    是否一单多条 active 结论标（理论不该有；出现就说明互斥漏了某条路径）
      */
     private record ConclusionShadow(String fromTag,
-                                    String terminalFromTag,
+                                    String settlementFact,
                                     String source,
                                     List<String> tagCodes,
                                     boolean multiple) {
@@ -385,36 +388,36 @@ public class AuditQueryService {
         }
         boolean multiple = conclusionTags.size() > 1;
 
-        // ---------------- 判定轴：这一轮引擎判成了什么（与 result 必须对得上） ----------------
-        // ★ 期 3 步骤 2.5：终局标（AUDIT_PASSED / AUDIT_REJECTED / RETURN_APPLIED）**不进这一轴** ——
-        //   它们回答的是"离开待审核之后去哪了"，与 result 是两个问题（见 ConclusionTags#isTerminalConclusion）。
+        // ---------------- 判定结论：这一轮引擎判成了什么（与 result 必须对得上） ----------------
+        // ★ V9：结算事实标（今天只有 RETURN_APPLIED 一枚）**不进这一栏** ——
+        //   它回答的是"这单进了退货流程"，与 result 是两个问题（见 ConclusionTags#isSettlementFact）。
         List<ActiveTag> verdictTags = new ArrayList<>();
         for (ActiveTag t : conclusionTags) {
-            if (!ConclusionTags.isTerminalConclusion(t.code())) verdictTags.add(t);
+            if (!ConclusionTags.isSettlementFact(t.code())) verdictTags.add(t);
         }
         String mapped = null;
         if (!verdictTags.isEmpty()) {
-            // 阻断型优先 → id 最大（与 primaryTag 同一条规则，只是范围收窄到"判定轴结论标"）
+            // 阻断型优先 → id 最大（与 primaryTag 同一条规则，只是范围收窄到"判定结论标"）
             ActiveTag chosen = verdictTags.stream()
                     .max(java.util.Comparator.comparing(ActiveTag::blocking).thenComparingLong(ActiveTag::id))
                     .orElse(null);
             mapped = chosen == null ? null : resultOfTagCode(chosen.code());
         }
 
-        // ---------------- 终局轴：它最后怎么了 ----------------
-        // 同轴上理论只有一条（结算时先 release 再落一条）；历史遗留有两条时取 id 最大的那条 ——
+        // ---------------- 结算事实标：离开待审核之后发生的那件事（今天只有"已申请退货"） ----------------
+        // 理论最多一条（同一枚码 + uk_active）；历史遗留有多条时取 id 最大的那条 ——
         // "取哪条"必须是可判定的规则，不能撞 LIMIT 1 随机取。
-        ActiveTag terminalTag = conclusionTags.stream()
-                .filter(t -> ConclusionTags.isTerminalConclusion(t.code()))
+        ActiveTag factTag = conclusionTags.stream()
+                .filter(t -> ConclusionTags.isSettlementFact(t.code()))
                 .max(java.util.Comparator.comparingLong(ActiveTag::id))
                 .orElse(null);
-        String terminal = terminalTag == null ? null : terminalTag.code();
+        String fact = factTag == null ? null : factTag.code();
 
-        // 来源：判定轴有标就报 TAG（它可能与 result 冲突，那正是 valueMismatch 要抓的）；
-        //       只有终局标时报 TERMINAL（**不与 result 比**，见对账端点）；两者都没有才是 DECISION/NONE。
+        // 来源：有判定结论就报 TAG（它可能与 result 冲突，那正是 valueMismatch 要抓的）；
+        //       只有事实标时报 SETTLEMENT_FACT（**不与 result 比**，见对账端点）；两者都没有才是 DECISION/NONE。
         String source = !verdictTags.isEmpty() ? "TAG"
-                : (terminal != null ? "TERMINAL" : (hasDecision ? "DECISION" : "NONE"));
-        return new ConclusionShadow(mapped, terminal, source, codes, multiple);
+                : (fact != null ? "SETTLEMENT_FACT" : (hasDecision ? "DECISION" : "NONE"));
+        return new ConclusionShadow(mapped, fact, source, codes, multiple);
     }
 
 
@@ -517,7 +520,7 @@ public class AuditQueryService {
         out.put("orderId", orderId);
         out.put("hasDecision", hasDecision);
         out.put("conclusionFromTag", shadow.fromTag());
-        out.put("conclusionTerminalTag", shadow.terminalFromTag());
+        out.put("conclusionSettlementFact", shadow.settlementFact());
         out.put("conclusionSource", shadow.source());
         out.put("conclusionTagCodes", shadow.tagCodes());
         out.put("conclusionTagMultiple", shadow.multiple());
@@ -532,38 +535,31 @@ public class AuditQueryService {
     private static final int PARITY_SCAN_PAGE = 200;
 
     /**
-     * <b>切口径前的风险测绘</b>：把「引擎这轮判了什么（{@code result}）」与「如果结论从标读会是什么」
+     * <b>内部排障工具</b>：把「引擎这轮判了什么（{@code result}）」与「如果结论从标读会是什么」
      * 逐单比一遍，数出不一致的单数并列出前 N 条。
      *
-     * <h3>期 3 步骤 2.5：结论标有了两个轴，对账也必须分成两件事</h3>
+     * <h3>⚠️ 口径迁移已暂停（V9 之后它是纯排障工具，不再进体检）</h3>
+     * "结论从标读"这件事本身已被暂停：V9（2026-11-16）收回了那三枚「通过 / 不通过」标，
+     * 结算回到「只解不落」。所以本端点<b>不再对任何业务方/体检承诺"零 gap"</b> ——
+     * 它保留的唯一用途是：将来若重启口径迁移，先拿它量一遍风险。字段名与分桶继续可用，但：
      * <ul>
-     *   <li><b>判定轴</b>（待审核期间的结论：AUDIT_PENDING / BLOCKED / NO_POLICY_MATCH / FROZEN /
-     *       STOCK_SHORT / COST_MISSING / AUTO_PASSED）—— 与 {@code result} <b>必须相等</b>，
-     *       不等就是 {@code valueMismatch}（真冲突，最危险）；</li>
-     *   <li><b>终局轴</b>（离开待审核之后落的 AUDIT_PASSED / AUDIT_REJECTED / RETURN_APPLIED）——
-     *       回答的是"它最后怎么了"，与 {@code result} 是<b>两个问题</b>，<b>不比</b>。
-     *       这批单计入 {@code answeredByTerminalTag}：标答得出来，而且答的就是该答的那句。</li>
+     *   <li>离开待审核的单本来就<b>没有</b>结论标（这是 V9 的设计，不是缺陷）⇒ 一律计入
+     *       {@code noAuditConclusionByDesign}，<b>不算 gap</b>；</li>
+     *   <li>因此不再有"终局标缺失"这一档（{@code terminalTagMissing} 已删除）、
+     *       也不再有"规则生效时刻"（{@code terminalRuleSince} 已删除）——
+     *       那条判据依赖一枚今天不该存在的标，留着只会天天报红，把端点自己变成假数据。</li>
      * </ul>
      *
-     * <h3>标里没有结论时，必须分清楚「正常」和「真缺口」（本期新增的分档）</h3>
-     * 只数一个 {@code noConclusionTag} 会把三种完全不同的东西混成一堆，处置方式也完全不同：
+     * <h3>还剩下的两个真缺口（都只在"待审核"这一侧）</h3>
      * <ol>
-     *   <li>{@code legacyDecision}（<b>正常</b>）：规则生效<b>之前</b>就离开过待审核的历史单 ——
-     *       那时结算只清空、不落终局标，所以它们身上没有终局标是<b>如实的过去</b>。
-     *       结论由决策行回答（{@code conclusionSource=DECISION}），口径允许，<b>不回填</b>；</li>
-     *   <li>{@code noAuditConclusionByDesign}（<b>正常</b>）：离开 7 的原因是<b>包裹聚合推导</b>
-     *       （{@code reason=DELIVERY_AGGREGATE}，7→2/3/9）—— 那是包裹事实，不是审核结论，
-     *       按设计就不落标；</li>
-     *   <li>{@code terminalTagMissing}（<b>真缺口</b>）：规则生效<b>之后</b>按结算四条路
-     *       （AUDIT_PASS / AUDIT_AUTO_PASS / AUDIT_REJECT / RETURN_APPLY）离开 7，
-     *       却没有终局标 ⇒ 代码 bug，必须报警；</li>
      *   <li>{@code pendingTagMissing}（<b>真缺口</b>）：还停在待审核、已经被判定过，
-     *       却一条结论标都没有 ⇒ 引擎漏落了标。</li>
+     *       却一条结论标都没有 ⇒ 引擎漏落了标（AUDIT_PENDING / BLOCKED / NO_POLICY_MATCH …）；</li>
+     *   <li>{@code valueMismatch}（<b>真冲突</b>）：判定结论标与 {@code result} 不相等。</li>
      * </ol>
-     * 「规则生效时刻」不硬编、也不猜：取**终局标第一次被登记进标目录**的那一刻
-     * （{@code audit_tag_catalog.created_at}，V8 的三条同一条语句写入；迁移幂等重放不会刷新它）。
-     * 目录里没有这三条（迁移没跑）时如实报 {@code terminalRuleKnown=false} 并把所有缺标单按历史单处理
-     * —— 判据不知道的时候不许冤枉数据。
+     *
+     * <h3>结算事实标（已申请退货）单独计</h3>
+     * {@code RETURN_APPLIED} 回答的是"这单进了退货流程"，与 {@code result} 是两个问题、<b>不比</b>，
+     * 计入 {@code answeredBySettlementFact}（见 {@link ConclusionTags#isSettlementFact}）。
      *
      * <p>⚠️ 纯只读：一条写语句都没有（不写决策行、不补标、不修数据）。它要能被随手多跑几次。
      *
@@ -573,18 +569,14 @@ public class AuditQueryService {
         int sampleLimit = Math.min(Math.max(1, limit), 100);
         List<Map<String, Object>> samples = new ArrayList<>();
         Map<String, Integer> byPair = new LinkedHashMap<>();
-        // 规则生效时刻（= 三枚终局标第一次进目录的时刻）。null = 迁移没跑，判据未知
-        java.time.LocalDateTime ruleSince =
-                tagCatalogMapper.selectEarliestCreatedAt(ConclusionTags.terminalCodesFromSettlement());
 
         long scanned = 0;
         long answeredByTag = 0;
-        long answeredByTerminalTag = 0;
+        long answeredBySettlementFact = 0;
         long valueMismatch = 0;
         long noConclusionTag = 0;
         long legacyDecision = 0;
         long noAuditConclusionByDesign = 0;
-        long terminalTagMissing = 0;
         long pendingTagMissing = 0;
         long unmappedTagCode = 0;
         long multipleConclusionTags = 0;
@@ -621,10 +613,10 @@ public class AuditQueryService {
                 String classification;
                 boolean inconsistent;
                 if (!shadow.tagCodes().isEmpty()) {
-                    if ("TERMINAL".equals(shadow.source())) {
-                        // 终局轴答出来了：标在回答"最后怎么了"，与 result 不可比 ⇒ 不算冲突
-                        answeredByTerminalTag++;
-                        classification = "TERMINAL_TAG";
+                    if ("SETTLEMENT_FACT".equals(shadow.source())) {
+                        // 结算事实标答出来了：标在回答"这单进了退货流程"，与 result 不可比 ⇒ 不算冲突
+                        answeredBySettlementFact++;
+                        classification = "SETTLEMENT_FACT_TAG";
                         inconsistent = false;
                     } else if (shadow.fromTag() == null) {
                         unmappedTagCode++;
@@ -642,16 +634,13 @@ public class AuditQueryService {
                 } else {
                     // 标里没有结论 —— 这一档必须分清「正常」与「真缺口」
                     noConclusionTag++;
-                    classification = missingConclusionBucket(
-                            leaveRows.get(orderId), orderStatus, row.get("created_at"), ruleSince);
+                    classification = missingConclusionBucket(leaveRows.get(orderId), orderStatus);
                     switch (classification) {
                         case "LEGACY_DECISION" -> legacyDecision++;
                         case "NO_AUDIT_CONCLUSION" -> noAuditConclusionByDesign++;
-                        case "TERMINAL_TAG_MISSING" -> terminalTagMissing++;
                         default -> pendingTagMissing++;
                     }
-                    inconsistent = "TERMINAL_TAG_MISSING".equals(classification)
-                            || "PENDING_TAG_MISSING".equals(classification);
+                    inconsistent = "PENDING_TAG_MISSING".equals(classification);
                 }
 
                 byPair.merge(pairLabel(result, shadow), 1, Integer::sum);
@@ -661,7 +650,7 @@ public class AuditQueryService {
                     sample.put("orderSn", row.get("order_sn"));
                     sample.put("result", result);
                     sample.put("conclusionFromTag", shadow.fromTag());
-                    sample.put("conclusionTerminalTag", shadow.terminalFromTag());
+                    sample.put("conclusionSettlementFact", shadow.settlementFact());
                     sample.put("conclusionSource", shadow.source());
                     sample.put("activeConclusionTags", shadow.tagCodes());
                     sample.put("conclusionTagMultiple", shadow.multiple());
@@ -678,98 +667,72 @@ public class AuditQueryService {
             if (rows.size() < PARITY_SCAN_PAGE) break;
         }
 
-        // 真缺口 = 该有标却没有。**历史单与聚合推导不算缺口** —— 它们的结论由决策行回答（口径允许）
-        long inconsistentTotal = valueMismatch + unmappedTagCode + terminalTagMissing + pendingTagMissing;
+        // 真缺口 = 该有标却没有。**离开待审核的单本来就没有结论标（V9 的设计）** ⇒ 不算缺口
+        long inconsistentTotal = valueMismatch + unmappedTagCode + pendingTagMissing;
         Map<String, Object> out = new LinkedHashMap<>();
         // ── 结论行（先给数，再给明细）───────────────────────────────────────────
         out.put("scanned", scanned);                       // 扫了多少张单（= 队列里的行数，每单最新一轮）
         out.put("inconsistent", inconsistentTotal);        // 真冲突 + 真缺口（不含"正常退回决策行"）
         out.put("valueMismatch", valueMismatch);           // 判定轴两边都有结论但不相等（真冲突）
         out.put("unmappedTagCode", unmappedTagCode);       // 有结论标但码不在映射表里
-        out.put("terminalTagMissing", terminalTagMissing); // 真缺口①：规则生效后离开 7 却没有终局标
-        out.put("pendingTagMissing", pendingTagMissing);   // 真缺口②：还在 7 被判过、却没有任何结论标
+        out.put("pendingTagMissing", pendingTagMissing);   // 真缺口：还在 7 被判过、却没有任何结论标（只有这一档是 gap）
         out.put("multipleConclusionTags", multipleConclusionTags);  // 一单多条 active 结论标（互斥漏了哪条路径）
-        // ── 标回答了结论的单（按轴分开：判定轴可比 result，终局轴不可比）──────────
-        out.put("answeredByTag", answeredByTag);                     // 判定轴：标与 result 一致
-        out.put("answeredByTerminalTag", answeredByTerminalTag);     // 终局轴：标答的是"最后怎么了"
-        // ── 标里没有结论的单：正常的两档 + 缺口的两档（上面 inconsistent 已含后两档）──
-        out.put("noConclusionTag", noConclusionTag);                 // 合计（= 下面四项之和）
-        out.put("legacyDecision", legacyDecision);                   // 正常：规则生效前的历史单 → 退回决策行
-        out.put("noAuditConclusionByDesign", noAuditConclusionByDesign); // 正常：包裹聚合推导离开 7，本不落标
-        // ── 判据来源（把"凭什么说它是历史单"也交出去，别让读者猜）──────────────
-        out.put("terminalRuleKnown", ruleSince != null);
-        out.put("terminalRuleSince", ruleSince == null ? null : ruleSince.toString());
+        // ── 标回答了结论的单 ───────────────────────────────────────────────
+        out.put("answeredByTag", answeredByTag);                     // 判定结论：标与 result 一致
+        out.put("answeredBySettlementFact", answeredBySettlementFact); // 结算事实标（已申请退货）：不与 result 比
+        // ── 标里没有结论的单：**离开待审核的一律算设计如此，不算 gap** ──────────────
+        out.put("noConclusionTag", noConclusionTag);                 // 合计（= 下面三项之和）
+        out.put("noAuditConclusionByDesign", noAuditConclusionByDesign); // 正常：已离开待审核 —— V9 结算只解不落
+        out.put("legacyDecision", legacyDecision);                   // 正常：无"离开 7"台账的历史单 → 退回决策行
+        // ── 端点的自身定位（别让读者把它当体检结论）────────────────────────────
+        out.put("internalOnly", true);                               // V9 起：口径迁移已暂停，这是内部排障工具
+        out.put("internalNote", "口径迁移已暂停（V9 收回了『通过/不通过』标）。本端点仅供排障，"
+                + "不对业务承诺零 gap；离开待审核的单没有结论标是设计如此，计入 noAuditConclusionByDesign。");
         out.put("consistent", scanned - inconsistentTotal);
         out.put("consistencyRate", scanned == 0 ? 1.0
                 : Math.round((scanned - inconsistentTotal) * 10000.0 / scanned) / 10000.0);
         // 从没被判定过的单：队列里永远看不到它们（队列 FROM order_audit_decision），
         // 但"标驱动结论"对它们的答案是"没有结论"。单列出来，免得这个缺口被扫描范围掩盖。
         out.put("neverJudgedOrders", decisionMapper.countOrdersWithoutAnyDecision());
-        out.put("byPair", byPair);                          // { "NO_MATCH → NO_MATCH": 12, "AUTO_PASS → 终局:AUTO_PASSED": 3, … }
+        out.put("byPair", byPair);                          // { "NO_MATCH → NO_MATCH": 12, "NO_MATCH → (无结论标)": 3, … }
         out.put("samples", samples);                        // 前 N 条不一致（含缺口分类与离开待审核的原因）
         out.put("sampleLimit", sampleLimit);
         return out;
     }
 
-    /** 结算四条路：从这四条路离开 7，按设计必须落一枚终局结论标（其余出口不落） */
-    private static final java.util.Set<String> SETTLEMENT_REASONS = java.util.Set.of(
-            com.qiqi.mall.shared.ledger.ReasonCodes.AUDIT_PASS,
-            com.qiqi.mall.shared.ledger.ReasonCodes.AUDIT_AUTO_PASS,
-            com.qiqi.mall.shared.ledger.ReasonCodes.AUDIT_REJECT,
-            com.qiqi.mall.shared.ledger.ReasonCodes.RETURN_APPLY);
-
     /**
      * 「标里没有结论」这一档的归因（<b>正常</b> vs <b>真缺口</b>）。
      *
+     * <h3>V9 之后只剩一种真缺口</h3>
+     * 结算已回到「只解不落」：单子离开待审核之后身上<b>本来就没有</b>结论标（这是设计），
+     * 所以"离开了 7 却没有结论标"一律是 {@code NO_AUDIT_CONCLUSION}（正常），不再是 gap。
+     * 剩下的真缺口只有一个：<b>还停在 7、已经被判定过，却一条结论标都没有</b>
+     * ——那是引擎漏落了标（AUDIT_PENDING / BLOCKED / NO_POLICY_MATCH …）。
+     *
      * @param leave       该单最后一次「离开待审核」的台账行（{@code null} = 台账里没有离开过 7）
      * @param orderStatus 当前订单状态
-     * @param decisionAt  这一轮决策行的创建时间（没有离开 7 的台账时，用它当"什么时候判的"）
-     * @param ruleSince   终局结论标规则的生效时刻（{@code null} = 判据未知）
-     * @return {@code LEGACY_DECISION} / {@code NO_AUDIT_CONCLUSION} / {@code TERMINAL_TAG_MISSING}
-     *         / {@code PENDING_TAG_MISSING}
+     * @return {@code PENDING_TAG_MISSING}（真缺口）/ {@code NO_AUDIT_CONCLUSION}（正常：已离开 7）/
+     *         {@code LEGACY_DECISION}（正常：无离开台账、状态也不在 7 ⇒ 证明不了它"该有"结论标）
      */
-    private static String missingConclusionBucket(Map<String, Object> leave, Integer orderStatus,
-                                                 Object decisionAt, java.time.LocalDateTime ruleSince) {
-        if (leave == null) {
-            // 台账里没有"离开 7"的记录：要么还停在待审核（该有判定轴结论标却没有 ⇒ 真缺口），
-            // 要么是早期没有台账的旧单 / 直接造的数据（状态已不在 7）⇒ 证明不了它"该有"终局标，
-            // 按历史单处理（判据不知道时不许冤枉数据）。
-            if (orderStatus != null && orderStatus == 7) {
-                return beforeRule(decisionAt, ruleSince) ? "LEGACY_DECISION" : "PENDING_TAG_MISSING";
-            }
-            return "LEGACY_DECISION";
+    private static String missingConclusionBucket(Map<String, Object> leave, Integer orderStatus) {
+        if (leave != null) {
+            // 台账里有"离开 7"的记录 ⇒ 结算已经把这个单的结论标解干净了。
+            // 是包裹聚合推导（DELIVERY_AGGREGATE）还是人工放行，结果都一样：**没有结论标是对的**。
+            return "NO_AUDIT_CONCLUSION";
         }
-        String reason = leave.get("reason") == null ? null : String.valueOf(leave.get("reason"));
-        if (!SETTLEMENT_REASONS.contains(reason)) return "NO_AUDIT_CONCLUSION";   // 包裹聚合推导等
-        return beforeRule(leave.get("created_at"), ruleSince) ? "LEGACY_DECISION" : "TERMINAL_TAG_MISSING";
-    }
-
-    /** 这个时刻是否早于规则生效时刻（无法判定时一律当"早于"⇒ 按历史单处理，宁可漏报也不冤枉数据） */
-    private static boolean beforeRule(Object at, java.time.LocalDateTime ruleSince) {
-        java.time.LocalDateTime ts = toLocalDateTime(at);
-        return ruleSince == null || ts == null || ts.isBefore(ruleSince);
-    }
-
-    /** 台账/决策的 created_at 归一（JDBC 可能回 LocalDateTime / Timestamp / 字符串） */
-    private static java.time.LocalDateTime toLocalDateTime(Object raw) {
-        if (raw == null) return null;
-        if (raw instanceof java.time.LocalDateTime ldt) return ldt;
-        if (raw instanceof java.sql.Timestamp ts) return ts.toLocalDateTime();
-        String text = String.valueOf(raw).trim();
-        if (text.length() >= 19) {
-            try {
-                return java.time.LocalDateTime.parse(text.substring(0, 19).replace(' ', 'T'));
-            } catch (java.time.format.DateTimeParseException e) {
-                return null;
-            }
+        if (orderStatus != null && orderStatus == 7) {
+            // 还在待审核、而且进了队列（队列 = 有决策行）⇒ 这一轮判定本该落标却没有 ⇒ 真缺口
+            return "PENDING_TAG_MISSING";
         }
-        return null;
+        // 台账里没有"离开 7"的记录、状态却不在 7：早期没有台账的旧单 / 直接造的数据。
+        // 证明不了它"该有"结论标，按历史单处理（判据不知道时不许冤枉数据）。
+        return "LEGACY_DECISION";
     }
 
     /** 配对分布里的一格：一眼看出"哪些结论在被标改写" */
     private static String pairLabel(String result, ConclusionShadow shadow) {
         if (shadow.tagCodes().isEmpty()) return result + " → (无结论标)";
-        if ("TERMINAL".equals(shadow.source())) return result + " → 终局:" + shadow.terminalFromTag();
+        if ("SETTLEMENT_FACT".equals(shadow.source())) return result + " → 事实标:" + shadow.settlementFact();
         return result + " → " + shadow.fromTag();
     }
 

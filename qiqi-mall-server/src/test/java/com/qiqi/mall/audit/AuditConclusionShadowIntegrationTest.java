@@ -111,13 +111,11 @@ class AuditConclusionShadowIntegrationTest {
         seedThreeOrders();
         seedAutoPolicy();
 
-        // V7 必须已经把 AUTO_PASSED 种进目录，且 **visible=0 / blocking=0 / category='结论' / builtin=1**
+        // V9 必须已把三枚「通过/不通过」标停用（enabled=0，行不删）：影子字段正因此读不到 AUTO_PASS 的结论
         AuditTagCatalog autoPassed = tagCatalog.byCode(AuditTagCatalogService.CODE_AUTO_PASSED);
-        assertThat(autoPassed).as("V7 必须已把 AUTO_PASSED 种进标目录（步骤 1 的迁移真的跑过）").isNotNull();
-        assertThat(autoPassed.getVisible()).as("AUTO_PASSED 必须 visible=0（有事实、不显示）").isZero();
-        assertThat(autoPassed.getBlocking()).as("AUTO_PASSED 不许拦任何东西（单子已经过审了）").isZero();
+        assertThat(autoPassed).as("V9 停用但行还在（历史标码要查得到中文名）").isNotNull();
+        assertThat(autoPassed.getEnabled()).as("V9：AUTO_PASSED 已停用（用户 16:38：通过与否由状态表达）").isZero();
         assertThat(autoPassed.getCategory()).isEqualTo(AuditTagCatalogService.CATEGORY_CONCLUSION);
-        assertThat(autoPassed.getBuiltin()).isEqualTo(1);
         System.out.println("[准备] QT-4002（该 AUTO_PASS）/ QT-4001（该 NO_MATCH）/ QT-4003（从未判定）就绪；"
                 + "标目录 " + tagCatalog.all().size() + " 条");
     }
@@ -138,48 +136,49 @@ class AuditConclusionShadowIntegrationTest {
 
     @Test
     @Order(1)
-    @DisplayName("①AUTO_PASS 单：active 结论标 == [AUTO_PASSED]，但队列行不显示它（visible=0），?tag= 仍筛得到")
-    void autoPassLandsInvisibleTag() {
+    @DisplayName("①AUTO_PASS 单（V9）：active 结论标 == []、队列行一个标都没有、?tag=AUTO_PASSED 筛不到任何单")
+    void autoPassLeavesNoConclusionTag() {
         RunResultDto run = executor.run("MANUAL", null);
         assertThat(run.total()).as("候选 = 两笔 status=7 的单（QT-4003 是 status=8，不进候选）").isEqualTo(2);
         assertThat(run.autoPass()).as("QT-4002").isEqualTo(1);
         assertThat(run.noMatch()).as("QT-4001").isEqualTo(1);
 
-        // ---------------- 数据层：结论标真的落了，且就是 AUTO_PASSED ----------------
+        // ---------------- 数据层：自动过审**不落标** ----------------
+        // V9（2026-11-16）：用户 16:38 拍板「通过与否由状态表达，不由标表达」——
+        // 「它过了」由状态 8 表达。V7 曾落 AUTO_PASSED，那是助手自己拍的板，已收回。
         assertThat(activeConclusionCodes("QT-4002"))
-                .as("AUTO_PASS 的结论必须有标（否则「结论从标读」在这批最常见的单上给不出答案）")
-                .containsExactly(AuditTagCatalogService.CODE_AUTO_PASSED);
+                .as("AUTO_PASS 不产标：离开待审核之后身上没有结论标，这是设计")
+                .isEmpty();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM order_audit_tag "
+                                + "WHERE order_id = ? AND tag_code = 'AUTO_PASSED'", Integer.class, orderIdOf("QT-4002")))
+                .as("不是「写了又被解掉」：这条落标路径整段不存在").isZero();
 
-        // ---------------- 渲染层：队列行不显示它 ----------------
+        // ---------------- 渲染层：队列行上一个标都没有 ----------------
         Map<String, Object> row = queueRowOf("QT-4002");
         assertThat(row.get("result")).as("result 一个字不许改（页签/筛选/e2e 全依赖它）").isEqualTo("AUTO_PASS");
-        assertThat(strings(row.get("tagCodes")))
-                .as("tags/tagCodes 是**可展示的标**（visible=1）⇒ AUTO_PASSED 不该出现在队列行的渲染输入里")
-                .isEmpty();
+        assertThat(strings(row.get("tagCodes"))).as("渲染输入里没有标").isEmpty();
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> tags = (List<Map<String, Object>>) row.get("tags");
-        assertThat(tags).as("同理 tags 数组里也不该有它（页面 otherwise 会多出一枚「自动过审通过」）").isEmpty();
-        assertThat(strings(row.get("allTagCodes")))
-                .as("数据层必须看得到：allTagCodes（全部 active 标）里有 AUTO_PASSED —— 判断只能读这个")
-                .containsExactly(AuditTagCatalogService.CODE_AUTO_PASSED);
-        assertThat(row.get("primaryTagCode"))
-                .as("主标只在**可见**标里挑 ⇒ 只有一枚 visible=0 的标时主标是 null（页面上没有第一枚标）").isNull();
+        assertThat(tags).as("tags 数组也空（页面不会多出一枚「自动过审通过」）").isEmpty();
+        assertThat(strings(row.get("allTagCodes"))).as("数据层同样一个标都没有").isEmpty();
+        assertThat(row.get("primaryTagCode")).as("没有标 ⇒ 主标 null").isNull();
 
-        // ---------------- 影子字段：这里恰好"标与决策同源" ----------------
-        assertThat(row.get("conclusionFromTag"))
-                .as("AUTO_PASSED 反推回结论值 AUTO_PASS（取值域与 result 完全相同）").isEqualTo("AUTO_PASS");
-        assertThat(row.get("conclusionSource")).isEqualTo("TAG");
+        // ---------------- 影子字段：只能退回决策行（这是如实回答，不是缺口） ----------------
+        assertThat(row.get("conclusionFromTag")).as("标里读不出结论").isNull();
+        assertThat(row.get("conclusionSource"))
+                .as("没有标可读 ⇒ 来源是 DECISION（决策行回答「这一轮判成了什么」）").isEqualTo("DECISION");
 
-        // ---------------- 筛选入口照样通：?tag=AUTO_PASSED ----------------
+        // ---------------- 筛选入口：停用之后按它筛不到任何单 ----------------
         Map<String, Object> byTag = queryService.queue(null, AuditTagCatalogService.CODE_AUTO_PASSED, 1, 50);
         assertThat(orderSns(byTag))
-                .as("visible=0 只影响显示，不影响可筛：?tag=AUTO_PASSED 必须能筛出这单")
-                .containsExactly("QT-4002");
-        assertThat(byTag.get("total")).isEqualTo(1L);
+                .as("V9：AUTO_PASSED 已停用且不再落标 ⇒ ?tag=AUTO_PASSED 筛不到任何单（下拉里也不该再有它）")
+                .isEmpty();
+        assertThat(byTag.get("total")).isEqualTo(0L);
 
-        System.out.println("[①] QT-4002：库内结论标=" + activeConclusionCodes("QT-4002")
+        System.out.println("[①] QT-4002（AUTO_PASS）：active 结论标=" + activeConclusionCodes("QT-4002")
                 + "，队列 tagCodes=" + row.get("tagCodes")
                 + "，allTagCodes=" + row.get("allTagCodes")
+                + "，conclusionSource=" + row.get("conclusionSource")
                 + "，?tag=AUTO_PASSED → " + orderSns(byTag));
     }
 
@@ -242,30 +241,32 @@ class AuditConclusionShadowIntegrationTest {
     @DisplayName("④一单多条 active 结论标：按「阻断型优先 → id 最大」取一条，并把「有多条」如实标出来")
     void multipleConclusionTagsTieBreak() {
         Long orderId = orderIdOf("QT-4002");
-        // 模拟"互斥上线前的历史遗留"：在 AUTO_PASSED 之外再加一条阻断型结论标。
+        // 模拟"互斥上线前的历史遗留"：同一张单并挂两条结论标（NO_MATCH + 阻断型 BLOCKED）。
         // 用的是引擎同一个写入口（ensureActive），不是直插 SQL —— 造出来的状态是真实可能存在的。
+        // ⚠️ V9 之后不能再拿 AUTO_PASSED 造这个场景了（它已停用、且不再落标）。
+        tagService.ensureActive(orderId, AuditTagCatalogService.CODE_NO_POLICY_MATCH, "历史遗留：互斥上线前并挂的行");
         tagService.ensureActive(orderId, AuditTagCatalogService.CODE_BLOCKED, "历史遗留：互斥上线前并挂的行");
 
         Map<String, Object> row = queueRowOf("QT-4002");
         assertThat(strings(row.get("conclusionTagCodes")))
                 .as("两条都在（数据层不许把「一单有两条」这个事实压掉）")
-                .containsExactlyInAnyOrder(AuditTagCatalogService.CODE_AUTO_PASSED,
+                .containsExactlyInAnyOrder(AuditTagCatalogService.CODE_NO_POLICY_MATCH,
                         AuditTagCatalogService.CODE_BLOCKED);
         assertThat(row.get("conclusionTagMultiple"))
                 .as("必须显式报「有多条」——理论不该有，真出现就说明互斥漏了某条路径").isEqualTo(true);
         assertThat(row.get("conclusionFromTag"))
-                .as("取一条的规则：阻断型优先（BLOCKED blocking=1 压过 AUTO_PASSED blocking=0），而不是随机/最早那条")
+                .as("取一条的规则：阻断型优先（BLOCKED blocking=1 压过 NO_POLICY_MATCH blocking=0），而不是随机/最早那条")
                 .isEqualTo("BLOCKED");
         assertThat(row.get("primaryTagCode"))
                 .as("显示层的主标用同一条规则（阻断型优先），且只在可见标里挑").isEqualTo("BLOCKED");
         assertThat(strings(row.get("tagCodes")))
-                .as("AUTO_PASSED 依旧不显示；BLOCKED 是可见标，必须显示")
-                .containsExactly("BLOCKED");
+                .as("两条都是可见标 ⇒ 渲染输入里都在（主标规则只决定「第一枚是谁」）")
+                .containsExactlyInAnyOrder("BLOCKED", "NO_POLICY_MATCH");
 
-        // 清理：把那条历史遗留的 BLOCKED 解掉，恢复"一单一条结论标"
+        // 清理：把两条历史遗留都解掉，恢复"身上没有结论标"（AUTO_PASS 的单本来就不该有标）
         tagService.release(orderId, AuditTagCatalogService.CODE_BLOCKED, "集成测试清理");
-        assertThat(activeConclusionCodes("QT-4002"))
-                .containsExactly(AuditTagCatalogService.CODE_AUTO_PASSED);
+        tagService.release(orderId, AuditTagCatalogService.CODE_NO_POLICY_MATCH, "集成测试清理");
+        assertThat(activeConclusionCodes("QT-4002")).isEmpty();
 
         System.out.println("[④] 并挂两条时：conclusionFromTag=" + row.get("conclusionFromTag")
                 + "，multiple=" + row.get("conclusionTagMultiple")
@@ -313,8 +314,9 @@ class AuditConclusionShadowIntegrationTest {
 
         @SuppressWarnings("unchecked")
         Map<String, Object> byPair = (Map<String, Object>) parity.get("byPair");
-        assertThat(((Number) byPair.getOrDefault("AUTO_PASS → AUTO_PASS", 0)).intValue())
-                .as("配对分布能一眼看出「哪些结论在被标改写」：AUTO_PASS ↔ AUTO_PASSED 这一对必须是一致的")
+        assertThat(((Number) byPair.getOrDefault("AUTO_PASS → (无结论标)", 0)).intValue())
+                .as("配对分布能一眼看出「哪些结论在被标改写」：V9 之后 AUTO_PASS 这一栏就该是「无结论标」"
+                        + "（自动过审不落标，影子字段退回决策行）")
                 .isGreaterThanOrEqualTo(1);
         assertThat(((Number) byPair.getOrDefault("NO_MATCH → MANUAL", 0)).intValue())
                 .as("不一致的那一对也要出现在分布里（NO_MATCH 的决策 + AUDIT_PENDING 的标）")

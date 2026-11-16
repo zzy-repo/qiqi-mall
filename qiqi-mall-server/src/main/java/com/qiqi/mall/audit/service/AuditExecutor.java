@@ -55,11 +55,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li>建 {@code audit_run} 行（决策行要引用 run_id，所以先建行、跑完回写计数）；</li>
  *   <li>逐单装配上下文 → 调 {@link AuditEngine#evaluate}（纯函数）；</li>
  *   <li>按结论执行：AUTO_PASS → {@code OrderStatusService.change(order, 8, AUDIT_AUTO_PASS, …)}
- *       （7→8 与状态台账同一事务；**结算旧结论标 + 落 {@code AUTO_PASSED} 由状态入口那次 change 一并做完**，
+ *       （7→8 与状态台账同一事务；**旧结论标的解除由状态入口那次 change 一并做完**，
  *       期 3 步骤 2.5 收敛到一处，这里不写标）；
  *       FROZEN → 打标 + 审计；
- *       <b>然后每种结论都落一个标</b>（{@link ConclusionTags}：MANUAL → AUDIT_PENDING/STOCK_SHORT/COST_MISSING，
- *       BLOCKED → BLOCKED，NO_MATCH → NO_POLICY_MATCH，AUTO_PASS → AUTO_PASSED 已在上一步落好）；
+ *       <b>然后落结论标</b>（{@link ConclusionTags}：MANUAL → AUDIT_PENDING/STOCK_SHORT/COST_MISSING，
+ *       BLOCKED → BLOCKED，NO_MATCH → NO_POLICY_MATCH；<b>AUTO_PASS 不落标</b> —— V9 起"它过了"
+ *       由状态 8 表达，用户 16:38：「通过与否由状态表达，不由标表达」）；
  *       <b>最后落策略配的特征标</b>（{@link #settleFeatureTags}，期 2 步骤 2：并行动作，
  *       三种策略类型都可能配，与结论标互斥规则无关）；</li>
  *   <li>落 {@code order_audit_decision}（每单每轮一行）—— <b>SKIPPED 不落行</b>（见下）；</li>
@@ -321,10 +322,11 @@ public class AuditExecutor {
                 //
                 // 上面那句 change(...) 就是「7→8 离开待审核」这个动作本身，而结算挂在这个动作的**唯一写入口**上
                 // （OrderStatusService#change → settleConclusionTagsIfLeavingAuditPending）：
-                //   ① 先 releaseAllConclusionTags(RELEASED_BY_SUPERSEDED) —— 库存/成本挂起标、
-                //      上一轮拦过它的 BLOCKED、更早的 NO_POLICY_MATCH… 一并让位；
-                //   ② 再 ensureActive(AUTO_PASSED) —— 由 ConclusionTags#terminalCodeOf(8, AUDIT_AUTO_PASS) 决定，
-                //      reason 用的是这里传下去的 verdict.reasonText()（引擎的判定原话，与改动前写进去的一字不差）。
+                //   releaseAllConclusionTags(RELEASED_BY_SUPERSEDED) —— 库存/成本挂起标、
+                //   上一轮拦过它的 BLOCKED、更早的 NO_POLICY_MATCH… 一并让位，**并且不再补落任何标**。
+                //   ★ V9（2026-11-16）：这里原来还有第二步 ensureActive(AUTO_PASSED)，已随那套"终局标"整体收回 ——
+                //   用户 16:38 拍板：「自动过审的单身上可以有标，但绝不会有一个叫『已通过』的标」
+                //   「通过与否由状态表达，不由标表达」。「它过了」由状态 8 表达，标不必再说一遍。
                 // 所以这里**一行标都不写**：本类只在"不改状态"的结论（MANUAL / BLOCKED / NO_MATCH / FROZEN）上
                 // 自己落标（见 settleConclusionTag），改状态的那条路由状态入口统一收尾 —— 一处写、不会漂。
                 //
@@ -476,9 +478,9 @@ public class AuditExecutor {
      * <p>映射只在 {@link ConclusionTags#codeOf} 一处决定，这里只负责"写下去"：
      * <ul>
      *   <li>SKIPPED → 不落（它连决策行都不写）；</li>
-     *   <li>AUTO_PASS → {@code AUTO_PASSED}（visible=0），但<b>写入在状态唯一写入口里做</b>
-     *       （{@code OrderStatusService#change → settleConclusionTagsIfLeavingAuditPending}：
-     *       先 release 旧结论标、再落终局标，与 7→8 同一事务），这里直接 return；</li>
+     *   <li>AUTO_PASS → <b>不落标</b>（V9：它过了由状态 8 表达，标只装"值得注意的事"）。旧结论标的解除
+     *       在状态唯一写入口里做（{@code OrderStatusService#change → settleConclusionTagsIfLeavingAuditPending}），
+     *       这里直接 return；</li>
      *   <li>MANUAL → AUDIT_PENDING / STOCK_SHORT / COST_MISSING（三支来路靠标拆开）；</li>
      *   <li>BLOCKED → BLOCKED；NO_MATCH → NO_POLICY_MATCH；</li>
      *   <li>FROZEN → 码由 {@code codeOf} 给出，但<b>写库由 {@link OrderAuditTagService#freeze} 独占</b>
@@ -523,10 +525,10 @@ public class AuditExecutor {
         // 所以 FROZEN 只在这里「确认它已被 conclude 过」—— 互斥规则本身仍由 OrderAuditTagService 一处管。
         if (verdict.result() == AuditResult.FROZEN) return;
         // 期 3 步骤 1+2.5：AUTO_PASS 这一支**改状态**（7→8），它的结算由状态入口统一做
-        // （{@code OrderStatusService#change → settleConclusionTagsIfLeavingAuditPending}：
-        // 先 release 全部旧结论标、再落 AUTO_PASSED，顺序在同一段里保证）。
-        // 这里若再落一次，同一张单上会出现"落一次、又被结算掉"的来回（AUTO_PASSED 插进去 → 被 release → 再插）。
-        // 谁想改这个分工，先读 {@code AuditExecutor#applyActions} 的 AUTO_PASS 分支那段注释。
+        // （{@code OrderStatusService#change → settleConclusionTagsIfLeavingAuditPending}：只解不落）。
+        // V9 起 AUTO_PASS 也不产标（{@link ConclusionTags#codeOf} 回 null），这里 return 只是把
+        // "这条支永不落标"写成一处可读的边界；谁想改这个分工，先读 {@code #applyActions} 的 AUTO_PASS 分支。
+        // ⚠️ 期 3 曾在这里落 AUTO_PASSED，结果同一张单"落一次、又被结算掉"—— 那段口径已随 V9 收回。
         if (verdict.result() == AuditResult.AUTO_PASS) return;
         // 顺序不能反：先让旧结论让位，再落新标 —— 同一事务，要么都成、要么都回滚。
         // 反过来的话，若 supersede 失败（例如目录缺失），新标已经插进去，就成了"两个结论标"。

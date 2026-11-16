@@ -1,6 +1,8 @@
 package com.qiqi.mall.audit;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.qiqi.mall.audit.engine.AuditResult;
+import com.qiqi.mall.audit.engine.AuditVerdict;
 import com.qiqi.mall.audit.service.AuditQueryService;
 import com.qiqi.mall.audit.service.AuditTagCatalogService;
 import com.qiqi.mall.audit.service.ConclusionTags;
@@ -39,20 +41,20 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * <b>期 3 · 步骤 2.5 的验收口径</b>：结算不再等于「清空」，而是「落一条终局结论标」。
- *
- * <h3>这个类要钉死的一句话</h3>
- * 订单离开待审核之后，它的<b>当前结论仍然存在</b>，只是变成了「它最后怎么了」：
+ * <b>V9（2026-11-16）的验收口径：结算回到「只解不落」</b> —— 本类原名
+ * {@code AuditConclusionTerminalTagIntegrationTest}，钉的是期 3 步骤 2.5 那套"落终局结论标"，
+ * 那套设计已被 V9 收回（助手自己拍板、推翻用户 16:38 的拍板）。本类保留全部真实入口造数，
+ * 但断言整体翻面，钉的是<b>停用之后会发生什么</b>：
  * <pre>
- *   7 → 8 人工放行      ⇒ active 结论标 == [AUDIT_PASSED]   （visible=0：过没过由状态 8 表达）
- *   7 → 8 自动引擎过审  ⇒ active 结论标 == [AUTO_PASSED]    （visible=0）
- *   7 → 4 审核不通过    ⇒ active 结论标 == [AUDIT_REJECTED] （visible=0："没过"由状态 4 表达）
- *   7 → 5 登记退货申请  ⇒ active 结论标 == [RETURN_APPLIED] （visible=1：队列里看不到订单状态）
- *   7 → 2/3/9 聚合推导  ⇒ **不落**（那是包裹事实，不是审核结论）—— 由 {@link ConclusionTags#terminalCodeOf} 断言
+ *   7 → 8 人工放行      ⇒ active 结论标 == []                （"过了"由状态 8 表达）
+ *   7 → 8 自动引擎过审  ⇒ active 结论标 == []                （V7 曾落 AUTO_PASSED，已收回）
+ *   7 → 4 审核不通过    ⇒ active 结论标 == []                （"没过"由状态 4 表达）
+ *   7 → 5 登记退货申请  ⇒ active 结论标 == [RETURN_APPLIED]   （退货是**事实**，visible=1）
+ *   7 → 2/3/9 聚合推导  ⇒ active 结论标 == []                （包裹事实，本就不落）
  * </pre>
- * 每条路径同时验三件事：① 落的是哪一枚；② <b>旧标（AUDIT_PENDING / NO_POLICY_MATCH…）active=0
- * 且 released_at / released_by 有值</b>（不是删行、也不是并挂两条）；③ 一单仍然只有<b>一条</b>
- * active 结论标（互斥没被破坏）。
+ * 每条路径同时验三件事：① 结算**只解不落**（不再补一枚"通过/不通过"标）；
+ * ② <b>旧标（AUDIT_PENDING / NO_POLICY_MATCH…）active=0 且 released_at / released_by 有值</b>
+ * （不是删行、也不是并挂两条）；③ 那三枚码<b>一行都没有被写过</b>（不是"写了又被解掉"）。
  *
  * <h3>为什么造数走真实入口</h3>
  * 建单 {@code POST /admin/orders}（status=7）→ 跑一轮 {@code POST /admin/order-audit/run}
@@ -61,7 +63,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 这些<b>夹具</b>是直插的（与其它 IT 同口径，它们不是被测对象）。
  *
  * <p>单号前缀 {@code QT-410x}（自建自清，不与 QT-100x/200x/300x/400x 混）。
- * 运行：{@code ./scripts/run-it.sh -Dtest=AuditConclusionTerminalTagIntegrationTest}
+ * 运行：{@code ./scripts/run-it.sh -Dtest=AuditSettlementLeavesNoPassTagTest}
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "qiqi.stock.cache-refresh-ms=3600000",
@@ -69,7 +71,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 })
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-class AuditConclusionTerminalTagIntegrationTest {
+class AuditSettlementLeavesNoPassTagTest {
 
     private static final String ADMIN_PASSWORD = System.getenv().getOrDefault("ADMIN_PASSWORD", "123456");
     private static final String SN_LIKE = "QT-410%";
@@ -124,15 +126,19 @@ class AuditConclusionTerminalTagIntegrationTest {
         seedFixtures();
         adminJwt = login();
 
-        // V8 必须已经把三条终局标种进目录，且 visible/blocking 与设计一致
+        // V9 必须已经把三枚「通过 / 不通过」标停用（enabled=0，**行不删**）
         // —— 这条断言同时证明「迁移真的跑过」，而不是测试自己插的目录项
-        assertThat(tagCatalog.byCode(AuditTagCatalogService.CODE_AUDIT_PASSED))
-                .as("V8 必须已把 AUDIT_PASSED 种进标目录").isNotNull();
+        assertThat(tagCatalog.byCode(AuditTagCatalogService.CODE_AUTO_PASSED))
+                .as("V9 停用但**不删行**：历史单身上的标码要有中文名可查").isNotNull();
+        assertThat(tagCatalog.byCode(AuditTagCatalogService.CODE_AUDIT_PASSED)).isNotNull();
         assertThat(tagCatalog.byCode(AuditTagCatalogService.CODE_AUDIT_REJECTED)).isNotNull();
+        assertThat(tagCatalog.byCode(AuditTagCatalogService.CODE_AUTO_PASSED).getEnabled())
+                .as("V9：AUTO_PASSED 停用（用户 16:38：绝不会有一个叫『已通过』的标）").isZero();
+        assertThat(tagCatalog.byCode(AuditTagCatalogService.CODE_AUDIT_PASSED).getEnabled()).isZero();
+        assertThat(tagCatalog.byCode(AuditTagCatalogService.CODE_AUDIT_REJECTED).getEnabled()).isZero();
+        // 唯一保留的结算事实标：退货申请（不是"过没过"，是事实）
         assertThat(tagCatalog.byCode(AuditTagCatalogService.CODE_RETURN_APPLIED)).isNotNull();
-        assertThat(tagCatalog.byCode(AuditTagCatalogService.CODE_AUDIT_PASSED).getVisible())
-                .as("AUDIT_PASSED visible=0：过没过由状态表达，标是事实不显示").isZero();
-        assertThat(tagCatalog.byCode(AuditTagCatalogService.CODE_AUDIT_REJECTED).getVisible()).isZero();
+        assertThat(tagCatalog.byCode(AuditTagCatalogService.CODE_RETURN_APPLIED).getEnabled()).isEqualTo(1);
         assertThat(tagCatalog.byCode(AuditTagCatalogService.CODE_RETURN_APPLIED).getVisible())
                 .as("RETURN_APPLIED visible=1：队列里看不到订单状态，只有这枚标能说明它在退货流程里").isEqualTo(1);
         assertThat(tagCatalog.byCode(AuditTagCatalogService.CODE_RETURN_APPLIED).getBlocking())
@@ -188,8 +194,8 @@ class AuditConclusionTerminalTagIntegrationTest {
 
     @Test
     @Order(2)
-    @DisplayName("② 7→8 自动过审：active 结论标 == [AUTO_PASSED]，NO_POLICY_MATCH 已解除（released_at/by 有值）")
-    void autoPassLandsAutoPassed() {
+    @DisplayName("② 7→8 自动过审：active 结论标 == []，NO_POLICY_MATCH 已解除（released_at/by 有值），AUTO_PASSED 一行都没写过")
+    void autoPassLeavesNoConclusionTag() {
         // 第二轮：给 QT-4104 的渠道补一条 AUTO 策略 ⇒ 自动过审（7→8），
         // 这正是「上一轮不命中 → 这一轮自动过审」那条路径（历史上就是它漏过 BLOCKED/NO_POLICY_MATCH 的结算）
         createAutoPolicy();
@@ -198,9 +204,11 @@ class AuditConclusionTerminalTagIntegrationTest {
         assertThat(statusOf(idAutoPassed)).as("7 待审核 → 8 待发货").isEqualTo(8);
 
         assertThat(activeConclusionCodes(idAutoPassed))
-                .as("自动过审的当前结论就是 AUTO_PASSED（不是空）")
-                .containsExactly(AuditTagCatalogService.CODE_AUTO_PASSED);
-        assertThat(conclusionTagCount(idAutoPassed)).as("一单只有一条 active 结论标").isEqualTo(1);
+                .as("V9：自动过审**不落标** —— 「它过了」由状态 8 表达（用户 16:38：通过与否由状态表达，不由标表达）")
+                .isEmpty();
+        assertThat(conclusionTagCount(idAutoPassed)).as("离开待审核后身上没有结论标，这是设计").isZero();
+        assertThat(tagRowCount(idAutoPassed, AuditTagCatalogService.CODE_AUTO_PASSED))
+                .as("不是「写了又被解掉」：这条落标路径已经整段不存在，一行都没有").isZero();
 
         Map<String, Object> old = anyTagRow(idAutoPassed, "NO_POLICY_MATCH");
         assertThat(((Number) old.get("active")).intValue()).as("旧结论标必须被解除").isZero();
@@ -208,77 +216,78 @@ class AuditConclusionTerminalTagIntegrationTest {
         assertThat(String.valueOf(old.get("released_by")))
                 .as("自动过审是「引擎给出了新结论」⇒ 旧结论被取代").isEqualTo("SYSTEM:SUPERSEDED");
 
-        Map<String, Object> landed = anyTagRow(idAutoPassed, AuditTagCatalogService.CODE_AUTO_PASSED);
-        assertThat(landed.get("released_at")).as("终局标是 active 的").isNull();
-        assertThat(String.valueOf(landed.get("reason")))
-                .as("标的 reason 用引擎的判定原话（不是一句等于没说的话）").isNotBlank();
-
-        System.out.println("[②] QT-4104（NO_MATCH → 自动过审）active 结论标 = "
-                + activeConclusionCodes(idAutoPassed) + "；NO_POLICY_MATCH released_by=" + old.get("released_by"));
+        System.out.println("[②] QT-4104（NO_MATCH → 自动过审 7→8）active 结论标 = "
+                + activeConclusionCodes(idAutoPassed) + "；NO_POLICY_MATCH released_by=" + old.get("released_by")
+                + "，released_at=" + old.get("released_at") + "；AUTO_PASSED 行数=0");
     }
 
     @Test
     @Order(3)
-    @DisplayName("③ 7→8 人工放行：active 结论标 == [AUDIT_PASSED]（旧 AUDIT_PENDING 已解除）")
-    void manualPassLandsAuditPassed() {
+    @DisplayName("③ 7→8 人工放行：active 结论标 == []（旧 AUDIT_PENDING 已解除；AUDIT_PASSED 一行都没写过）")
+    void manualPassLeavesNoConclusionTag() {
         assertThat(activeConclusionCodes(idPassed)).as("起点：待人工审核").containsExactly("AUDIT_PENDING");
 
         ok(post("/admin/orders/" + idPassed + "/audit-pass", null));
         assertThat(statusOf(idPassed)).as("7 待审核 → 8 待发货").isEqualTo(8);
 
         assertThat(activeConclusionCodes(idPassed))
-                .as("放行后「当前结论」仍然存在：人工放行通过（不是空）")
-                .containsExactly(AuditTagCatalogService.CODE_AUDIT_PASSED);
-        assertThat(conclusionTagCount(idPassed)).as("一单只有一条 active 结论标（互斥）").isEqualTo(1);
+                .as("V9：放行后身上**没有**结论标 —— 「过了」由状态 8 表达（用户 16:38：绝不会有一个叫『已通过』的标）")
+                .isEmpty();
+        assertThat(conclusionTagCount(idPassed)).isZero();
+        assertThat(tagRowCount(idPassed, AuditTagCatalogService.CODE_AUDIT_PASSED))
+                .as("不是「写了又被解掉」：这张单上从来没有过 AUDIT_PASSED").isZero();
 
         Map<String, Object> old = anyTagRow(idPassed, "AUDIT_PENDING");
         assertThat(((Number) old.get("active")).intValue()).isZero();
         assertThat(old.get("released_at")).isNotNull();
         assertThat(String.valueOf(old.get("released_by")))
                 .as("解除人要说清是「放行结算」").isEqualTo("SYSTEM:AUDIT_PASS");
-        // 队列/显示层口径：AUDIT_PASSED 是 visible=0，所以它不会跑到队列的标区里
-        assertThat(tagCatalog.byCode(AuditTagCatalogService.CODE_AUDIT_PASSED).getVisible())
-                .as("visible=0 ⇒ 队列行不显示它（数据上有事实，页面上没有噪声）").isZero();
-        Map<String, Object> row = queueRowByTag("AUDIT_PASSED", "QT-4101");
-        assertThat(strings(row.get("tagCodes")))
-                .as("渲染输入（visible=1 的标）里没有它：队列不显示「人工放行通过」这枚标").isEmpty();
-        assertThat(strings(row.get("allTagCodes")))
-                .as("数据层（全部 active 标）里必须有它 —— 判断只能读 allTagCodes").containsExactly("AUDIT_PASSED");
-        assertThat(row.get("conclusionTerminalTag")).as("终局轴答得出「它最后怎么了」").isEqualTo("AUDIT_PASSED");
-        assertThat(row.get("conclusionSource")).as("结论来源是终局标（不是 DECISION 退回）").isEqualTo("TERMINAL");
-        assertThat(row.get("primaryTagCode")).as("主标只在可见标里挑 ⇒ 只剩一枚 visible=0 的标时主标为 null").isNull();
+        // 队列/显示层口径：队列行上一个标都没有，结论退回决策行（这是如实回答，不是缺口）
+        assertThat(tagCatalog.byCode(AuditTagCatalogService.CODE_AUDIT_PASSED).getEnabled())
+                .as("目录项停用 ⇒ 下拉/维护页不再提供它").isZero();
+        Map<String, Object> row = queueRowOf("QT-4101");
+        assertThat(strings(row.get("tagCodes"))).as("渲染输入里一个标都没有").isEmpty();
+        assertThat(strings(row.get("allTagCodes"))).as("数据层也没有（不是 visible=0 藏起来，是真的没有）").isEmpty();
+        assertThat(row.get("conclusionSettlementFact")).as("没有结算事实标").isNull();
+        assertThat(row.get("conclusionFromTag")).as("判定结论读不出（离开待审核后这是设计）").isNull();
+        assertThat(row.get("conclusionSource")).as("结论来源退回决策行").isEqualTo("DECISION");
+        assertThat(row.get("primaryTagCode")).as("没有标 ⇒ 没有主标").isNull();
 
-        System.out.println("[③] QT-4101（AUDIT_PENDING → 人工放行）active 结论标 = "
-                + activeConclusionCodes(idPassed) + "；AUDIT_PENDING released_by=" + old.get("released_by"));
+        System.out.println("[③] QT-4101（AUDIT_PENDING → 人工放行 7→8）active 结论标 = "
+                + activeConclusionCodes(idPassed) + "；AUDIT_PENDING released_by=" + old.get("released_by")
+                + "，released_at=" + old.get("released_at") + "；conclusionSource=" + row.get("conclusionSource"));
     }
 
     @Test
     @Order(4)
-    @DisplayName("④ 7→4 审核不通过：active 结论标 == [AUDIT_REJECTED]（旧 AUDIT_PENDING 已解除）")
-    void auditRejectLandsAuditRejected() {
+    @DisplayName("④ 7→4 审核不通过：active 结论标 == []（旧 AUDIT_PENDING 已解除；AUDIT_REJECTED 一行都没写过）")
+    void auditRejectLeavesNoConclusionTag() {
         assertThat(activeConclusionCodes(idRejected)).containsExactly("AUDIT_PENDING");
 
         ok(post("/admin/orders/" + idRejected + "/audit-reject", null));
         assertThat(statusOf(idRejected)).as("7 待审核 → 4 已关闭").isEqualTo(4);
 
         assertThat(activeConclusionCodes(idRejected))
-                .as("关单后「当前结论」= 审核不通过（状态 4 只说关了，说不出是人工关的）")
-                .containsExactly(AuditTagCatalogService.CODE_AUDIT_REJECTED);
-        assertThat(conclusionTagCount(idRejected)).isEqualTo(1);
+                .as("V9：关单后身上**没有**结论标 —— 「没过」由状态 4 表达")
+                .isEmpty();
+        assertThat(conclusionTagCount(idRejected)).isZero();
+        assertThat(tagRowCount(idRejected, AuditTagCatalogService.CODE_AUDIT_REJECTED))
+                .as("不是「写了又被解掉」：这张单上从来没有过 AUDIT_REJECTED").isZero();
 
         Map<String, Object> old = anyTagRow(idRejected, "AUDIT_PENDING");
         assertThat(((Number) old.get("active")).intValue()).isZero();
         assertThat(old.get("released_at")).isNotNull();
         assertThat(String.valueOf(old.get("released_by"))).isEqualTo("SYSTEM:AUDIT_REJECT");
 
-        System.out.println("[④] QT-4102（AUDIT_PENDING → 审核不通过）active 结论标 = "
-                + activeConclusionCodes(idRejected) + "；AUDIT_PENDING released_by=" + old.get("released_by"));
+        System.out.println("[④] QT-4102（AUDIT_PENDING → 审核不通过 7→4）active 结论标 = "
+                + activeConclusionCodes(idRejected) + "；AUDIT_PENDING released_by=" + old.get("released_by")
+                + "，released_at=" + old.get("released_at"));
     }
 
     @Test
     @Order(5)
-    @DisplayName("⑤ 7→5 申请退货：active 结论标 == [RETURN_APPLIED]（旧 AUDIT_PENDING 已解除）")
-    void returnApplyLandsReturnApplied() {
+    @DisplayName("⑤ 7→5 申请退货：active 结论标 == [RETURN_APPLIED]（唯一保留的结算事实标；旧 AUDIT_PENDING 已解除）")
+    void returnApplyLeavesOnlyReturnApplied() {
         assertThat(activeConclusionCodes(idReturned)).containsExactly("AUDIT_PENDING");
 
         JsonNode apply = ok(post("/admin/return-applies",
@@ -302,56 +311,62 @@ class AuditConclusionTerminalTagIntegrationTest {
         assertThat(strings(row.get("tagCodes")))
                 .as("visible=1 ⇒ 它**出现在队列的渲染输入里**（队列看不到订单状态，这是唯一能说明\"在退货流程里\"的地方）")
                 .containsExactly("RETURN_APPLIED");
-        assertThat(row.get("conclusionTerminalTag")).isEqualTo("RETURN_APPLIED");
-        assertThat(row.get("conclusionSource")).isEqualTo("TERMINAL");
+        assertThat(row.get("conclusionSettlementFact")).isEqualTo("RETURN_APPLIED");
+        assertThat(row.get("conclusionSource"))
+                .as("来源是结算事实标（不与 result 比，对账不拿它当冲突）").isEqualTo("SETTLEMENT_FACT");
+        assertThat(row.get("conclusionFromTag")).as("它不是\"这一轮判成了什么\"，判定结论读不出来").isNull();
 
-        System.out.println("[⑤] QT-4103（AUDIT_PENDING → 申请退货）active 结论标 = "
-                + activeConclusionCodes(idReturned) + "；AUDIT_PENDING released_by=" + old.get("released_by"));
+        System.out.println("[⑤] QT-4103（AUDIT_PENDING → 申请退货 7→5）active 结论标 = "
+                + activeConclusionCodes(idReturned) + "；AUDIT_PENDING released_by=" + old.get("released_by")
+                + "，released_at=" + old.get("released_at"));
     }
 
-    // ================================================================== ⑥ 聚合推导那一支：只解不落
+    // ================================================== ⑥ V9 的"停用"到底发生了什么（映射与目录）
 
     /**
-     * 7→2/3/9 是<b>包裹事实推导</b>，不是审核结论 —— 所以「只解不落」是设计，不是漏。
+     * 三件事一起钉：目录停用、代码不再产出、唯一保留的事实标仍在。
      *
-     * <p>为什么这条用纯函数断言而不是造一条聚合流转：{@code DeliveryFlowService#recompute} 要把
-     * 7 推成 2/3/9 需要一整套包裹/出库事件，而这里要钉的只是<b>那张映射表的答案</b>
-     * （{@code OrderStatusService} 只是照它执行）。造一整套包裹事件来验"落不落标"属于拿大炮打蚊子，
-     * 真库那一侧的行为由 {@code StatusEntryGuardTest} ③ 用 mock 断言（release 调了、ensureActive 没调）。
+     * <p>为什么用纯函数/目录断言补这一条：上面的 ②③④⑤ 证明的是「真实入口不再落那三枚标」，
+     * 但"为什么不再落"可能有两种原因（目录停用 vs 代码不写）。这条把两头都钉死 ——
+     * 只有目录停用而代码还写，标会以"目录里查不到"的形态重新出现；只有代码不写而目录还启用，
+     * 下拉里就会留下一个永远筛不到东西的选项。
      */
     @Test
     @Order(6)
-    @DisplayName("⑥ 映射表：7→2/3/9（聚合推导）与 7→8(聚合) 都不落终局标；四条结算路各落各的")
-    void terminalCodeMappingTable() {
-        assertThat(ConclusionTags.terminalCodeOf(8, ReasonCodes.AUDIT_PASS))
-                .isEqualTo(AuditTagCatalogService.CODE_AUDIT_PASSED);
-        assertThat(ConclusionTags.terminalCodeOf(8, ReasonCodes.AUDIT_AUTO_PASS))
-                .isEqualTo(AuditTagCatalogService.CODE_AUTO_PASSED);
-        assertThat(ConclusionTags.terminalCodeOf(4, ReasonCodes.AUDIT_REJECT))
-                .isEqualTo(AuditTagCatalogService.CODE_AUDIT_REJECTED);
-        assertThat(ConclusionTags.terminalCodeOf(5, ReasonCodes.RETURN_APPLY))
-                .isEqualTo(AuditTagCatalogService.CODE_RETURN_APPLIED);
+    @DisplayName("⑥ 三枚「通过/不通过」标：目录 enabled=0 + 代码不再产出（codeOf(AUTO_PASS)==null）；RETURN_APPLIED 保留")
+    void passFailTagsDisabledEverywhere() {
+        // 目录：停用，但行还在（只增不删）
+        assertThat(tagCatalog.byCode(AuditTagCatalogService.CODE_AUTO_PASSED).getEnabled()).isZero();
+        assertThat(tagCatalog.byCode(AuditTagCatalogService.CODE_AUDIT_PASSED).getEnabled()).isZero();
+        assertThat(tagCatalog.byCode(AuditTagCatalogService.CODE_AUDIT_REJECTED).getEnabled()).isZero();
+        // 目录：只剩"事实"那一枚还启用
+        assertThat(tagCatalog.byCode(AuditTagCatalogService.CODE_RETURN_APPLIED).getEnabled()).isEqualTo(1);
 
-        // 聚合推导：包裹事实，不是审核结论 ⇒ 不落（只由 change 里的 releaseAll 收尾）
-        assertThat(ConclusionTags.terminalCodeOf(2, ReasonCodes.DELIVERY_AGGREGATE)).isNull();
-        assertThat(ConclusionTags.terminalCodeOf(3, ReasonCodes.DELIVERY_AGGREGATE)).isNull();
-        assertThat(ConclusionTags.terminalCodeOf(9, ReasonCodes.DELIVERY_AGGREGATE)).isNull();
-        assertThat(ConclusionTags.terminalCodeOf(8, ReasonCodes.DELIVERY_AGGREGATE))
-                .as("7→8 也可能是聚合推导出来的 ⇒ 判据必须带 reason，不能只看目标状态").isNull();
+        // 代码：AUTO_PASS 不再产标（V7 那条口径已收回）
+        AuditVerdict autoPass = new AuditVerdict(AuditResult.AUTO_PASS, null, List.of(), List.of(), List.of(),
+                null, List.of(), null, "自动过审（测试构造）", Map.of());
+        assertThat(ConclusionTags.codeOf(autoPass)).as("AUTO_PASS 不落标").isNull();
+        assertThat(ConclusionTags.producesTag(AuditResult.AUTO_PASS))
+                .as("AUTO_PASS 不在\"会落标\"的结论里").isFalse();
 
-        // 三枚终局标必须被"终局轴"认出来（否则对账会拿它们去跟 result 比，制造假冲突）
-        assertThat(ConclusionTags.terminalCodesFromSettlement())
-                .containsExactlyInAnyOrder(AuditTagCatalogService.CODE_AUDIT_PASSED,
-                        AuditTagCatalogService.CODE_AUDIT_REJECTED, AuditTagCatalogService.CODE_RETURN_APPLIED);
-        assertThat(ConclusionTags.terminalCodesFromSettlement())
-                .allSatisfy(code -> assertThat(ConclusionTags.isTerminalConclusion(code)).isTrue());
-        // 判定轴的码不许被当成终局码（它们与 result 必须对得上，参与 valueMismatch 检查）
-        assertThat(ConclusionTags.isTerminalConclusion("AUDIT_PENDING")).isFalse();
-        assertThat(ConclusionTags.isTerminalConclusion("BLOCKED")).isFalse();
-        assertThat(ConclusionTags.isTerminalConclusion("NO_POLICY_MATCH")).isFalse();
+        // 代码：那两枚"过没过"码不再被任何映射产出/认识
+        assertThat(ConclusionTags.conclusionCodesWrittenHere())
+                .as("这张清单里不该再有那三枚码")
+                .doesNotContain(AuditTagCatalogService.CODE_AUTO_PASSED,
+                        AuditTagCatalogService.CODE_AUDIT_PASSED,
+                        AuditTagCatalogService.CODE_AUDIT_REJECTED);
+        assertThat(ConclusionTags.resultOf(AuditTagCatalogService.CODE_AUDIT_PASSED))
+                .as("读不出结论值（它已不是结论标；拿它冒充 AUTO_PASS 就是伪造结论）").isEmpty();
 
-        System.out.println("[⑥] 映射表：7→8(人工)=AUDIT_PASSED / 7→8(自动)=AUTO_PASSED / 7→4=AUDIT_REJECTED / "
-                + "7→5=RETURN_APPLIED；7→2/3/9 与 7→8(聚合) 均为 null（只解不落）");
+        // 代码：唯一保留的事实标认得出来，且只有它
+        assertThat(ConclusionTags.isSettlementFact(AuditTagCatalogService.CODE_RETURN_APPLIED)).isTrue();
+        assertThat(ConclusionTags.isSettlementFact(AuditTagCatalogService.CODE_AUDIT_PASSED)).isFalse();
+        assertThat(ConclusionTags.isSettlementFact("AUDIT_PENDING")).isFalse();
+        assertThat(ConclusionTags.isSettlementFact("BLOCKED")).isFalse();
+
+        System.out.println("[⑥] 目录：AUTO_PASSED/AUDIT_PASSED/AUDIT_REJECTED enabled=0（行仍在）；"
+                + "RETURN_APPLIED enabled=1；codeOf(AUTO_PASS)=null；conclusionCodesWrittenHere="
+                + ConclusionTags.conclusionCodesWrittenHere());
     }
 
     // ================================================================== 真实入口
@@ -451,6 +466,24 @@ class AuditConclusionTerminalTagIntegrationTest {
     private Map<String, Object> anyTagRow(Long orderId, String tagCode) {
         return jdbc.queryForMap("SELECT * FROM order_audit_tag WHERE order_id = ? AND tag_code = ? "
                 + "ORDER BY id DESC LIMIT 1", orderId, tagCode);
+    }
+
+    /** 这单上某个标码的**全部行数**（含已解除的）—— 用来证明"不是写了又被解掉" */
+    private int tagRowCount(Long orderId, String tagCode) {
+        Integer n = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM order_audit_tag WHERE order_id = ? AND tag_code = ?",
+                Integer.class, orderId, tagCode);
+        return n == null ? -1 : n;
+    }
+
+    /** 队列里按单号取那一行（不按标筛：V9 之后终局单身上已经没有标可筛了） */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> queueRowOf(String orderSn) {
+        List<Map<String, Object>> rows = (List<Map<String, Object>>) queryService.queue(null, null, 1, 100).get("rows");
+        return rows.stream()
+                .filter(r -> orderSn.equals(String.valueOf(r.get("order_sn"))))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("队列里没有 " + orderSn));
     }
 
     /** 按标码筛队列行，再按单号取那一行（接口级证据：visible 决定它进不进渲染输入） */
