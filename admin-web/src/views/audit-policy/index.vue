@@ -227,6 +227,41 @@
           </el-row>
         </div>
 
+        <!-- 命中时打标（期 2 步骤 2）：**并行动作**，三种策略类型都能配。
+             它是「策略 A 打标 → 下一轮策略 B 读标」这条传送带的起点，
+             所以选项只来自标目录 category='特征' 且启用的项（后端保存时也按同一口径校验）。 -->
+        <div class="form-row">
+          <el-form-item label="命中时打标">
+            <div class="feature-tag-picker">
+              <el-select
+                v-model="editing.featureTags"
+                multiple
+                filterable
+                collapse-tags
+                collapse-tags-tooltip
+                data-testid="policy-form-feature-tags"
+                :placeholder="featureTagOptions.length ? '选特征标（可多选，最多 5 个）' : '目录里还没有特征标，先点右侧新增'"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="t in featureTagOptions"
+                  :key="t.code"
+                  :label="t.name"
+                  :value="t.code"
+                >
+                  <span>{{ t.name }}</span>
+                  <el-text size="small" type="info">{{ t.code }}</el-text>
+                </el-option>
+              </el-select>
+              <el-button size="small" :icon="Plus" data-testid="feature-tag-create" @click="openTagCreator">新增特征标</el-button>
+            </div>
+            <div class="muted cond-tip">
+              命中时<b>顺手</b>打这些标，不改变结论（该过的照样过、该拦的照样拦）。
+              特征标是策略之间的传送带：下一条策略可以用「当前标记 有标 X」读它。
+            </div>
+          </el-form-item>
+        </div>
+
         <el-form-item label="匹配条件">
           <div class="cond-editor" data-testid="cond-editor">
             <div v-if="!editing.conditions.length" class="muted">还没有条件：一条条件都没有的策略永远不会命中</div>
@@ -404,6 +439,31 @@
         </div>
       </template>
     </el-dialog>
+
+    <!-- ================= 新增特征标（就地新增，不跳走） ================= -->
+    <!-- 为什么在策略弹窗里就能新增：标目录里 category='特征' 可能一条都没有，
+         而「命中时打标」的下拉只能从目录里选。若不给入口，运营会说
+         「我知道该配什么标，但系统里没有，我只能去求开发写迁移」—— 那正是期 1 要消灭的自由文本回潮。
+         中文名必填（它是队列里显示的那几个字），code 由人工给或留空自动生成（CUSTOM_<id>）。 -->
+    <el-dialog v-model="tagCreatorVisible" title="新增特征标" width="min(520px, 92vw)" data-testid="feature-tag-dialog">
+      <el-form label-width="80px" size="small">
+        <el-form-item label="中文名" required>
+          <el-input v-model="newTag.name" data-testid="feature-tag-name" placeholder="业务看到的几个字，如「客诉客户」" />
+        </el-form-item>
+        <el-form-item label="标码">
+          <el-input v-model="newTag.code" data-testid="feature-tag-code" placeholder="留空自动生成（CUSTOM_<id>）；手填用大写字母/数字/下划线" />
+        </el-form-item>
+        <el-form-item label="说明">
+          <el-input v-model="newTag.description" data-testid="feature-tag-desc" placeholder="一句话：这个标什么意思、下一步该做什么" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <div class="footer-buttons">
+          <el-button data-testid="feature-tag-cancel" @click="tagCreatorVisible = false">取消</el-button>
+          <el-button type="primary" :loading="creatingTag" data-testid="feature-tag-submit" @click="submitNewTag">新增</el-button>
+        </div>
+      </template>
+    </el-dialog>
   </el-card>
 </template>
 
@@ -416,7 +476,7 @@ import {
   listAuditPolicies, policyBundle,
   createAuditPolicy, updateAuditPolicy, deleteAuditPolicy, moveAuditPolicy,
   previewAuditPolicy, listAuditQueue, queuePage, toConditionRequest, mapCondition,
-  listFreezeReasons
+  listFreezeReasons, listAuditTags, featureTagOptionsOf, createAuditTag
 } from '../../api/audit'
 import { handleSaveError } from '../../composables/useConflictHandler'
 import { compareCondition, rowFieldValue, expectedText } from '../../composables/useAuditExplain'
@@ -446,10 +506,22 @@ const conditionSummary = (c) => {
   return `${label} ${auditOpText(op)}${noValue ? '' : ' ' + expectedText({ ...c, valueType: typeOf(c) })}`
 }
 
+/**
+ * 动作摘要：结论动作 + 并行动作（期 2 步骤 2）。
+ *
+ * 特征标显示**中文名**（目录里查得到就显示名字、查不到退化成标码，与队列那一列同口径）——
+ * 只显示码的话，运营得背下 COMPLAINT_CUSTOMER 才知道这条策略在打什么标。
+ */
+const featureTagNames = (row) =>
+  (row.featureTags || []).map((code) => featureTagOptions.value.find((t) => t.code === code)?.name || code)
+
 const actionText = (row) => {
-  if (row.type === 'AUTO') return '自动过审（状态 7 → 8）'
-  if (row.type === 'BLOCK') return '阻止（前置拦截，不推进状态）'
-  return `冻结：${row.actionTag || 'FROZEN'}（${row.actionReason || row.name}）`
+  const conclusion = row.type === 'AUTO' ? '自动过审（状态 7 → 8）'
+    : row.type === 'BLOCK' ? '阻止（前置拦截，不推进状态）'
+      : `冻结：${row.actionTag || 'FROZEN'}（${row.actionReason || row.name}）`
+  const marks = featureTagNames(row)
+  // 打标是并行动作，与结论并列显示（不是"顺便"）：它决定下一轮别的策略读不读得到标
+  return marks.length ? `${conclusion} ＋ 打标：${marks.join('、')}` : conclusion
 }
 
 /** 高亮定位：从队列「判定依据」跳过来时会带 focusPolicy / focusSeq */
@@ -504,9 +576,70 @@ const editing = reactive({
   actionTag: 'FROZEN',
   actionReason: '',
   actionReasonCode: '',
+  featureTags: [],
   conditions: [],
   globalExclusions: []
 })
+
+/** 「命中时打标」的候选（标目录 category='特征' 且启用） */
+const featureTagOptions = ref([])
+
+/**
+ * 特征标候选：目录是唯一来源（前端不许抄一份标码常量表 —— 抄一份的下场是
+ * "后端有 COMPLAINT_CUSTOMER、前端没有"，页面显示成空白英文码且不报错）。
+ * 取失败不阻塞保存（老策略/无标场景下依旧能改条件），但下拉会是空的，所以给一句提示。
+ */
+const loadFeatureTagOptions = async () => {
+  try {
+    featureTagOptions.value = featureTagOptionsOf(await listAuditTags())
+  } catch {
+    featureTagOptions.value = []
+  }
+}
+
+// ---------------------------------------------------------------- 就地新增特征标
+
+const tagCreatorVisible = ref(false)
+const creatingTag = ref(false)
+const newTag = reactive({ code: '', name: '', description: '' })
+
+const openTagCreator = () => {
+  newTag.code = ''
+  newTag.name = ''
+  newTag.description = ''
+  tagCreatorVisible.value = true
+}
+
+/**
+ * 新增一条「特征」标并把它选进当前策略。
+ *
+ * ⚠️ 中文名必填：只给码就等于让目录里多出一条"没人看得懂"的项 —— 而标的中文名正是
+ * 队列/抽屉里给人看的那几个字（期 1 的教训：reason="1231" 就是这么来的）。
+ */
+const submitNewTag = async () => {
+  if (!newTag.name.trim()) {
+    ElMessage.warning('请填写中文名（它就是业务人员在队列里看到的那几个字）')
+    return
+  }
+  creatingTag.value = true
+  try {
+    const created = await createAuditTag({
+      code: newTag.code.trim() || undefined,
+      name: newTag.name.trim(),
+      description: newTag.description.trim() || undefined,
+      category: '特征'
+    })
+    await loadFeatureTagOptions()
+    const code = String(created?.code || '')
+    if (code && !editing.featureTags.includes(code)) editing.featureTags.push(code)
+    tagCreatorVisible.value = false
+    ElMessage.success(`已新增特征标「${created?.name || newTag.name}」并选上`)
+  } catch (e) {
+    ElMessage.error('新增特征标失败：' + (e?.message || e))
+  } finally {
+    creatingTag.value = false
+  }
+}
 
 const blankCondition = () => ({
   kind: 'MATCH',
@@ -548,6 +681,9 @@ const openEditor = (policy) => {
     // 按中文名反查回填，让下拉显示"它现在是哪一条"，而不是空着诱导人误以为没配
     editing.actionReasonCode = policy.actionReasonCode
       || (freezeReasonOptions.value.find((r) => r.name === policy.actionReason)?.code ?? '')
+    // 特征标回填的是**码**；目录里已删/停用的码也照样回填（否则一次编辑就会把它抹掉，
+    // 而策略里那条引用还写着它 —— 保存时才会被后端拒，报错位置离原因很远）
+    editing.featureTags = [...(policy.featureTags || [])]
     // seq 重排成 0..n：后端保存时也是按数组下标重排的，两边口径一致（why-miss-${id}-${seq} 才对得上）
     editing.conditions = policy.conditions.map((c, i) => ({ ...mapCondition(c), seq: i }))
     editing.globalExclusions = globalExclusions.value.map((c, i) => ({ ...c, seq: i }))
@@ -560,6 +696,7 @@ const openEditor = (policy) => {
     editing.actionTag = 'FROZEN'
     editing.actionReason = ''
     editing.actionReasonCode = ''
+    editing.featureTags = []
     editing.conditions = [blankCondition()]
     editing.globalExclusions = globalExclusions.value.map((c, i) => ({ ...c, seq: i }))
   }
@@ -607,6 +744,8 @@ const payloadOf = () => ({
     ? (freezeReasonNameOf(editing.actionReasonCode) || editing.actionReason || editing.name)
     : null,
   actionReasonCode: editing.type === 'EXCEPTION' ? (editing.actionReasonCode || null) : null,
+  // 并行动作：三种类型都能配（后端只对「结论动作」限 EXCEPTION）
+  featureTags: [...editing.featureTags],
   conditions: editing.conditions.map((c) => toConditionRequest(c, { kind: c.kind, scope: 'POLICY' })),
   // null = 不动全局排除（改策略 B 不该顺手抹掉策略 A 里配的全局排除）
   globalExclusions: editing.type === 'AUTO'
@@ -617,6 +756,8 @@ const payloadOf = () => ({
 /** 提交前的本地校验：与后端 insertCondition 的校验口径一致，少一次「保存才知道配错」 */
 const validate = () => {
   if (!editing.name.trim()) return '请填写策略名称'
+  // 上限与后端 MAX_FEATURE_TAGS 一致（5）：本地先拦，省一次「保存才知道」的往返
+  if (editing.featureTags.length > 5) return '一次命中最多打 5 个特征标（挂太多就没人看了）'
   if (!editing.conditions.length) return '至少配一条匹配条件'
   for (const [i, c] of editing.conditions.entries()) {
     if (!c.fieldCode) return `第 ${i} 条条件还没选字段`
@@ -788,6 +929,8 @@ const toggleEnabled = async (row, value) => {
       enabled: Boolean(value),
       actionTag: row.actionTag,
       actionReason: row.actionReason,
+      // ⚠️ PUT 是**整体覆盖**：漏传 featureTags 就等于"切个启用开关顺手把它清空"（静默丢配置）
+      featureTags: [...(row.featureTags || [])],
       conditions: row.conditions.map((c) => toConditionRequest(c, { kind: c.kind, scope: 'POLICY' })),
       globalExclusions: null // 不动全局排除
     })
@@ -825,6 +968,7 @@ onMounted(async () => {
   }
   await load()
   await loadFreezeReasons()
+  await loadFeatureTagOptions()
   // 从队列「判定依据 → 去改这条策略」跳过来：直接打开对应策略的编辑器，条件高亮由 isFocused 负责
   if (focusPolicy.value) {
     const target = policies.value.find((p) => p.id === focusPolicy.value)
@@ -869,6 +1013,8 @@ onMounted(async () => {
   display: block; text-align: center;
 }
 .cond-tip { margin-top: 6px; }
+/* 「命中时打标」= 多选下拉 + 就地新增按钮：下拉铺满、按钮不换行挤成两行 */
+.feature-tag-picker { display: flex; gap: 8px; width: 100%; align-items: center; }
 .editor-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .editor-footer .impact { text-align: left; flex: 1; }
 .footer-buttons { display: flex; gap: 8px; }

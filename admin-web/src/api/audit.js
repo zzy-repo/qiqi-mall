@@ -351,10 +351,27 @@ export const mapPolicy = (p) => ({
   versionNo: num(pick(p, 'versionNo', 'version_no')) ?? 1,
   actionTag: pick(p, 'actionTag', 'action_tag') ?? null,
   actionReason: pick(p, 'actionReason', 'action_reason') ?? null,
+  actionReasonCode: pick(p, 'actionReasonCode', 'action_reason_code') ?? null,
+  // 期 2 步骤 2：命中时打的「特征」标码（并行动作，三种策略类型都可能配）。
+  // 回填的是**码**，页面负责用标目录翻成中文名 —— 策略引用的必须是稳定键（改名不该让策略失效）
+  featureTags: (pick(p, 'featureTags', 'feature_tags') || []).map((c) => String(c)),
   // 后端 PolicyDto 目前没有 updatedAt —— 列里显示「—」而不是假时间（见报告⑤）
   updatedAt: pick(p, 'updatedAt', 'updated_at') ?? null,
   conditions: (pick(p, 'conditions') || []).map(mapCondition)
 })
+
+/**
+ * 标目录 → 「命中时打标」下拉的选项（期 2 步骤 2）。
+ *
+ * ⚠️ 只收 {@code category='特征'} 且 {@code enabled=1}：结论标由判定链产出，
+ * 策略打结论标会被后端拒（等于伪造一条判定结论的证据），所以这里根本不让它出现在选项里 ——
+ * 让前端把一个必然保存失败的值摆在人面前，是拿后端校验当交互反馈用。
+ */
+export const featureTagOptionsOf = (payload) =>
+  tagCatalogOf(payload)
+    .filter((t) => t.category === '特征' && t.enabled)
+    .map((t) => ({ code: t.code, name: t.name, description: t.description }))
+
 
 export const mapCondition = (c, index = 0) => ({
   id: num(pick(c, 'id')),

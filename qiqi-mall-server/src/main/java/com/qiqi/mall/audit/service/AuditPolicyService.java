@@ -34,8 +34,10 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 审核策略的配置面：读写策略/条件、排序、版本快照、变更审计，以及给引擎装载只读视图。
@@ -57,6 +59,15 @@ import java.util.Map;
 public class AuditPolicyService {
 
     private static final Logger log = LoggerFactory.getLogger(AuditPolicyService.class);
+
+    /**
+     * 一条策略命中时最多打几个特征标（期 2 步骤 2）。
+     *
+     * <p>5 是"人一眼能看完"的量：队列那格标签区放得下、抽屉里也不用滚动。
+     * 上限的存在意义不是防呆，而是防"一条兜底策略给所有单挂十几个标" ——
+     * 那种配置一旦生效，标就不再是信号，而是背景噪声（期 1 立"每种结论落一个标"时同一个道理）。
+     */
+    private static final int MAX_FEATURE_TAGS = 5;
 
     private final AuditPolicyMapper policyMapper;
     private final AuditPolicyConditionMapper conditionMapper;
@@ -123,7 +134,7 @@ public class AuditPolicyService {
                     policy.getPriority() == null ? 100 : policy.getPriority(), policy.getName(),
                     policy.getVersionNo() == null ? 1 : policy.getVersionNo(),
                     policy.getEnabled() != null && policy.getEnabled() == 1,
-                    parseAction(policy.getActionJson(), policy.getName()),
+                    parseAction(policy.getActionJson(), policy.getName(), PolicyType.valueOf(policy.getType())),
                     List.copyOf(conditions)));
         }
         return result;
@@ -146,7 +157,9 @@ public class AuditPolicyService {
         policy.setName(name);
         policy.setEnabled(req.enabled() == null || req.enabled() ? 1 : 0);
         policy.setVersionNo(1);
-        policy.setActionJson(type == PolicyType.EXCEPTION ? actionJson(req) : null);
+        // 动作 JSON：EXCEPTION 存结论动作，三种类型都可能存 feature_tags（并行动作）；
+        // 都没有 → null（不存空对象，见 actionJson）
+        policy.setActionJson(actionJson(req, type));
         policyMapper.insert(policy);
 
         int seq = 0;
@@ -185,7 +198,7 @@ public class AuditPolicyService {
         update.setEnabled(req.enabled() == null ? before.getEnabled() : (req.enabled() ? 1 : 0));
         // 版本号 +1：改完条件后，历史决策仍然指得到「当时是哪一版」
         update.setVersionNo((before.getVersionNo() == null ? 1 : before.getVersionNo()) + 1);
-        update.setActionJson(type == PolicyType.EXCEPTION ? actionJson(req) : null);
+        update.setActionJson(actionJson(req, type));
         policyMapper.updateById(update);
 
         conditionMapper.deleteByPolicy(id);
@@ -397,6 +410,20 @@ public class AuditPolicyService {
                 LocalDateTime.now());
     }
 
+    /**
+     * 动作校验（期 2 步骤 2 放开到三种类型，但两种动作的规则不同）。
+     *
+     * <h3>结论动作（FROZEN 等）仍然只有 EXCEPTION 能配</h3>
+     * 冻结会改"这单的当前结论"，还会写冻结原因字典（{@code reason_id}/{@code reason_code}）。
+     * AUTO / BLOCK 的语义是"过"和"拦"，它们身上出现冻结动作就等于自相矛盾 ——
+     * 一条 AUTO 命中后把单按住，判定链的结论与动作直接打架。所以这一档放开的只是
+     * <b>并行动作</b>，不是结论动作。
+     *
+     * <h3>特征标三种都能配</h3>
+     * 打特征标不改结论：客诉客户 / 双地址 / 平台旗帜这些事实与"过没过"无关
+     * （吉客云原话：这些单打了标照样自动审核通过）。所以 AUTO、BLOCK、EXCEPTION 都可以在命中时
+     * 顺手打标 —— 这正是「策略 A 打标 → 下一轮策略 B 读标」这条传送带的起点。
+     */
     private void validateAction(PolicyType type, PolicyRequest req) {
         if (type == PolicyType.EXCEPTION) {
             String tag = req.actionTag() == null || req.actionTag().isBlank()
@@ -418,37 +445,161 @@ public class AuditPolicyService {
                 }
             }
         } else if ((req.actionTag() != null && !req.actionTag().isBlank())
-                || (req.actionReason() != null && !req.actionReason().isBlank())) {
-            throw new IllegalArgumentException(type + " 策略不能带冻结动作（只有 EXCEPTION 会冻结订单）");
+                || (req.actionReason() != null && !req.actionReason().isBlank())
+                || (req.actionReasonCode() != null && !req.actionReasonCode().isBlank())) {
+            // reason_code 也一并拒：只拒 tag 会让"配了原因码、没有标码"的 AUTO 策略存进去，
+            // 然后在执行层被当成冻结动作的一部分，落出一个没有标码的冻结原因 —— 半配的状态最难查
+            throw new IllegalArgumentException(type + " 策略不能带冻结动作（只有 EXCEPTION 会冻结订单）；"
+                    + "要在这条策略命中时给人看的说法请配「命中时打标」（特征标）");
+        }
+        validateFeatureTags(req.featureTags());
+    }
+
+    /**
+     * 特征标的守门（期 2 步骤 2 口径②）。
+     *
+     * <h3>为什么必须在保存时校验，而不是命中时悄悄跳过</h3>
+     * 特征标是<b>策略之间的接口</b>：策略 A 打 {@code COMPLAINT_CUSTOMER}，策略 B 读
+     * {@code ACTIVE_TAGS HAS COMPLAINT_CUSTOMER}。码拼错一个字母，A 打的是个没人读的码、
+     * B 读的码永远不会出现 —— 两条策略都"保存成功"，而传送带已经断了，
+     * 且没有任何地方会报错（与 {@code FieldRegistry} 把拼错的字段名挡在保存时是同一条理由）。
+     *
+     * <h3>四条判据</h3>
+     * <ol>
+     *   <li><b>数量 ≤ {@link #MAX_FEATURE_TAGS}</b>：一次命中打十几个标，队列里那一格就没人看了；</li>
+     *   <li><b>码必须存在于标目录</b>（不是"随便一个字符串"）—— 目录是标码的闭集；</li>
+     *   <li><b>必须启用</b>（{@code enabled=1}）：停用项的语义是"不许再被打上去"，
+     *       历史行照旧能显示中文名；</li>
+     *   <li><b>必须是「特征」档</b>，且不许是 {@code FROZEN} 家族：结论标是判定链的产物，
+     *       策略自己去打一个 {@code BLOCKED} / {@code NO_POLICY_MATCH} 等于伪造一条判定结论的证据；
+     *       冻结族还会按前缀参与结论标互斥，打上去会把真正的冻结标挤掉。</li>
+     * </ol>
+     *
+     * <p>报错一律带 <b>目录中文名</b>（参照冻结原因那套）：运营看到「NO_POLICY_MATCH（无策略命中）」
+     * 才知道自己选错了哪一档，只给英文码等于让人去猜。
+     */
+    private void validateFeatureTags(List<String> featureTags) {
+        List<String> codes = normalizeFeatureTags(featureTags);
+        if (codes.isEmpty()) return;
+        if (codes.size() > MAX_FEATURE_TAGS) {
+            throw new IllegalArgumentException("一次命中最多打 " + MAX_FEATURE_TAGS
+                    + " 个特征标（收到 " + codes.size() + " 个）：标是给人看的，一次挂十几个就没人看了");
+        }
+        for (String code : codes) {
+            if (!code.matches("^[A-Z][A-Z0-9_]{1,31}$")) {
+                throw new IllegalArgumentException("特征标码「" + code + "」不合法：只能用大写字母/数字/下划线，"
+                        + "以字母开头，2~32 字符（tag_code 列宽 32）");
+            }
+            if (code.regionMatches(true, 0, "FROZEN", 0, "FROZEN".length())) {
+                throw new IllegalArgumentException("特征标不能是冻结标「" + code
+                        + "」：冻结是判定链第 2 步的产物（结论档），策略打它会把真正的冻结结论挤掉");
+            }
+            var def = tagCatalogService.byCode(code);
+            if (def == null) {
+                throw new IllegalArgumentException("特征标「" + code + "」不在标目录里：先在标字典新增一条"
+                        + "「特征」标（POST /admin/order-audit/tags，中文名必填）再来配 —— "
+                        + "标码是策略之间的稳定键，拼错一个字母会让「读标」的策略永远不命中且毫无痕迹。"
+                        + "当前可用的特征标：" + featureTagHint());
+            }
+            if (def.getEnabled() == null || def.getEnabled() != 1) {
+                throw new IllegalArgumentException("特征标「" + def.getName() + "」（" + code
+                        + "）已停用，不能再配进策略（停用项连人工都打不上去，策略更不该配）");
+            }
+            if (!AuditTagCatalogService.CATEGORY_FEATURE.equals(def.getCategory())) {
+                throw new IllegalArgumentException("「" + def.getName() + "」（" + code
+                        + "）是**结论**标，不能当特征标打：结论标由判定链产出，"
+                        + "策略自己打一个等于伪造一条判定结论的证据。要挂说法请新增一条「特征」标");
+            }
         }
     }
 
-    private String actionJson(PolicyRequest req) {
-        Map<String, Object> action = new LinkedHashMap<>();
-        action.put("tag", req.actionTag() == null || req.actionTag().isBlank()
-                ? ActionSpec.DEFAULT_TAG : req.actionTag().trim());
-        action.put("reason", req.actionReason() == null || req.actionReason().isBlank()
-                ? "异常策略命中" : req.actionReason().trim());
-        // 原因码是稳定键（统计与 P1 豁免都靠它）；没配就留 null，执行时按人话反查 ——
-        // 不在这里"猜一个"写死，否则策略里会留下一份可能与字典改版失配的副本
-        if (req.actionReasonCode() != null && !req.actionReasonCode().isBlank()) {
-            action.put("reason_code", req.actionReasonCode().trim());
+    /**
+     * 特征标码归一化：去空白、转大写、去重保序。
+     *
+     * <p>转大写的理由与 {@code AuditTagCatalogService#createCustom} 一致：目录里的 code 恒为大写，
+     * 让运营/接口手写小写就报"不存在"是白白制造一次挫败；但<b>不</b>做任何模糊匹配 ——
+     * 码是稳定键，近似匹配等于把两个不同的标悄悄并成一个。
+     */
+    static List<String> normalizeFeatureTags(List<String> raw) {
+        if (raw == null || raw.isEmpty()) return List.of();
+        LinkedHashSet<String> ordered = new LinkedHashSet<>();
+        for (String code : raw) {
+            if (code == null) continue;
+            String trimmed = code.trim().toUpperCase();
+            if (!trimmed.isEmpty()) ordered.add(trimmed);
         }
+        return List.copyOf(ordered);
+    }
+
+    /** 报错时提示"现在能选什么"：空目录也要说清楚是空的，而不是给一句空清单 */
+    private String featureTagHint() {
+        var features = tagCatalogService.enabledByCategory(AuditTagCatalogService.CATEGORY_FEATURE);
+        if (features.isEmpty()) return "（当前目录里一条「特征」标都没有，请先新增一条）";
+        return features.stream().map(t -> t.code() + "（" + t.name() + "）")
+                .collect(Collectors.joining("、"));
+    }
+
+    /**
+     * 动作 → {@code action_json}。
+     *
+     * <p>非 EXCEPTION 只写 {@code feature_tags}（没有结论动作）；两者都没有就返回 {@code null}
+     * —— 存一行空 JSON 会让「这条策略配了动作吗」多出一种既不等于 null 也不等于有内容的状态。
+     */
+    private String actionJson(PolicyRequest req, PolicyType type) {
+        Map<String, Object> action = new LinkedHashMap<>();
+        if (type == PolicyType.EXCEPTION) {
+            action.put("tag", req.actionTag() == null || req.actionTag().isBlank()
+                    ? ActionSpec.DEFAULT_TAG : req.actionTag().trim());
+            action.put("reason", req.actionReason() == null || req.actionReason().isBlank()
+                    ? "异常策略命中" : req.actionReason().trim());
+            // 原因码是稳定键（统计与 P1 豁免都靠它）；没配就留 null，执行时按人话反查 ——
+            // 不在这里"猜一个"写死，否则策略里会留下一份可能与字典改版失配的副本
+            if (req.actionReasonCode() != null && !req.actionReasonCode().isBlank()) {
+                action.put("reason_code", req.actionReasonCode().trim());
+            }
+        }
+        List<String> featureTags = normalizeFeatureTags(req.featureTags());
+        if (!featureTags.isEmpty()) {
+            action.put("feature_tags", featureTags);
+        }
+        if (action.isEmpty()) return null;
         try {
             return json.writeValueAsString(action);
         } catch (JsonProcessingException e) {
-            throw new IllegalStateException("冻结动作序列化失败：" + e.getMessage(), e);
+            throw new IllegalStateException("策略动作序列化失败：" + e.getMessage(), e);
         }
     }
 
-    private ActionSpec parseAction(String actionJson, String policyName) {
+    /**
+     * 解析 {@code action_json}。
+     *
+     * <h3>为什么 {@code reason} 的兜底要按类型分</h3>
+     * EXCEPTION 老配置里可能只有 {@code tag}、没有 {@code reason}，兜底成「异常策略命中：策略名」
+     * 是对的（冻结必须有一句原因）。但 AUTO / BLOCK 的动作里<b>只有</b> {@code feature_tags}，
+     * 若这里也兜底成"异常策略命中：X"，那句话会变成特征标的备注 —— 一条自动过审策略打出来的标
+     * 写着"异常策略命中"，读库的人会去查一个根本不存在的异常。
+     */
+    private ActionSpec parseAction(String actionJson, String policyName, PolicyType type) {
         if (actionJson == null || actionJson.isBlank()) return null;
         try {
             com.fasterxml.jackson.databind.JsonNode node = json.readTree(actionJson);
-            String tag = node.path("tag").asText(ActionSpec.DEFAULT_TAG);
-            String reason = node.path("reason").asText("异常策略命中：" + policyName);
+            String tag = node.path("tag").asText(null);
+            boolean exception = type == PolicyType.EXCEPTION;
+            String reason = node.path("reason").asText(null);
+            if (reason == null && exception) reason = "异常策略命中：" + policyName;
             String reasonCode = node.path("reason_code").asText(null);   // 老配置没有这个键 → null
-            return new ActionSpec(tag, reason, reasonCode);
+            List<String> featureTags = new ArrayList<>();
+            com.fasterxml.jackson.databind.JsonNode ft = node.path("feature_tags");
+            if (ft.isArray()) {
+                for (com.fasterxml.jackson.databind.JsonNode c : ft) {
+                    String code = c.asText(null);
+                    if (code != null && !code.isBlank()) featureTags.add(code.trim());
+                }
+            }
+            // tagCode 只有 EXCEPTION 有意义：AUTO/BLOCK 的 action_json 里即使被人手塞了 tag，
+            // 也不许让它变成"冻结动作"（否则绕过保存校验就能造出冻结动作）
+            return new ActionSpec(exception ? (tag == null || tag.isBlank() ? ActionSpec.DEFAULT_TAG : tag) : null,
+                    reason, exception ? reasonCode : null, featureTags);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("策略 " + policyName + " 的 action_json 不是合法 JSON：" + e.getMessage(), e);
         }
@@ -540,11 +691,12 @@ public class AuditPolicyService {
     }
 
     private PolicyDto toDto(AuditPolicy policy, List<AuditPolicyCondition> conditions) {
-        ActionSpec action = parseAction(policy.getActionJson(), policy.getName());
+        ActionSpec action = parseAction(policy.getActionJson(), policy.getName(), PolicyType.valueOf(policy.getType()));
         return new PolicyDto(policy.getId(), policy.getType(), policy.getPriority(), policy.getName(),
                 policy.getEnabled() != null && policy.getEnabled() == 1, policy.getVersionNo(),
                 action == null ? null : action.tagCode(), action == null ? null : action.reason(),
                 action == null ? null : action.reasonCode(),
+                action == null ? List.of() : action.featureTags(),
                 conditions.stream().map(this::toDto).toList(),
                 // ⑥ 顺手补：实体上有 updated_at（ON UPDATE 自动刷），策略页那一列不用再显示「—」
                 policy.getUpdatedAt());

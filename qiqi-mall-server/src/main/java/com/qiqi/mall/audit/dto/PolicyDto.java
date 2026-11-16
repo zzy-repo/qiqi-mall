@@ -12,6 +12,10 @@ import java.util.List;
  *
  * <p>为什么不给 {@code createdAt}：页面只在「上次改动」这个语境里用它（一条规则改了没改，
  * 看的是 updatedAt）。要给再加，不必现在凑。
+ *
+ * <p>{@code featureTags}（期 2 步骤 2）：命中时要打的「特征」标码，回填给编辑弹窗用的
+ * <b>就是码</b>（不是中文名）—— 策略引用的必须是稳定键，中文名只用于显示，
+ * 页面把码映射成名字（下拉选项来自标目录）。
  */
 public record PolicyDto(
         Long id,
@@ -23,6 +27,7 @@ public record PolicyDto(
         String actionTag,
         String actionReason,
         String actionReasonCode,
+        List<String> featureTags,
         List<ConditionDto> conditions,
         LocalDateTime updatedAt) {
 }

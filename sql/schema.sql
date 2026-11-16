@@ -173,13 +173,13 @@ CREATE TABLE `audit_policy` (
   `name` varchar(64) NOT NULL COMMENT '策略名（决策行会快照它，改名不影响历史决策）',
   `enabled` tinyint NOT NULL DEFAULT '1' COMMENT '1启用 0停用（停用不删，历史决策仍指得到）',
   `version_no` int NOT NULL DEFAULT '1' COMMENT '策略版本号：每次改条件 +1，决策行记当时版本',
-  `action_json` json DEFAULT NULL COMMENT 'EXCEPTION 专属冻结动作：{"tag":"FROZEN","reason":"..."}；AUTO/BLOCK 必须 NULL（见 CHECK）',
+  `action_json` json DEFAULT NULL COMMENT '策略动作：EXCEPTION 必填（{"tag":"FROZEN","reason":"…","reason_code":"…"}，可并列 feature_tags）；AUTO/BLOCK 可选且只允许 {"feature_tags":["CODE",…]}（不许带 tag，见 CHECK）',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '最后修改时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_type_name` (`type`,`name`),
   KEY `idx_type_priority` (`type`,`priority`,`enabled`),
-  CONSTRAINT `ck_audit_policy_type_action` CHECK ((((`type` = _utf8mb4'EXCEPTION') and (`action_json` is not null)) or ((`type` in (_utf8mb4'AUTO',_utf8mb4'BLOCK')) and (`action_json` is null))))
+  CONSTRAINT `ck_audit_policy_type_action` CHECK ((((`type` = _utf8mb4'EXCEPTION') and (`action_json` is not null)) or ((`type` in (_utf8mb4'AUTO',_utf8mb4'BLOCK')) and ((`action_json` is null) or (json_contains_path(`action_json`,_utf8mb4'one',_utf8mb4'$.tag') = 0)))))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='审核策略主体（AUTO/BLOCK/EXCEPTION）';
 
 -- audit_policy_condition

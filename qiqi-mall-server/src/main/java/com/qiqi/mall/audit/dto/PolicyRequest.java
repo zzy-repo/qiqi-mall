@@ -9,8 +9,9 @@ import java.util.List;
  * @param priority         同类型内升序（默认 100）
  * @param name             策略名（同类型内唯一）
  * @param enabled          默认 true
- * @param actionTag        EXCEPTION 的冻结标码（默认 FROZEN；AUTO/BLOCK 传了会被忽略）
- * @param actionReason     EXCEPTION 的冻结原因（人话；默认用策略名，写进 tag.reason 与审计摘要）
+ * @param actionTag        EXCEPTION 的冻结标码（默认 FROZEN；AUTO/BLOCK 传了会被拒 —— 冻结是结论动作）
+ * @param actionReason     EXCEPTION 的冻结原因（人话；默认用策略名，写进 tag.reason 与审计摘要）。
+ *                         它同时是 {@code featureTags} 的**备注**（特征标写进 {@code order_audit_tag.reason}）
  * @param actionReasonCode EXCEPTION 的冻结原因**码**（{@code audit_freeze_reason.code}，可为 null）。
  *                         这是稳定键：统计与 P1 的「不再以此原因冻结该单」都以它为准。
  *                         老调用方只传 actionReason 也能工作（执行时按人话关键词反查）。
@@ -18,6 +19,16 @@ import java.util.List;
  * @param globalExclusions 全局排除（scope=ALL_AUTO）。**null = 不动全局排除**；非 null = 整套替换。
  *                         为什么用 null 区分：全局排除没有归属策略，若每次保存策略都重写它，
  *                         改策略 B 会顺手把在策略 A 里配的全局排除抹掉。
+ * @param featureTags      **期 2 步骤 2**：命中时要打的「特征」标码（并行动作，可空）。
+ *                         三种策略类型都能配；码必须是标目录里 {@code category='特征'} 且启用的项
+ *                         （不存在 / 停用 / 是结论标一律拒，报中文原因）。
+ *                         语义是「策略 A 打标 → 下一轮策略 B 读标」这条轮间传送带，
+ *                         与结论动作并行：一次命中可以既冻结又打标，也可以只打标。
+ *
+ * <p>⚠️ {@code featureTags} 放在<b>最后</b>：record 加一个组件就换了构造器元数，
+ * 而 {@code new PolicyRequest(...)} 在集成测试里几十个点位。追加在尾部 + 保留旧元数的兼容构造，
+ * 老调用方一行都不用改，也不可能因为"位置变了"而悄悄把 conditions 传进 featureTags
+ * （两个都是 {@code List}，中间插一个的位置错误是编译得过的 —— 尾部追加连这个机会都不给）。
  */
 public record PolicyRequest(
         String type,
@@ -28,10 +39,11 @@ public record PolicyRequest(
         String actionReason,
         String actionReasonCode,
         List<ConditionRequest> conditions,
-        List<ConditionRequest> globalExclusions) {
+        List<ConditionRequest> globalExclusions,
+        List<String> featureTags) {
 
     /**
-     * 老签名（没有原因码）—— 只为不让既有调用方改一行。
+     * 老签名（没有原因码、没有特征标）—— 只为不让既有调用方改一行。
      *
      * <p>{@link #actionReasonCode()} 是 P2 才加的第三个冻结动作字段。record 加一个组件就换了构造器
      * 元数，而 {@code new PolicyRequest(...)} 在集成测试里有十几个点位（造种子策略）。
@@ -41,6 +53,14 @@ public record PolicyRequest(
     public PolicyRequest(String type, Integer priority, String name, Boolean enabled,
                          String actionTag, String actionReason,
                          List<ConditionRequest> conditions, List<ConditionRequest> globalExclusions) {
-        this(type, priority, name, enabled, actionTag, actionReason, null, conditions, globalExclusions);
+        this(type, priority, name, enabled, actionTag, actionReason, null, conditions, globalExclusions, null);
+    }
+
+    /** 老签名 + 原因码（期 1.6 起的前端入参形状），仍然不配特征标 */
+    public PolicyRequest(String type, Integer priority, String name, Boolean enabled,
+                         String actionTag, String actionReason, String actionReasonCode,
+                         List<ConditionRequest> conditions, List<ConditionRequest> globalExclusions) {
+        this(type, priority, name, enabled, actionTag, actionReason, actionReasonCode,
+                conditions, globalExclusions, null);
     }
 }

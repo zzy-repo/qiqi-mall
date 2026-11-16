@@ -6,6 +6,12 @@ import com.qiqi.mall.audit.dto.DecisionRowDto;
 import com.qiqi.mall.audit.dto.RunResultDto;
 import com.qiqi.mall.audit.engine.ActionSpec;
 import com.qiqi.mall.audit.engine.AuditContext;
+import com.qiqi.mall.audit.engine.ConditionTrace;
+import com.qiqi.mall.audit.engine.ConditionView;
+import com.qiqi.mall.audit.engine.FieldRegistry;
+import com.qiqi.mall.audit.engine.Fmt;
+import com.qiqi.mall.audit.engine.OpCode;
+import com.qiqi.mall.audit.engine.ValueType;
 import com.qiqi.mall.audit.engine.AuditEngine;
 import com.qiqi.mall.audit.engine.AuditResult;
 import com.qiqi.mall.audit.engine.AuditSetting;
@@ -13,6 +19,7 @@ import com.qiqi.mall.audit.engine.AuditVerdict;
 import com.qiqi.mall.audit.engine.PolicyView;
 import com.qiqi.mall.audit.entity.AuditRun;
 import com.qiqi.mall.audit.entity.OrderAuditDecision;
+import com.qiqi.mall.audit.entity.OrderAuditTag;
 import com.qiqi.mall.audit.mapper.AuditCandidateMapper;
 import com.qiqi.mall.audit.mapper.AuditRunMapper;
 import com.qiqi.mall.audit.mapper.OrderAuditDecisionMapper;
@@ -34,8 +41,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -48,7 +57,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li>按结论执行：AUTO_PASS → {@code OrderStatusService.change(order, 8, AUDIT_AUTO_PASS, …)}
  *       （7→8 与状态台账同一事务）；FROZEN → 打标 + 审计；
  *       <b>然后每种结论都落一个标</b>（{@link ConclusionTags}：MANUAL → AUDIT_PENDING/STOCK_SHORT/COST_MISSING，
- *       BLOCKED → BLOCKED，NO_MATCH → NO_POLICY_MATCH，AUTO_PASS/FROZEN 不额外落）；</li>
+ *       BLOCKED → BLOCKED，NO_MATCH → NO_POLICY_MATCH，AUTO_PASS/FROZEN 不额外落）；
+ *       <b>最后落策略配的特征标</b>（{@link #settleFeatureTags}，期 2 步骤 2：并行动作，
+ *       三种策略类型都可能配，与结论标互斥规则无关）；</li>
  *   <li>落 {@code order_audit_decision}（每单每轮一行）—— <b>SKIPPED 不落行</b>（见下）；</li>
  *   <li>回写五类计数 + 写一条 {@code ACTION_AUDIT_RUN} 审计。</li>
  * </ol>
@@ -93,6 +104,8 @@ public class AuditExecutor {
     private final AuditPolicyService policyService;
     private final AuditContextLoader contextLoader;
     private final OrderAuditTagService tagService;
+    /** 标目录：特征标打完之后审计摘要要写中文名（「码 → 中文名 → 备注」的顺序是契约） */
+    private final AuditTagCatalogService tagCatalogService;
     private final OrderStatusService orderStatusService;
     private final OrderSettingService orderSettingService;
     private final OrderMapper orderMapper;
@@ -104,13 +117,15 @@ public class AuditExecutor {
     private final AuditEngine engine = new AuditEngine();
 
     public AuditExecutor(AuditPolicyService policyService, AuditContextLoader contextLoader,
-                         OrderAuditTagService tagService, OrderStatusService orderStatusService,
+                         OrderAuditTagService tagService, AuditTagCatalogService tagCatalogService,
+                         OrderStatusService orderStatusService,
                          OrderSettingService orderSettingService, OrderMapper orderMapper,
                          AuditRunMapper runMapper, OrderAuditDecisionMapper decisionMapper,
                          AuditCandidateMapper candidateMapper, AdminAuditWriter auditWriter, ObjectMapper json) {
         this.policyService = policyService;
         this.contextLoader = contextLoader;
         this.tagService = tagService;
+        this.tagCatalogService = tagCatalogService;
         this.orderStatusService = orderStatusService;
         this.orderSettingService = orderSettingService;
         this.orderMapper = orderMapper;
@@ -342,6 +357,106 @@ public class AuditExecutor {
             }
         }
         settleConclusionTag(order, verdict);
+        // 并行动作：结论动作照旧，命中时顺手打的特征标也在这里落（期 2 步骤 2）。
+        // 顺序放在结论之后：AUTO_PASS 分支会解掉全部结论标，特征标本就不在它的射程内，
+        // 但"先结算结论、再打并行标"读起来才是两件独立的事，反过来容易让人以为特征标是结论的一部分。
+        settleFeatureTags(order, verdict);
+    }
+
+    /**
+     * 落「特征」标（期 2 步骤 2 的并行动作）：<b>策略 A 打标 → 下一轮策略 B 读标</b>的起点。
+     *
+     * <h3>与结论标的三处差别（照抄会错）</h3>
+     * <ol>
+     *   <li><b>不参与互斥</b>：结论标一单只有一个当前值，特征标可以并存（既刷单又客诉）。
+     *       所以这里<b>不调</b> {@code supersedeOtherConclusionTags} —— 调了就会把上一轮的真结论挤掉；</li>
+     *   <li><b>{@code reason_id} / {@code reason_code} 必须留空</b>：{@code order_audit_tag.reason_id}
+     *       是 {@code audit_freeze_reason} 的外键，特征是"标"不是"冻结原因"；稳定键已经是
+     *       {@code tag_code} 本身，再建第三张字典只会多一份要对齐的副本。
+     *       所以走的是 {@code ensureActive(orderId, code, reason)} 这个<b>不解析原因字典</b>的重载；</li>
+     *   <li><b>{@code reason} 是"为什么打这个标"</b>：策略配了 note（{@code action_json.reason}）就用它，
+     *       没配就拼「策略「X」命中：&lt;第一条条件人话&gt;」—— 后者是 AUTO / BLOCK 的常态
+     *       （它们的动作里只有特征标，没有 note）。绝不写"自动审核"这种等于没说的话。</li>
+     * </ol>
+     *
+     * <h3>幂等</h3>
+     * {@code ensureActive} 先查 active 同码标、没有才 insert，并发下 {@code uk_active} 兜底 ⇒
+     * 同一策略跑一百轮也只有一行。审计只在新打上时写一条：审计记的是「谁在什么时候打了这个标」，
+     * 第二轮什么都没发生，再写一条"打了标"就是假证据（与 {@code applyManualTag} 同一口径）。
+     *
+     * <h3>为什么用 {@code activeTags} 先做一次快照</h3>
+     * {@code ensureActive} 幂等时会返回既有行，调用方<b>拿不到</b>"这次到底是不是新插入的"。
+     * 想避免每轮重复写审计，就得自己先看一眼这张单现在挂着什么。
+     * 一单一轮只查一次（不是每个标一次），代价是一次索引查询（{@code idx_order}）。
+     */
+    private void settleFeatureTags(Order order, AuditVerdict verdict) {
+        PolicyView policy = verdict.matchedPolicy();
+        ActionSpec action = policy == null ? null : policy.action();
+        if (action == null || !action.hasFeatureTags()) return;      // NO_MATCH / SKIPPED：没有"命中的策略"
+
+        String policyName = policy.name();
+        String note = action.reason() != null && !action.reason().isBlank()
+                ? action.reason().trim()
+                : "策略「" + policyName + "」命中：" + firstConditionText(verdict, policy);
+
+        Set<String> alreadyActive = new HashSet<>();
+        for (OrderAuditTag t : tagService.activeTags(order.getId())) {
+            if (t.getTagCode() != null) alreadyActive.add(t.getTagCode());
+        }
+
+        for (String code : action.featureTags()) {
+            if (alreadyActive.contains(code)) continue;              // 已在身上：不重复写行、不重复写审计
+            tagService.ensureActive(order.getId(), code, note);
+            String name = tagCatalogService.nameOf(code);
+            // 摘要顺序沿用打标那套「码 → 中文名 → 备注」：AdminAuditWriter 按 255 从尾部裁，
+            // 机器要断言的（码）必须在最前面，人写的备注放最后
+            String summary = "自动审核：策略「" + policyName + "」命中，给订单 " + order.getOrderSn()
+                    + " 打标：标=" + code + "，中文名=" + name
+                    + (note.equals(name) ? "" : "（备注：" + note + "）");
+            auditWriter.record(new AdminAuditWriter.Event(
+                    ReasonCodes.ACTION_AUDIT_TAG_ADD, ReasonCodes.TARGET_ORDER, order.getId(), order.getOrderSn(),
+                    summary,
+                    null, order.getId(),
+                    AdminAuditWriter.snapshot("tagActive", Boolean.FALSE),
+                    AdminAuditWriter.snapshot("tagActive", Boolean.TRUE, "tag", code, "tagName", name,
+                            "category", AuditTagCatalogService.CATEGORY_FEATURE,
+                            "policy", policyName, "note", note)));
+            log.info("订单 {} 命中策略「{}」，已打特征标：{}（{}）",
+                    order.getOrderSn(), policyName, code, name);
+        }
+    }
+
+    /**
+     * 「第一条条件的人话」—— 策略没配 note 时，用它回答"为什么平白无故打这个标"。
+     *
+     * <p>优先用引擎的求值留痕（{@code matchedConditions} / {@code excludedBy} 的 {@code text}）：
+     * 那是<b>判定时真的算过</b>的那句话（含实际数值），比按配置重新拼一遍更可信。
+     * 只有留痕为空（理论上不发生：命中就一定有留痕）才回退到按策略条件拼。
+     */
+    private static String firstConditionText(AuditVerdict verdict, PolicyView policy) {
+        for (List<ConditionTrace> traces : List.of(verdict.matchedConditions(), verdict.excludedBy())) {
+            for (ConditionTrace t : traces) {
+                if (t != null && t.text() != null && !t.text().isBlank()) return t.text();
+            }
+        }
+        List<ConditionView> conds = policy == null ? List.of() : policy.matchConditions();
+        if (conds.isEmpty()) return "（无匹配条件）";
+        ConditionView c = conds.get(0);
+        FieldRegistry.FieldDef def = FieldRegistry.find(c.fieldCode());
+        String label = def == null ? c.fieldCode() : def.label();
+        OpCode op = OpCode.of(c.opCode());
+        String symbol = op == null ? String.valueOf(c.opCode()) : op.symbol();
+        String expected;
+        if (c.valueType() == ValueType.LIST) {
+            expected = "「" + c.valueText() + "」";
+        } else if (c.valueType() == ValueType.NUM) {
+            expected = Fmt.num(c.valueNum(), Fmt.isMoney(c.fieldCode()));
+        } else if (c.valueType() == ValueType.BOOL) {
+            expected = c.valueNum() != null && c.valueNum().signum() != 0 ? "是" : "否";
+        } else {
+            expected = String.valueOf(c.valueText());
+        }
+        return label + " " + symbol + " " + expected;
     }
 
     /**
