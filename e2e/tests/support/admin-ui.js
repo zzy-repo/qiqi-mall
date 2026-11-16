@@ -136,6 +136,17 @@ export const auditPassOrder = async (page, row) => {
  *
  * 原来独立的「拆单方案预览」弹窗（order-split-preview-dialog）已并入 danger 弹窗的
  * details 区，所以「只看不做」= 打开 → 断言/读取明细 → 取消（取消不发任何请求）。
+ *
+ * ⚠️ 明细区的 DOM 是 `el-descriptions`（见 admin-web 的 DangerConfirmDialog.vue）：
+ * 「一个包裹」= 一条 `el-descriptions-item`，渲染成一个标签格 + 一个内容格，
+ * 标签格的类是 `el-descriptions__label`，内容就是「仓名（N 条明细）」。
+ * 这里**只取标签格**，因为调用方要的正是「每个包裹落在哪个仓、几条明细」这一层信息
+ * （`t.split('\n')[0]` 取到的就是仓名那一行）。
+ *
+ * 历史坑（2026-11-15 的三个 style 提交把 `<div class="detail-row">` 换成 el-descriptions 之后
+ * 忘了改这里）：旧写法 `locator('.detail-row')` 在现代码里 **0 处命中** ⇒ 永远返回 `[]`，
+ * 两条「跨仓拆单」用例因此从 11-15 起一直是红的（断言行是 `Expected 2 Received 0`）。
+ * 这是「测试跟上实现」，不是放宽断言：包裹数、每包落在哪个仓两条断言一字未改。
  * @returns 明细区每行的文本（第 1 行是「仓名（N 条明细）」）
  */
 export const openSplitPreview = async (page, row) => {
@@ -143,7 +154,10 @@ export const openSplitPreview = async (page, row) => {
   await waitDanger(page, { willDo: '待审核→待发货' })
   const details = dangerDetails(page)
   await expect(details, '预演弹窗应把拆单方案列进明细区（哪个仓、几条明细、哪些商品）').toBeVisible()
-  const plan = await details.locator('.detail-row').allInnerTexts()
+  // 等明细真的渲染出来再读（预演是异步请求：willDo 先到、plan 后到，读早了会拿到空数组）
+  const labels = details.locator('.el-descriptions__label')
+  await expect(labels.first(), '预演弹窗的明细区应至少列出 1 个包裹').toBeVisible()
+  const plan = await labels.allInnerTexts()
   await cancelDanger(page)
   return plan
 }
