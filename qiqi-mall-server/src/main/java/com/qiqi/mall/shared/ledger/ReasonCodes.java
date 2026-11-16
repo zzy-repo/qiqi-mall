@@ -110,6 +110,19 @@ public final class ReasonCodes {
     public static final String ACTION_ORDER_SPLIT = "ORDER_SPLIT";
     public static final String ACTION_ORDER_SHIP = "ORDER_SHIP";
     public static final String ACTION_DELIVERY_DISPATCH = "DELIVERY_DISPATCH";
+    /**
+     * 下发被<b>拦下</b>（期 2 的第二个检测点：下发前读「标」，发现冻结/阻断标记就拒绝下发）。
+     *
+     * <p>为什么必须单独一个动作码、<b>不能</b>并进 {@link #ACTION_DELIVERY_DISPATCH}：
+     * 那个码的意思是「货真的发给 WMS 了」（外呼已发生、不可撤回），而这个码的意思是
+     * 「<b>什么都没发生</b>」—— WMS 一次请求都没收到。两者混成一个码，事后统计"今天发了多少包裹"
+     * 会把被拦下的单算进去，运维还会去 WMS 侧找那些根本不存在的单据。
+     *
+     * <p>这条审计是<b>独立事务</b>写的（{@code AdminAuditWriter#recordIndependently}）：
+     * 拦下之后业务立刻抛异常回滚，同事务的审计会被一起回滚掉 ⇒ 「谁在什么时候想下发哪张单、
+     * 因为哪个标被拦」就完全没有痕迹了。
+     */
+    public static final String ACTION_DISPATCH_BLOCKED = "DISPATCH_BLOCKED";
     public static final String ACTION_DELIVERY_SPLIT = "DELIVERY_SPLIT";
     public static final String ACTION_DELIVERY_MERGE = "DELIVERY_MERGE";
     public static final String ACTION_DELIVERY_DELETE = "DELIVERY_DELETE";

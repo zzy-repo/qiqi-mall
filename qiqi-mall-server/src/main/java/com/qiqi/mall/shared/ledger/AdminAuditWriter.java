@@ -7,6 +7,8 @@ import com.qiqi.mall.shared.security.ActorResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Map;
 import java.util.UUID;
@@ -118,6 +120,32 @@ public class AdminAuditWriter {
                 requestId, idemKey);
         log.debug("审计：{} {} #{} → {}（requestId={}, idemKey={}）",
                 actor.type(), event.action(), event.targetId(), event.targetType(), requestId, idemKey);
+    }
+
+    /**
+     * 写一条审计，但用<b>独立事务</b>（{@code REQUIRES_NEW}）：业务事务回滚，这一条照样留在库里。
+     *
+     * <h3>为什么需要一个"故意不合群"的入口</h3>
+     * {@link #record} 与业务**同一个事务**，这对「业务成功 → 审计也成功」「业务回滚 → 审计也回滚」
+     * 都是对的（台账不能记没发生的事）。但有一类动作恰好相反：<b>业务被主动拦下、紧接着就要抛异常回滚整笔</b>
+     * （期 2 的下发前检测点：{@code DeliveryFlowService#dispatch} 读标发现被冻结/含阻断标记 → 拒绝下发）。
+     * 那种情况下「这次被拦下」是<b>必须留证的失败证据</b> —— 用 {@link #record} 写，异常一回滚
+     * 它就跟着没了：库里只有「包裹还是待下发」，没人知道有人试过下发、更不知道为什么被拦。
+     *
+     * <p>所以这不是"放松事务一致性"，而是把这条审计的事务边界挪到<b>与业务无关</b>：
+     * 业务怎么回滚都不影响它，因为它记的是「尝试」而不是「结果」。
+     *
+     * <h3>⚠️ 调用方式：必须从别的 bean 调进来</h3>
+     * {@code REQUIRES_NEW} 是 Spring 事务代理实现的，<b>同一个 bean 内部自调用不走代理</b>
+     * （{@code this.recordIndependently(...)} 会退化成"和调用方同一个事务"，
+     * 于是被拦下的审计跟着业务一起回滚 —— 静默失效，测试里表现为"审计没 +1"）。
+     * 本类没有内部自调用，调用方都是注入的 bean（{@code DeliveryFlowService} 等）。
+     *
+     * <p>落库逻辑与 {@link #record} 完全一致（同一个内部方法），只有事务边界不同。
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public void recordIndependently(Event event) {
+        record(event);
     }
 
     /**

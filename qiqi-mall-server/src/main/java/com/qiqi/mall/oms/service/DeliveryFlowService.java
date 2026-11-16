@@ -1,6 +1,9 @@
 package com.qiqi.mall.oms.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.qiqi.mall.audit.entity.OrderAuditTag;
+import com.qiqi.mall.audit.service.AuditTagCatalogService;
+import com.qiqi.mall.audit.service.OrderAuditTagService;
 import com.qiqi.mall.catalog.service.SkuService;
 import com.qiqi.mall.oms.entity.DeliveryItem;
 import com.qiqi.mall.oms.entity.DeliveryLogistics;
@@ -47,12 +50,16 @@ public class DeliveryFlowService {
     private final WmsExchangeLedgerWriter wmsLedger;
     /** 后台操作审计（下发是敏感动作：外呼不可撤回） */
     private final AdminAuditWriter auditWriter;
+    /** 下发前检测点读「标」：active 标 + 标目录（category/blocking）—— 见 {@link #enforceDispatchTagGate} */
+    private final OrderAuditTagService auditTagService;
+    private final AuditTagCatalogService tagCatalog;
 
     public DeliveryFlowService(DeliveryOrderService deliveryOrderService, DeliveryItemService deliveryItemService,
                                DeliveryLogisticsService deliveryLogisticsService, OrderService orderService,
                                SkuService skuService, MockWmsService wms, WarehouseService warehouseService,
                                DeliveryStatusService deliveryStatusService, OrderStatusService orderStatusService,
-                               WmsExchangeLedgerWriter wmsLedger, AdminAuditWriter auditWriter) {
+                               WmsExchangeLedgerWriter wmsLedger, AdminAuditWriter auditWriter,
+                               OrderAuditTagService auditTagService, AuditTagCatalogService tagCatalog) {
         this.deliveryOrderService = deliveryOrderService;
         this.deliveryItemService = deliveryItemService;
         this.deliveryLogisticsService = deliveryLogisticsService;
@@ -64,6 +71,8 @@ public class DeliveryFlowService {
         this.orderStatusService = orderStatusService;
         this.wmsLedger = wmsLedger;
         this.auditWriter = auditWriter;
+        this.auditTagService = auditTagService;
+        this.tagCatalog = tagCatalog;
     }
 
     /**
@@ -80,6 +89,12 @@ public class DeliveryFlowService {
         if (delivery.getStatus() != DeliveryOrder.PENDING) {
             throw new IllegalStateException("只有待下发发货单可以下发");
         }
+        // === 第二个检测点（期 2）：下发前读「标」决定放不放行 ===
+        // 位置是刻意的：① 在状态守卫之后（「不是待下发」比「被冻结」更根本，文案不能抢跑）；
+        // ② 在 change(...) 之前、WMS 台账与 wms.dispatch(...) 之前 —— 拦下时一行都没写、一次都没外呼。
+        // 为什么要有这一道（而不是只靠审核阶段）：正常冻结在审核阶段就是 SKIPPED（根本到不了待下发），
+        // 但「审核通过之后才被人工冻结」的单已经在待下发里了，审核阶段那道保险对它不起作用。
+        enforceDispatchTagGate(delivery, true);
         // 状态写入统一走 DeliveryStatusService（同一条 UPDATE 里带 status_seq 自增与 version 自增）
         int rows = deliveryStatusService.change(delivery, DeliveryOrder.DISPATCHED,
                 DeliveryStatusService.REASON_DISPATCH, null);
@@ -267,16 +282,201 @@ public class DeliveryFlowService {
      * 预演不落库、不签发任何凭证；并发控制不在这里，靠 version 乐观锁与状态守卫（见各 controller）。
      */
 
-    /** 预演「下发」：守卫同 {@link #dispatch} */
+    /** 预演「下发」：守卫同 {@link #dispatch}（**含**下发前检测点：预演与真实下发必须同一套判据） */
     public String previewDispatch(Long deliveryId) {
         DeliveryOrder d = require(deliveryId);
         if (d.getStatus() != DeliveryOrder.PENDING) {
             throw new IllegalStateException("只有待下发发货单可以下发");
         }
+        // 与 dispatch 同一个检测点，只是不写审计（预演不落库，一行都不写）。
+        // 预演也必须拦：否则「预演说能下发 → 真点下去被拦」是同一件事的两种说法，用户会以为系统坏了。
+        enforceDispatchTagGate(d, false);
         List<DeliveryItem> items = itemsOf(deliveryId);
         return "将把包裹 " + d.getDeliverySn() + "（" + warehouseName(d.getWarehouseId()) + "，"
                 + items.size() + " 条明细合计 " + totalQty(items) + " 件）下发给 WMS：状态 待下发→已下发。"
                 + "下发后不可撤回，只能等 WMS 回传。";
+    }
+
+    // ------------------------------------------------------------------ 第二个检测点：下发前读标
+
+    /**
+     * 下发前被拦下的那条标（报告/文案用）。
+     *
+     * @param code 标码（机器要断言的靠前）
+     * @param name 中文名（目录里查不到时回原始码）
+     * @param note 人话（标行上的 reason：冻结备注 / 打标备注）
+     */
+    private record BlockingTag(String code, String name, String note) {
+    }
+
+    /**
+     * 下发被拦下：{@code IllegalStateException} 的子类，<b>不是</b> 409。
+     *
+     * <h3>为什么是它</h3>
+     * <ul>
+     *   <li>走 {@code GlobalExceptionHandler} 的通用分支 → {@code body.code=1} + 中文 message，
+     *       前端 {@code api/request.js} 的拦截器原样 toast ⇒ 前端零改动；</li>
+     *   <li><b>不能</b>用 {@code OptimisticLockGuard.LockException}（400/409）：那套码的语义是
+     *       「别人改过，刷新重试」，而这里刷新一万次也还是被拦着 —— 要处理的是标，不是版本号；</li>
+     *   <li><b>不能</b>新增一个状态码：与「冻结不进状态码」同源的错误（见 {@code OrderAuditTag} 类注释）。</li>
+     * </ul>
+     */
+    public static class DispatchBlockedException extends IllegalStateException {
+        public DispatchBlockedException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * <b>第二个检测点</b>：下发之前读这张包裹所属订单的「标」，决定放不放行（期 2 · 步骤 3）。
+     *
+     * <h3>为什么是「在该问的环节问」而不是流程开头一次算全</h3>
+     * 标是会变的（审完才冻结、冻结之后又解冻、人工随时打标），在下单/审核那一刻算好一个布尔存进订单，
+     * 到下发时早已过期。所以判据必须在<b>下发这一刻</b>从库里重新读。
+     *
+     * <h3>拦什么（两条腿，缺一不可）</h3>
+     * <ol>
+     *   <li><b>FROZEN 家族</b>：{@code tag_code LIKE 'FROZEN%' AND active=1}。用前缀而不是 join 标目录 ——
+     *       细分码 {@code FROZEN_RETURN_APPLY} 允许<b>不在</b>目录里（与 {@code unfreeze} 的
+     *       {@code LIKE 'FROZEN%'} 同口径，一次解冻放掉整族）；</li>
+     *   <li><b>特征标 + blocking=1</b>：{@code category='特征' AND blocking=1 AND active=1}。
+     *       这是 {@code audit_tag_catalog.blocking} 这一列第一次真正被消费 ——
+     *       「客诉客户 / 双地址」这类标与"过没过"无关，但运营标了「阻断」就代表流程必须停下来等人处理。</li>
+     * </ol>
+     *
+     * <h3>⚠️ <b>不</b>拦：{@code category='结论' AND blocking=1}（这条会误拦且无解）</h3>
+     * 期 1.6 + 结算统一化之后，走完「离开待审核」的路径结论标都已结算干净（{@code released_by=SYSTEM:AUDIT_PASS}
+     * 等，实测队列里的待发货单结论标为 {@code []}）。但仍有<b>历史遗留单</b>：结算上线之前离开 7 的单，
+     * 可能还挂着 {@code AUDIT_PENDING} / {@code BLOCKED}。若按结论标 blocking 一刀切，这些单会被挡住，
+     * 而<b>没有任何动作能解掉那些标</b>（队列里它已经不是待审核，没有"再审一次"的入口）——
+     * 自愈无门 = 死锁。所以只拦 FROZEN 家族 + 特征标。
+     * （{@code OrderAuditTagMapper#supersedeOtherConclusionTags} 的注释里写着同一个判断。）
+     *
+     * <h3>⚠️⚠️ 这道保险<b>不拦「审前就冻结」</b>：这是设计如此，<b>不是漏拦，别去"修"它</b></h3>
+     * 冻结发生在待审核(7)期间的单，人一旦点「审核通过」，{@code OrderStatusService#change} 就会在
+     * 7→8 的同一条出口上结算<b>整个 FROZEN 族</b>（{@code released_by=SYSTEM:AUDIT_PASS}）——
+     * 因为「人工放行」= 人明确决定"放它走"，冻结语义（按住等处理）到此已不成立。
+     * 于是那种单到下发时身上<b>本来就没有冻结标</b>，本方法自然放过它。
+     *
+     * <p>所以别把"放行了它却还冻着"当成要修的东西：<b>放行就该解冻</b>；若为了让这道保险"有活干"
+     * 而保留冻结标，反而自相矛盾。
+     *
+     * <p><b>本保险真正拦的是</b>：
+     * <ol>
+     *   <li><b>离开待审核之后</b>才被冻结 / 被打上阻断特征标的单（{@code OrderAuditController#freeze}
+     *       不看 status，这条路径今天真实存在：已经待发货的包裹被人工按住）；</li>
+     *   <li><b>历史遗留单</b>：结算/打标机制上线之前就已经卡在待发货、身上还挂着 FROZEN 类标的单。</li>
+     * </ol>
+     * 换句话说它的定位是「防『离开待审核之后才冻住的单』继续往 WMS 发」+「兜历史遗留」，
+     * 而不是"把审核阶段那道保险再做一遍"（审核阶段那道靠的是 SKIPPED，根本不产生包裹）。
+     *
+     * @param delivery  待下发的包裹（用 {@code orderId} 读标）
+     * @param writeAudit true = 真实下发路径：被拦时写一条 <b>独立事务</b>审计（{@code DISPATCH_BLOCKED}）；
+     *                   false = 预演路径：只抛，不写（预演零落库）。
+     *                   ⚠️ 审计必须独立事务：本方法紧接着抛异常，同事务的审计会被一起回滚掉 →
+     *                   "谁想下发哪张单、为什么被拦"当场消失。
+     */
+    private void enforceDispatchTagGate(DeliveryOrder delivery, boolean writeAudit) {
+        Long orderId = delivery.getOrderId();
+        if (orderId == null) return;
+        List<OrderAuditTag> active = auditTagService.activeTags(orderId);
+        if (active == null || active.isEmpty()) return;       // 无标：绝大多数单（直发/AUTO_PASS）走这条
+
+        List<BlockingTag> frozen = new ArrayList<>();
+        List<BlockingTag> features = new ArrayList<>();
+        for (OrderAuditTag tag : active) {
+            String code = tag.getTagCode();
+            if (code == null || code.isBlank()) continue;
+            // 腿①：FROZEN 家族（前缀，不依赖标目录）
+            if (OrderAuditTagService.isFrozenFamily(code)) {
+                frozen.add(new BlockingTag(code, tagCatalog.nameOf(code), tag.getReason()));
+                continue;
+            }
+            // 腿②：特征标里 blocking=1 的。目录里查不到 = 谈不上 category/blocking → 不拦（不是错误，
+            // 允许"标先落库、目录后补"，见 AuditTagCatalogService 类注释）
+            AuditTagCatalogService.TagInfo info = tagCatalog.info(code);
+            if (info == null) continue;
+            if (AuditTagCatalogService.CATEGORY_FEATURE.equals(info.category()) && info.blocking()) {
+                features.add(new BlockingTag(code, info.name(), tag.getReason()));
+            }
+            // 腿③（刻意不做）：category='结论' 一律放过 —— 理由见方法注释的硬约束
+        }
+        if (frozen.isEmpty() && features.isEmpty()) return;
+
+        String message = dispatchBlockedMessage(delivery, frozen, features);
+        if (writeAudit) {
+            // 摘要顺序沿用冻结那套：包裹号 → 标码 → 中文名 → 人话（机器要断言的靠前，
+            // AdminAuditWriter 会从尾部裁到 255，人话最可能长、也最不参与断言）
+            String summary = "包裹 " + delivery.getDeliverySn() + " 下发被拦："
+                    + blockedTagSummary(frozen, features)
+                    + "（订单 id=" + orderId + "，本次未向 WMS 发出任何请求）";
+            auditWriter.recordIndependently(new AdminAuditWriter.Event(
+                    ReasonCodes.ACTION_DISPATCH_BLOCKED, ReasonCodes.TARGET_PACKAGE, delivery.getId(),
+                    delivery.getDeliverySn(), summary,
+                    null, orderId,
+                    AdminAuditWriter.snapshot("dispatchBlocked", Boolean.FALSE),
+                    AdminAuditWriter.snapshot("dispatchBlocked", Boolean.TRUE,
+                            "orderId", orderId,
+                            "blockedTags", blockedCodes(frozen, features),
+                            "wmsCalled", Boolean.FALSE)));
+        }
+        log.warn("下发被拦下：包裹 {}{}（订单 {}）：{}",
+                delivery.getDeliverySn(), "(id=" + delivery.getId() + ")", orderId, message);
+        throw new DispatchBlockedException(message);
+    }
+
+    /** 被拦的标码清单（审计 after_json 用：机器断言靠它，不受 summary 的 255 限制） */
+    private static List<String> blockedCodes(List<BlockingTag> frozen, List<BlockingTag> features) {
+        List<String> codes = new ArrayList<>();
+        frozen.forEach(t -> codes.add(t.code()));
+        features.forEach(t -> codes.add(t.code()));
+        return codes;
+    }
+
+    /** 审计摘要里的「标码 → 中文名 → 人话」那段（顺序是契约，别调换） */
+    private static String blockedTagSummary(List<BlockingTag> frozen, List<BlockingTag> features) {
+        List<String> parts = new ArrayList<>();
+        for (BlockingTag t : frozen) parts.add("标=" + t.code() + "，中文名=" + t.name() + humanNote(t));
+        for (BlockingTag t : features) parts.add("标=" + t.code() + "，中文名=" + t.name() + humanNote(t));
+        return String.join("；", parts);
+    }
+
+    private static String humanNote(BlockingTag tag) {
+        return tag.note() == null || tag.note().isBlank() ? "" : "，人话=" + tag.note().trim();
+    }
+
+    /**
+     * 被拦下的中文文案（<b>两套</b>：冻结 / 阻断标记；两者都命中就并成一句）。
+     *
+     * <h3>必须写清「本次没有向 WMS 发出任何请求」</h3>
+     * 否则运维看到"下发失败"的第一反应是去 WMS 侧手工撤销一张<b>根本没发出去</b>的单据；
+     * 而真实情况是这里一次外呼都没发生（拦在台账与 {@code wms.dispatch} 之前）。
+     */
+    private static String dispatchBlockedMessage(DeliveryOrder delivery,
+                                                List<BlockingTag> frozen, List<BlockingTag> features) {
+        BlockingTag f = frozen.isEmpty() ? null : frozen.get(0);
+        List<String> featureNames = new ArrayList<>();
+        features.forEach(t -> featureNames.add("「" + t.name() + "（" + t.code() + "）」"));
+
+        StringBuilder sb = new StringBuilder("已拦下：");
+        if (f != null) {
+            sb.append("本单被冻结（订单 ").append(delivery.getOrderId()).append("，标=").append(f.code());
+            if (f.note() != null && !f.note().isBlank()) sb.append("，原因=").append(f.note().trim());
+            sb.append("）");
+            if (!featureNames.isEmpty()) sb.append("，并含阻断标记").append(String.join("、", featureNames));
+        } else {
+            sb.append("本单含阻断标记").append(String.join("、", featureNames));
+        }
+        sb.append("，包裹 ").append(delivery.getDeliverySn()).append(" 未下发。")
+                .append("本次没有向 WMS 发出任何请求。");
+        if (f != null && !featureNames.isEmpty()) {
+            sb.append("请先解冻 / 解除标记后重试。");
+        } else if (f != null) {
+            sb.append("请先解冻后重试。");
+        } else {
+            sb.append("请先解除标记后重试。");
+        }
+        return sb.toString();
     }
 
     /**
