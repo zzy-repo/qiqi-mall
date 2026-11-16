@@ -32,6 +32,14 @@ import java.util.Map;
  * @param satisfied 是否满足
  * @param evaluated 是否在 AND 链上被求值到（见上）
  * @param text      人话：「毛利 −12.00 ≤ 0」
+ * @param valueMissing 实际值是否<b>缺失</b>（{@code null} / 空），即「这条<b>判不了</b>」而不是「不符」。
+ *        <p><b>为什么必须是引擎透传的布尔，而不是让下游读 {@code actual} 的文案去猜</b>：
+ *        {@code Fmt.value} 把 null 写成「无值」，但那是一句<b>展示文案</b> —— 文案一改（换个措辞、
+ *        加个单位、换成英文），所有"拿文案比对"的判据就静默失效，而且失效方向是**把「判不了」说成「不符」**
+ *        （界面会把「这单没填收货城市」写成「城市不符」），指错排查方向。所以口径落在这里：
+ *        求值那一刻就知道 {@code raw == null}，直接记成布尔带出去。
+ *        <p>多值字段（{@code ACTIVE_TAGS}）恒为 {@code false}：空集合是"这单确实没有这个标"，
+ *        是<b>事实</b>不是缺失（未装配会抛异常，走不到这里）。
  */
 public record ConditionTrace(
         Integer seq,
@@ -42,18 +50,36 @@ public record ConditionTrace(
         String actual,
         boolean satisfied,
         boolean evaluated,
-        String text) {
+        String text,
+        boolean valueMissing) {
+
+    /** 兼容构造（{@code valueMissing=false}：老调用方/老测试按 9 参构造，缺失信息当作"有值"） */
+    public ConditionTrace(Integer seq, String fieldCode, String fieldLabel, String opCode,
+                          String expected, String actual, boolean satisfied, boolean evaluated, String text) {
+        this(seq, fieldCode, fieldLabel, opCode, expected, actual, satisfied, evaluated, text, false);
+    }
 
     /** 完整求值（{@code ConditionEvaluator} 的正常出口：这条确实算过） */
     public static ConditionTrace evaluated(Integer seq, String fieldCode, String fieldLabel, String opCode,
                                            String expected, String actual, boolean satisfied, String text) {
-        return new ConditionTrace(seq, fieldCode, fieldLabel, opCode, expected, actual, satisfied, true, text);
+        return evaluated(seq, fieldCode, fieldLabel, opCode, expected, actual, satisfied, text, false);
+    }
+
+    /**
+     * 完整求值 + <b>值是否缺失</b>（引擎在 {@code raw == null} 时传 {@code true}，见 {@link #valueMissing()}）。
+     */
+    public static ConditionTrace evaluated(Integer seq, String fieldCode, String fieldLabel, String opCode,
+                                           String expected, String actual, boolean satisfied, String text,
+                                           boolean valueMissing) {
+        return new ConditionTrace(seq, fieldCode, fieldLabel, opCode, expected, actual, satisfied, true, text,
+                valueMissing);
     }
 
     /** 同一个事实换一个 {@code evaluated} 标记（不重算、不改值：引擎确实算过，只是不算结论依据） */
     public ConditionTrace withEvaluated(boolean value) {
         return value == evaluated ? this
-                : new ConditionTrace(seq, fieldCode, fieldLabel, opCode, expected, actual, satisfied, value, text);
+                : new ConditionTrace(seq, fieldCode, fieldLabel, opCode, expected, actual, satisfied, value, text,
+                valueMissing);
     }
 
     /**
@@ -73,6 +99,8 @@ public record ConditionTrace(
         m.put("actual", actual);
         m.put("satisfied", satisfied);
         m.put("evaluated", evaluated);
+        // 期 4：值是否缺失（「判不了」≠「不符」）。新增键，老消费方读不到的键仍然是老行为。
+        m.put("valueMissing", valueMissing);
         m.put("reason", text);
         // 兼容键：老的 matched_condition_json 消费方（含历史 SQL 断言）按这三个短键读
         m.put("field", fieldCode);

@@ -39,6 +39,15 @@ export const reasonMainOf = (row) => row.getByTestId('audit-row-reason')
 /** 行内原因第二行（后端原话，含具体数值差）—— 灰字没有 testid，按类名取 */
 export const reasonSubOf = (row) => row.locator('.reason-sub')
 
+/**
+ * 行内「这单最像哪条策略、还差什么」那一行（期 4 / T2）。
+ *
+ * 它是**不点抽屉**就能读到的那句话（`NO_MATCH` / `MANUAL` 才有），内容与抽屉第一层的
+ * 「一句人话」**同一个字段**（`layers.layer1.oneLiner`）—— 断言"两处说法一致"时
+ * 就是拿这个 locator 的文本去比抽屉里的 `audit-explain-oneliner`。
+ */
+export const reasonClosestOf = (row) => row.getByTestId('audit-row-closest')
+
 /** 「判定依据」按钮（打不开就没得解释，所以点完必须断言抽屉真的开了） */
 export const whyButtonOf = (row) => row.getByTestId('audit-row-why')
 

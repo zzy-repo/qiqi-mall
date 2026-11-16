@@ -658,6 +658,101 @@ class AuditRunIntegrationTest {
         tagService.release(orderId, OrderAuditTagService.TAG_FROZEN, "system");
     }
 
+    // ================================================================== 期 4：三层判定依据
+
+    @Test
+    @Order(8)
+    @DisplayName("期 4 · 判定依据三层：队列行的 layers 三层形状正确；渠道不符只进第二层 byField，第一层一个字都不提")
+    void explainLayersThroughQueue() {
+        Map<String, Object> all = queryService.queue(null, 1, 50);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rows = (List<Map<String, Object>>) all.get("rows");
+        Map<String, Object> row3 = rows.stream()
+                .filter(r -> "QT-1003".equals(String.valueOf(r.get("order_sn"))))
+                .findFirst().orElseThrow();
+
+        // ---------------- ① 原有字段一个都没少（新增字段不许改老语义） ----------------
+        assertThat(String.valueOf(row3.get("result"))).isEqualTo("NO_MATCH");
+        assertThat(row3.get("miss_reasons")).as("沿用旧键：前端与 e2e 都还在读它").isNotNull();
+        assertThat(row3.get("evidence")).isNotNull();
+
+        // ---------------- ② layers 三层形状 ----------------
+        assertThat(row3.get("layers")).as("队列行必须带 layers（这就是抽屉第一屏的数据源）").isNotNull();
+        Map<String, Object> layers = asMap(row3.get("layers"));
+        assertThat(layers.keySet()).containsExactly("layer1", "layer2", "layer3");
+
+        Map<String, Object> layer1 = asMap(layers.get("layer1"));
+        Map<String, Object> layer2 = asMap(layers.get("layer2"));
+        Map<String, Object> layer3 = asMap(layers.get("layer3"));
+
+        // 第一层：只剩「最接近那条」——QT-1003 是抖音单，最接近的是 抖音-标准单（差应收 1580<500）
+        assertThat(layer1.get("conclusion")).isEqualTo("最接近");
+        assertThat(String.valueOf(layer1.get("oneLiner")))
+                .as("一句人话里要带具体差值").contains("抖音-标准单").contains("1580.00");
+        assertThat(String.valueOf(layer1.get("oneLiner")).length())
+                .as("第一屏那句有 80 字硬上限（渠道 3→30 也不会被撑破）").isLessThanOrEqualTo(80);
+        Map<String, Object> closest = asMap(layer1.get("closest"));
+        assertThat(closest.get("policyName")).isEqualTo("抖音-标准单");
+        assertThat(closest.get("missingConditions")).as("最接近那条只差应收一条").isNotNull();
+
+        // 【核心】渠道不符 = 不适用 = 噪音：第一层的任何一个字段里都不许出现它
+        assertThat(String.valueOf(layer1))
+                .as("第一层不许出现「淘宝-标准单」（渠道不符，不是「差一点点」）").doesNotContain("淘宝-标准单");
+        assertThat(String.valueOf(layer1.get("notApplicableNote")))
+                .as("聚合句必须点明是哪个字段不符").contains("另有 2 条不适用").contains("渠道不符");
+        assertThat(layer1).as("第一层的类型里不许有完整矩阵")
+                .doesNotContainKeys("policies", "conditions", "matrix");
+
+        // 第二层：不适用总数 + 按分类字段分布（两个数字必须自己算得平）
+        assertThat(intOf(layer2.get("notApplicableTotal"))).isEqualTo(2);
+        List<Map<String, Object>> byField = asListOfMap(layer2.get("byField"));
+        assertThat(byField).extracting(f -> String.valueOf(f.get("field")))
+                .as("渠道不符的那条要记在「渠道」头上").contains("渠道");
+        assertThat(byField).extracting(f -> String.valueOf(f.get("field")))
+                .as("店铺单的客户标签不符记在「客户标签」头上").contains("客户标签");
+        assertThat(byField.stream().mapToInt(f -> intOf(f.get("count"))).sum())
+                .as("byField 合计 == notApplicableTotal（界面上两个数自洽，人才会信）")
+                .isEqualTo(intOf(layer2.get("notApplicableTotal")));
+
+        // 第三层：一条不删（完整矩阵），且不适用必须在行上标出来
+        List<Map<String, Object>> policies = asListOfMap(layer3.get("policies"));
+        assertThat(policies).as("三条 AUTO 策略一条不删").hasSize(3);
+        Map<String, Object> taobao = policies.stream()
+                .filter(p -> "淘宝-标准单".equals(String.valueOf(p.get("policyName")))).findFirst().orElseThrow();
+        assertThat(taobao.get("notApplicable")).isEqualTo(true);
+        assertThat(taobao.get("notApplicableField")).isEqualTo("渠道");
+
+        // ---------------- ③ QT-1002（被全局排除留人工）：第一层说「被排除」，不适用照样进第二层 ----------------
+        Map<String, Object> row2 = rows.stream()
+                .filter(r -> "QT-1002".equals(String.valueOf(r.get("order_sn"))))
+                .findFirst().orElseThrow();
+        Map<String, Object> layer1b = asMap(asMap(row2.get("layers")).get("layer1"));
+        assertThat(layer1b.get("conclusion")).as("淘宝单条件全满足、被「客服备注含改」挡掉 ⇒ 被排除").isEqualTo("被排除");
+        assertThat(String.valueOf(layer1b.get("oneLiner"))).contains("淘宝-标准单").contains("客服备注");
+        assertThat(String.valueOf(layer1b)).as("直营/抖音那两条是渠道/标签不符 ⇒ 不适用，不许混进第一层")
+                .doesNotContain("直营-小单").doesNotContain("抖音-标准单");
+        assertThat(String.valueOf(layer1b.get("notApplicableNote"))).contains("另有 2 条不适用");
+
+        System.out.println("[期 4] QT-1003 layer1=" + layer1);
+        System.out.println("[期 4] QT-1003 layer2=" + layer2);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asMap(Object value) {
+        assertThat(value).as("期望是对象（Map）").isInstanceOf(Map.class);
+        return (Map<String, Object>) value;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> asListOfMap(Object value) {
+        assertThat(value).as("期望是数组").isInstanceOf(List.class);
+        return (List<Map<String, Object>>) value;
+    }
+
+    private static int intOf(Object value) {
+        return value instanceof Number n ? n.intValue() : Integer.parseInt(String.valueOf(value));
+    }
+
     /** 任意一次 AUDIT_FREEZE 审计（summary + after_json + reason） */
     private Map<String, Object> newestFreezeAudit(Long orderId) {
         return jdbc.queryForMap(

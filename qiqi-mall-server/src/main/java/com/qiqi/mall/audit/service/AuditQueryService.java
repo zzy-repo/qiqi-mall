@@ -3,7 +3,10 @@ package com.qiqi.mall.audit.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.qiqi.mall.audit.engine.PolicyView;
 import com.qiqi.mall.audit.entity.AuditRun;
+import com.qiqi.mall.audit.explain.AuditExplainLayers;
+import com.qiqi.mall.audit.explain.PolicyScanAssembler;
 import com.qiqi.mall.audit.mapper.AuditRunMapper;
 import com.qiqi.mall.audit.mapper.AuditTagCatalogMapper;
 import com.qiqi.mall.audit.mapper.AuditTrailMapper;
@@ -50,12 +53,22 @@ public class AuditQueryService {
      * 与下发保险踩过的坑同源（见 {@code AuditTagCatalogService} 类注释）。
      */
     private final AuditTagCatalogMapper tagCatalogMapper;
+    /**
+     * 策略服务：<b>只读</b>用来取「策略 ID → 优先级」。
+     *
+     * <p>为什么队列要读策略：{@code layers} 的第一层排序（五级字典序）第 4 级就是 priority，
+     * 第三层矩阵的第一排序键也是它。而决策行里<b>没有</b>存 priority（那是策略配置，不是判定事实），
+     * 所以只能现取。取不到就让组装器退回缺省值 —— 排序仍然确定（policyId 兜底），
+     * 不会因为一次读失败变成随机顺序，更不该让整张队列 500。
+     */
+    private final AuditPolicyService policyService;
 
     public AuditQueryService(OrderAuditDecisionMapper decisionMapper, AuditRunMapper runMapper,
                              AuditTrailMapper trailMapper, ObjectMapper json,
                              AuditFreezeReasonService freezeReasonService,
                              AuditTagCatalogService tagCatalog,
-                             AuditTagCatalogMapper tagCatalogMapper) {
+                             AuditTagCatalogMapper tagCatalogMapper,
+                             AuditPolicyService policyService) {
         this.decisionMapper = decisionMapper;
         this.runMapper = runMapper;
         this.trailMapper = trailMapper;
@@ -63,6 +76,7 @@ public class AuditQueryService {
         this.freezeReasonService = freezeReasonService;
         this.tagCatalog = tagCatalog;
         this.tagCatalogMapper = tagCatalogMapper;
+        this.policyService = policyService;
     }
 
     // ================================================================ 人工队列
@@ -100,13 +114,15 @@ public class AuditQueryService {
         List<Map<String, Object>> rows = decisionMapper.selectQueue(filter, tagFilter, (p - 1) * s, s);
         long total = decisionMapper.countQueue(filter, tagFilter);
         Map<Long, List<ActiveTag>> tagsByOrder = tagsOf(rows);
+        // 优先级映射：整页只取一次（策略配置是内存级的小表，不逐行回表）
+        Map<Long, Integer> priorities = prioritiesById();
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("total", total);
         out.put("page", p);
         out.put("size", s);
         out.put("rows", rows.stream()
                 // 队列行的来源恒为 order_audit_decision ⇒ hasDecision=true（这是"影子字段"以外的事实）
-                .map(r -> queueRow(r, tagsByOrder.get(asLong(r.get("order_id"))), true))
+                .map(r -> queueRow(r, tagsByOrder.get(asLong(r.get("order_id"))), true, priorities))
                 .toList());
         return out;
     }
@@ -189,6 +205,22 @@ public class AuditQueryService {
         return item;
     }
 
+    /**
+     * 策略 ID → 优先级（整页一份）。读失败返回空映射（{@code layers} 退回缺省优先级），
+     * <b>不抛</b>：一张策略配置读不出来不该让整张人工队列打不开。
+     */
+    private Map<Long, Integer> prioritiesById() {
+        try {
+            Map<Long, Integer> out = new LinkedHashMap<>();
+            for (PolicyView p : policyService.loadEnginePolicies()) {
+                if (p != null && p.id() != null) out.putIfAbsent(p.id(), p.priority());
+            }
+            return out;
+        } catch (RuntimeException e) {
+            return Map.of();
+        }
+    }
+
     /** 打标时间统一成 {@code yyyy-MM-dd HH:mm:ss}：抽屉里直接显示，不把 JDBC 的毫秒尾巴丢给页面 */
     private static final java.time.format.DateTimeFormatter TAG_TIME =
             java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -220,7 +252,8 @@ public class AuditQueryService {
      * 前端于是永远走「本地对照」降级路径 —— 数据明明在，页面却说没回传。
      * 所以解析放在这里（唯一知道这些列语义的地方），并按前端读的键名给出。
      */
-    private Map<String, Object> queueRow(Map<String, Object> row, List<ActiveTag> tags, boolean hasDecision) {
+    private Map<String, Object> queueRow(Map<String, Object> row, List<ActiveTag> tags, boolean hasDecision,
+                                        Map<Long, Integer> priorities) {
         Map<String, Object> out = new LinkedHashMap<>(row);
         // 注意 remove 要在**副本**上做：四个 *_json 原始列换成同名结构，避免同一份证据
         // 既以字符串又以数组出现在同一行里（两份形状会让前端 pick() 随键名不同取到不同东西）
@@ -228,6 +261,16 @@ public class AuditQueryService {
         out.put("matched_conditions", readJson(out.remove("matched_condition_json")));
         out.put("excluded_by", readJson(out.remove("excluded_by_json")));
         out.put("evidence", readJson(out.remove("evidence_json")));
+        // ---------------- 期 4：三层判定依据（第一屏只说一条，矩阵收进第三层） ----------------
+        // **纯新增**：上面四列 JSON 与 result 一个字都没动（页面与 e2e 仍在读它们）。
+        // 为什么在这里算而不是新开一个接口：抽屉的数据就是这一行 —— 另开一个接口等于让页面
+        // 为同一份证据打第二次往返，两边的「由谁算」迟早漂移（见 PolicyScanAssembler 类注释）。
+        // 算不出来的情况（老行没留痕 / 脏 JSON）由组装器兜底成「无可用策略」那一层，不抛、不空白。
+        // 这里先拿**带类型**的三层对象、再交给组装器转 JSON，而不是一步 toMap：
+        // ① 类型是这份口径的锚（第一层没有 conditions 字段不是靠自觉，是这个 record 里压根没有）；
+        // ② 第二层明细（items）要和 notApplicableTotal 同源，只能从同一个对象上取。
+        AuditExplainLayers.ExplainLayers layers = PolicyScanAssembler.layersOfQueueRow(out, priorities);
+        out.put("layers", PolicyScanAssembler.layersJson(layers));
         // 冻结事实：**永远是 boolean**（不是 1/0、不是 null）。
         // 「这单现在冻着没有」必须是一个确定答案，前端不该去猜 null 是"没查"还是"没冻"。
         out.put("frozen", toBoolean(out.remove("frozen")));

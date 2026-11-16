@@ -44,13 +44,19 @@ public final class ConditionEvaluator {
             boolean present = raw != null && (!(raw instanceof String s) || !s.isBlank());
             boolean satisfied = op == OpCode.EXISTS ? present : !present;
             String text = def.label() + (present ? " 有值" : " 无值") + "（实际 " + actualText + "）";
-            return ConditionTrace.evaluated(condition.seq(), def.code(), def.label(), op.name(), "", actualText, satisfied, text);
+            // 值缺失透传：EXISTS/NOT_EXISTS 本身就是"有没有值"的判定，但"确实没有值"这个事实
+            // 对下游（「判不了」≠「不符」，见 ConditionTrace#valueMissing）仍然是缺失，照实记录
+            return ConditionTrace.evaluated(condition.seq(), def.code(), def.label(), op.name(), "", actualText,
+                    satisfied, text, raw == null);
         }
 
         String expectedText = expectedText(condition, def);
         if (raw == null) {
             String text = def.label() + " 无值，无法比较 " + op.symbol() + " " + expectedText;
-            return ConditionTrace.evaluated(condition.seq(), def.code(), def.label(), op.name(), expectedText, actualText, false, text);
+            // valueMissing=true：这条**判不了**（不是"不符"）。下游据此把它排除在「不适用」的判据之外，
+            // 否则「没填收货城市」的单会被界面写成「城市不符」，把人引向错误的排查方向。
+            return ConditionTrace.evaluated(condition.seq(), def.code(), def.label(), op.name(), expectedText,
+                    actualText, false, text, true);
         }
 
         boolean satisfied = switch (def.type()) {

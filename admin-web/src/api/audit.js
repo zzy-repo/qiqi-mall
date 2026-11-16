@@ -138,6 +138,15 @@ export const mapQueueRow = (r) => ({
   // 「判定依据」的结构化留痕：后端补齐 miss_reason_json / evidence_json 后这里直接就有值，
   // 没有时页面降级为「按策略条件 + 队列可见字段本地对一遍」（见 views/order-audit/index.vue）。
   missReasons: pick(r, 'missReasons', 'miss_reasons'),
+  /**
+   * 期 4：后端算好的**三层判定依据**（{@code {layer1, layer2, layer3}}）。
+   *
+   * <p>为什么原样透传、前端不重算：「哪条最接近」「哪些算不适用」是判定口径（后端
+   * {@code AuditExplainLayers} + {@code PolicyScanAssembler} 的单测锁着），在前端再算一遍
+   * 就是第二份实现 —— 引擎改一次（新增分类字段、改排序键），页面就会给出与事实相反的解释，
+   * 而且不报错。老行没有这个字段 ⇒ null，抽屉退回改造前的单层渲染。
+   */
+  layers: pick(r, 'layers') ?? null,
   matchedConditions: pick(r, 'matchedConditions', 'matched_conditions'),
   excludedBy: pick(r, 'excludedBy', 'excluded_by'),
   evidence: pick(r, 'evidence') ?? null,

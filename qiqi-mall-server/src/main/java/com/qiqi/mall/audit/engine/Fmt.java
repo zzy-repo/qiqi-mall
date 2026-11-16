@@ -8,6 +8,19 @@ import java.util.stream.Collectors;
 /** 判定文案里的数值格式（引擎与执行层共用，避免一边写 −12.00 一边写 -12）。 */
 public final class Fmt {
 
+    /**
+     * 「无值」的展示文案 —— <b>导出成常量</b>，因为历史数据（本期之前落库的 {@code *_json}）只有文案、
+     * 没有 {@code ConditionTrace#valueMissing} 这个布尔。下游读老行时唯一能用的线索就是它。
+     *
+     * <p>为什么导出而不是让下游写字符串字面量：那样文案一改，读老行的判据会<b>静默失效</b>
+     * （把「判不了」读成「不符」）。导出成常量后，改文案的人会看到这里被引用，改动是可见的。
+     * <p>新数据<b>不要</b>再读它 —— 新行有 {@code valueMissing}，布尔才是口径。
+     */
+    public static final String NO_VALUE_TEXT = "无值";
+
+    /** 多值字段「未装配」的展示文案（与 {@link #NO_VALUE_TEXT} 同理，仅历史行走文案兜底时用） */
+    public static final String UNASSEMBLED_TEXT = "未装配";
+
     private Fmt() {
     }
 
@@ -48,12 +61,12 @@ public final class Fmt {
      */
     public static String value(Object raw, FieldRegistry.FieldDef def, AuditContext ctx) {
         if (def != null && def.type() == ValueType.LIST) return list(raw, ctx);
-        if (raw == null) return "无值";
+        if (raw == null) return NO_VALUE_TEXT;
         if (raw instanceof Boolean b) return b ? "是" : "否";
         if (raw instanceof BigDecimal d) return num(d, isMoney(def == null ? null : def.code()));
         if (raw instanceof Number n) return String.valueOf(n);
         String s = String.valueOf(raw);
-        return s.isBlank() ? "无值" : s;
+        return s.isBlank() ? NO_VALUE_TEXT : s;
     }
 
     /**
@@ -66,7 +79,7 @@ public final class Fmt {
         if (raw == null) {
             // 上下文里组件是 null = 装配漏了（不可评估）；理论上 raw 与 ctx.activeTags() 同源，
             // 但文案的权威判据是上下文，不假设调用方一定按字段取值传参
-            return ctx == null || ctx.activeTags() == null ? "未装配" : "无值";
+            return ctx == null || ctx.activeTags() == null ? UNASSEMBLED_TEXT : NO_VALUE_TEXT;
         }
         if (raw instanceof Collection<?> c) {
             if (c.isEmpty()) return "（空集合）";

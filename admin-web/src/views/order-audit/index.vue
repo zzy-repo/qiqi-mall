@@ -204,6 +204,25 @@
                只有 would-be 的「斜体+左竖线」和 stock-warn 的 11px 是 EP 表达不了的，留在样式块里。 -->
           <div class="reason-cell">
             <el-text data-testid="audit-row-reason">{{ reasonHead(row) }}</el-text>
+            <!-- ==================================================================== 期 4（T2）：不命中 / 留人工，行内当场说「最像哪条、差什么」
+                 用户的原始抱怨是「不落标，人就在队列里看不见它」；标落了以后还差一步 ——
+                 「为什么卡、最像哪条」得**点开抽屉**才看得见。而运营日常是**扫队列**，不是逐单开抽屉。
+                 所以这一行必须在这里，且只在这里说一句（不搬完整矩阵进来，那是抽屉第三层的事）。
+                 ⚠️ 取法：`row.layers.layer1.oneLiner` **原样**，前端不自己拿 closest 拼一句话。
+                    抽屉第一层渲染的是**同一个字段**（上面 audit-explain-oneliner）⇒ 两处文字逐字相同，
+                    「行内和抽屉各说一套」在结构上就不可能发生。若这里自拼「最接近「X」，差在 Y」，
+                    那只是措辞接近，不是同一句话：后端改一次文案（例如「还差 N 个条件」换说法），
+                    两处就开始漂移，而且不报错 —— 运营最不信的就是这种不一致。
+                 ⚠️ 只加**行**、不加**列**：这张表 10 列已顶满 1960 画幅，加列会把「原因」挤出画面。
+                    行高实测 +48px（「原因」列宽约 299px，这句话折成 2 行：2×23px 行高 + 2px 间距；
+                    1280/1440/1960 三个宽度下都是这个数，见 e2e「队列行-不命中就说像哪条」的 ⑥）。
+                    这是用一点行高换「不点抽屉就知道差什么」，可接受；但**不许**再把矩阵搬进来。 -->
+            <el-text
+              v-if="closestLineOf(row)"
+              size="small"
+              type="info"
+              data-testid="audit-row-closest"
+            >{{ closestLineOf(row) }}</el-text>
             <!-- .reason-sub 这个类名别改：e2e 的 support/audit-ui.js reasonSubOf() 用它定位这一行 -->
             <el-text size="small" type="info" class="reason-sub">{{ row.reason || '—' }}</el-text>
             <!-- QT-1004 的核心叙事：策略条件其实满足了，只是被前一条策略先拦下 —— 必须看得见 -->
@@ -288,7 +307,15 @@
       />
     </div>
 
-    <!-- ============ 「判定依据」抽屉：逐策略逐条件 expected vs actual ============ -->
+    <!-- ============ 「判定依据」抽屉：三层（第一屏只说一条，完整矩阵进第三层） ============
+         为什么必须分三层（用户原话：「淘宝、抖音的判定都展示了一遍，渠道多了肉眼看得过来么」）：
+         病根不是「展示得难看」，而是把**不适用于这单**的策略（渠道 ≠ 淘宝）当成了「差一点点」。
+         于是渠道从 3 条涨到 30 条，第一屏就长 10 倍 —— 而信息量一条没多。
+         所以：第一层只说「最接近哪一条 + 还差什么」，不适用聚合成一句灰字，完整矩阵默认折叠。
+         ⚠️ 三层的**边界是后端定的**（layers.layer1/2/3）：第一层类型里压根没有 conditions 字段，
+            前端只能摆位置，没法「顺手把矩阵塞进第一屏」——那是刻意的，别绕过。
+         ⚠️ 折叠用 max-height/overflow 而不是 v-if：矩阵的 DOM 保留（页面内搜索 / 无障碍 / 旧断言都还能用），
+            但**视觉上收起**（第一屏高度不含它）。层高实测见 e2e「判定依据分层」用例。 -->
     <el-drawer
       v-model="whyVisible"
       :title="`判定依据 - ${whyRow?.orderSn || ''}`"
@@ -318,7 +345,65 @@
         <el-text v-if="otherGatesText(whyRow)" size="small" type="danger" class="why-line" data-testid="audit-why-other-gates">
           {{ otherGatesText(whyRow) }}
         </el-text>
-        <el-alert class="why-reason" type="info" :closable="false" :title="whyRow.reason || '后端未回传原因'" />
+
+        <!-- ============================================================ 第一层：一眼读完 -->
+        <!-- 结论 + 一句人话 + 最接近那条（策略名 + 缺的条件人话）+ 两句聚合旁注。
+             这里**没有**完整矩阵 —— 后端的 FirstLayer 类型里就没有那个字段。 -->
+        <div v-if="explainLayers" class="why-layer1" data-testid="audit-explain-layer1">
+          <div class="why-layer1-line">
+            <el-tag
+              :type="conclusionTagType"
+              effect="plain"
+              size="small"
+              data-testid="audit-explain-conclusion"
+            >{{ layer1.conclusion }}</el-tag>
+            <el-text class="why-oneliner" data-testid="audit-explain-oneliner">{{ layer1.oneLiner }}</el-text>
+          </div>
+
+          <div v-if="layer1.closest" class="why-closest" data-testid="audit-explain-closest">
+            <el-text tag="div" class="why-closest-name">最接近：「{{ layer1.closest.policyName }}」</el-text>
+            <el-text
+              v-for="(t, i) in closestMissingShown(layer1.closest)"
+              :key="`cm-${i}`"
+              tag="div"
+              size="small"
+              class="why-closest-missing"
+            >· {{ t }}</el-text>
+            <!-- T2：第一层的「差在哪」**只摆前 2 条**，其余收成一句「…还有 N 条」。
+                 理由与「不适用聚合」同源：一条策略差 8 个条件时，逐条全列会把第一屏撑长 ——
+                 那正是「渠道 3→30、第一屏不能跟着长」这条纪律被破坏的另一种方式（换了个字段而已）。
+                 ⚠️ 截断只发生在**显示层**：后端 closest.missingConditions 仍然逐条全给
+                    （第三层矩阵、接口契约、AuditExplainLayers 的 12 条单测都还要它），
+                    数据语义一个字没动。放在前端还有个好处：不需要为「显示几个」重启后端。
+                 ⚠️ 队列行那一行取的是 oneLiner（只含第 1 条 + 总数），行内空间更小，不在这里展开。 -->
+            <el-text
+              v-if="closestMissingRest(layer1.closest) > 0"
+              tag="div"
+              size="small"
+              class="muted"
+              data-testid="audit-explain-closest-more"
+            >…还有 {{ closestMissingRest(layer1.closest) }} 条（逐条见下方完整矩阵）</el-text>
+          </div>
+
+          <el-text v-if="layer1.tieNote" tag="div" size="small" class="muted" data-testid="audit-explain-tie">
+            {{ layer1.tieNote }}
+          </el-text>
+
+          <!-- 不适用聚合句：一行灰字，点开就是第二层（这条是「看不看得过来」的止损点） -->
+          <el-text
+            v-if="layer1.notApplicableNote"
+            tag="div"
+            size="small"
+            class="why-not-applicable"
+            data-testid="audit-explain-not-applicable"
+            @click="layer2Open = !layer2Open"
+          >
+            {{ layer1.notApplicableNote }} · {{ layer2Open ? '收起' : '点开看是哪几条' }}
+          </el-text>
+        </div>
+
+        <!-- 老行没有 layers（本期之前落的决策行 / 后端未回传）时保持原样：直接给引擎原话 -->
+        <el-alert v-if="!explainLayers" class="why-reason" type="info" :closable="false" :title="whyRow.reason || '后端未回传原因'" />
 
         <div class="why-meta">
           <span>应收 {{ money(whyRow.totalAmount) }}</span>
@@ -330,81 +415,133 @@
           </el-tag>
         </div>
 
-        <el-empty v-if="!whyGroups.length" description="这类结论没有可对照的策略（例如未参与本轮）" />
+        <!-- 全局排除：不分策略，判定时并入每条自动策略；留人工的单很多就是被它挡掉的 -->
+        <el-alert
+          v-if="whyTargets.length && globalExclusions.length"
+          class="why-global"
+          type="warning"
+          title="全局排除"
+          :closable="false"
+          show-icon
+          data-testid="audit-why-global"
+        >
+          <el-text class="muted" tag="div">以下条件对每条自动策略一并求值：任一条成立，那条策略就被排除（结论转人工）</el-text>
+          <el-text v-for="g in globalExclusions" :key="`g-${g.seq}`" class="why-backend-line" tag="div">· 排除：{{ condText(g) }}</el-text>
+        </el-alert>
 
-        <div v-for="g in whyGroups" :key="`${g.policyId}`" class="why-group" :data-testid="`audit-why-policy-${g.policyId}`">
-          <div class="why-group-head">
-            <el-text tag="b" :data-testid="`audit-why-policy-name-${g.policyId ?? 'unknown'}`">「{{ g.policyName }}」</el-text>
-            <el-tag size="small" effect="plain">优先级 {{ g.priority ?? '—' }}</el-tag>
-            <el-tag size="small" effect="plain">第 {{ g.versionNo ?? '—' }} 版</el-tag>
-            <el-tag v-if="g.allSatisfied" size="small" type="success" effect="plain">条件全部满足</el-tag>
-            <el-tag v-else size="small" type="danger" effect="plain">未命中</el-tag>
+        <!-- ============================================================ 第二层：不适用的是哪几条 -->
+        <!-- 只列「策略名 + 一句为什么」，不含完整条件表（那是第三层的事）。默认折叠。 -->
+        <div
+          v-if="explainLayers && layer2Total > 0"
+          class="why-collapse"
+          :class="{ open: layer2Open }"
+          data-testid="audit-explain-layer2"
+        >
+          <!-- 标题**不重复**第一层那句聚合话（同一件事说两遍，两个措辞还容易对不上账）：
+               第一层负责「另有 N 条不适用（渠道不符 3…）」，这里只负责「明细有几条」。 -->
+          <div class="why-collapse-head" data-testid="audit-explain-layer2-toggle" @click="layer2Open = !layer2Open">
+            <span>不适用明细（{{ layer2Total }} 条）</span>
+            <span class="why-caret">{{ layer2Open ? '收起' : '点开' }}</span>
           </div>
-
-          <el-text v-if="g.reasonLines.length" class="why-backend-lines" tag="div" size="small">
-            <el-text class="muted" tag="div">后端留痕：</el-text>
-            <el-text v-for="(line, i) in g.reasonLines" :key="i" class="why-backend-line" tag="div">· {{ line }}</el-text>
-          </el-text>
-
-          <el-table
-            :data="g.conditions"
-            border
-            size="small"
-            :row-class-name="whyRowClass"
-            :row-style="whyRowStyle"
-            empty-text="这条策略没有可对照的条件"
-          >
-            <el-table-column label="序号" width="60" align="center">
-              <template #default="{ row }">{{ row.seq }}</template>
-            </el-table-column>
-            <el-table-column label="字段" min-width="140">
-              <template #default="{ row }">
-                <div>{{ row.fieldLabel || row.fieldCode }}</div>
-                <div class="muted mono">{{ row.fieldCode }}</div>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作符" width="90" align="center">
-              <template #default="{ row }">{{ auditOpText(row.opCode) }}</template>
-            </el-table-column>
-            <el-table-column label="期望 expected" min-width="130">
-              <template #default="{ row }"><span class="mono">{{ row.expected }}</span></template>
-            </el-table-column>
-            <el-table-column label="实际 actual" min-width="150">
-              <template #default="{ row }"><span class="mono">{{ row.actual }}</span></template>
-            </el-table-column>
-            <el-table-column label="结论" width="110" align="center">
-              <template #default="{ row }">
-                <el-tag v-if="row.status === 'satisfied'" size="small" type="success" effect="plain">满足</el-tag>
-                <el-tag v-else-if="row.status === 'unsatisfied'" size="small" type="danger" effect="plain">不满足</el-tag>
-                <!-- AND 短路 / 字段没回传：显式标「未求值」，不混进「不满足」 -->
-                <el-tag v-else size="small" type="info" effect="plain" data-testid="audit-why-unevaluated">未求值</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="" width="120" fixed="right" align="center">
-              <template #default="{ row }">
-                <!-- 指向标 = el-tag：tag 本身 inline-flex + white-space:nowrap（不折行）、自带边框与底色，
-                     比裸文字更适合"箭头指向这一行"；不再需要一行 white-space: nowrap 的自定义样式。 -->
-                <el-tag v-if="row.status === 'unsatisfied'" size="small" type="danger" effect="plain" data-testid="audit-why-mark">← 此项未满足</el-tag>
-                <span v-else-if="row.status === 'unevaluated'" class="muted">—</span>
-              </template>
-            </el-table-column>
-          </el-table>
+          <div class="why-collapse-body" data-testid="audit-explain-layer2-body">
+            <el-text tag="div" size="small" class="muted">
+              这些策略不是「差一点点」，而是这单本来就不是那一类（渠道 / 店铺 / 客户标签 / 城市 / 标记不符）——
+              把它们留在第一屏，只会让人一条条读到「渠道 ≠ 淘宝」为止。
+            </el-text>
+            <el-text
+              v-for="p in notApplicableRows"
+              :key="`na-${p.policyId}`"
+              tag="div"
+              size="small"
+              class="why-na-row"
+              :data-testid="`audit-explain-na-${p.policyId}`"
+            >
+              <b>「{{ p.policyName }}」</b>：{{ p.why }}
+            </el-text>
+          </div>
         </div>
-      </template>
 
-      <!-- 全局排除：不分策略，判定时并入每条自动策略；留人工的单很多就是被它挡掉的 -->
-      <el-alert
-        v-if="whyTargets.length && globalExclusions.length"
-        class="why-global"
-        type="warning"
-        title="全局排除"
-        :closable="false"
-        show-icon
-        data-testid="audit-why-global"
-      >
-        <el-text class="muted" tag="div">以下条件对每条自动策略一并求值：任一条成立，那条策略就被排除（结论转人工）</el-text>
-        <el-text v-for="g in globalExclusions" :key="`g-${g.seq}`" class="why-backend-line" tag="div">· 排除：{{ condText(g) }}</el-text>
-      </el-alert>
+        <!-- ============================================================ 第三层：完整矩阵（默认折叠） -->
+        <!-- 就是原来的表原样搬进来：一条不删、逐条件 expected vs actual、三态（满足/不满足/未求值）。
+             没有 layers 的老行强制展开（等同于改造前的行为，页面不倒退）。 -->
+        <div class="why-collapse" :class="{ open: matrixOpen }" data-testid="audit-explain-layer3">
+          <div
+            v-if="explainLayers"
+            class="why-collapse-head"
+            data-testid="audit-explain-layer3-toggle"
+            @click="layer3Open = !layer3Open"
+          >
+            <span>完整矩阵（{{ matrixCount }} 条策略，逐条件 expected vs actual）</span>
+            <span class="why-caret">{{ layer3Open ? '收起' : '点开' }}</span>
+          </div>
+          <div class="why-collapse-body" data-testid="audit-explain-layer3-body">
+            <!-- 引擎原话（含具体数值差）：它会把每条策略都念一遍，所以属于第三层，不属于第一屏 -->
+            <el-alert v-if="explainLayers" class="why-reason" type="info" :closable="false" :title="whyRow.reason || '后端未回传原因'" />
+
+            <el-empty v-if="!whyGroups.length" description="这类结论没有可对照的策略（例如未参与本轮）" />
+
+            <div v-for="g in whyGroups" :key="`${g.policyId}`" class="why-group" :data-testid="`audit-why-policy-${g.policyId}`">
+              <div class="why-group-head">
+                <el-text tag="b" :data-testid="`audit-why-policy-name-${g.policyId ?? 'unknown'}`">「{{ g.policyName }}」</el-text>
+                <el-tag size="small" effect="plain">优先级 {{ g.priority ?? '—' }}</el-tag>
+                <el-tag size="small" effect="plain">第 {{ g.versionNo ?? '—' }} 版</el-tag>
+                <el-tag v-if="g.allSatisfied" size="small" type="success" effect="plain">条件全部满足</el-tag>
+                <el-tag v-else size="small" type="danger" effect="plain">未命中</el-tag>
+              </div>
+
+              <el-text v-if="g.reasonLines.length" class="why-backend-lines" tag="div" size="small">
+                <el-text class="muted" tag="div">后端留痕：</el-text>
+                <el-text v-for="(line, i) in g.reasonLines" :key="i" class="why-backend-line" tag="div">· {{ line }}</el-text>
+              </el-text>
+
+              <el-table
+                :data="g.conditions"
+                border
+                size="small"
+                :row-class-name="whyRowClass"
+                :row-style="whyRowStyle"
+                empty-text="这条策略没有可对照的条件"
+              >
+                <el-table-column label="序号" width="60" align="center">
+                  <template #default="{ row }">{{ row.seq }}</template>
+                </el-table-column>
+                <el-table-column label="字段" min-width="140">
+                  <template #default="{ row }">
+                    <div>{{ row.fieldLabel || row.fieldCode }}</div>
+                    <div class="muted mono">{{ row.fieldCode }}</div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作符" width="90" align="center">
+                  <template #default="{ row }">{{ auditOpText(row.opCode) }}</template>
+                </el-table-column>
+                <el-table-column label="期望 expected" min-width="130">
+                  <template #default="{ row }"><span class="mono">{{ row.expected }}</span></template>
+                </el-table-column>
+                <el-table-column label="实际 actual" min-width="150">
+                  <template #default="{ row }"><span class="mono">{{ row.actual }}</span></template>
+                </el-table-column>
+                <el-table-column label="结论" width="110" align="center">
+                  <template #default="{ row }">
+                    <el-tag v-if="row.status === 'satisfied'" size="small" type="success" effect="plain">满足</el-tag>
+                    <el-tag v-else-if="row.status === 'unsatisfied'" size="small" type="danger" effect="plain">不满足</el-tag>
+                    <!-- AND 短路 / 字段没回传：显式标「未求值」，不混进「不满足」 -->
+                    <el-tag v-else size="small" type="info" effect="plain" data-testid="audit-why-unevaluated">未求值</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="" width="120" fixed="right" align="center">
+                  <template #default="{ row }">
+                    <!-- 指向标 = el-tag：tag 本身 inline-flex + white-space:nowrap（不折行）、自带边框与底色，
+                         比裸文字更适合"箭头指向这一行"；不再需要一行 white-space: nowrap 的自定义样式。 -->
+                    <el-tag v-if="row.status === 'unsatisfied'" size="small" type="danger" effect="plain" data-testid="audit-why-mark">← 此项未满足</el-tag>
+                    <span v-else-if="row.status === 'unevaluated'" class="muted">—</span>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+          </div>
+        </div>
+
+      </template>
 
       <template #footer>
         <div class="why-footer">
@@ -808,6 +945,35 @@ const reasonHead = (row) => {
 }
 
 /**
+ * 「这单最像哪条策略、还差什么」那一句 —— 只给「没命中任何策略」和「留人工」两类。
+ *
+ * <h3>为什么是 {@code layer1.oneLiner}，而不是前端自己拿 closest 拼一句</h3>
+ * 抽屉第一层渲染的**就是这同一个字段**（{@code audit-explain-oneliner}），所以行内与抽屉里的
+ * 那句话**逐字相同** —— 「同一个 closest，不许两处各算一遍」不是靠测试保证的，是这个取法本身保证的。
+ * 自拼一句「最接近「X」，差在 Y」读起来差不多，却是第二份措辞：后端哪天把「还差 N 个条件」换成
+ * 别的说法（或补上「同一策略另有 M 条并列」），行内就与抽屉各说一套，而且**不报错**。
+ *
+ * <h3>为什么不自己判断结论</h3>
+ * 结论（命中 / 最接近 / 被排除 / 全部不适用 / 无可用策略）由后端 {@code AuditExplainLayers} 按五级
+ * 字典序算好，前端只按 result 决定「这一行要不要出现」。全部不适用时 oneLiner 是
+ * 「本的渠道/店铺与全部策略都不匹配」，一条策略都没有时是「没有可用的审核策略，请先配置策略」——
+ * 同样是运营当场要读的那句话，不必前端再分一套分支去拼。
+ *
+ * <h3>没有 layers 时为什么宁可不显示</h3>
+ * 老决策行（本期之前落的）/ 后端未回传时 {@code layers} 为 null。这时前端手里没有任何「哪条最接近」
+ * 的判定口径，去猜就等于把「最像哪条」变成页面算的（第二份实现）。宁可少一行，也不编一句。
+ *
+ * @param {object} row 队列行（已由 mapQueueRow 透传 layers）
+ * @returns {string} 那一句人话；不该显示时返回空串（模板里 v-if 直接吃掉）
+ */
+const CLOSEST_LINE_RESULTS = ['NO_MATCH', 'MANUAL']
+const closestLineOf = (row) => {
+  const result = String(row?.result || '').toUpperCase()
+  if (!CLOSEST_LINE_RESULTS.includes(result)) return ''
+  return String(row?.layers?.layer1?.oneLiner || '').trim()
+}
+
+/**
  * 「假如没被拦，本来会命中哪条自动策略」那一行。
  *
  * 后端判定链顺序固定：[3] BLOCK / [4] EXCEPTION 命中后**仍继续跑 [5] AUTO，只看不执行**，
@@ -1019,7 +1185,123 @@ const whyRow = ref(null)
 const openWhy = (row) => {
   whyRow.value = row
   whyVisible.value = true
+  // 每次打开都从「第一层」开始：折叠状态不跨单继承，否则上一单展开的矩阵会跟着过来
+  layer2Open.value = false
+  layer3Open.value = false
 }
+
+// ---------------------------------------------------------------- 三层判定依据（期 4）
+
+/**
+ * 后端算好的三层（{@code layers.layer1/2/3}）。
+ *
+ * <p>**为什么由后端算、前端只摆位置**：「哪条最接近」「哪些算不适用」是判定口径，不是展示偏好。
+ * 放到前端就是第二份实现，引擎一改（新增分类字段、改排序键）页面就会给出与事实相反的解释，
+ * 而这种不一致不报错、只让人误解。后端 {@code AuditExplainLayers} 的 12 条单测 + 组装器单测
+ * 锁着这份口径，前端不许复制一份。
+ *
+ * <p>老行（本期之前落的决策行）没有这个字段 ⇒ {@code null}，页面退回改造前的单层渲染（不倒退、不空白）。
+ */
+const explainLayers = computed(() => whyRow.value?.layers || null)
+
+/** 第一层（结论 + 一句人话 + 最接近那条 + 两句旁注）；没有 layers 时给一份空壳，模板不必到处判空 */
+const layer1 = computed(() => explainLayers.value?.layer1 || {
+  conclusion: '', oneLiner: '', closest: null, notApplicableNote: '', tieNote: ''
+})
+
+/** 不适用条数（第二层与那句灰字同一个数，页面上两个数字必须对得上） */
+const layer2Total = computed(() => Number(explainLayers.value?.layer2?.notApplicableTotal || 0))
+
+/**
+ * 第一层「最接近那条」最多摆几条缺项（T2）。
+ *
+ * <p><b>为什么要有这个上限</b>：``closest.missingConditions`` 是**逐条全给**的（后端不变），
+ * 但第一层的职责是「一眼读完」。一条策略差 8 个条件时，逐条列会把第一屏撑长 ——
+ * 那和「渠道 3→30 条策略」是同一个失败模式，只是换了个维度。
+ *
+ * <p><b>为什么截在显示层、不截在数据里</b>：这份列表还被第三层矩阵、接口契约、
+ * {@code AuditExplainLayers} 的单测用着（它们是「一条不删」的那一侧）。在数据层截断，
+ * 等于让「完整矩阵」也开始少条；而且前端想改「显示几条」得重启后端，不值。
+ *
+ * <p><b>队列行为什么不跟着展开</b>：行内只放得下一句，取的是 {@code oneLiner}
+ * （后端已经只带第 1 条 + 「还差 N 个条件」），比这里更窄。
+ */
+const CLOSEST_MISSING_MAX = 2
+
+/** 第一层要摆出来的缺项（前 CLOSEST_MISSING_MAX 条；closest 为空时给空数组，模板不必判空） */
+const closestMissingShown = (closest) => (closest?.missingConditions || []).slice(0, CLOSEST_MISSING_MAX)
+
+/** 被收起来的那几条的数量（0 ⇒ 连「…还有 N 条」这句都不出现） */
+const closestMissingRest = (closest) =>
+  Math.max(0, (closest?.missingConditions || []).length - CLOSEST_MISSING_MAX)
+
+/** 不适用按分类字段的分布，如「渠道 3、客户标签 1」（中文名由后端给，前端不抄字段表） */
+const layer2FieldText = computed(() => (explainLayers.value?.layer2?.byField || [])
+  .map((f) => `${f.field} ${f.count}`)
+  .join('、'))
+
+/** 完整矩阵的条数（第三层标题上那个数） */
+const matrixCount = computed(() => (explainLayers.value?.layer3?.policies || []).length)
+
+/** 第二层的折叠状态（默认折起）；第三层同理 */
+const layer2Open = ref(false)
+const layer3Open = ref(false)
+
+/**
+ * 第三层是否展开：**没有 layers 的老行强制展开** —— 那时它就是改造前的那张表，行为一个字都不该变。
+ */
+const matrixOpen = computed(() => !explainLayers.value || layer3Open.value)
+
+/**
+ * 第二层要列的「不适用策略」：策略名 + 一句为什么。
+ *
+ * 「为什么」优先取那条分类字段条件的人话（引擎原文，例如「渠道 = 淘宝（实际 抖音）」）——
+ * 比再写一句「渠道不符」多给一个实际值，人一眼就知道这单是抖音单。
+ *
+ * ⚠️ 这份明细由**后端**给（`layers.layer2.items`），前端不自己拼：
+ *    它是与 `notApplicableTotal` 同源的一份投影（同一个组装器、同一套分类字段映射），
+ *    所以「另有 N 条不适用」和点开后的行数对得平。前端拿第三层去筛、再去文案里找「渠道」
+ *    两个字（旧写法）是第二份实现：后端改一次措辞/语言，这里就静默退化成「渠道不符」甚至错配。
+ *    只有早期后端没有 `items` 时才退回那条兜底投影（判据仍是后端算的 `notApplicable` 标志）。
+ */
+const notApplicableRows = computed(() => {
+  const items = explainLayers.value?.layer2?.items
+  if (Array.isArray(items) && items.length) {
+    return items.map((it) => ({
+      policyId: it.policyId,
+      policyName: it.policyName,
+      why: it.why || `${it.field || '分类字段'}不符`
+    }))
+  }
+  return (explainLayers.value?.layer3?.policies || [])
+    .filter((p) => p.notApplicable)
+    .map((p) => ({
+      policyId: p.policyId,
+      policyName: p.policyName,
+      why: notApplicableWhy(p)
+    }))
+})
+
+/**
+ * 兜底（仅当后端没给 `layer2.items` 时用）：一条不适用策略的「为什么」
+ * = 撞上的那条分类字段条件的人话；找不到就退回字段名。
+ * 这里按**前缀**比对（条件文案由「字段中文名 + 关系 + 实际值」拼成），不是全文找子串。
+ */
+const notApplicableWhy = (policy) => {
+  const label = policy.notApplicableField || '分类字段'
+  const cond = (policy.missingConditions || []).find((c) => String(c.text || '').startsWith(label))
+  return cond ? cond.text : `${label}不符`
+}
+
+/** 第一层结论徽标的颜色（命中绿 / 最接近黄 / 被排除黄 / 全不适用与无策略灰） */
+const conclusionTagType = computed(() => {
+  switch (layer1.value.conclusion) {
+    case '命中': return 'success'
+    case '最接近': return 'warning'
+    case '被排除': return 'warning'
+    default: return 'info'
+  }
+})
 
 /** 抽屉里要对照的策略：按结局选类别（阻止看 BLOCK，冻结看 EXCEPTION，其余看 AUTO） */
 const whyTargets = computed(() => policiesForResult(whyRow.value?.result, policies.value))
@@ -1301,6 +1583,41 @@ onMounted(() => {
 /* 「← 此项未满足」的"不折行"由 el-tag 自带（.el-tag 就是 inline-flex + white-space:nowrap），
    本文件不再为它保留任何外观声明。 */
 .why-footer { display: flex; justify-content: flex-end; gap: 10px; }
+
+/* ---- 三层判定依据（期 4） ----
+   第一层：一眼读完（结论 + 一句人话 + 最接近那条 + 两句旁注）。
+   之后的「不适用 / 完整矩阵」都是**默认折起**的：折起用 max-height + overflow 实现，
+   不用 v-if —— DOM 保留（页内搜索、无障碍、老断言都还能读到），但视觉上真的不在第一屏，
+   所以「渠道 3→30 条」时第一屏高度不变（e2e「判定依据分层」用例用 boundingBox 实测）。 */
+.why-layer1 {
+  margin-top: 10px; padding: 10px 12px;
+  border-left: 3px solid var(--el-color-primary);
+  background: var(--el-fill-color-lighter);
+  border-radius: 4px;
+}
+.why-layer1-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+/* 一句人话：略大一号，第一屏的主角；行高固定，避免长策略名把第一屏撑成两行 */
+.why-oneliner { font-size: 14px; line-height: 22px; }
+.why-closest { margin-top: 8px; }
+.why-closest-name { font-weight: 600; line-height: 20px; }
+.why-closest-missing { line-height: 20px; color: var(--el-color-danger); }
+/* 不适用那句灰字：可点击（点开第二层），所以给手型 + 下划线虚线，明确"这不是结论，是个入口" */
+.why-not-applicable {
+  display: block; margin-top: 8px; cursor: pointer;
+  color: var(--el-text-color-secondary);
+  text-decoration: underline dotted;
+}
+.why-collapse { margin-top: 12px; border-top: 1px dashed var(--el-border-color); }
+.why-collapse-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 0; cursor: pointer; color: var(--el-text-color-regular);
+}
+.why-collapse-head:hover { color: var(--el-color-primary); }
+.why-caret { color: var(--el-text-color-secondary); font-size: 12px; }
+/* 折叠容器：收起时高度 0（视觉上不存在），展开时放开 */
+.why-collapse-body { max-height: 0; overflow: hidden; }
+.why-collapse.open .why-collapse-body { max-height: none; padding-bottom: 8px; }
+.why-na-row { line-height: 22px; }
 /* 冻结计数：与其它数字同款 el-text tag="b"，不再单独染紫 ——
    紫是 FROZEN 徽标的色，而这一列是"冻结了几单"的数量，本来就不该跟徽标同色 */
 </style>
