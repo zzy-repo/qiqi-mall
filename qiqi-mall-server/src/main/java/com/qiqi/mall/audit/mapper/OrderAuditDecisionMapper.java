@@ -30,6 +30,21 @@ import java.util.Map;
  * 若改用 {@code evidence_json} 复用快照：{@code gross_profit} 有、{@code shop_name/channel}
  * 没有、{@code item_kind_count} 没有 —— 一个字段变三种取法，值还会与当前库漂移
  * （快照是判定那一刻的，页面上「店铺」却是现在的，对不上时没人查得清）。宁可都读当前值。
+ *
+ * <h3>队列行为什么还要补 {@code order_audit_tag} 的冻结事实（frozen / frozen_reason）</h3>
+ * 「引擎这轮判了什么」（{@code d.result}）与「这单现在冻着没有」（{@code order_audit_tag}）是**两件事**：
+ * <ul>
+ *   <li>策略冻的（EXCEPTION 命中）：当轮 {@code result='FROZEN'}，同时打了 FROZEN 标 —— 两个事实都成立；</li>
+ *   <li>人工冻的（后台点「冻结」）：**不产生新的决策行**，{@code result} 还是上一轮的
+ *       MANUAL / NO_MATCH / AUTO_PASS…，但标是实打实 active 的。</li>
+ * </ul>
+ * 只查决策表的话，页面只能拿 {@code result === 'FROZEN'} 去猜「冻没冻」—— 人工冻的单永远猜不出来
+ * （永远显示「冻结」按钮、点不到解冻）。所以这一行把标表的事实**显式**带出来，与 {@code result} 解耦。
+ *
+ * <p>标的口径与 {@link OrderAuditTagMapper#selectActiveFrozen} 一致：{@code active=1 AND tag_code LIKE 'FROZEN%'}。
+ * 用前缀而不是等值，因为 FROZEN 有细分标（如 {@code FROZEN_RETURN_APPLY}），
+ * 而解冻接口 {@link OrderAuditTagMapper#releaseFrozen} 也是按前缀一次放掉的 ——
+ * 「队列说冻着」和「点解冻真的能解」必须是同一个判据，否则又会出一个点不动的按钮。
  */
 @Mapper
 public interface OrderAuditDecisionMapper extends BaseMapper<OrderAuditDecision> {
@@ -44,6 +59,9 @@ public interface OrderAuditDecisionMapper extends BaseMapper<OrderAuditDecision>
     /**
      * 人工队列：每单最新一轮决策，可按 result 过滤（单值；为空 = 不过滤）。
      *
+     * <p>每行额外带 {@code frozen}（该单当前是否有 active 的冻结标）/ {@code frozen_reason} /
+     * {@code frozen_tag_code} —— 见类注释最后一段：人工冻的单没有新决策行，只能从标表读。
+     *
      * <p>为什么按 MAX(id) 去重而不是 DISTINCT：一轮一行、id 单调，取最新行是确定的；
      * 用 round_no 去重会在「同一单不同 run 但轮次相同」的脏数据上给出随机结果。
      */
@@ -55,7 +73,17 @@ public interface OrderAuditDecisionMapper extends BaseMapper<OrderAuditDecision>
             + "       o.order_sn, o.status AS order_status, o.total_amount, "
             + "       o.shop_name, o.channel, o.gross_profit, "
             + "       (SELECT COUNT(DISTINCT i.product_sku_id) FROM order_item i WHERE i.order_id = d.order_id) AS item_kind_count, "
-            + "       (SELECT COALESCE(SUM(i.product_quantity), 0) FROM order_item i WHERE i.order_id = d.order_id) AS item_qty_total "
+            + "       (SELECT COALESCE(SUM(i.product_quantity), 0) FROM order_item i WHERE i.order_id = d.order_id) AS item_qty_total, "
+            // ---- 冻结事实（来自标表，与 d.result 完全解耦；见类注释最后一段）----
+            // 三列都是**相关子查询**而不是 JOIN：一单可能同时挂着 FROZEN + FROZEN_RETURN_APPLY 两条 active 标，
+            // JOIN 会把这一行复制成 2 行（分页 total 与行数立刻对不上）。子查询只对**本页这几十行**执行，
+            // 走 idx_order(order_id, tag_code)，不是 N+1（没有第二次往返、没有 O(行数) 次查询）。
+            + "       EXISTS(SELECT 1 FROM order_audit_tag t WHERE t.order_id = d.order_id "
+            + "              AND t.active = 1 AND t.tag_code LIKE 'FROZEN%') AS frozen, "
+            + "       (SELECT t.reason FROM order_audit_tag t WHERE t.order_id = d.order_id "
+            + "        AND t.active = 1 AND t.tag_code LIKE 'FROZEN%' ORDER BY t.id ASC LIMIT 1) AS frozen_reason, "
+            + "       (SELECT t.tag_code FROM order_audit_tag t WHERE t.order_id = d.order_id "
+            + "        AND t.active = 1 AND t.tag_code LIKE 'FROZEN%' ORDER BY t.id ASC LIMIT 1) AS frozen_tag_code "
             + "FROM order_audit_decision d JOIN `order` o ON o.id = d.order_id "
             + "WHERE d.id IN (SELECT MAX(id) FROM order_audit_decision GROUP BY order_id) "
             + "<if test='result != null and result != \"\"'> AND d.result = #{result}</if> "

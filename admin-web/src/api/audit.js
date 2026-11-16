@@ -50,6 +50,15 @@ const num = (v) => {
   return Number.isFinite(n) ? n : null
 }
 
+/**
+ * 宽松真值：true / 1 / '1' / 'true' 都算真。
+ *
+ * 为什么不用 `!!v`：后端契约里 `frozen` 已经是 boolean，但队列行也可能来自旧版本后端
+ * （0/1）或 MySQL 的 EXISTS 原样（1）。这里只做**一个方向**的收敛：把"冻着"认全，
+ * 把缺失/0/false 一律当"没冻"——判据不清楚的按钮比没有按钮更糟。
+ */
+const asBool = (v) => v === true || v === 1 || v === '1' || String(v).toLowerCase() === 'true'
+
 /** 统一分页外壳：后端队列/run 列表给的是 { total, page, size, rows }（不是 MP 的 records/current） */
 const pageOf = (payload, mapper) => {
   const raw = payload || {}
@@ -91,6 +100,15 @@ export const mapQueueRow = (r) => ({
   grossProfit: num(pick(r, 'grossProfit', 'gross_profit')),
   // 判定结局：六种之一（AUTO_PASS / MANUAL / BLOCKED / FROZEN / NO_MATCH / SKIPPED）
   result: String(pick(r, 'result') ?? '').toUpperCase(),
+  /**
+   * 冻结事实（**与 result 解耦**，来自 order_audit_tag 而非决策表）：
+   *   result = 引擎这一轮判了什么（历史结论，冻结/解冻都不改写它）；
+   *   frozen = 这单**现在**挂着一条 active 的冻结标没有（人工冻的单只有它有反应）。
+   * 所以「操作列显示冻结还是解冻」「行上要不要打冻结标记」一律读 frozen，不许再拿 result 猜。
+   */
+  frozen: asBool(pick(r, 'frozen')),
+  frozenReason: pick(r, 'frozenReason', 'frozen_reason') ?? null,
+  frozenTagCode: pick(r, 'frozenTagCode', 'frozen_tag_code') ?? null,
   matchedPolicyId: num(pick(r, 'matchedPolicyId', 'matched_policy_id')),
   matchedPolicyName: pick(r, 'matchedPolicyName', 'matched_policy_name') ?? null,
   matchedPolicyVersionNo: num(pick(r, 'matchedPolicyVersionNo', 'matched_policy_version_no')),

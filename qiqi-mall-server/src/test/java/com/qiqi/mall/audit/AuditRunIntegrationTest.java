@@ -457,6 +457,104 @@ class AuditRunIntegrationTest {
                 .isEqualTo(((Number) decisionRaw.get("id")).longValue());
     }
 
+    // ============================================================ 冻结可见性（P0）
+
+    /**
+     * 队列行的 {@code frozen / frozenReason} —— 与 {@code result} 解耦的第二个事实。
+     *
+     * <p>旧行为：队列只查决策表，页面拿 {@code result === 'FROZEN'} 猜「冻没冻」。
+     * 人工冻结**不产生新决策行**（{@code result} 还是 NO_MATCH/MANUAL/BLOCKED…），
+     * 于是人工冻的单永远判不出来 —— 队列显示「冻结」按钮、点不到解冻。
+     *
+     * <p>本用例钉三件事：
+     * <ol>
+     *   <li>人工冻结后 {@code result} 一个字没变，而 {@code frozen=true} + 原因可读；</li>
+     *   <li>同单挂两条冻结标（含细分标 {@code FROZEN_RETURN_APPLY}）时，队列**不会**因此多出一行
+     *       —— 这正是用相关子查询而不是 JOIN 的原因（JOIN 会把行复制成 2 行，翻页与 total 当场对不上）；</li>
+     *   <li>解冻后 {@code frozen=false}、{@code frozenReason=null}（不是"空字符串"这种半吊子）。</li>
+     * </ol>
+     */
+    @Test
+    @Order(6)
+    @DisplayName("队列行带 frozen / frozenReason：人工冻的单 result 不变也看得见；解冻后回到 false")
+    void queueFrozenField() {
+        // ---------------- 起点：未冻结 ----------------
+        Map<String, Object> before = queueRowOf("QT-1003");
+        assertThat(before.get("result")).as("QT-1003 的结论与冻结无关").isEqualTo("NO_MATCH");
+        assertThat(before.get("frozen")).as("未冻结时 frozen 必须是 boolean false（不是 null、不是 0）")
+                .isInstanceOf(Boolean.class).isEqualTo(Boolean.FALSE);
+        assertThat(before.get("frozenReason")).as("未冻结时原因必须是 null").isNull();
+        assertThat(before.get("frozenTagCode")).isNull();
+
+        // ---------------- 人工冻结：决策行一条都不多 ----------------
+        int decisionsBefore = decisionCountOf("QT-1003");
+        int rowsBefore = queueRows().size();
+        tagService.freeze(orderOf("QT-1003"), OrderAuditTagService.TAG_FROZEN, "集成测试：人工冻结", "人工");
+
+        assertThat(decisionCountOf("QT-1003")).as("人工冻结不产生决策行（所以 result 不可能反映它）")
+                .isEqualTo(decisionsBefore);
+
+        Map<String, Object> frozen = queueRowOf("QT-1003");
+        assertThat(frozen.get("result")).as("冻结**不**改写 result：引擎这轮判的还是 NO_MATCH").isEqualTo("NO_MATCH");
+        assertThat(frozen.get("frozen")).as("人工冻的单 frozen 必须是 true").isEqualTo(Boolean.TRUE);
+        assertThat(frozen.get("frozenReason")).isEqualTo("集成测试：人工冻结");
+        assertThat(frozen.get("frozenTagCode")).isEqualTo("FROZEN");
+
+        // ---------------- 细分标也算冻结；两条标不复制行 ----------------
+        tagService.freeze(orderOf("QT-1003"), "FROZEN_RETURN_APPLY", "集成测试：细分标", "人工");
+        Map<String, Object> twoTags = queueRowOf("QT-1003");
+        assertThat(twoTags.get("frozen")).as("FROZEN% 前缀都算冻结（与 unfreeze 的判据同口径）")
+                .isEqualTo(Boolean.TRUE);
+        assertThat(twoTags.get("frozenReason")).as("原因取最早那条 active 标（与 selectActiveFrozen 同口径）")
+                .isEqualTo("集成测试：人工冻结");
+        assertThat(queueRows()).as("同单挂两条冻结标**不许**把队列行复制成两行（分页/total 会当场对不上）")
+                .hasSize(rowsBefore);
+        assertThat(queueRows().stream().filter(r -> "QT-1003".equals(String.valueOf(r.get("order_sn")))))
+                .as("QT-1003 在队列里仍然只出现一次").hasSize(1);
+
+        // ---------------- 解冻：回到 false / null ----------------
+        assertThat(tagService.unfreeze(orderOf("QT-1003"))).as("一次解冻放掉所有 FROZEN 类标（2 条）").isEqualTo(2);
+        Map<String, Object> after = queueRowOf("QT-1003");
+        assertThat(after.get("frozen")).isEqualTo(Boolean.FALSE);
+        assertThat(after.get("frozenReason")).isNull();
+        assertThat(after.get("result")).as("解冻同样不改 result").isEqualTo("NO_MATCH");
+
+        // 另一笔对照：策略冻过又解冻的 QT-1005，此刻 result 仍是 AUTO_PASS 且没冻 —— 两个事实互不影响
+        Map<String, Object> d5 = queueRowOf("QT-1005");
+        assertThat(d5.get("result")).isEqualTo("AUTO_PASS");
+        assertThat(d5.get("frozen")).isEqualTo(Boolean.FALSE);
+    }
+
+    private Map<String, Object> queueRowOf(String orderSn) {
+        return queueRows().stream()
+                .filter(r -> orderSn.equals(String.valueOf(r.get("order_sn"))))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("队列里没有订单 " + orderSn));
+    }
+
+    private List<Map<String, Object>> queueRows() {
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rows = (List<Map<String, Object>>) queryService.queue(null, 1, 50).get("rows");
+        return rows;
+    }
+
+    private int decisionCountOf(String orderSn) {
+        Integer n = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM order_audit_decision d JOIN `order` o ON o.id = d.order_id WHERE o.order_sn = ?",
+                Integer.class, orderSn);
+        return n == null ? 0 : n;
+    }
+
+    private com.qiqi.mall.order.entity.Order orderOf(String orderSn) {
+        return jdbc.queryForObject("SELECT id, order_sn, status FROM `order` WHERE order_sn = ?", (rs, i) -> {
+            com.qiqi.mall.order.entity.Order o = new com.qiqi.mall.order.entity.Order();
+            o.setId(rs.getLong("id"));
+            o.setOrderSn(rs.getString("order_sn"));
+            o.setStatus(rs.getInt("status"));
+            return o;
+        }, orderSn);
+    }
+
     private Long orderIdOf(String orderSn) {
         return jdbc.queryForObject("SELECT id FROM `order` WHERE order_sn = ?", Long.class, orderSn);
     }

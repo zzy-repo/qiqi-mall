@@ -102,13 +102,34 @@
       <!-- 判定徽标：颜色 + 中文文案 + data-result 三重冗余 -->
       <el-table-column label="判定" width="132">
         <template #default="{ row }">
-          <el-tag
-            :type="auditResultTag(row.result)"
-            effect="dark"
-            size="small"
-            data-testid="audit-row-badge"
-            :data-result="row.result"
-          >{{ auditResultText(row.result) }}</el-tag>
+          <!-- 单元格里是**两个独立事实**，所以上下两枚而不是挤成一枚：
+                 · 上：判定徽标 = 引擎这一轮判了什么（result，历史结论，冻/解冻都不改写它）；
+                 · 下：冻结标记 = 这单**现在**有没有 active 的冻结标（frozen，来自标表）。
+               人工冻的单没有新决策行（result 仍是 MANUAL / NO_MATCH / BLOCKED…），
+               以前只有上面那枚 → 队列里根本看不出它冻着；现在靠下面这枚。
+               为什么不开新列：这张表 10 列已经 1647px 顶满（见 playwright.config.js 的 1960 画幅推导），
+               加一列就要横向滚动，「原因」列会被挤出画面 —— 把标记叠进判定列既省宽又语义相邻。 -->
+          <div class="verdict-cell">
+            <el-tag
+              :type="auditResultTag(row.result)"
+              effect="dark"
+              size="small"
+              data-testid="audit-row-badge"
+              :data-result="row.result"
+            >{{ auditResultText(row.result) }}</el-tag>
+            <!-- title = 冻结原因：扫一眼知道"冻着"，悬停 / 读屏知道"为什么" -->
+            <el-tag
+              v-if="row.frozen"
+              type="warning"
+              effect="plain"
+              size="small"
+              class="frozen-mark"
+              :title="frozenTitle(row)"
+              :data-testid="`audit-row-frozen-${row.orderSn}`"
+              :data-frozen-reason="row.frozenReason || ''"
+              :data-frozen-tag="row.frozenTagCode || ''"
+            >冻结中</el-tag>
+          </div>
         </template>
       </el-table-column>
 
@@ -133,6 +154,15 @@
             <el-text v-if="wouldBeText(row) && stockWarnText(row)" size="small" type="warning" class="reason-stock-warn" data-testid="audit-row-would-be-stock">
               {{ stockWarnText(row) }}
             </el-text>
+            <!-- 冻结原因：**冻着的单**必须自己把「因为什么」说出来，不能只靠悬停。
+                 人工冻的单 result 不是 FROZEN，上面几行一个都不会讲冻结，所以这条不能省。 -->
+            <el-text
+              v-if="row.frozen"
+              size="small"
+              type="warning"
+              class="reason-frozen"
+              :data-testid="`audit-row-frozen-reason-${row.orderSn}`"
+            >{{ frozenReasonText(row) }}</el-text>
           </div>
         </template>
       </el-table-column>
@@ -159,8 +189,14 @@
           <el-button link type="primary" size="small" data-testid="audit-row-trail" @click="openOrderDrawer(row)">
             流转记录
           </el-button>
+          <!-- 冻结 / 解冻：判据是 **frozen（标表事实）**，不是 result（引擎结论）。
+               —— 2026-11-16 修的就是这里：原来写的是 row.result === 'FROZEN'，
+               而人工冻结**不产生新决策行**，result 仍是 MANUAL/NO_MATCH/… ⇒ 人工冻的单
+               永远显示「冻结」按钮，解冻只能拿 curl 去救。
+               反向也一样成立：策略冻的单解冻后 result 还是 FROZEN（决策行不该被改写），
+               但标已经放了 ⇒ 这里必须显示「冻结」（否则点下去后端会报「当前没有被冻结」）。 -->
           <el-button
-            v-if="row.result === 'FROZEN'"
+            v-if="row.frozen"
             link
             type="warning"
             size="small"
@@ -330,7 +366,10 @@
           <AuditTrail :order-id="orderRow?.orderId" />
         </el-tab-pane>
         <el-tab-pane label="判定摘要" name="summary">
-          <el-descriptions v-if="orderRow" :column="2" border size="small">
+          <!-- label-width 是必须的：el-descriptions 按内容自适应列宽，而「原因」那一行很长，
+               会把 label 列挤到只剩一个字宽（实测「冻结状态」被折成「冻结状 / 态」，
+               甚至「单号」也变成竖排）—— 固定 92px 后六个标签都整行可读。 -->
+          <el-descriptions v-if="orderRow" :column="2" :label-width="92" border size="small">
             <el-descriptions-item label="单号">{{ orderRow.orderSn }}</el-descriptions-item>
             <el-descriptions-item label="第几轮">第 {{ orderRow.roundNo ?? '—' }} 轮</el-descriptions-item>
             <el-descriptions-item label="判定">
@@ -339,6 +378,29 @@
               </el-tag>
             </el-descriptions-item>
             <el-descriptions-item label="命中策略">{{ orderRow.matchedPolicyName || '—' }}</el-descriptions-item>
+            <!-- 标签用「冻结」而不是「冻结状态」：el-descriptions 的 label 列窄，
+                 四个字会被折成「冻结状 / 态」两行，读起来像坏掉 -->
+            <el-descriptions-item label="冻结">
+              <el-tag
+                :type="orderRow.frozen ? 'warning' : 'info'"
+                effect="plain"
+                size="small"
+                data-testid="audit-order-frozen"
+                :data-frozen="orderRow.frozen ? 'true' : 'false'"
+              >{{ orderRow.frozen ? '冻结中' : '未冻结' }}</el-tag>
+            </el-descriptions-item>
+            <!-- 人工冻的单在抽屉里必须能看到原因（队列行上只有一行小字，这里给全文 + 标码）。
+                 testid 挂在内容 span 上而不是 el-descriptions-item：后者渲染成 <td> 时属性透传
+                 依赖 EP 内部实现，挂在内层才是确定的锚点。 -->
+            <el-descriptions-item label="冻结原因">
+              <span data-testid="audit-order-frozen-reason">
+                <span v-if="orderRow.frozen">{{ orderRow.frozenReason || '（未填写原因）' }}</span>
+                <span v-else class="muted">—</span>
+              </span>
+              <el-text v-if="orderRow.frozen && orderRow.frozenTagCode" size="small" type="info" class="frozen-tagcode">
+                标 {{ orderRow.frozenTagCode }}
+              </el-text>
+            </el-descriptions-item>
             <el-descriptions-item label="原因" :span="2">{{ orderRow.reason || '—' }}</el-descriptions-item>
           </el-descriptions>
         </el-tab-pane>
@@ -487,6 +549,26 @@ const isNegative = (v) => {
   return Number.isFinite(n) && n < 0
 }
 const fmtTime = (at) => (at ? String(at).replace('T', ' ').slice(0, 19) : '—')
+
+/**
+ * 冻结标记的 title（悬停 / 读屏）：标码 + 原因。
+ *
+ * 为什么这里**不**按 result 猜来源（「策略冻的」/「人工冻的」）：
+ * 解冻后人工再冻一次，result 仍停在上一次的 FROZEN 上 —— 按 result 说来源会说错。
+ * 判据只有标本身（tag_code + reason），所以 title 也只说这两件事。
+ */
+const frozenTitle = (row) => {
+  const tag = row?.frozenTagCode || 'FROZEN'
+  const why = row?.frozenReason ? row.frozenReason : '未填写原因'
+  return `冻结中（标 ${tag}）：${why}`
+}
+
+/**
+ * 原因列里的那一行「因为什么冻着」。
+ * 人工冻的单 result 不是 FROZEN，reasonHead/reasonSub 讲的全是上一轮的判定，
+ * 一个字都不会提到冻结 —— 所以这一行不能靠上面那几行代替。
+ */
+const frozenReasonText = (row) => (row?.frozenReason ? `冻结原因：${row.frozenReason}` : '冻结原因：（未填写）')
 
 /** 原因栏第一行：说「命中了哪条 / 为什么没命中」，第二行灰字才是后端原话（含数值差） */
 const reasonHead = (row) => {
@@ -911,6 +993,12 @@ onMounted(() => {
 /* 「本可自动过审：命中…（被上面那条策略先拦下）」这句自己带着主谓宾，与上一行「后端原话」
    靠 type 区分（info / warning）就够了，不再靠斜体+竖线喊"这不是结论" —— 那是审美，不是信息。 */
 .reason-stock-warn { padding-left: 8px; }
+/* 冻结原因那一行：与上面几行缩进对齐（外观全交给 el-text 的 size/type=warning） */
+.reason-frozen { padding-left: 8px; }
+
+/* 判定列：判定徽标 + 冻结标记上下叠，纵向排列、左对齐（不加宽就不挤掉「原因」列） */
+.verdict-cell { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+.frozen-tagcode { margin-left: 6px; }
 
 /* 全局排除块 = el-alert（warning）：浅黄底、警示图标、标题层级全由组件给。
    原来是一张 el-card 自己染色 + 虚线边框，虚线和淡黄都是"这块不一样"的语气，不是信息：

@@ -48,7 +48,13 @@ public class AuditQueryService {
 
     // ================================================================ 人工队列
 
-    /** 人工队列（每单最新一轮），{@code result} 可为空表示不过滤 */
+    /**
+     * 人工队列（每单最新一轮），{@code result} 可为空表示不过滤。
+     *
+     * <p>每行带两个**互相独立**的事实（见 {@link #queueRow} 的注释）：
+     * {@code result}（引擎这一轮判了什么）与 {@code frozen} + {@code frozenReason}
+     * （这单当前是否挂着 active 的冻结标）。人工冻的单不产生新决策行，只有后者能说明它冻着。
+     */
     public Map<String, Object> queue(String result, int page, int size) {
         int p = Math.max(1, page);
         int s = Math.min(Math.max(1, size), 100);   // 与 MybatisPlusConfig.maxLimit 同口径，防 size=999999
@@ -79,7 +85,21 @@ public class AuditQueryService {
         out.put("matched_conditions", readJson(out.remove("matched_condition_json")));
         out.put("excluded_by", readJson(out.remove("excluded_by_json")));
         out.put("evidence", readJson(out.remove("evidence_json")));
+        // 冻结事实：**永远是 boolean**（不是 1/0、不是 null）。
+        // 「这单现在冻着没有」必须是一个确定答案，前端不该去猜 null 是"没查"还是"没冻"。
+        out.put("frozen", toBoolean(out.remove("frozen")));
+        out.put("frozenReason", out.remove("frozen_reason"));
+        out.put("frozenTagCode", out.remove("frozen_tag_code"));
         return out;
+    }
+
+    /** MySQL 的 EXISTS 回来是 0/1（有时是字符串），统一收敛成 boolean；缺列/空值 = false */
+    private static boolean toBoolean(Object raw) {
+        if (raw == null) return false;
+        if (raw instanceof Boolean b) return b;
+        if (raw instanceof Number n) return n.intValue() != 0;
+        String text = String.valueOf(raw).trim();
+        return "1".equals(text) || "true".equalsIgnoreCase(text);
     }
 
     private Object readJson(Object raw) {

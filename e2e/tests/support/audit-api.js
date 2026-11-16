@@ -44,6 +44,12 @@ export async function getAuditQueue(request, adminToken, { result, page = 1, siz
  *   · 人话原因叫 `reason_text`（`JSON_UNQUOTE(JSON_EXTRACT(evidence_json,'$.reason')) AS reason_text`），
  *     不叫 `reason` —— 前端 mapQueueRow 同时认这两个键，接口本身只有 reason_text；
  *   · `miss_reasons / matched_conditions / excluded_by / evidence` 是**已解析的结构**（不是 JSON 字符串）。
+ *
+ * ⚠️ 两个例外（P0 冻结可见性）：`frozen` / `frozenReason` / `frozenTagCode` 是**驼峰**，
+ * 由 AuditQueryService#queueRow 整形过（SQL 里的 frozen_reason / frozen_tag_code 被换成驼峰同名键，
+ * 与那四个 JSON 列同一手法）。`frozen` **一定是 boolean**（true/false，不会缺席、不会是 1/0、不会是 null）；
+ * `frozenReason` 在没有冻结标时是 null。它与 `result` 解耦：result 说引擎这轮判了什么，
+ * frozen 说这单现在有没有一条 active 的冻结标（人工冻的单只有后者会变）。
  */
 export async function getQueueRowOf(request, adminToken, orderSn) {
   const payload = await getAuditQueue(request, adminToken, { size: 100 })
