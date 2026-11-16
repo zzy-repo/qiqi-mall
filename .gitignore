@@ -12,10 +12,16 @@ target/
 #   · 入库：docs/flows/** 与 docs/er/** 下的 .mmd（图源码）/ .svg（渲染产物）/ 正文.md / 实测数字.sql
 #   · 不入库：口语稿（作者面试用的私人口述材料）、*.png（可由 mmd 重渲，7.9M）、
 #             _refs（外部课程参考资料）、reports / screenshots / _rollback
+#   · 例外（下面那行）：**界面截图不能重渲，必须入库**。
+#     `.mmd → .svg` 才是可重渲的产物；`不命中单三分钟走查` 下那 5 张 png 是 playwright 抓的
+#     真实页面帧（e2e/scripts/t5-audit-walkthrough.mjs 出图），渲不出来。
+#     没有它们，clone 下来构建，页面能出（200）但图全 404 —— 文档页等于半张空页。
+#     所以只对这一处开一个目录级口子，其余的 docs/**/*.png 照旧不入库。
 docs/*
 !docs/flows/
 !docs/er/
 docs/**/*.png
+!docs/flows/02-业务场景/业务/订单-自动审核/不命中单三分钟走查/*.png
 docs/**/口语稿*.txt
 docs/_refs/
 docs/reports/
