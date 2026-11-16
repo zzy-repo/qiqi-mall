@@ -115,7 +115,24 @@ public class DeliveryFlowService {
 
     /**
      * 取消：守卫 仅待下发。
-     * 联动：回补「总池」库存（下单时扣的是 sku.stock；inventory 是分仓归属记录，拆单并未扣它，故不回补 inventory）。
+     *
+     * <h3>库存口径：<b>条件</b>回补（不是「取消就回补」）</h3>
+     * <ul>
+     *   <li><b>该订单还有别的在途包裹</b> → 这一包的货确实回了货架，按该包裹明细回补总池库存；</li>
+     *   <li><b>该订单一张在途包裹都不剩</b>（= 拆单结果被整体撤销）→ <b>不许回补</b>：货仍记在这张订单名下，
+     *       等订单真正终止时（关闭(4) / 已退款(6) / 删单）由 {@code OrderController#auditReject} /
+     *       {@code ReturnApplyController} / {@code OrderPurgeService} 一次性回补。</li>
+     * </ul>
+     *
+     * <p><b>为什么必须加这个条件</b>（缺陷：库存数量守恒）：{@link #recompute} 会把「包裹全取消」的订单
+     * 退回 7 待审核以便重新审核拆单，而 {@code SplitOrderService#split} 只建包裹、<b>不再扣一次库存</b>。
+     * 「取消就回补」的后果是：重新履约一次、货出去了、总池库存却是回补后的值 —— 同一件货被出库两次，
+     * 库存虚高 N 件（账上还很干净：该单台账净额恰好 0）。
+     * 现在库存归属只跟着「这张单还有没有在途包裹」走，与 {@code recompute} 的判据**同一口径**，
+     * 所以「退回待审核」的订单在库存形态上与任何一张普通待审核订单完全一样。
+     *
+     * <p>回补仍然打在该「总池」上（下单时扣的是总池；inventory 是分仓归属记录，拆单并未扣它，故不回补 inventory），
+     * 台账/幂等键/数量守恒一个字都没改 —— 本方法只是把「回补」的发生时机从「每取消一张」改成「拆单结果被撤销时不动」。
      */
     @Transactional(rollbackFor = Exception.class)
     public DeliveryOrder cancel(Long deliveryId) {
@@ -123,17 +140,68 @@ public class DeliveryFlowService {
         if (delivery.getStatus() != DeliveryOrder.PENDING) {
             throw new IllegalStateException("只有待下发发货单可以取消");
         }
+        // ① 加锁（顺序固定：先本单包裹行、再父单行 —— 与 recompute 的加锁顺序一致，不会成环）。
+        //    不锁的后果（实测 5/5 复现，见 ConcurrentCancelProbeTest）：两张包裹被并发取消时，
+        //    两个事务各自只看到「对方还在途」→ 双双回补（库存凭空多出来），而且两个 recompute
+        //    都因为「还有一张在途」而不写状态 → 订单卡在 8 待发货、却一张在途包裹都没有
+        //    （正是 8→7 那条规则本来要消灭的死锁形态）。
+        //    ★ 锁必须配**排他读**：MySQL 默认 REPEATABLE READ 下，普通 SELECT 用的是本事务
+        //    第一次一致性读建立的快照（这里是上面那句 require(...)），加锁也读不到别人后来的提交。
+        //    所以下面的「还剩几张在途」与 recompute 的子单列表都走 lockParcels()（FOR UPDATE → 读最新已提交）。
+        List<DeliveryOrder> siblings = lockParcels(delivery.getOrderId());
+        lockOrderRow(delivery.getOrderId());
+
         // fail-closed：0 行 = 读到「待下发」之后别人改过 → 409 回滚，库存一次都不会被回补
         int rows = deliveryStatusService.change(delivery, DeliveryOrder.CANCELLED,
                 DeliveryStatusService.REASON_CANCEL, null);
         OptimisticLockGuard.requireAffected(rows);
 
-        deliveryItemService.list(new LambdaQueryWrapper<DeliveryItem>()
-                        .eq(DeliveryItem::getDeliveryId, deliveryId))
-                .forEach(item -> skuService.restoreStock(item.getProductSkuId(), item.getQuantity()));
+        // ② 条件回补：判据 = 这张单**除本次取消的这张之外**还有没有在途包裹。
+        //    siblings 是加锁后的最新快照，且这些行已被本事务锁住，所以这个判据在并发下是稳的。
+        long othersActive = siblings.stream()
+                .filter(d -> !d.getId().equals(deliveryId))
+                .filter(d -> d.getStatus() == null || d.getStatus() != DeliveryOrder.CANCELLED)
+                .count();
+        if (othersActive > 0) {
+            deliveryItemService.list(new LambdaQueryWrapper<DeliveryItem>()
+                            .eq(DeliveryItem::getDeliveryId, deliveryId))
+                    .forEach(item -> skuService.restoreStock(item.getProductSkuId(), item.getQuantity()));
+        } else {
+            log.info("包裹 {}（订单 {}）是该订单最后一张在途包裹：按「拆单结果被撤销」口径**不回补库存**，"
+                            + "货仍记在该订单名下；待订单关闭/退款/删除时再一次性回补",
+                    delivery.getDeliverySn(), delivery.getOrderId());
+        }
 
         recomputeOrderStatus(delivery.getOrderId());
         return delivery;
+    }
+
+    /**
+     * 该订单名下全部包裹行（**排他读**：{@code SELECT ... FOR UPDATE}）。
+     *
+     * <h3>为什么不能是普通 SELECT</h3>
+     * MySQL 默认隔离级别是 REPEATABLE READ：事务里第一次一致性读会建一个快照，之后普通 SELECT 都读快照。
+     * 「两张包裹被并发取消」时，后到的那个事务的快照**建立在自己那句 require(...) 上**，
+     * 于是它看不到前一个事务刚提交的取消 —— 判据会算成「还有一张在途」，两个事务都回补，
+     * 且两个 {@code recompute} 都不写状态。排他读（锁定读）不走快照、永远读最新已提交版本，
+     * 这才是「这张单现在到底还有没有在途包裹」的正确答案。
+     *
+     * <p>副作用只有一个、而且是想要的：把这一组行锁到事务结束，判据与随后的写之间不会再被插队。
+     */
+    private List<DeliveryOrder> lockParcels(Long orderId) {
+        return deliveryOrderService.list(new LambdaQueryWrapper<DeliveryOrder>()
+                .eq(DeliveryOrder::getOrderId, orderId)
+                .orderByAsc(DeliveryOrder::getId)
+                .last("FOR UPDATE"));
+    }
+
+    /**
+     * 取父订单行的排他锁（{@code SELECT ... FOR UPDATE}），把同一订单的取消串成串行。
+     * 只锁不写：不涨 {@code version}、不产生任何台账行、不改任何字段。
+     */
+    private void lockOrderRow(Long orderId) {
+        orderService.getBaseMapper().selectOne(new LambdaQueryWrapper<Order>()
+                .eq(Order::getId, orderId).last("FOR UPDATE"));
     }
 
     /**
@@ -211,7 +279,13 @@ public class DeliveryFlowService {
                 + "下发后不可撤回，只能等 WMS 回传。";
     }
 
-    /** 预演「取消」：守卫同 {@link #cancel}；文案要点明回补哪些 SKU 多少件 */
+    /**
+     * 预演「取消」：守卫同 {@link #cancel}。
+     *
+     * <p>文案必须分两支说清「这一下到底动不动库存」——「取消」在业务上很容易被理解成「货退回货架」，
+     * 而本系统的口径是：<b>只有拆单结果被整体撤销时货才继续记在这张单名下</b>。
+     * 预演的职责就是把这件事提前说明白，别让人点完一堆问号。
+     */
     public String previewCancel(Long deliveryId) {
         DeliveryOrder d = require(deliveryId);
         if (d.getStatus() != DeliveryOrder.PENDING) {
@@ -219,9 +293,17 @@ public class DeliveryFlowService {
         }
         List<DeliveryItem> items = itemsOf(deliveryId);
         List<String> restore = skuQtyLines(items);
-        return "将取消包裹 " + d.getDeliverySn() + "（" + warehouseName(d.getWarehouseId())
-                + "）：状态 待下发→已取消，并把 " + items.size() + " 条明细的 SKU 总池库存回补（"
-                + describeSkuQty(restore) + "，合计 " + totalQty(items) + " 件）；父订单状态会重新聚合。";
+        String head = "将取消包裹 " + d.getDeliverySn() + "（" + warehouseName(d.getWarehouseId())
+                + "）：状态 待下发→已取消";
+        // 计数包含这一张：> 1 = 取消之后还有别的在途包裹（这一包的货当真回货架）
+        if (activeDeliveryCount(d.getOrderId()) > 1) {
+            return head + "，并把 " + items.size() + " 条明细的 SKU 总池库存回补（"
+                    + describeSkuQty(restore) + "，合计 " + totalQty(items) + " 件）；父订单状态会重新聚合。";
+        }
+        return head + "。这是该订单最后一张在途包裹：**本次不回补库存**（货仍记在这张订单名下，"
+                + "这一包共 " + items.size() + " 条明细、" + totalQty(items) + " 件）——"
+                + "订单会退回「待审核」并可重新审核拆单；只有订单被关闭 / 退款 / 删除时才一次性回补。"
+                + "父订单状态会重新聚合。";
     }
 
     /** 预演「WMS 回传」：守卫同 {@link #wmsCallback}（含幂等判断） */
@@ -491,8 +573,11 @@ public class DeliveryFlowService {
             log.info("订单 {} 正处于「退款中」（退货申请审批中），跳过包裹聚合（退款流程状态不被回传改写）", orderId);
             return;
         }
-        List<DeliveryOrder> children = deliveryOrderService.list(
-                new LambdaQueryWrapper<DeliveryOrder>().eq(DeliveryOrder::getOrderId, orderId));
+        // 子单事实必须**读最新已提交**（lockParcels = 锁定读），不能读 REPEATABLE READ 的快照：
+        // 并发场景下（例：两张包裹被同时取消）后到的事务快照里前一张包裹还是「待下发」，
+        // 于是这里会算出「还有在途」而不写状态 —— 父单永远推不动，正是本段要消除的那类死锁。
+        // 加锁顺序与 cancel 一致（包裹行 → 父单行），不会成环。
+        List<DeliveryOrder> children = lockParcels(orderId);
         if (children.isEmpty()) {
             // 一张包裹行都没有（直发单）：聚合没有事实可依，正常调用一律不动状态。
             // 唯一例外是「删掉了待处理退货申请」—— 那一步把订单从 5 交回来，必须给它一个可继续的状态，

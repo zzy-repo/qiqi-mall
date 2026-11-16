@@ -11,7 +11,12 @@
 #   · 父订单状态与包裹事实分叉（父单说「已发货」但没有任何包裹真的出库；或货已出库、父单还挂着「待发货」）
 #     —— 所有按状态聚合的报表与文档从此都要为它开例外；
 #   · **状态台账与 status_seq 不一致**（⑥）—— 每次状态流转应该恰好留一条台账，
-#     多一条少一条都说明「写入路径漏了或重了」，而这类漏记在业务层完全看不出。
+#     多一条少一条都说明「写入路径漏了或重了」，而这类漏记在业务层完全看不出；
+#   · **库存被「拆单被撤销」的订单占住**（⑦）—— 取消最后一张包裹不再回补库存（口径见
+#     DeliveryFlowService#cancel），货仍记在该订单名下。这类订单在数据上**长得跟正常待审核订单一样**，
+#     只有「退回待审核过 + 没有在途包裹 + 台账净额仍为负」这三条同时成立才认得出来。
+#     它不是错误（订单可能确实还在等人重新审核），所以**按停留时长分档**：短的算正常等待，
+#     长的才提示人工处理 —— 默认只告警，--strict 才把「长期悬挂」判红。
 # 这三类都得**定期扫**，等到业务方发现「库存对不上」时已经查不出是哪一步坏的。
 # 所以把体检做成一条命令：只读、10 秒内跑完、有数字、有样本、退出码能直接判断这次体检过没过。
 #
@@ -20,12 +25,15 @@
 #   ./scripts/check-data-integrity.sh qiqi_mall_test  # 只体检指定库（可给多个）
 #   ./scripts/check-data-integrity.sh --strict        # 历史「分叉-已完成但包裹未签收」也判红（默认只告警）
 #   ./scripts/check-data-integrity.sh --samples 10    # 每类分叉最多打几条样本（默认 5，0 = 不打）
+#   ./scripts/check-data-integrity.sh --stuck-days 3  # ⑦ 的「长期悬挂」分档天数（默认 3，见该节口径）
 #   ./scripts/check-data-integrity.sh --help
 #
 # ── 退出码 ─────────────────────────────────────────────────────────────────
 #   0 = 全部通过（告警不算问题）
-#   1 = 有问题（孤儿台账 / 负库存 / 父单超前 / 父单落后；--strict 还包括「已完成但包裹未签收」）
+#   1 = 有问题（孤儿台账 / 负库存 / 父单超前 / 父单落后；--strict 还包括「已完成但包裹未签收」，
+#       --strict 还包括 ⑦ 的「长期悬挂」档）
 #       ④ 桶缺失 / ⑤ 缓存偏差 **只告警不判红**（缓存滞后是分桶模式的正常现象，阈值见 --drift）
+#       ⑦ 库存被撤销拆单的订单占住 **默认只告警**（订单确实可能还在等重新审核），见该节分档口径
 #   2 = 参数或环境错误（docker 不可用、库连不上、库名不存在…）—— **不等于「没问题」**，别当 0 用
 #
 # ── 只读承诺 ───────────────────────────────────────────────────────────────
@@ -60,6 +68,9 @@ SAMPLES=5
 # ⑤ 缓存偏差告警阈值（绝对件数）：|sku.stock − SUM(桶)| 超过它才告警。
 # 分桶模式下缓存滞后一个回写周期（250ms）是正常的，所以这里只报警、不判红。
 DRIFT=100
+# ⑦ 库存占用分档（天）：< N 天 = 正常等待（订单还在等重新审核，属正常业务）；
+#    N ~ 2N 天 = 待关注；>= 2N 天 = 长期悬挂（默认仍只告警，--strict 判红）。
+STUCK_DAYS=3
 DBS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -69,12 +80,15 @@ while [[ $# -gt 0 ]]; do
     --drift=*)   DRIFT="${1#--drift=}"; shift ;;
     --samples)   SAMPLES="${2:-}"; shift 2 ;;
     --samples=*) SAMPLES="${1#--samples=}"; shift ;;
+    --stuck-days)   STUCK_DAYS="${2:-}"; shift 2 ;;
+    --stuck-days=*) STUCK_DAYS="${1#--stuck-days=}"; shift ;;
     -*)          echo "✗ 不认识的参数：$1（用 --help 看用法）" >&2; exit 2 ;;
     *)           DBS+=("$1"); shift ;;
   esac
 done
 [[ "$SAMPLES" =~ ^[0-9]+$ ]] || { echo "✗ --samples 需要非负整数（收到「$SAMPLES」）" >&2; exit 2; }
 [[ "$DRIFT" =~ ^[0-9]+$ ]] || { echo "✗ --drift 需要非负整数（收到「$DRIFT」）" >&2; exit 2; }
+[[ "$STUCK_DAYS" =~ ^[1-9][0-9]*$ ]] || { echo "✗ --stuck-days 需要正整数（收到「$STUCK_DAYS」）" >&2; exit 2; }
 if [[ ${#DBS[@]} -eq 0 ]]; then DBS=("qiqi_mall" "qiqi_mall_test"); fi
 
 # 库名要拼进 SQL，先校验它只含字母、数字、下划线
@@ -347,6 +361,112 @@ if [[ "$ledger_problems" == "0" ]]; then
 fi
 echo
 
+# ================================================================ ⑦ 库存被「撤销的拆单」占住的订单
+echo "⑦ 库存被「撤销的拆单」占住的订单（退回待审核后没有在途包裹，货仍记在该订单名下）"
+# ── 为什么需要这一项（口径见 DeliveryFlowService#cancel 的注释）─────────────────────────
+# 取消最后一张包裹时**不回补库存**：货仍记在这张订单名下，等订单真正终止
+# （关闭(4) / 已退款(6) / 删单）时才一次性回补。这样「重新审核拆单 → 再发货」不会把同一件货出库两次。
+# 代价是：货在数据上被一张「可能永远不再处理」的单占着，而这**完全看不出来** ——
+#   它的形态与任何一张普通待审核订单一模一样（扣了库存、没有包裹），
+#   `sku.stock` 与 SUM(桶) 仍然相等，①~⑥ 全部干净。
+#
+# ── 指纹（为什么是这三条而不是看状态）────────────────────────────────────────────────
+#   ① order_status_ledger 里有 reason='DELIVERY_AGGREGATE' 且 to_status=7 的行
+#      = 这张单曾经「包裹全被取消 → 退回待审核」（该行由 DeliveryFlowService#recompute 写），
+#      普通待审核订单没有这一行；取 MAX(created_at) 作为「退回来的时刻」；
+#   ② 现在一张在途包裹都没有（status <> 9）；
+#   ③ stock_ledger 净额仍为负（货还占着；净额 0 = 已经补过/部分取消已补，不算占用）。
+#
+# ── 分档（**不一律判红**）─────────────────────────────────────────────────────────
+# 退回待审核之后订单本来就要等人重新审核，所以「占着」本身不是错误。按停留时长分三档：
+#   · < N 天      → 正常等待（不告警，只计数）
+#   · N ~ 2N 天   → 待关注（告警，给样本）
+#   · >= 2N 天    → 长期悬挂（告警 + 样本；--strict 下判红）
+# N 由 --stuck-days 控制（默认 3）。处理出路永远是这三条之一：重新审核发货 / 审核不通过关闭(4) /
+# 退货退款(6) / 删单 —— 每条都会把库存回补或转成「货真的出去了」。本脚本只读，不替你动手。
+stuck_warn_days="$STUCK_DAYS"
+stuck_red_days=$(( STUCK_DAYS * 2 ))
+stuck_problems=0
+for db in "${DBS[@]}"; do
+  has_tables="$(q "SELECT COUNT(*) FROM information_schema.tables
+                    WHERE table_schema = '$db'
+                      AND table_name IN ('order_status_ledger','stock_ledger','delivery_order')")"
+  if [[ "$has_tables" != "3" ]]; then
+    printf '  ⚠ %-16s 缺台账/包裹表（未跑迁移？）—— 跳过本项\n' "$db"
+    warnings=$((warnings + 1))
+    continue
+  fi
+
+  # 每张「退回来的单」一行：id / 停留天数 / 占用件数
+  stuck_rows="$(q "SELECT t.oid, t.hrs, t.occ
+                     FROM (
+                       SELECT o.id AS oid,
+                              TIMESTAMPDIFF(HOUR, l.last_back, NOW()) AS hrs,
+                              -SUM(sl.delta) AS occ
+                         FROM \`$db\`.\`order\` o
+                         JOIN (SELECT order_id, MAX(created_at) AS last_back
+                                 FROM \`$db\`.order_status_ledger
+                                WHERE reason = 'DELIVERY_AGGREGATE' AND to_status = 7
+                                GROUP BY order_id) l ON l.order_id = o.id
+                         JOIN \`$db\`.stock_ledger sl ON sl.order_id = o.id
+                        WHERE o.status IN (7, 8)
+                          AND NOT EXISTS (SELECT 1 FROM \`$db\`.delivery_order d
+                                           WHERE d.order_id = o.id AND d.status <> 9)
+                        GROUP BY o.id, l.last_back
+                       HAVING SUM(sl.delta) < 0
+                     ) t
+                    ORDER BY t.hrs DESC")"
+
+  if [[ -z "$stuck_rows" ]]; then
+    printf '  ✓ %-16s 没有被「撤销的拆单」占住的库存（0 单）\n' "$db"
+    continue
+  fi
+
+  total="$(echo "$stuck_rows" | wc -l | tr -d ' ')"
+  # 分档统计：1 = 正常等待（<N 天）；2 = 待关注（N~2N）；3 = 长期悬挂（>=2N）
+  t1=0; t2=0; t3=0; occ1=0; occ2=0; occ3=0
+  while IFS=$'\t' read -r _oid hrs occ; do
+    days=$(( (hrs + 23) / 24 ))          # 向上取整成天：2h 显示 1 天，不显示「0 天」
+    case "$hrs" in ''|*[!0-9]*) continue ;; esac
+    if   [[ "$hrs" -lt $(( stuck_warn_days * 24 )) ]]; then t1=$((t1+1)); occ1=$((occ1+occ))
+    elif [[ "$hrs" -lt $(( stuck_red_days  * 24 )) ]]; then t2=$((t2+1)); occ2=$((occ2+occ))
+    else                                                     t3=$((t3+1)); occ3=$((occ3+occ))
+    fi
+  done <<< "$stuck_rows"
+
+  printf '  %-16s 共 %s 单被占住：正常等待(<%s天) %s 单/占用 %s 件｜待关注(%s~%s天) %s 单/占用 %s 件｜长期悬挂(>=%s天) %s 单/占用 %s 件\n' \
+    "$db" "$total" "$stuck_warn_days" "$t1" "$occ1" \
+    "$stuck_warn_days" "$((stuck_red_days - 1))" "$t2" "$occ2" "$stuck_red_days" "$t3" "$occ3"
+
+  if [[ $((t2 + t3)) -gt 0 ]]; then
+    warnings=$((warnings + 1))
+    echo "    ⚠ 有 ${t2} 单待关注、${t3} 单长期悬挂 —— 这些单的货还记在订单名下（库存仍被占用）："
+    echo "      · 出路：重新审核发货 / 审核不通过关闭(4) / 退货退款(6) / 删单（每条都会结算库存）"
+    echo "$stuck_rows" | awk -F'\t' -v w="$stuck_warn_days" -v r="$stuck_red_days" \
+      -v n="$SAMPLES" -v db="$db" '
+      BEGIN { printed = 0 }
+      {
+        hrs = $2 + 0; occ = $3 + 0
+        if (hrs < w * 24) next                      # 正常等待的不打样本
+        if (printed >= n) next
+        tier = (hrs >= r * 24) ? "长期悬挂" : "待关注"
+        printf "      · %s order id=%s 停留 %.1f 天 占用 %d 件 [%s]\n", db, $1, hrs / 24.0, occ, tier
+        printed++
+      }'
+    if [[ "$STRICT" == "1" && "$t3" -gt 0 ]]; then
+      problems=$((problems + 1)); stuck_problems=1
+      echo "    ✗ --strict：${t3} 单已悬挂 >= ${stuck_red_days} 天，按「库存长期被占住」判红"
+    fi
+  else
+    echo "    → 全部都在 ${stuck_warn_days} 天以内：订单还在等重新审核，属正常等待（不告警）"
+  fi
+done
+if [[ "$stuck_problems" == "0" ]]; then
+  echo "  → 口径：这类订单不是错误，只是「货还记在单名下」。它与正常待审核订单在数据上完全一样，"
+  echo "        所以只能靠「退回待审核过 + 无在途包裹 + 台账净额<0」这三条认出来（普通待审核单没有第一条）。"
+fi
+echo
+
 # ================================================================ 结论
 elapsed=$(( $(date +%s) - started ))
 echo "────────────────────────────────────────────────────────────"
@@ -356,5 +476,6 @@ if [[ "$problems" == "0" ]]; then
 fi
 printf '结论：FAIL（问题 %s 项，告警 %s 项）｜耗时 %ss\n' "$problems" "$warnings" "$elapsed"
 echo "处理建议：孤儿台账先 dump 再按 NOT EXISTS 清理；负库存查扣减入口；A/B 分叉用父单状态重算（DeliveryFlowService#recomputeOrderStatus）回填；
-⑤ 桶缺失/缓存偏差：历史脚本 migrate-sku-bucket.sql 已下线（结构请用 db/migration/V*）；桶缺失用 sql/reset-sku-bucket-N.sql 按目标桶数重铺，重置总量用 sql/reset-sku-bucket.sql（分仓库存是另一件事，用 scripts/backfill-inventory.sh）。"
+⑤ 桶缺失/缓存偏差：历史脚本 migrate-sku-bucket.sql 已下线（结构请用 db/migration/V*）；桶缺失用 sql/reset-sku-bucket-N.sql 按目标桶数重铺，重置总量用 sql/reset-sku-bucket.sql（分仓库存是另一件事，用 scripts/backfill-inventory.sh）；
+⑦ 库存被撤销拆单的订单占住：不是数据错误，去业务侧结掉那些单（重新审核发货 / 审核不通过 / 退货退款 / 删单），每条出路都会结算库存。"
 exit 1

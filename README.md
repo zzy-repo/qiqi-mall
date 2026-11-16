@@ -105,6 +105,37 @@ cd qiqi-mall-server && mvn -o compile
 
 ⚠️ **新增 Maven 依赖后，dev 8081 必须整进程重启**（`mvn compile` 触发的 devtools 热重启救不了：JVM classpath 是启动时固定的，新依赖的类加载不到，会 `NoClassDefFoundError` 把服务带下去）。此时杀掉 8081 进程重新 `mvn spring-boot:run` 即可；e2e 后端（8091/8092）还要重跑 `scripts/e2e-classpath.sh` 刷新 `target/e2e-cp.txt`。
 
+## 测试（后端集成测试）
+
+后端用例是真**连库**跑的集成测试（`src/test/java`，Surefire 收 `*Test`），默认连 dev 库 `qiqi_mall`，
+自建自清（造数据 → 断言 → 删干净 → 把动过的 SKU 库存还原），所以**只断言自己造的数据**。
+统一入口带一把跨命令互斥锁（与 `npm test` 共用，避免两边的清理/复位互相踩）：
+
+```bash
+./scripts/run-it.sh                                         # 全量
+./scripts/run-it.sh -Dtest=OptimisticLockIntegrationTest    # 单类
+```
+
+### ⚠️ 连接池压到 6：别裸跑，也别压到 2
+
+```bash
+./scripts/run-it.sh -Dspring.datasource.hikari.maximum-pool-size=6
+```
+
+- **裸跑（Hikari 默认 10）会随机红**：每个 `@SpringBootTest` 属性组合各建一套 Spring 上下文，各自持有一个
+  连接池，而上下文是被缓存复用（池不关）；再叠上常驻的 dev 后端与两套 e2e 后端（8091/8092），
+  很容易顶穿 MySQL 的 `max_connections = 151`。症状是**最后一个上下文根本建不起来**：
+  `Unable to obtain connection from database … "Too many connections"` —— 看着像某条用例失败，
+  实际那一个类一条都没跑（会以 `Failed to load ApplicationContext` 出现）。
+- **压到 2 会反向踩坑**：`OptimisticLockIntegrationTest` 有 9 条「持锁并发」用例 —— 在一条连接上
+  `SELECT … FOR UPDATE` 按住行锁、另一个线程打 HTTP、主线程再查库断言，**同一时刻需要 ≥3 条连接**；
+  池子只有 2 时它们全部 `CannotGetJdbcConnection: Failed to obtain JDBC Connection` 并各超时 30s。
+  所以这个值的**下界是 3**，取 6 是留余量（上下文数 × 6 仍远低于上限）。
+- **只作命令行参数，不要写进 `application*.yml`**：它是本机/CI 的并发环境参数，生产不该被它影响；
+  yml 里那条 `useLocalSessionState=true` 才有业务含义（改它前先看 `scripts/check-jdbc-session-safety.sh`）。
+
+数据完整性体检（只读、可反复跑）另有一支：`./scripts/check-data-integrity.sh`（①~⑦，退出码见 `--help`）。
+
 ## 部署（容器）
 
 镜像多阶段构建，只对外暴露前端端口，详见 `docs/docker.md`。

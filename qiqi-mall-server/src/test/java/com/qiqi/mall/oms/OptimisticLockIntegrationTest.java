@@ -517,6 +517,11 @@ class OptimisticLockIntegrationTest {
     void cancel_interleavedWrite_409AndNoStockRestore() {
         Long orderId = newOrder(8);
         Long deliveryId = newDelivery(orderId, warehouseA, 3);
+        // 同单再挂一张待下发包裹：本用例验的是「冲突不回补 + 重试只回补一次」，
+        // 而现在的口径是「取消**最后一张**包裹不回补（货仍记在订单名下，见 DeliveryFlowService#cancel）」。
+        // 所以这里必须让被取消的这张**不是最后一张**，否则「回补 3 件」这条断言本身就与新口径矛盾。
+        // （这是 ⑩ 唯一为新口径做的夹具调整，断言一个字没改。）
+        newDelivery(orderId, warehouseB, 2);
         Long skuId = jdbc.queryForObject(
                 "SELECT product_sku_id FROM delivery_item WHERE delivery_id = ? LIMIT 1", Long.class, deliveryId);
         int stockBefore = stockOf(skuId);
