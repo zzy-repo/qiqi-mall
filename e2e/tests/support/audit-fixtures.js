@@ -46,6 +46,23 @@ export const POLICY_NAME = {
 /** seed 里 AUTO/BLOCK/EXCEPTION 三类策略共 7 条 + 1 条全局排除（scope=ALL_AUTO） */
 export const DEMO_POLICY_COUNT = 7
 
+/**
+ * 演示 SKU 的目标桶数 —— 必须与后端 `qiqi.stock.bucket-count` 一致。
+ *
+ * 三处必须同值（改一处就要三处一起改，否则「代码按 N 找桶号、库里却是另一个 N」= 明明有货判缺货）：
+ *   · qiqi-mall-server/src/main/resources/application-dev.yml  （e2e 后端 8091/8092 用 dev profile）
+ *   · qiqi-mall-server/src/main/resources/application-test.yml （容器栈 18080 用 test profile）
+ *   · sql/reset-sku-bucket-N.sql 的 @n
+ * 现在三处都是 8（e2e/tests/scenarios/库存/库存分桶.spec.js 的 BUCKET_COUNT 也是同一个约定）。
+ */
+const DEMO_BUCKET_COUNT = 8
+
+/** seed 给 9 个演示 SKU 的目标总量：8 个 1000（见 sql/seed-order-audit-demo.sql 的 stock 列） */
+const DEMO_SKU_STOCK = 1000
+
+/** 第 8 个演示 SKU（OFFSET 7 = 按 id 升序的第 8 个）故意留 0 库存 —— QT-1006 的「库存不足」全靠它 */
+const DEMO_ZERO_STOCK_INDEX = 7
+
 const SEED_SQL = new URL('../../../sql/seed-order-audit-demo.sql', import.meta.url)
 
 /* ------------------------------------------------------------------ SQL 小工具 */
@@ -148,11 +165,103 @@ function demoSkuIds() {
 }
 
 /**
+ * 把若干 SKU 的库存桶**按目标总量重铺**（DELETE → 按 N 均分 INSERT → 对齐 sku.stock → 回读自证）。
+ *
+ * ── 为什么必须是「删了重铺」而不是「一条 UPDATE 按桶号均分」──────────────────────
+ * 因为要同时保证两个不变量，而它们在「桶数本来就不对」时无法用 UPDATE 达成：
+ *   ① SUM(桶) == 该 SKU 的目标总量；
+ *   ② 桶数 == DEMO_BUCKET_COUNT（后端按 bucket_no = hash % N 找桶，桶号缺一个就是假缺货）。
+ * 桶数不对（实测：e2e 分片库 a/b 的 9 个演示 SKU 只有 bucket_no=0 这一个桶，因为
+ * sql/seed-order-audit-demo.sql 只给每个 SKU 插 1 行，而 reset-sku-bucket-N.sql 只在
+ * qiqi_mall_test 上被 reset-test-db.sh 跑过）时，旧桶行既凑不出 N 个桶号、总量也没法均分，
+ * 只能重铺。选 DELETE+INSERT 而不是 UPDATE 的理由到此为止：**它能同时表达「补桶」和「改总量」**，
+ * 而 UPDATE 只能改现有行的值。
+ *
+ * ── 余数怎么处理（这是本次缺陷的第二个坑）──────────────────────────────────────
+ * 与后端 `SkuBucketMapper#insertSplit`、`#backfill`、`sql/reset-sku-bucket-N.sql` ⑤ 段**逐字同一套**：
+ *   桶 i 的库存 = FLOOR(total / N) + (i == 0 ? total - FLOOR(total / N) * N : 0)
+ * 即**余数全部进 0 号桶**。这样 SUM 严格等于 total：
+ *   · 1000 / 8 = 125 整除 → 8 个 125（余数 0）；
+ *   · 1001 / 8 = 125 余 1 → 0 号桶 126、1..7 号桶各 125（SUM = 1001，不是 1000）；
+ *   · total = 0（第 8 个 SKU）→ 8 个 0（不是「没有桶」—— 那样 QT-1006 会走「按 sku.stock 物化」的兜底路径，
+ *     变成测另一条链路）；
+ *   · total < N（例如 3）→ 0 号桶 3、其余 0（FLOOR = 0，余数 3）。
+ * 用 FLOOR 而不做余数分配会得到 SUM = FLOOR(total/N)*N < total（1001 时少 1 件），
+ * 那种「少 1 件」不会报错，只会让对账/断言悄悄偏 —— 所以余数必须显式落桶。
+ *
+ * ── 要不要「标脏」？**不需要**，理由如下 ──────────────────────────────────────
+ * `sku.stock` 是 SUM(桶) 的展示缓存，由 StockCacheRefresher 每 250ms 回写一次；
+ * 标脏（StockCacheDirtyMarker）是**后端 JVM 内存里的一个 Map**，只有扣减/回补/管理端重置
+ * 才会往里塞，SQL 侧根本够不着 —— 也就是说「fixture 标脏」这件事在物理上做不到。
+ * 旧代码之所以躺了两天：它把桶写成 8×1000 = 8000、却把 sku.stock 写成 1000，
+ * 于是**谁也没欠谁一次回写**（没有标脏 ⇒ 回写任务永远不会来；而就算来了，回写的也是 SUM=8000，
+ * 只会把 sku.stock 也放大成 8000）。这里改成「桶与缓存写同一个数」以后：
+ *   · 写的那一刻偏差就是 0（不是「等 250ms 追平」，是从来没有偏差）；
+ *   · 万一某个用例的扣减把该 SKU 标了脏，回写拿到的 SUM(桶) 正是我们铺的这个总量 ± 那次扣减，
+ *     回写结果与我们的写入一致（幂等），不会把 8×125 打回 8×1000。
+ * 所以正确做法不是「标脏补偿」，而是**两侧写同一个数**：一个原本就没有偏差的状态不需要任何补偿。
+ *
+ * ⚠️ 只动 sku_bucket 与 sku.stock 两处（不碰 version：后端 refreshSkuCache 也不碰，
+ *    否则后台编辑会被莫名其妙判成 409）。
+ *
+ * @param {{skuId: number, total: number}[]} totals 每个 SKU 的目标总量（total >= 0）
+ */
+function resplitSkuBuckets(totals) {
+  const list = (totals || []).map((t) => ({ skuId: Number(t.skuId), total: Math.max(0, Number(t.total)) }))
+  if (!list.length) return
+  const n = DEMO_BUCKET_COUNT
+  const skuIds = list.map((t) => t.skuId).join(', ')
+  // (sku_id, total) 两列的目标总量表：INSERT 与 UPDATE 各 join 一次，避免把数字拼进两条语句各写一遍
+  const totalsTable = list
+    .map((t) => `SELECT ${t.skuId} AS sku_id, ${t.total} AS total`)
+    .join(' UNION ALL ')
+  // 桶号数字表 0..N-1（与后端 insertSplit 的 nos 同一形状；纯整数，不涉及注入）
+  const bucketNos = Array.from({ length: n }, (_, i) => `SELECT ${i} AS n`).join(' UNION ALL ')
+
+  execSql(`
+    DELETE FROM sku_bucket WHERE sku_id IN (${skuIds});
+    INSERT INTO sku_bucket (sku_id, bucket_no, stock)
+    SELECT t.sku_id, seq.n,
+           FLOOR(t.total / ${n}) + IF(seq.n = 0, t.total - FLOOR(t.total / ${n}) * ${n}, 0)
+      FROM (${totalsTable}) t CROSS JOIN (${bucketNos}) seq;
+    UPDATE sku s JOIN (${totalsTable}) t ON t.sku_id = s.id SET s.stock = t.total;
+  `)
+
+  // 回读自证：铺完必须真的是「N 个桶 + SUM == 目标总量」。不复核的话，这个函数就退化成一个
+  // 静默的「看起来成功了」—— 本文件从第 174 行起的那次事故正是这样躺了两天。
+  const rows = rowsOf(
+    `SELECT s.id, s.stock, COUNT(b.id) AS buckets, COALESCE(SUM(b.stock), 0) AS bucket_sum `
+    + `FROM sku s LEFT JOIN sku_bucket b ON b.sku_id = s.id `
+    + `WHERE s.id IN (${skuIds}) GROUP BY s.id, s.stock`
+  )
+  const byId = new Map(rows.map(([id, stock, buckets, sum]) => [Number(id), {
+    stock: Number(stock), buckets: Number(buckets), bucketSum: Number(sum)
+  }]))
+  const bad = list.filter(({ skuId, total }) => {
+    const got = byId.get(skuId)
+    return !got || got.buckets !== n || got.bucketSum !== total || got.stock !== total
+  })
+  if (bad.length) {
+    throw new Error('演示 SKU 的库存桶重铺失败：'
+      + bad.map(({ skuId, total }) => {
+        const got = byId.get(skuId)
+        return `SKU ${skuId} 目标 ${total}（${n} 个桶）实际 ${got
+          ? `SUM=${got.bucketSum}、桶数=${got.buckets}、sku.stock=${got.stock}`
+          : '查不到行'}`
+      }).join('；'))
+  }
+}
+
+/**
  * 把六笔演示单还原成 seed 基线（**可重复跑**）：
  *   · 删决策 / 删标 / 删状态台账（都是本用例跑 run 时留下的，seed 里本来没有）；
  *   · 退款申请回到「待处理 0」，并删掉售后台账（QT-1005 第一轮冻结的触发事实要能复现）；
  *   · 订单回 status=7、status_seq=0（决策的 order_status_seq 与台账幂等键都依赖它）；
- *   · 演示 SKU 的库存与桶回到 seed 值（QT-1006 的人工关单会回补库存，不回滚会逐轮漂移）。
+ *   · 演示 SKU 的库存桶按 seed 的目标总量**重铺**成 DEMO_BUCKET_COUNT 个桶
+ *     （SUM(桶) == 1000，第 8 个 SKU 为 0），sku.stock 写同一个数。
+ *     为什么是「重铺」而不是「改值」：QT-1006 的人工关单会回补库存（不回滚就逐轮漂移），
+ *     而桶数本身也可能不是 N（e2e 分片库实测只有 1 个桶 = bucket_no 0，扣减只能靠「换桶兜底」命中，
+ *     与 test/dev 的 8 桶形态不一致）—— 见 resplitSkuBuckets。
  *
  * 不 TRUNCATE、不碰非演示数据 —— 只按订单号收敛到自己这六笔单上。
  * @returns {number[]} 复位到的订单 id
@@ -173,13 +282,15 @@ export function resetAuditDemoBaseline({ sns = DEMO_ORDER_SNS } = {}) {
 
   const skus = demoSkuIds()
   if (skus.length >= 8) {
-    // seed：9 个 SKU 全是 1000，只有第 8 个（OFFSET 7）故意是 0
-    execSql(`
-      UPDATE sku_bucket SET stock = 1000 WHERE sku_id IN (${skus.join(', ')});
-      UPDATE sku_bucket SET stock = 0 WHERE sku_id = ${skus[7]};
-      UPDATE sku SET stock = 1000 WHERE id IN (${skus.join(', ')});
-      UPDATE sku SET stock = 0 WHERE id = ${skus[7]};
-    `)
+    // seed：9 个 SKU 全是 1000，只有第 8 个（OFFSET 7）故意是 0。
+    // 重铺成 DEMO_BUCKET_COUNT 个桶、SUM(桶) == 目标总量（余数进 0 号桶），并把 sku.stock 写成同一个数。
+    // ⚠️ 以前的写法是 `UPDATE sku_bucket SET stock = 1000 WHERE sku_id IN (...)` —— 那是把**总量**
+    //    写进**每个桶**：库里已有 8 个桶时 SUM 变成 8×1000 = 8000，而 sku.stock 只拿到 1000，
+    //    权威值当场被放大 8 倍；且裸 SQL 不标脏 ⇒ 250ms 的回写任务永远不会来追平（见 resplitSkuBuckets 注释）。
+    resplitSkuBuckets(skus.map((skuId) => ({
+      skuId,
+      total: skuId === skus[DEMO_ZERO_STOCK_INDEX] ? 0 : DEMO_SKU_STOCK
+    })))
   }
 
   // 回读自证：无论成败，复位后的基线必须真的是「六笔待审核、零决策」
