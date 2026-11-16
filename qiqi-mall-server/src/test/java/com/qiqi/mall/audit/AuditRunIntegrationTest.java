@@ -9,6 +9,8 @@ import com.qiqi.mall.audit.service.AuditQueryService;
 import com.qiqi.mall.audit.service.OrderAuditTagService;
 import com.qiqi.mall.oms.controller.OrderController;
 import com.qiqi.mall.shared.common.Result;
+import com.qiqi.mall.support.ItCleanup;
+import com.qiqi.mall.support.ItDatabase;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -22,6 +24,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 import java.math.BigDecimal;
 import java.sql.PreparedStatement;
@@ -34,7 +38,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 真库集成测试（<b>qiqi_mall_test</b>）：按用户原表造 6 笔单（QT-1001..1006）→ 真跑 run →
+ * 真库集成测试（隔离库 <b>qiqi_mall_it</b>，用完即重建）：按用户原表造 6 笔单（QT-1001..1006）→ 真跑 run →
  * 断言五类计数与 6 行 decision → 补「人工审核 7→4」链路证据 → 解冻后再跑第二轮。
  *
  * <h3>六笔单（用户原表，与 {@link AuditScenario} / seed 脚本逐字一致）</h3>
@@ -53,18 +57,23 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 这条链是 e2e 会依赖的，所以这里直接调 controller 方法（与 HTTP 同一条代码路径与事务边界）
  * 并把状态台账 / 库存回补台账都断言掉。
  *
+ * <h3>连的是隔离库 qiqi_mall_it，不是演示库</h3>
+ * 以前这里硬编码 {@code jdbc:mysql://127.0.0.1:3306/qiqi_mall_test} —— 那正是公网演示站点用的库，
+ * 于是本类造的 QT-100x「已付款、待审核」单会被演示站的「商城开放接口 → 立即拉单」导成渠道单，
+ * 下一轮测试又在 {@code DELETE FROM product WHERE name='自动审核测试商品'} 上撞 fk_item_product 变红
+ * （详见 {@link com.qiqi.mall.support.ItDatabase} 类注释里的事故复盘）。
+ * 现在：datasource 由 {@link #itDatasource} 指到 {@code qiqi_mall_it}（每轮运行前重建的空库，
+ * schema 由 Flyway V1/V2 建），演示库有多少可导入的单都与本类无关。
+ *
  * <h3>与库里既有数据的隔离</h3>
- * 候选范围是「status=7 或已冻结」，测试库里本来就有别的待审核单 → 造数前把它们临时置 8，
- * 跑完 {@code @AfterAll} 原值恢复（只改 status 一列）。本类自己的数据跑完**保留**（报告要贴 SQL），
- * 下次运行前按 {@code order_sn LIKE 'QT-100%'} 清理。
+ * 候选范围是「status=7 或已冻结」——隔离库里本来只有本类自己的单，但 {@code parkOtherPendingOrders()}
+ * 仍然保留：它是「候选范围是全库」这条语义的常驻保险（真出现外来待审核单时不会把 total 顶歪）。
+ * 跑完 {@code @AfterAll} 先打印报告用的决策表，再把本类造的数据按外键倒序删干净并断言残留为 0
+ * （{@link ItCleanup}），所以下一轮从「空库 + 空数据」起步，连跑两遍结果一致。
  *
  * <p>运行：{@code cd qiqi-mall-server && mvn -o test -Dtest=AuditRunIntegrationTest}
  */
 @SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:mysql://127.0.0.1:3306/qiqi_mall_test"
-                + "?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai",
-        "spring.datasource.username=root",
-        "spring.datasource.password=qiqi123456",
         // 关掉「sku.stock 缓存回写」：本类要让 sku.stock 保持造数时的值，避免后台任务改写断言依据
         "qiqi.stock.cache-refresh-ms=3600000",
         // 关掉本上下文里的定时调度：后台线程若在断言之间跑一轮，计数与轮次都会漂
@@ -73,6 +82,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class AuditRunIntegrationTest {
+
+    /**
+     * datasource 指到隔离库 qiqi_mall_it（不是演示库 qiqi_mall_test）。
+     * {@link ItDatabase#prepare()} 必须在上下文创建之前跑：它把库重建为空库，schema 交给启动时的 Flyway。
+     */
+    @DynamicPropertySource
+    static void itDatasource(DynamicPropertyRegistry registry) {
+        ItDatabase.prepare();
+        registry.add("spring.datasource.url", ItDatabase::url);
+        registry.add("spring.datasource.username", ItDatabase::username);
+        registry.add("spring.datasource.password", ItDatabase::password);
+    }
 
     @Autowired
     private JdbcTemplate jdbc;
@@ -102,6 +123,8 @@ class AuditRunIntegrationTest {
 
     @BeforeAll
     void seed() {
+        // 第一句永远是「连的是不是隔离库」：连错库时要在造数之前就炸，而不是在演示库里留下脏数据
+        ItDatabase.assertIsolatedAndReady(jdbc);
         cleanOurData();
         parkOtherPendingOrders();
         seedCatalogAndMembers();
@@ -116,6 +139,30 @@ class AuditRunIntegrationTest {
                 jdbc.update("UPDATE `order` SET status = ? WHERE id = ?", status, id));
         System.out.println("[恢复] 既有待审核单状态已还原：" + parkedOrders.keySet());
         printDecisions();
+        purgeAndAssertNoResidue();
+    }
+
+    /**
+     * 跑完把自己造的数据按外键倒序删干净，并<b>断言残留为 0</b>。
+     *
+     * <p>为什么必须验：{@code order_audit_decision} / {@code stock_ledger} / {@code order_status_ledger} /
+     * {@code admin_audit_log} 这些证据表<b>没有指向 order 的外键</b>，删订单不会带走它们，
+     * 只会留下一堆悬空 order_id ——「删了」和「删干净了」是两件事。删完再数一遍（{@link ItCleanup#residueOfOrders}）
+     * 才算自清。
+     *
+     * <p>另一层意义：即使将来有人把 datasource 又指回共享库，这一句也能保证本类跑完不留下任何 QT-100x 残骸。
+     * 顺序是「打印报告 → 清理」：决策行要先打出来（报告要贴），再删。
+     */
+    private void purgeAndAssertNoResidue() {
+        Map<String, Integer> deleted = new LinkedHashMap<>(ItCleanup.purgeOrders(jdbc, "QT-100%"));
+        deleted.putAll(ItCleanup.purgeCatalog(jdbc, "自动审核测试商品", "audit_qt_member", "audit_qt_store"));
+        System.out.println("[清理] 删除行数：" + deleted);
+
+        ItCleanup.residueOfOrders(jdbc, "QT-100%")
+                .forEach((table, left) -> assertThat(left).as("清理后 `%s` 还有残留", table).isZero());
+        ItCleanup.residueOfCatalog(jdbc, "自动审核测试商品", "audit_qt_member", "audit_qt_store")
+                .forEach((table, left) -> assertThat(left).as("清理后 `%s` 还有残留", table).isZero());
+        System.out.println("[清理] 残留断言通过：订单侧 / 商品侧 全部为 0");
     }
 
     // ================================================================== ① 第一轮
@@ -445,6 +492,13 @@ class AuditRunIntegrationTest {
     }
 
     private void seedCatalogAndMembers() {
+        // 空库（qiqi_mall_it）里没有字典种子 —— 测试不依赖"演示库里有种子数据"，自己造三行：
+        // category / product_type / return_reason 是 product / return_apply 的外键父表（fk_product_category 等），
+        // 缺了这三行 product 插不进去（这正是「测试自己造自己需要的数据」那条要求的具体落点）
+        jdbc.update("INSERT IGNORE INTO category (id, parent_id, name) VALUES (1, 0, '自动审核测试分类')");
+        jdbc.update("INSERT IGNORE INTO product_type (id, name) VALUES (1, '自动审核测试类型')");
+        jdbc.update("INSERT IGNORE INTO return_reason (id, name) VALUES (1, '不想要了')");
+
         // 普通会员（QT-1001/1002/1003/1005/1006）/ 直营门店会员（QT-1004 命中「直营-小单」）
         memberUser = insertAndReturnKey(
                 "INSERT INTO member (username, password, nickname, status, create_time, version, customer_tag) "
@@ -600,7 +654,7 @@ class AuditRunIntegrationTest {
                         + "d.downgrade_reason, JSON_UNQUOTE(JSON_EXTRACT(d.evidence_json, '$.reason')) AS reason "
                         + "FROM order_audit_decision d JOIN `order` o ON o.id = d.order_id "
                         + "WHERE o.order_sn LIKE 'QT-100%' ORDER BY o.order_sn, d.round_no");
-        System.out.println("┌─ order_audit_decision（真实库 qiqi_mall_test）");
+        System.out.println("┌─ order_audit_decision（隔离库 " + ItDatabase.dbName() + "）");
         for (Map<String, Object> r : rows) {
             System.out.println("│ " + r.get("order_sn") + " | round=" + r.get("round_no") + " | " + r.get("result")
                     + " | " + r.get("matched_policy_name") + " | would_be=" + r.get("would_be_auto_policy_name")

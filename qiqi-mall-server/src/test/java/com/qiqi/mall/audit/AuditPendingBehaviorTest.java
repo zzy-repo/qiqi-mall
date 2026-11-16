@@ -9,6 +9,9 @@ import com.qiqi.mall.audit.engine.AuditResult;
 import com.qiqi.mall.audit.engine.AuditVerdict;
 import com.qiqi.mall.audit.service.AuditExecutor;
 import com.qiqi.mall.audit.service.AuditPolicyService;
+import com.qiqi.mall.support.ItCleanup;
+import com.qiqi.mall.support.ItDatabase;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.MethodOrderer;
@@ -21,6 +24,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -80,12 +85,16 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 这样三个用例彼此独立、可单独跑、也可连跑。
  *
  * <p>跑：{@code cd qiqi-mall-server && mvn -o test -Dtest=AuditPendingBehaviorTest} → 期望 <b>3 passed</b>。
+ *
+ * <h3>连的是隔离库 qiqi_mall_it，不是演示库</h3>
+ * 以前这里硬编码 {@code jdbc:mysql://127.0.0.1:3306/qiqi_mall_test}（= 公网演示站点 admin.rose7.cn /
+ * mall.rose7.cn 的库），造的 QT-100x「已付款、待审核」单跑完不清，会被演示站的「商城开放接口 → 立即拉单」
+ * 导成渠道单，下一轮 {@code mvn test} 就在 {@code DELETE FROM product WHERE name='自动审核测试商品'}
+ * 上撞 fk_item_product 变红（事故复盘见 {@link com.qiqi.mall.support.ItDatabase}）。
+ * 现在 datasource 由 {@link #itDatasource} 指到 {@code qiqi_mall_it}（每轮重建的空库，schema 由 Flyway V1/V2 建），
+ * 跑完 {@code @AfterAll} 再按外键倒序清干净并断言残留为 0（{@link ItCleanup}）。
  */
 @SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:mysql://127.0.0.1:3306/qiqi_mall_test"
-                + "?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai",
-        "spring.datasource.username=root",
-        "spring.datasource.password=qiqi123456",
         // sku.stock 缓存回写会改写断言依据（桶才是权威值），关掉
         "qiqi.stock.cache-refresh-ms=3600000",
         // 关掉本上下文的定时调度：后台线程若在断言之间跑一轮，计数与轮次都会漂
@@ -94,6 +103,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class AuditPendingBehaviorTest {
+
+    /** datasource 指到隔离库 qiqi_mall_it（不是演示库）；drop/create 必须在上下文创建之前发生 */
+    @DynamicPropertySource
+    static void itDatasource(DynamicPropertyRegistry registry) {
+        ItDatabase.prepare();
+        registry.add("spring.datasource.url", ItDatabase::url);
+        registry.add("spring.datasource.username", ItDatabase::username);
+        registry.add("spring.datasource.password", ItDatabase::password);
+    }
 
     @Autowired
     private JdbcTemplate jdbc;
@@ -318,12 +336,38 @@ class AuditPendingBehaviorTest {
      */
     private void seedIfNeeded() {
         if (seeded) return;
+        // 造数之前先确认「连的是隔离库」：连错库时要在写第一行之前就炸
+        ItDatabase.assertIsolatedAndReady(jdbc);
         cleanOurData();
         seedCatalogAndMembers();
         seedSevenOrders();
         seedPolicies();
         seeded = true;
         System.out.println("[准备] QT-1001..QT-1007 已就绪（7 条策略 / 7 笔单）");
+    }
+
+    /**
+     * 跑完把本类造的数据按外键倒序删干净，并<b>断言残留为 0</b>（{@link ItCleanup}）。
+     *
+     * <p>为什么删完还要数一遍：{@code order_audit_decision} / {@code stock_ledger} /
+     * {@code order_status_ledger} / {@code admin_audit_log} 都没有指向 order 的外键，
+     * 删订单不会带走它们，只会留下悬空 order_id ——「删了」不等于「删干净了」。
+     *
+     * <p>决策行是各用例里 {@code printDecisions("①/②/③")} 打的（报告用），已经打完才轮到本方法清理。
+     */
+    @AfterAll
+    void purgeAndAssertNoResidue() {
+        if (!seeded) return;   // 三个用例全 @Disabled 时本类一行 SQL 都没跑（同上：零副作用）
+        Map<String, Integer> deleted = new LinkedHashMap<>(ItCleanup.purgeOrders(jdbc, "QT-100%"));
+        deleted.putAll(ItCleanup.purgeCatalog(jdbc, "待审核行为契约测试商品",
+                "audit_pending_member", "audit_pending_store"));
+        System.out.println("[清理] 删除行数：" + deleted);
+
+        ItCleanup.residueOfOrders(jdbc, "QT-100%")
+                .forEach((table, left) -> assertThat(left).as("清理后 `%s` 还有残留", table).isZero());
+        ItCleanup.residueOfCatalog(jdbc, "待审核行为契约测试商品", "audit_pending_member", "audit_pending_store")
+                .forEach((table, left) -> assertThat(left).as("清理后 `%s` 还有残留", table).isZero());
+        System.out.println("[清理] 残留断言通过：订单侧 / 商品侧 全部为 0");
     }
 
     /**
@@ -395,6 +439,12 @@ class AuditPendingBehaviorTest {
     }
 
     private void seedCatalogAndMembers() {
+        // 空库（qiqi_mall_it）里没有字典种子 —— 不依赖"演示库里有种子数据"，自己造三行：
+        // category / product_type / return_reason 是 product / return_apply 的外键父表，缺了插不进数据
+        jdbc.update("INSERT IGNORE INTO category (id, parent_id, name) VALUES (1, 0, '待审核契约测试分类')");
+        jdbc.update("INSERT IGNORE INTO product_type (id, name) VALUES (1, '待审核契约测试类型')");
+        jdbc.update("INSERT IGNORE INTO return_reason (id, name) VALUES (1, '不想要了')");
+
         memberUser = insertAndReturnKey(
                 "INSERT INTO member (username, password, nickname, status, create_time, version, customer_tag) "
                         + "VALUES ('audit_pending_member', '', '待审核契约-普通', 1, NOW(), 0, '普通')");
