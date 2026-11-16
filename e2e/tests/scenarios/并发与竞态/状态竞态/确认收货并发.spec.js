@@ -44,7 +44,7 @@ import { memberNickOf, addressOf } from '../../../support/fixtures.js'
 const PRODUCT_ID = 1
 
 /**
- * 分片库名：确认收货的并发闸门是数据库行级版本号，只有直接查库才能证明
+ * 分片库名：确认收货的并发保护是数据库行级版本号，只有直接查库才能证明
  * 「状态就是 3、版本只被推进了一次」。库名由 API_BASE 端口决定 —— 映射唯一维护在
  * e2e/tests/support/db.js 的 DB_OF_PORT（本 spec 原先自带一份，已收口）。
  */
@@ -194,7 +194,7 @@ test.describe('并发与竞态 › 状态竞态 › 确认收货并发', () => {
       let respA, respB
       await test.step('④ 两页同一时刻点「确认收货」（真并发）', async () => {
         // 确认收货现在带二次确认（不可逆终态流转）：点行内按钮只弹框，真正发 POST 的是弹框里的「确定」。
-        // 所以并发点法改成「两页先把框弹出来 → 再同一时刻点确定」，闸门仍是同一瞬间发出的两个请求。
+        // 所以并发点法改成「两页先把框弹出来 → 再同一时刻点确定」，并发点仍是同一瞬间发出的两个请求。
         await Promise.all([
           row1.getByTestId('orders-row-confirm').click(),
           row2.getByTestId('orders-row-confirm').click()

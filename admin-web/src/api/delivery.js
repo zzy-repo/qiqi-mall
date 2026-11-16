@@ -8,7 +8,7 @@ const BASE = '/deliveries'
 /**
  * 发货单（包裹）接口。
  *
- * 高危写操作（L3）统一两条通道：
+ * 高危写操作统一两条通道：
  *   ① 预演：同一路径 + ?dryRun=true → { code:0, data:{ willDo, ... } }，库里零变化；
  *   ② 执行：同一路径 + 业务 body（确认码已下线，不再需要 confirmCode）。
  * 所以每个写操作都有成对的 `xxxDryRun(...)`（预演）与 `xxx(...)`（执行）。

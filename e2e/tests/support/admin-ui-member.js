@@ -163,7 +163,7 @@ export const backToMemberList = async (page) => {
  * 这里只读 captcha-required 做前置等待，不改服务端状态（成功登录自然清零）。
  *
  * 轮询节奏：300ms 起、指数退避到上限 1000ms（300 → 600 → 1000 → 1000 …）。
- * 原来固定 5s 轮一次，查的只是一个布尔值，门禁一旦解除（成功登录会清零）本该立刻返回，
+ * 原来固定 5s 轮一次，查的只是一个布尔值，验证码锁定一旦解除（成功登录会清零）本该立刻返回，
  * 却要平白多等最多 5s——而这 5s 落在**每个需要等窗口的用例**的关键路径上。
  * 退避上限 1000ms 是为了不让这个只读接口被打爆（解除前最多 ~1 次/秒）。
  * 总时限 360s 不变：语义与超时判定完全一致，只是问得更勤、返回得更早。
@@ -183,7 +183,7 @@ export async function waitAdminCaptchaClear(request, username = 'admin', timeout
     await new Promise((resolve) => setTimeout(resolve, Math.min(interval, remaining)))
     interval = Math.min(interval * 2, POLL_MAX_MS)
   }
-  throw new Error('等待后台验证码门禁解除超时（其它用例连续输错密码触发，需再等 5 分钟窗口）')
+  throw new Error('等待后台验证码锁定解除超时（其它用例连续输错密码触发，需再等 5 分钟窗口）')
 }
 
 /** 管理端会员列表（可按登录名过滤） */
@@ -220,7 +220,7 @@ export async function deleteMemberApi(request, token, id) {
 }
 
 /**
- * 后台登录（抗并发）：先等验证码门禁空窗，登录后再核对；
+ * 后台登录（抗并发）：先等验证码锁定时段过去，登录后再核对；
  * 并行跑用例时「同一登录名连续输错 5 次就要验证码」的 5 分钟窗口会被别的用例反复点亮，
  * 这里最多重试 3 次（每次重试前都等窗口过去），失败原因照实抛出，不掩盖真实密码错误。
  */

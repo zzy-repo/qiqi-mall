@@ -28,7 +28,7 @@ import java.util.Map;
  * <h3>没有上下文时怎么办</h3>
  * 直接抛异常（fail-closed）：无台账的库存变更就是这个缺陷本身，宁可报错也不要静默改库存。
  *
- * <h3>幂等键的打散前缀（可关）</h3>
+ * <h3>幂等键的前缀分桶（可关）：给 idem_key 加 orderId % N 前缀，把插入分散到 N 个唯一索引 gap</h3>
  * 前缀 = {@code orderId % N}（{@code qiqi.stock.idem-key-shards}，默认 1 = 不加）。
  * 动机是 uk_idem 这个唯一二级索引的「尾部 gap 单点排队」：{@code idem_key} 以单调 orderId 开头，
  * 所有插入共用一个 gap，InnoDB 的重复检查共享锁与并发插入的意向锁互斥 → 吞吐被钉死。
@@ -51,7 +51,7 @@ public final class StockLedgerContext {
         }
 
         /**
-         * 幂等键（可带打散前缀）：{@code LPAD(orderId % shards, 位宽, '0') + ":" + 原键}。
+         * 幂等键（可带分桶前缀）：{@code LPAD(orderId % shards, 位宽, '0') + ":" + 原键}。
          *
          * <p>{@code shards <= 1} 时**完全等价于**原来的 {@link #idemKey(Long)}（不加前缀），
          * 这是「可回滚」的关键：把配置改回 1，行为逐字节回到今天。
@@ -61,7 +61,7 @@ public final class StockLedgerContext {
          * （{@code order_id % N}），Java 与 MySQL 能算出逐字节相同的键。
          *
          * <p>唯一性语义不变：前缀是 orderId 的纯函数，等于把同一份信息挪到字符串最前面，
-         * 整个 {@code idem_key} 仍然全局唯一，{@code uk_idem} 仍是硬闸门。
+         * 整个 {@code idem_key} 仍然全局唯一，{@code uk_idem} 仍会由表上的唯一索引真的拦住重复行。
          */
         public String idemKey(Long skuId, int shards) {
             String plain = orderId + ":" + skuId + ":" + reason + ":" + (refId == null ? 0L : refId);

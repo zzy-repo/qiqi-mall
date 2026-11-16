@@ -13,7 +13,7 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 /**
- * 退货申请状态写入的<b>唯一入口</b>（P2 第一步：收敛写点，行为不变）。
+ * 退货申请状态写入的<b>唯一入口</b>：所有改 {@code return_apply.status} 的路径都走这里。
  *
  * <p>收敛的对象有两处：
  * <ol>
@@ -26,7 +26,7 @@ import java.util.function.Consumer;
  * </ol>
  *
  * <h3>与订单/包裹入口的关键差别：本表没有 version 列</h3>
- * {@code return_apply} 没有 {@code @Version}，并发闸门是「把「待处理」写进 UPDATE 的 WHERE」：
+ * {@code return_apply} 没有 {@code @Version}，并发保护是「把「待处理」写进 UPDATE 的 WHERE」：
  * {@code ... WHERE id=? AND status=0}。两个管理员同时审同一张申请时，InnoDB 行锁把两次 UPDATE 排成先后，
  * 后一个的 {@code WHERE status=0} 不再命中 → 影响 0 行 → 409，不会各退一次款。
  *
@@ -40,7 +40,7 @@ public class ReturnStatusService {
     private static final Logger log = LoggerFactory.getLogger(ReturnStatusService.class);
 
     // ---- 事件原因（reason 列口径）----
-    // 常量唯一来源是 shared/ledger/ReasonCodes；这里保留别名，P2 第一步的调用点不用改。
+    // 常量唯一来源是 shared/ledger/ReasonCodes；这里保留别名，已经写好的调用点（REASON_*）一个字都不用改。
     public static final String REASON_CREATE = ReasonCodes.RETURN_CREATE;
     public static final String REASON_IMPORT = ReasonCodes.RETURN_IMPORT;
     public static final String REASON_APPLY = ReasonCodes.RETURN_APPLY;
@@ -113,7 +113,7 @@ public class ReturnStatusService {
 
         LambdaUpdateWrapper<ReturnApply> update = new LambdaUpdateWrapper<ReturnApply>()
                 .eq(ReturnApply::getId, apply.getId())
-                // 并发闸门：把「读到的状态」写成 UPDATE 条件（原 SQL 的 AND status=0 原样保留）
+                // 并发保护：把「读到的状态」写成 UPDATE 条件（原 SQL 的 AND status=0 原样保留）
                 .eq(ReturnApply::getStatus, from)
                 .set(ReturnApply::getStatus, to)
                 .setSql(STATUS_SEQ_INCREMENT);

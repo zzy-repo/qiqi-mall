@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# avalanche.sh —— 雪崩实验（A 型：内存/线程耗尽）一键基线阶梯
+# avalanche.sh —— 雪崩实验（内存 / 线程耗尽这一类）一键基线阶梯
 #
 #   一条命令复现：
 #     MEMBER_PASS='<自选>' bench/tools/avalanche.sh
@@ -56,8 +56,8 @@ cleanup() {
   for p in "$CG_PID" "$ENV_PID" "$DS_PID" "$WD_PID" "$MY_PID" "$DUMP_PID" "$MYCPU_PID" "$DIG_PID"; do [ -n "$p" ] && kill "$p" 2>/dev/null; done
   if [ -n "$GEN_PID" ] && kill -0 "$GEN_PID" 2>/dev/null; then kill "$GEN_PID" 2>/dev/null; fi
   # ⚠️ 只释放**自己拿到**的锁：acquire 失败时也走 EXIT trap，无条件 release 会把
-  #    **别人正在跑的**锁释放掉（本轮实测踩过：一轮 acquire 失败 → release 了别人的锁 →
-  #    下一轮立刻"成功"拿到锁 → 两个压测并发跑，两轮数据同时作废）。见 LOCK_HELD。
+  #    **别人正在跑的**锁释放掉（实测踩过：一轮 acquire 失败顺手 release 了别人的锁 →
+  #    紧接着的那一轮"成功"拿到锁 → 两个压测并发跑，两轮数据同时作废）。见 LOCK_HELD。
   if [ "${LOCK_HELD:-0}" = "1" ] && [ -x "$LOCK" ]; then "$LOCK" release >>"$LOG" 2>&1 || true; fi
 }
 trap cleanup EXIT INT TERM
@@ -81,7 +81,7 @@ curl -s -o /dev/null -w "  gateway /api/health -> %{http_code}\n" http://127.0.0
 
 # performance_schema 的重负载 consumer 必须是关的：events_statements_history_long 会给**每条语句**
 # 写一行环形缓冲，在 7.7k SQL/s 下等于给 MySQL 加了一层审计，实测能把 380 档压垮（ok/s 273、丢 7986）。
-# 这一步把它变成硬门禁 —— 谁为了排障临时开过，忘了关就会被这里拦下，而不是污染一整轮实验。
+# 这一步把它变成失败即拦的校验 —— 谁为了排障临时开过，忘了关就会被这里拦下，而不是污染一整轮实验。
 CONS=$(sql_db "select VARIABLE_VALUE from performance_schema.global_status where VARIABLE_NAME='performance_schema'" 2>/dev/null)
 HIST=$(docker exec -i -e MYSQL_PWD="$MYSQL_PASSWORD" qiqi-mysql mysql -uroot -N -e \
   "select ENABLED from performance_schema.setup_consumers where NAME='events_statements_history_long'" 2>/dev/null | tr -d '\r')
@@ -159,7 +159,7 @@ DS_PID=$!
 MY_PID=""
 if [ "${SAMPLE_MYSQL:-1}" = "1" ]; then
   # 前 6 列是历史口径（avalanche.py 按位置取前 6 列，**只能往后追加**，不能插队）。
-  # 追加的 6 列是第三步要的证据：fsync / log_waits 用来判「闸门是不是提交落盘」，
+  # 追加的 6 列是第三步要的证据：fsync / log_waits 用来判「瓶颈是不是提交落盘」，
   # rows_* 与 com_commit 用来对账「7.7k SQL/s 到底有多少是真的改数据的」。
   ( echo "epoch,threads_run,threads_conn,row_lock_waits,row_lock_time_ms,queries,data_fsyncs,log_fsyncs,log_waits,bp_wait_free,rows_updated,rows_inserted" > "$OUT/mysql.csv";
     while :; do
@@ -281,7 +281,7 @@ if ls "$OUT"/threaddump-*.txt >/dev/null 2>&1; then
   python3 "$SELF/tdcount.py" "$OUT" 2>&1 | tee -a "$LOG"
 fi
 
-log "=== 6. 清场（reset 掉本轮造的数据，别把库留给下一个人）==="
+log "=== 6. 清场（reset 掉本次压测造的数据，别把库留给下一个人）==="
 MEMBER_PASS="$MEMBER_PASS" MYSQL_PASSWORD="$MYSQL_PASSWORD" BENCH_WORKDIR="$LG" \
   "$SELF/prepare.sh" reset >>"$LOG" 2>&1 && log "✅ 清场完成"
 docker exec -i -e MYSQL_PWD="$MYSQL_PASSWORD" qiqi-mysql \

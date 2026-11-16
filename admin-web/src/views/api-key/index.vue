@@ -420,7 +420,7 @@ const submit = async () => {
   try {
     const payload = {
       name: form.name.trim(),
-      scopes,                            // 已按可授予白名单过滤（顺序 = 页面勾选顺序）
+      scopes,                            // 已按后端可授予的 scope 集合过滤（顺序 = 页面勾选顺序）
       expiresAt: form.expiresAt || null // 留空 = 永不过期
     }
     if (form.id) {

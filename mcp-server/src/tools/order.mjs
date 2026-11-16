@@ -437,7 +437,7 @@ export function registerOrderTools(server, { writeEnabled } = {}) {
           .positive()
           .optional()
           .describe('下单会员 id，**必填**（后端 order.member_id 是 NOT NULL，缺了只会 500）：先用 member(action=list) 查'),
-        // 初始状态白名单（与后端 OrderController#create 同一口径）：只收 0 待付款 / 1 已付款 / 7 待审核。
+        // 初始状态只收 0 待付款 / 1 已付款 / 7 待审核（与后端 OrderController#create 同一口径）。
         // 在协议层就收掉，模型连「传 8 造一张没有包裹的待发货单」都做不到 —— 后端虽然也拒，
         // 但那是请求已经发出去之后的事，等于把不可能的状态组合留在提示词层面可被"想象"。
         // 1 已付款保留：退货被拒且无包裹时订单会落回 1，ship 的 1→2 直发通道正是为它准备的。

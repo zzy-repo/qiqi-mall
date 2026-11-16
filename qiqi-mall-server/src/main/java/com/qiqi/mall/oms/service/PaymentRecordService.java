@@ -6,7 +6,7 @@ import com.qiqi.mall.oms.entity.PaymentRecord;
 public interface PaymentRecordService extends IService<PaymentRecord> {
 
     /**
-     * 记一条流水（P2 第二步：带上加固字段 —— 归属、触发单据、操作者、幂等键）。
+     * 记一条流水（带溯源字段 —— 归属、触发单据、操作者、幂等键）。
      *
      * <p>为什么这些字段必须由调用方给：只有调用点知道「这笔钱是谁、为什么、因为哪张单据动的」。
      * 从 {@code order_sn} 反推是猜，猜错的台账比没有更坏。

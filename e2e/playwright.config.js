@@ -1,23 +1,25 @@
 import { defineConfig, devices } from '@playwright/test'
 
 /**
- * 五个业务场景的 E2E 配置。
+ * E2E 配置。用例按 4 个桶组织（业务 / 并发与竞态 / 台账与取证 / 库存，另有 _legacy/），
+ * 桶与文件的对应关系见 README 的「目录结构」。
  *
  * 两档运行方式，同一份 spec 代码共用，断言一行不改：
  *
- *  1) 验收档（默认，`npm test`）：跑本地开发栈，快，不录视频、不降速
+ *  1) 验收档（默认，`npm test`；用来判断用例对错：跑得快、只留失败视频、不降速）
  *       PORTAL_BASE  http://127.0.0.1:5173
  *       ADMIN_BASE   http://127.0.0.1:5175
  *       API_BASE     http://127.0.0.1:8081
  *
- *  2) demo 档（`npm run demo`，即 DEMO=1）：跑容器栈 = 测试环境，1960x1120 全量录制 + slowMo 400
+ *  2) demo 档（`npm run demo`，即 DEMO=1；用来出演示视频：全量录制 + 放慢动作）跑容器栈 =
+ *     测试环境，1960x1120 全量录制 + slowMo 400
  *       PORTAL_BASE  http://127.0.0.1:5174   (portal-web 容器 nginx)
  *       ADMIN_BASE   http://127.0.0.1:5176   (admin-web 容器 nginx)
  *       API_BASE     http://127.0.0.1:18080  (gateway → server-1/server-2 + Redis)
  *     视频落在 report/videos/raw/，用 `npm run demo:collect` 统一改名 + 合并到 report/videos/
  *
  * 目录结构：
- *   tests/scenarios/  五个业务场景用例
+ *   tests/scenarios/  用例（4 个桶，递归匹配 *.spec.js）
  *   tests/support/    ui.js（真实 UI 操作）/ assert.js（只读断言）/ data.js（页面无入口的数据准备）/ env.js（地址与工具）
  */
 const CHROME = '/root/.cache/ms-playwright/chromium-1248/chrome-linux64/chrome'

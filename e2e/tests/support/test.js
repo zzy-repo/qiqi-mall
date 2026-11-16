@@ -8,7 +8,7 @@
  *
  * 和原生 test 的唯一区别：
  *   · context fixture 被包了一层：每个 page（含用例中途新开的弹窗/新标签页）都挂上 console 监听；
- *   · 用例结束（含失败）时若出现未豁免的 `Failed to resolve component` 一类告警 → 用例判红。
+ *   · 用例结束（含失败）时若出现没被放行的 `Failed to resolve component` 一类告警 → 用例判红。
  *
  * 开关见 console-guard.js 头部（E2E_ALLOW_VUE_WARN / E2E_VUE_WARN_ALLOW）。
  */

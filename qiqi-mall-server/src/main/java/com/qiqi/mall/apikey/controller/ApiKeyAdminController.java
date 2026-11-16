@@ -101,7 +101,7 @@ public class ApiKeyAdminController {
      * 不挂任何 API Key scope；如果哪天红线放开要给它一个 scope，该是 {@code config:read}
      * （它是权限配置的元数据，不是订单数据，与配置文件同档），不是 {@code order:read}。
      *
-     * <p>{@code grantable} 原样回 {@code ALL_SCOPES}（顺序 = 页面顺序），前端拿它当保存白名单：
+     * <p>{@code grantable} 原样回 {@code ALL_SCOPES}（顺序 = 页面顺序），前端拿它当「保存时允许提交的范围」：
      * 后端没授予的值，前端连提交都不会提交。
      */
     @GetMapping("/scopes")
@@ -110,7 +110,7 @@ public class ApiKeyAdminController {
         List<ScopeOption> write = new ArrayList<>();
         for (String scope : AiApiKeyService.ALL_SCOPES) {
             // ALL_SCOPES 只有 :read / :write 两种后缀；万一将来出现别的后缀，归到「可写」组
-            // —— 让它被看见（并随保存进白名单）比静默丢在页面上看不见更安全。
+            // —— 让它被看见（并随保存一起提交给后端）比静默丢在页面上看不见更安全。
             ScopeOption option = new ScopeOption(scope, labelOf(scope));
             if (scope.endsWith(":read")) read.add(option);
             else write.add(option);
@@ -234,7 +234,7 @@ public class ApiKeyAdminController {
 
     /**
      * 权限目录：{@code read}（9）+ {@code write}（4）+ {@code unGrantable}（5）。
-     * {@code grantable} = read + write 的全部 value，前端拿它当保存白名单与「可勾」判据。
+     * {@code grantable} = read + write 的全部 value，前端拿它当「保存时允许提交的范围」与「可勾」判据。
      */
     public record ScopeCatalog(List<ScopeOption> read, List<ScopeOption> write,
                               List<ScopeOption> unGrantable, List<String> grantable) {

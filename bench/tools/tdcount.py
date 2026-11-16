@@ -4,7 +4,7 @@
     python3 tdcount.py <rundir>            # 读 <rundir>/threaddump-*.txt
 
 为什么需要它：容器里是 JRE（没有 jstack/jcmd），但 `kill -3`（SIGQUIT）会让 JVM 自己把
-thread dump 打到 stdout，`docker logs --since <epoch>` 就能取回来。于是「连接池是不是闸门」
+thread dump 打到 stdout，`docker logs --since <epoch>` 就能取回来。于是「连接池是不是瓶颈」
 不需要靠猜 —— 直接数**停在 `HikariPool.getConnection` 的 http-nio 线程数**：
 
     pool=10 时：~190/202 线程在排队借连接，只有个位数线程真在跑 SQL

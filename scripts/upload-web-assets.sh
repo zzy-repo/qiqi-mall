@@ -51,7 +51,7 @@
 #      浏览器对 module script 的 MIME 校验很严（text/html / octet-stream 直接拒绝执行）。
 #
 # -----------------------------------------------------------------------------
-# ★ 上传前门禁（防错门）：让"白建 CDN"这类不报错的事故变成不可能
+# ★ 上传前校验：让"白建 CDN"这类不报错的事故变成不可能
 # -----------------------------------------------------------------------------
 #   2026-11-15 19:30 事故：有人执行 `scripts/upload-web-assets.sh admin-web --apply`，
 #   脚本默认读仓库里的 admin-web/dist —— 那是当天一次**没带 CDN_BASE** 的本地构建，
@@ -102,7 +102,7 @@ CDN_HOST="${CDN_HOST:-https://cdn.rose7.cn}"
 CDN_ORIGIN="${CDN_ORIGIN:-https://admin.rose7.cn}"
 
 APPLY=0; PRUNE=0; VERIFY=0; DIST_OVERRIDE=""; ALLOW_RELATIVE=0
-RELATIVE_BYPASSED=0      # 本次是否有 app 走了 --allow-relative（门禁 bypass 留痕用）
+RELATIVE_BYPASSED=0      # 本次是否有 app 走了 --allow-relative（校验 bypass 留痕用）
 APPS=()
 
 usage() { sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
@@ -134,12 +134,12 @@ dist_for() {
 prefix_for() { printf '%s/%s' "$OSS_PREFIX" "$1"; }
 
 # =============================================================================
-# 上传前门禁（防错门）—— 见文件头【★ 上传前门禁】节
+# 上传前校验 —— 见文件头【★ 上传前校验】节
 #   全部只读本地文件：不联网、不碰 OSS、不改任何东西，可以在 plan 模式随便跑。
 # =============================================================================
 CDN_HOST_ONLY="${CDN_HOST#*://}"; CDN_HOST_ONLY="${CDN_HOST_ONLY%%/*}"
 
-# 审计留痕：门禁被绕过（--allow-relative）这种事必须留痕，否则又是一次"没人知道发生过"
+# 审计留痕：校验被绕过（--allow-relative）这种事必须留痕，否则又是一次"没人知道发生过"
 audit_log() {
   local line f
   line="$(date '+%F %T') $*"
@@ -175,12 +175,12 @@ gate_check_dist() {
   local r h b x dup b0 pnorm
   local -a all_refs=() cdn_refs=() rel_refs=() bases=() missing=()
 
-  echo "=== 上传前门禁：$app（dist=$dist，目标前缀=$prefix）==="
+  echo "=== 上传前校验：$app（dist=$dist，目标前缀=$prefix）==="
 
   if [ ! -f "$idx" ]; then
     {
       echo
-      echo "❌ 门禁拒绝（$app）：$idx 不存在。"
+      echo "❌ 校验拒绝（$app）：$idx 不存在。"
       echo "   没有 index.html 就无法证明这份产物是给哪个 app、哪个 CDN 前缀构建的 ——"
       echo "   既然证明不了，就当它是错的：拒绝上传（几秒后重试的成本，远小于白建一个 CDN）。"
     } >&2
@@ -212,11 +212,11 @@ gate_check_dist() {
           printf '       本次引用：%s\n' "$(printf '%s ' "${rel_refs[@]}")"
         fi
       } >&2
-      audit_log "ALLOW-RELATIVE 绕过基址/前缀门禁 app=$app dist=$dist prefix=$prefix user=$(id -un) pid=$$"
+      audit_log "ALLOW-RELATIVE 绕过基址/前缀校验 app=$app dist=$dist prefix=$prefix user=$(id -un) pid=$$"
     else
       {
         echo
-        echo "❌ 门禁拒绝（$app）：这个 dist 的 index.html 引用的是相对路径 ⇒ 构建时没传 CDN_BASE。"
+        echo "❌ 校验拒绝（$app）：这个 dist 的 index.html 引用的是相对路径 ⇒ 构建时没传 CDN_BASE。"
         echo "   dist: $dist"
         if [ ${#rel_refs[@]} -gt 0 ]; then
           printf '   引用: %s\n' "$(printf '%s ' "${rel_refs[@]}")"
@@ -249,7 +249,7 @@ gate_check_dist() {
   case "$app" in
     admin-web)  marker_expect='qiqi_admin_token';  marker_foreign='qiqi_member_token' ;;
     portal-web) marker_expect='qiqi_member_token'; marker_foreign='qiqi_admin_token' ;;
-    *) echo "❌ 门禁拒绝：未知 app：$app（只认识 admin-web / portal-web，不知道该拿什么特征去验）" >&2; return 1 ;;
+    *) echo "❌ 校验拒绝：未知 app：$app（只认识 admin-web / portal-web，不知道该拿什么特征去验）" >&2; return 1 ;;
   esac
   if grep -rqaF -- "$marker_expect"  "$dist" 2>/dev/null; then has_expect=1;  fi
   if grep -rqaF -- "$marker_foreign" "$dist" 2>/dev/null; then has_foreign=1; fi
@@ -257,7 +257,7 @@ gate_check_dist() {
   if [ "$has_expect" -eq 0 ] || [ "$has_foreign" -eq 1 ]; then
     {
       echo
-      echo "❌ 门禁拒绝（$app）：dist 里没有 $app 的构建特征，张冠李戴。"
+      echo "❌ 校验拒绝（$app）：dist 里没有 $app 的构建特征，张冠李戴。"
       echo "   dist: $dist"
       echo "   判据（互斥，来自 src/utils/auth.js 的登录令牌键，构建无关）："
       echo "     admin-web  ⇔ 必含 qiqi_admin_token"
@@ -308,7 +308,7 @@ gate_check_dist() {
     if [ ${#bases[@]} -eq 0 ] || [ ${#bases[@]} -gt 1 ] || [ "$b0" != "$pnorm" ]; then
       {
         echo
-        echo "❌ 门禁拒绝（$app）：构建基址与本次上传前缀不一致。"
+        echo "❌ 校验拒绝（$app）：构建基址与本次上传前缀不一致。"
         echo "   dist: $dist"
         echo "   index.html 反解出的构建基址 : ${bases[*]:-<无>}"
         echo "   本次要上传的 OSS 前缀      : $prefix   （= OSS_PREFIX 的 \"$OSS_PREFIX\" + \"$app\"）"
@@ -344,7 +344,7 @@ gate_check_dist() {
     if [ ${#missing[@]} -gt 0 ]; then
       {
         echo
-        echo "❌ 门禁拒绝（$app）：index.html 引用的文件在 dist 里不存在 —— index 与 assets 不是同一次构建（混装）。"
+        echo "❌ 校验拒绝（$app）：index.html 引用的文件在 dist 里不存在 —— index 与 assets 不是同一次构建（混装）。"
         echo "   dist: $dist"
         printf '   缺失: %s\n' "${missing[*]}"
         echo "   传上去就是 404 → 白屏（比孤儿对象更糟）。请从同一次构建/同一个镜像里取完整产物。"
@@ -377,13 +377,13 @@ for app in "${APPS[@]}"; do
   elif [ ! -d "$d/assets" ]; then
     echo "❌ $d 下没有 assets/" >&2; fail=1
   elif ! gate_check_dist "$app" "$d" "$(prefix_for "$app")"; then
-    # 门禁拒绝：不写 OSS、不预热、不删任何东西，直接退出（exit 非 0 才能拦住 rm -f 之后的 && 链/CI）
+    # 校验拒绝：不写 OSS、不预热、不删任何东西，直接退出（exit 非 0 才能拦住 rm -f 之后的 && 链/CI）
     fail=1
   fi
 done
 if [ "$fail" -ne 0 ]; then
   echo >&2
-  echo "❌ 上传前门禁未通过 → 本次不上传、不写 OSS、不碰 CDN。修好上面的问题再跑（详见文件头【★ 上传前门禁】）。" >&2
+  echo "❌ 上传前校验未通过 → 本次不上传、不写 OSS、不碰 CDN。修好上面的问题再跑（详见文件头【★ 上传前校验】）。" >&2
   exit 1
 fi
 if [ "$VERIFY" -eq 0 ] && [ ! -r "$CRED_FILE" ]; then

@@ -38,7 +38,7 @@ import java.util.List;
  *
  * <h3>落单五步（严格按需求单顺序）</h3>
  * <ol>
- *   <li><b>先查幂等闸门</b>：{@code channel_order_map(shop_id, platform_sn)} 有 → 抛
+ *   <li><b>先查映射表里有没有这单</b>：{@code channel_order_map(shop_id, platform_sn)} 有 → 抛
  *       {@link DuplicateOrderException}（调用方记 SKIP / IDEMPOTENT）；</li>
  *   <li><b>SKU 匹配</b>：{@code SKU-<id>} 或纯数字 {@code <id>}；任一明细匹配不到 →
  *       {@link SkuNotMatchedException}（调用方记 FAIL / SKU_NOT_MATCHED）并跳过整单
@@ -105,7 +105,7 @@ public class ChannelOrderImporter {
     public ImportResult importOne(ChannelShop shop, PlatformOrder platformOrder) {
         String sn = platformOrder.platformSn();
 
-        // ① 先查闸门（快路径；真正的兜底是第 ⑤ 步的唯一键）
+        // ① 先查映射表（快路径；真正的兜底是第 ⑤ 步撞唯一键失败）
         if (mapMapper.countByKey(shop.getId(), sn) > 0) {
             throw new DuplicateOrderException(sn);
         }

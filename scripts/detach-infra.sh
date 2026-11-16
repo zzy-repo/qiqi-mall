@@ -9,7 +9,7 @@
 # 搬出去之后 DSH 的 MemoryCurrent 才会真的降下来（新起的进程用 systemd-run 即可，无需迁移）。
 #
 # 红线：绝不移动 DSH 自身进程（/opt/dsh-app 下的 node），移了 DSH 会挂。
-#       也绝不移动 systemd/容器运行时等系统进程——只按下面的白名单匹配。
+#       也绝不移动 systemd/容器运行时等系统进程——只按下面这份特征清单匹配。
 #
 # slice 配置（不入库，只在这里留档；由 root 手工创建/设置）：
 #   systemd-run --slice 或 systemctl 创建 /qiqi.slice /qiqi-infra.slice /qiqi-e2e.slice
@@ -24,7 +24,7 @@ SLICE_UNIT="qiqi-infra.slice"
 APPLY=0
 [[ "${1:-}" == "--apply" ]] && APPLY=1
 
-# 白名单：只认这些特征（qiqi-mall 的后端与前端 dev server / esbuild service）
+# 只认这些特征（qiqi-mall 的后端与前端 dev server / esbuild service）：
 # 注意 vite 有两种写法：绝对路径 `.../portal-web/node_modules/.bin/vite` 和相对路径
 # `node ./node_modules/.bin/vite --strictPort`（scripts/start-e2e-frontends.sh 起的），
 # 所以不能只靠命令行前缀，还要看 cwd 是否在 qiqi-mall 下（见 in_scope_cwd）。

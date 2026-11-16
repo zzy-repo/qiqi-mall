@@ -160,7 +160,7 @@ export const openSplitPreview = async (page, row) => {
  */
 export const createOrderViaUi = async (page, { receiver, status = '待审核', items }) => {
   const who = receiver ?? receiverOf('新增订单默认收货人')
-  // 订单列表页头的「新增」按钮没有 testid（本轮 testid 只覆盖了搜索/筛选/行操作），按文案点
+  // 订单列表页头的「新增」按钮没有 testid（现有 testid 只覆盖了搜索/筛选/行操作），按文案点
   await page.getByRole('button', { name: '新增' }).click()
   const dlg = tid(page, 'order-form-dialog')
   await expect(dlg, '新增订单弹窗应打开').toBeVisible()

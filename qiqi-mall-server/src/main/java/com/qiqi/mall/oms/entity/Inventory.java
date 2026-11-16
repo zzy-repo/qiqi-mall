@@ -5,7 +5,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
-/** 分仓库存记录：拆单时的「归属标记」依据；不在拆单时扣减（见 FIX-oms-split 口径③） */
+/** 分仓库存记录：拆单时的「归属标记」依据；不在拆单时扣减（拆单口径见 {@link com.qiqi.mall.oms.service.SplitOrderService}） */
 @Data
 @TableName("inventory")
 public class Inventory {

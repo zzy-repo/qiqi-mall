@@ -10,8 +10,8 @@
 #
 # 为什么这么设计（与 audit-cost 那轮的教训）：
 #   events_statements_summary_by_digest 是**自 MySQL 启动以来**的累计值，但它会被回收/清空
-#   （上一轮实测：同一份 CSV 里 COMMIT 的 COUNT_STAR 从 5.3M 掉到 1265）——拿「首行 vs 末行」做差
-#   会算出 2800 万条语句这种鬼数字。所以本轮**只用窗口紧邻的前后两次快照**做差，
+#   （实测过：同一份 CSV 里 COMMIT 的 COUNT_STAR 从 5.3M 掉到 1265）——拿「首行 vs 末行」做差
+#   会算出 2800 万条语句这种鬼数字。所以这里**只用窗口紧邻的前后两次快照**做差，
 #   且快照本身不带 `use`（采样器自己的语句 SCHEMA_NAME=NULL，不进被测量纲）。
 #
 # 铁律：不重建镜像、不改表结构、只读挂载 jar；跑完 DB/Redis/容器回干净态；锁由调用方持有。
@@ -99,7 +99,7 @@ prep_data() {
                                 ' drift=',(select count(*) from sku s where s.id between 1 and 21 and s.stock<>coalesce((select sum(stock) from sku_bucket b where b.sku_id=s.id),0)));")
   say "  自检 $chk"
   case "$chk" in *bad=0*drift=0*) ;; *) echo "✗ 库存自检不过：$chk" >&2; return 1 ;; esac
-  # purge 消化门禁（reset 会一次删掉上一轮几万单，undo 没消化完开跑会把 p50 抬到秒级）
+  # purge 消化前置校验（reset 会一次删掉前一轮压测留下的几万单，undo 没消化完开跑会把 p50 抬到秒级）
   local lag=0 waited=0
   while [ "$waited" -lt 40 ]; do
     lag=$(sql_q "select count from information_schema.innodb_metrics where name='trx_rseg_history_len';" | tr -d '\r')
@@ -137,7 +137,7 @@ cmd_probe() {
   local out=$OUTROOT/$label; mkdir -p "$out"
   local log=$out/run.log; : > "$log"
   prep_data "$(( n + 50 ))" |& tee -a "$log" || exit 4
-  say "--- 打开 history_long（**只用于本探针**，吞吐轮开跑前会硬门禁并要求关闭）"
+  say "--- 打开 history_long（**只用于本探针**，吞吐轮开跑前会做失败即拦的校验并要求关闭）"
   sql_q "update performance_schema.setup_consumers set ENABLED='YES' where NAME in
           ('events_statements_history_long','events_transactions_history_long');"
   # 环形缓冲必须先**清空**：不清空时它保留着上几轮几千条语句，配对会缺行（实测：主事务只配到 8/10 条），
@@ -170,7 +170,7 @@ cmd_run() {
   local rps=${2:-300} secs=${3:-75} ws=${4:-90} wrps=${5:-100}
   local out=$OUTROOT/$label; mkdir -p "$out"
   local log=$out/run.log; : > "$log"
-  # history_long 必须是关的（硬门禁，见 avalanche.sh 的教训）
+  # history_long 必须是关的（失败即拦的校验，见 avalanche.sh 的教训）
   local hist; hist=$(sql_q "select ENABLED from performance_schema.setup_consumers where NAME='events_statements_history_long'" | tr -d '\r')
   [ "${hist:-NO}" = "NO" ] || { echo "✗ events_statements_history_long 还开着，拒绝开跑" >&2; exit 3; }
   local need=$(( rps * secs + ws * wrps ))

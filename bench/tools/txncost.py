@@ -6,7 +6,7 @@
   ./txncost.py --probe <dir>      # 探针：history_long 的「事务 → 语句」归因，逐事务拆 pre/语句/间隙/提交
 
 为什么要「紧邻快照」而不是 CSV 采样：P_S 的 digest 聚合表会被回收/Q清空，首末行做差会算出
-天文数字（上一轮实测出过 2800 万条语句）。只有窗口紧邻的前后两次快照相减才有意义。
+天文数字（实测出过 2800 万条语句）。只有窗口紧邻的前后两次快照相减才有意义。
 """
 import sys, os, csv, json
 from collections import defaultdict, Counter

@@ -25,10 +25,10 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 后台建单的**初始状态白名单**（{@code POST /admin/orders}）：真起后端 + 真打 HTTP + 真连库。
+ * 后台建单的**初始状态只接受 0/1/7**（{@code POST /admin/orders}）：真起后端 + 真打 HTTP + 真连库。
  *
  * <h3>要固化的缺陷</h3>
- * {@code OrderController#create} 原来把请求体里的 {@code status} <b>原样落库</b>，没有任何白名单。
+ * {@code OrderController#create} 原来把请求体里的 {@code status} <b>原样落库</b>，没有任何初始状态校验。
  * 于是能造出任何真实流程都产不出的状态组合：「8 待发货却一张包裹都没有」「6 已退款却没有退款流水」
  * 「3 已完成却没有任何包裹」。这些组合一旦落库，所有按状态聚合的图与文档都必须为它开例外 ——
  * 它是当时最大的状态分叉口。
@@ -145,7 +145,7 @@ class OrderCreateStatusWhitelistIntegrationTest {
     @DisplayName("建单 status=7 待审核 / status=1 已付款 → 放行（后台表单与 MCP 的既有用法）")
     void create_withAllowedInitialStatuses_passes() {
         // 后台表单默认选中「待审核」、e2e createOrderViaUi 一直传 7；
-        // MCP 的 ship_order 用例要造「1 已付款待直发」的样本 —— 两者都必须在白名单里
+        // MCP 的 ship_order 用例要造「1 已付款待直发」的样本 —— 两者都必须被放行
         for (int wanted : new int[] {7, 1}) {
             String orderSn = sn("ADM-OK" + wanted);
             JsonNode data = ok(post("/admin/orders", orderBody(orderSn, wanted, 1, null)));
@@ -172,7 +172,7 @@ class OrderCreateStatusWhitelistIntegrationTest {
                     status, body.path("code").asInt(), rows, message.replace("\n", " / "));
 
             assertThat(rows).as("被拒的建单不许落库（status=%d）", status).isZero();
-            assertThat(message).as("中文原因要说清白名单（status=%d）", status)
+            assertThat(message).as("中文原因要说清允许的三个初始状态（status=%d）", status)
                     .contains("建单只允许").contains("作为初始状态")
                     .contains("必须由业务流程流转产生");
             // 具体状态名也要点到，别让调用方猜自己传的是什么
@@ -188,10 +188,10 @@ class OrderCreateStatusWhitelistIntegrationTest {
         String statusPart = status == null ? "" : ",\"status\":" + status;
         String versionPart = version == null ? "" : ",\"version\":" + version;
         return "{\"order\":{\"orderSn\":\"" + orderSn + "\",\"memberId\":" + memberId + statusPart
-                + ",\"payType\":1,\"receiverName\":\"建单状态白名单用例\",\"receiverPhone\":\"13700000000\""
+                + ",\"payType\":1,\"receiverName\":\"建单初始状态用例\",\"receiverPhone\":\"13700000000\""
                 + ",\"receiverAddress\":\"自动化测试地址（跑完即删）\",\"splitStatus\":0" + versionPart + "},"
                 + "\"items\":[{\"productId\":" + productId + ",\"productSkuId\":" + skuId
-                + ",\"productName\":\"建单状态白名单用例-明细\",\"productPrice\":10.00,\"productQuantity\":"
+                + ",\"productName\":\"建单初始状态用例-明细\",\"productPrice\":10.00,\"productQuantity\":"
                 + quantity + "}]}";
     }
 

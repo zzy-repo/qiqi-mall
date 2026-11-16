@@ -19,7 +19,7 @@
 // │    title 中文、description 中文且写清「什么时候用」、inputSchema 用 zod + .describe()
 // │    - 「一个资源一个工具」的写法（如 delivery/return_apply/member，用 action 参数区分动作）时：
 // │      write=0 要把写动作从 action 枚举里摘掉（工具仍在、只读动作照常可用），
-// │      并在 handler 里再判一次（第二道闸）
+// │      并在 handler 里再判一次（第二道校验）
 // │ 3) 分页一律用 ./_shared.mjs 的 clampPage + paginate（page 默认 1，size 默认 10、最大 50），
 // │    即使后端接口不分页也在工具层夹取 —— 10 批工具的分页语义必须完全一致
 // │ 4) 返回「文本摘要 + JSON:」两段（照 preview_split 的写法），空结果给明确文案
@@ -35,7 +35,7 @@
 // │        能 zod 必填就 zod 必填（member update），一个工具里混了不吃 version 的动作时
 // │        （delivery dispatch/cancel）由工具层+后端两步兜住，并在 .describe() 里写清哪个 action 必填；
 // │      · 该表**没有 version 列**（return_apply / return_reason / warehouse / order_setting /
-// │        member_address / cart）→ 后端根本不收 version，并发靠「影响行数 0 → 409」闸门；
+// │        member_address / cart）→ 后端根本不收 version，并发靠「影响行数 0 → 409」兜住；
 // │        这时**不能凭空造一个 version 参数**（会让每次调用都被当成非法入参）。
 // │    只读工具（含 dry-run 预演）无副作用，可反复调用。
 // │ 7) 在本文件下面 import 并调用一行；纯只读域直接注册，写域自带 writeEnabled 判定

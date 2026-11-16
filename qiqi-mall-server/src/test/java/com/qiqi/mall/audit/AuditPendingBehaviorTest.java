@@ -154,7 +154,7 @@ class AuditPendingBehaviorTest {
                 .build();
         AuditVerdict verdict = engine.evaluate(ctx, AuditScenario.policies(), AuditScenario.strict());
 
-        // 期望行为（明天）：result 不变、不是降级、不推进状态
+        // 期望行为：result 不变、不是降级、不推进状态
         assertThat(verdict.result()).isEqualTo(AuditResult.NO_MATCH);
         assertThat(verdict.matchedPolicy()).isNull();
         assertThat(verdict.downgradeReason())
@@ -167,7 +167,7 @@ class AuditPendingBehaviorTest {
             assertThat(m.reasons()).anyMatch(r -> r.contains("商品种类数 6 ≤ 5"));
         });
 
-        // 期望行为（明天）：evidence 里出现 stock 段，值与 AUTO_PASS 那条链同口径
+        // 期望行为：evidence 里出现 stock 段，值与 AUTO_PASS 那条链同口径
         assertThat(verdict.evidence()).containsKey("stock");
         @SuppressWarnings("unchecked")
         Map<String, Object> stock = (Map<String, Object>) verdict.evidence().get("stock");
@@ -293,13 +293,13 @@ class AuditPendingBehaviorTest {
         RunResultDto run3 = executor.run("MANUAL", null);
         int rowsAfter3 = decisionCount(order5);
 
-        // 期望行为（明天）：SKIPPED 不写决策行 → 行数不随轮次增长
+        // 期望行为：SKIPPED 不写决策行 → 行数不随轮次增长
         assertThat(rowsAfter3)
                 .as("同一笔已冻结单连跑 3 轮，决策行数不许增长（冻结久了 round_no 会一直涨）")
                 .isEqualTo(rowsAfter1);
         assertThat(rowsAfter3).as("SKIPPED 一行都不该写").isZero();
 
-        // 期望行为（明天）：跳过的事实仍要在 run 上看得见 —— 用 skipped 计数，不占决策行
+        // 期望行为：跳过的事实仍要在 run 上看得见 —— 用 skipped 计数，不占决策行
         assertThat(run1.skipped()).as("第 1 轮：本轮跳过 1 笔").isEqualTo(1);
         assertThat(run2.skipped()).isEqualTo(1);
         assertThat(run3.skipped()).isEqualTo(1);

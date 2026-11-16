@@ -13,7 +13,7 @@
 #   · **状态台账与 status_seq 不一致**（⑥）—— 每次状态流转应该恰好留一条台账，
 #     多一条少一条都说明「写入路径漏了或重了」，而这类漏记在业务层完全看不出。
 # 这三类都得**定期扫**，等到业务方发现「库存对不上」时已经查不出是哪一步坏的。
-# 所以把体检做成一条命令：只读、10 秒内跑完、有数字、有样本、退出码能直接当门禁。
+# 所以把体检做成一条命令：只读、10 秒内跑完、有数字、有样本、退出码能直接判断这次体检过没过。
 #
 # ── 用法 ───────────────────────────────────────────────────────────────────
 #   ./scripts/check-data-integrity.sh                 # 体检 qiqi_mall + qiqi_mall_test
@@ -77,7 +77,7 @@ done
 [[ "$DRIFT" =~ ^[0-9]+$ ]] || { echo "✗ --drift 需要非负整数（收到「$DRIFT」）" >&2; exit 2; }
 if [[ ${#DBS[@]} -eq 0 ]]; then DBS=("qiqi_mall" "qiqi_mall_test"); fi
 
-# 库名拼进 SQL，先过一遍白名单（只允许字母数字下划线）
+# 库名要拼进 SQL，先校验它只含字母、数字、下划线
 for db in "${DBS[@]}"; do
   [[ "$db" =~ ^[A-Za-z0-9_]+$ ]] || { echo "✗ 库名只允许字母数字下划线（收到「$db」）" >&2; exit 2; }
 done
@@ -136,14 +136,14 @@ for db in "${DBS[@]}"; do
   if [[ "$n" == "0" ]]; then
     printf '  ✓ %-16s 负库存 0 个（最小库存 %s）\n' "$db" "$(q "SELECT IFNULL(MIN(stock),0) FROM \`$db\`.sku")"
   else
-    printf '  ✗ %-16s 负库存 %s 个 ← 扣减闸门被绕过，后续进出都会继续错\n' "$db" "$n"
+    printf '  ✗ %-16s 负库存 %s 个 ← 扣减库存的原子校验被绕过，后续进出都会继续错\n' "$db" "$n"
     q "SELECT CONCAT('      · sku id=', id, ' stock=', stock, ' version=', version), 0
          FROM \`$db\`.sku WHERE stock < 0 ORDER BY stock LIMIT $SAMPLES" | cut -f1
     problems=$((problems + 1))
     neg_total=$((neg_total + n))
   fi
 done
-[[ "$neg_total" == "0" ]] && echo "  → 库存没有被扣穿（SkuService#deductStock 的原子闸门有效）"
+[[ "$neg_total" == "0" ]] && echo "  → 库存没有被扣穿（SkuService#deductStock 的原子校验有效）"
 echo
 
 # ================================================================ ③ 订单 ↔ 包裹状态分叉

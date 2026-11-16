@@ -33,7 +33,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
  * 别处不要再拼字符串。{@code operator_id} 对 API Key 存的是 {@code ai_api_key.id}，
  * 不是 key 明文/前缀 —— 台账里绝不出现凭证。
  *
- * <p><b>注意</b>：本类只「解析」，不写库。第一次落库在状态台账里（P2 第二步），
+ * <p><b>注意</b>：本类只「解析」，不写库 —— 解析结果由调用方交给状态台账写成三列，
  * 因此这里没有任何 {@code INSERT}。
  */
 public final class ActorResolver {

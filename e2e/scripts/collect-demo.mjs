@@ -2,7 +2,7 @@
 /**
  * demo 视频整理：把一次 Playwright 录制（可能是同一场景的多个用例）合成**每个场景一个 mp4**。
  *
- * 不再产出「全流程合并片」——演示只需要按场景单独出片。
+ * 不再产出「全流程合并片」——演示只需要按场景单独出视频。
  *
  * 输入：`npm run demo`（DEMO=1）产出的一次录制目录，里面有若干个 <用例目录>/video.webm
  * 输出：`report/videos/<桶>/[<子分类>/]<场景>/<段序>-<段名>.mp4`（与 tests/scenarios/<桶>/[<子分类>/]<场景>.spec.js、docs 图目录**同一段 rel**）
@@ -110,7 +110,7 @@ if (!all.length) {
   die(`${FROM} 里没有 video.webm，demo 档没录上？`)
 }
 
-// ---- --only：取子集（每个关键词都必须命中，避免"少录了一段还静默出片"）----
+// ---- --only：取子集（每个关键词都必须命中，避免"少录了一段还静默出视频"）----
 let picked = all
 if (ONLY.length) {
   const missing = ONLY.filter((kw) => !all.some((c) => c.dir.includes(kw)))

@@ -237,7 +237,7 @@ export function skuDetail(id) {
 //   DELETE /admin/deliveries/{id}        **version 在 query**（?targetId=&version=），不是 body ——
 //                                        DELETE 带请求体在部分代理/网关会被丢掉，后端刻意改成 query
 //   POST   /admin/deliveries/{id}/dispatch、/{id}/cancel   这两个**不收 version**：
-//                                        由「仅待下发」状态守卫 + UPDATE 影响行数闸门兜住
+//                                        由「仅待下发」状态守卫 + UPDATE 影响行数校验（0 行 → 409）兜住
 //   以上写操作全部支持 ?dryRun=true：只返回 { willDo }、不落库、不需要 version（预演不产生冲突）
 //   四个编辑动作（update/split/merge/delete）成功时返回 { orderId, splitStatus, deliveries:[...] } ——
 //   里面已经带**改完之后的最新 version**，所以工具层回读新 version 只需读这个响应（不必再发一次 GET）。
@@ -309,7 +309,7 @@ export function cancelDelivery(id, { dryRun } = {}) {
 //   POST /admin/return-applies                   创建（本批 MCP 不暴露：退货申请由买家在 C 端发起）
 //   PUT  /admin/return-applies/{id}              body {status:1通过/2拒绝, description?}，支持 ?dryRun=true
 //        ⚠️ **return_apply 表没有 version 列**：并发靠「UPDATE ... WHERE id=? AND status=0 影响 0 行 → 409」
-//        加「order 行 @Version 0 行 → 409 整笔回滚」两道闸门，所以 MCP 这里**没有 version 可传**（不是我省略）
+//        加「order 行 @Version 0 行 → 409 整笔回滚」两道影响行数校验，所以 MCP 这里**没有 version 可传**（不是我省略）
 //   GET/POST/PUT/DELETE /admin/return-reasons    原因字典：List 不分页；DELETE 被引用时后端拒绝
 
 /** 退货申请列表（status / orderId 都可选，都是精确等值） */
@@ -323,7 +323,7 @@ export function listReturnApplies({ status, orderId } = {}) {
 
 /**
  * 审核退货申请（status=1 通过 → 退款 + 回补库存；2 拒绝 → 订单回已付款）。
- * ⚠️ 没有 version 可传（表无 version 列），并发由后端影响行数闸门兜住 → 409。
+ * ⚠️ 没有 version 可传（表无 version 列），并发由后端影响行数校验（0 行）兜住 → 409。
  */
 export function auditReturnApply(id, { status, description, dryRun } = {}) {
   const body = { status };
@@ -625,7 +625,7 @@ export function deleteReturnApply(id) {
 //
 // 后端实际形态（已逐个读 Controller 确认，别按「标准 REST」想当然）：
 //   GET /admin/ledgers                      七类台账 UNION，**真分页**（Page: records/total/size/current/pages）；
-//                                           size 后端夹 1..50；type 白名单七类，拼错直接报错并列出可选值
+//                                           size 后端夹 1..50；type 只接受七类之一，拼错直接报错并列出可选值
 //   GET /admin/inventory/reconcile?skuId    单 SKU 三数 + 最近 20 条流水；skuId 不存在时后端 code=1 报错（不是空对象）
 //   GET /admin/inventory/reconcile/drift    **真分页**；threshold 默认 100，传 0 = 任何非零偏差都列
 //   GET /admin/order-audit/queue            返回 **{total,page,size,rows}**（不是 MP 的 Page，字段名是 rows 不是 records，

@@ -77,7 +77,7 @@ export const buildScopeGroups = (catalog) => {
   }))
 }
 
-/** 保存白名单：接口原样回的 grantable（后端没授予的值，前端连提交都不会提交） */
+/** 保存时要提交的 scope：接口原样回的 grantable（后端没授予的值，前端连提交都不会提交） */
 export const grantableValuesOf = (catalog) => (catalog?.grantable || [])
 
 /**

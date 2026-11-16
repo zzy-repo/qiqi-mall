@@ -7,7 +7,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * 台账开关（{@code qiqi.ledger.*}）—— P2 第二步：把台账写入接进业务事务。
+ * 台账开关（{@code qiqi.ledger.*}）：台账写入与业务操作在<b>同一个事务</b>里，这里决定写不写。
  *
  * <h3>为什么一定要开关（单变量纪律）</h3>
  * 台账写入是**新增的写库动作**，而且与业务在**同一个事务**里。上线后它只有两种可能：
@@ -15,14 +15,14 @@ import org.springframework.stereotype.Component;
  *   <li>它对（多一条证据，业务照跑）—— 这时开关留着是为了<b>对比</b>：同一套 e2e，
  *       开/关各跑一次，行数差恰好等于台账写入次数，才能证明「打开台账没有改变业务行为」；</li>
  *   <li>它错（约束冲突、锁等待、事务变长到超时）—— 这时开关是**一键回退**：
- *       {@code qiqi.ledger.enabled=false} 立刻回到 P2 第一步（只有状态写入，没有台账），
+ *       {@code qiqi.ledger.enabled=false} 立刻回到「只有业务自己的状态写入、一行台账都不写」的行为，
  *       不用回滚代码、不用重新发版。</li>
  * </ol>
  *
  * <h3>为什么是「总开关 + 分项」而不是四个独立开关</h3>
  * 四个独立布尔能拼出 2⁴ 种组合，排障时没人能一眼说清「现在到底记了什么账」。
- * 所以口径是：{@link #enabled} 是**总闸**，分项只能在总闸打开时才生效 ——
- * 总闸一关，四项一起停，不存在「关了一半」的中间态。启动日志会把这四个**生效值**打出来
+ * 所以口径是：{@link #enabled} 是**总开关**，分项只能在总开关打开时才生效 ——
+ * 总开关一关，四项一起停，不存在「关了一半」的中间态。启动日志会把这四个**生效值**打出来
  * （见 {@link #describe()}），一眼可验。
  *
  * <p><b>默认全开</b>：台账是本轮交付物本身，默认关掉等于没交付；要关必须显式配置。
@@ -33,7 +33,7 @@ public class LedgerProperties {
 
     private static final Logger log = LoggerFactory.getLogger(LedgerProperties.class);
 
-    /** 总闸：false = 一行台账都不写（精确回到 P2 第一步的行为） */
+    /** 总开关：false = 一行台账都不写（库里不会再增出任何台账行） */
     private boolean enabled = true;
 
     /** 分项：三张状态台账（order/delivery/return_status_ledger） */
@@ -48,7 +48,7 @@ public class LedgerProperties {
     /** 分项：支付流水加固字段（order_id、ref_type、ref_id、origin_flow_id、operator 三列、idem_key） */
     private boolean paymentTraceEnabled = true;
 
-    // ------------------------------------------------------------------ 生效值（总闸 & 分项）
+    // ------------------------------------------------------------------ 生效值（总开关 & 分项）
 
     public boolean statusOn() {
         return enabled && statusEnabled;
@@ -69,7 +69,7 @@ public class LedgerProperties {
     /**
      * 启动日志口径：{@code ledger.enabled=true status=true audit=true wms=true payment-trace=true}。
      *
-     * <p>打的是**生效值**（已经与总闸与过），不是配置原文 —— 否则配了
+     * <p>打的是**生效值**（已经和总开关做过「与」运算），不是配置原文 —— 否则配了
      * {@code enabled=false audit-enabled=true} 时会打出「audit=true」，与实际行为相反。
      */
     public String describe() {
@@ -91,7 +91,7 @@ public class LedgerProperties {
         if (enabled) {
             log.info("[ledger] 台账写入已启用：{}", describe());
         } else {
-            log.warn("[ledger] 台账写入已**关闭**（{}）：行为等同 P2 第一步，库里不会有新台账行", describe());
+            log.warn("[ledger] 台账写入已**关闭**（{}）：行为等同「没有台账那一版」，库里不会有新台账行", describe());
         }
     }
 

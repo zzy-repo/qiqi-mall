@@ -45,7 +45,7 @@ import java.util.function.LongFunction;
  *
  * <h3>开关</h3>
  * {@code qiqi.ledger.enabled=false}（或 {@code qiqi.ledger.status-enabled=false}）时本类全部方法直接 return：
- * 一行不写、一句 SQL 都不发 —— 行为精确回到 P2 第一步。
+ * 一行不写、一句 SQL 都不发 —— 行为精确回到「还没有台账」的样子。
  */
 @Component
 public class StatusLedgerWriter {
@@ -177,7 +177,7 @@ public class StatusLedgerWriter {
      *
      * <p>为什么不加 shard 前缀：{@code stock_ledger} 的 {@code idem_key} 以单调递增的 orderId 开头，
      * 所有插入都落在 uk_idem 最右端同一个 gap，成了全局串行点（压测实证）。同样形状的键理论上
-     * 有同一个风险，评估见 {@code docs} 与 P2 第二步报告：
+     * 有同一个风险，之所以这次敢这么写，逐条评估如下：
      * <ul>
      *   <li>写入量差一个数量级：库存台账是「每条明细一次」，状态台账是「每次状态流转一次」；</li>
      *   <li>{@code {bizId}:{seq}} 是字符串键，字典序按 bizId 的**首字符**分簇（10 簇），

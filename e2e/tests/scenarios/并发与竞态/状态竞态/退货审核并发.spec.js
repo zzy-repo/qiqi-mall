@@ -46,7 +46,7 @@ import { tid } from '../../../support/tid.js'
  *   · 退货申请只被处理一次（status=1），订单只退一次（status=6）
  *
  * 拒绝原因按**实际返回**断言（不写死成 409）：
- *   ReturnApplyController#update 的第一道闸是 `exist.getStatus() != 0 → fail("该申请已处理，不能重复审核")`
+ *   ReturnApplyController#update 的第一道状态守卫是 `exist.getStatus() != 0 → fail("该申请已处理，不能重复审核")`
  *   —— **HTTP 200 + code=1 + 中文原因**；而且它是两段式交互的**预演**阶段
  *   （PUT /admin/return-applies/{id}?dryRun=true）就被拦下，所以前端不会进「确认执行」，
  *   表现是：表单停在原地（不收起）+ 一条「预演失败：…」toast + 表单内 `return-apply-form-preview-error`。

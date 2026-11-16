@@ -13,7 +13,7 @@
         sql_share   = 审计 INSERT 的 SUM_TIMER_WAIT ÷ 窗口内**所有**语句的 SUM_TIMER_WAIT
                       （= 审计在「服务器花在 SQL 上的时间」里占多少）
         txn_share   = 审计 INSERT 的 SUM_TIMER_WAIT ÷ 窗口内**事务**的总时长
-                      （= 审计在「每笔事务墙钟」里占多少 —— 任务书判据用的就是这个口径，
+                      （= 审计在「每笔事务墙钟」里占多少 —— 这次实验的判据用的就是这个口径，
                        但注意事务时长含锁等待/网络，所以它比 sql_share 只会更小）
 """
 import csv
@@ -154,7 +154,7 @@ def report_run(d, idx=0):
     ws = window_stats(d, st["start_ep"], st["end_ep"])
     tc, tt = txn_delta(d)
     # 事务聚合的前后差覆盖的是**整段采样窗口**（含预热档/第一档），所以分母要用整段跑完的 ok 数，
-    # 不能用「测量档」的 ok —— 否则每单事务时长会被放大成 2~3 倍（本轮踩过）。
+    # 不能用「测量档」的 ok —— 否则每单事务时长会被放大成 2~3 倍（实测踩过）。
     run_ok = ok
     try:
         run_ok = json.load(open(os.path.join(d, "run.json")))["ok"] or ok

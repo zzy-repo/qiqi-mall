@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""sqlmerge.py —— 「压 SQL 条数能不能换吞吐」的 A/B 判读（改前手臂 vs 改后手臂）
+"""sqlmerge.py —— 「压 SQL 条数能不能换吞吐」的 A/B 判读（改前那组 vs 改后那组）
 
     python3 sqlmerge.py --a <dir> [<dir> ...] --b <dir> [<dir> ...]
 
-每个手臂可以给多轮（>=2 轮用来卡 ±2.8% 噪声带）。输出：
+每组可以给多轮（>=2 轮用来卡 ±2.8% 噪声带）。输出：
   ① 阶梯并列表：λ × (ok/s, p50/p95/p99, 每单语句数, SQL/s, MySQL 核数, 行锁/s)
-  ② 每臂的「拐区起点 / 饱和点」（判据沿用 avalanche.py：弹性 = Δok/s ÷ Δλ < 0.5）
+  ② 每组的「拐区起点 / 饱和点」（判据沿用 avalanche.py：弹性 = Δok/s ÷ Δλ < 0.5）
   ③ **因果检验**：实测 ok/s 涨幅 vs「每单语句数下降比例」预测的涨幅
        预测 = S_A / S_B  （语句少了 → 同样 SQL/s 能跑更多单）
        实测 = ok/s_B / ok/s_A
-       二者比值 0.8~1.2 → 不变式被证实；远小于 1 → 闸门不在这里
+       二者比值 0.8~1.2 → 不变式被证实；远小于 1 → 瓶颈不在这里
   ④ MySQL CPU 与节流（第三步要的因果证据）：mycpu.csv 按档窗口求增量
 """
 import csv
@@ -123,7 +123,7 @@ def verdicts(lad):
 
 
 def arm_table(dirs):
-    """一个手臂（多轮）→ 每档的均值行"""
+    """一组（多轮）→ 每档的均值行"""
     per = [load_ladder(d) for d in dirs]
     per = [p for p in per if p]
     targets = sorted({t for p in per for t in p})

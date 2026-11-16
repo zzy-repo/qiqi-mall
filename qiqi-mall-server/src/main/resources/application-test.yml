@@ -153,7 +153,7 @@ qiqi:
   #   集成测试在自己的上下文里关掉它，避免后台线程在断言之间偷偷跑一轮
   audit:
     schedule-enabled: ${AUDIT_SCHEDULE_ENABLED:true}
-  # 台账写入开关（P2 第二步）：总闸 + 分项。总闸关掉 = 精确回到「只有状态写入、没有台账」的旧行为。
+  # 台账写入开关：总开关 + 分项。总开关关掉 = 一行台账都不写（只剩业务自己的状态写入）。
   # 默认全开（见 shared/ledger/LedgerProperties）；显式写在这里是为了出事时改一行就能回退，不用翻代码找默认值。
   # 启动日志会打印生效值：ledger.enabled=true status=true audit=true wms=true payment-trace=true
   ledger:
@@ -179,7 +179,7 @@ qiqi:
     # 启动日志会打 `stock.mode=legacy|bucket(N=8) ledger=naive|ignore idem-shards=1`，压测方据此确认镜像身份。
     bucket-enabled: true
     ledger-insert-ignore: true
-    # 幂等键打散前缀桶数：1 = 不加前缀（与历史数据逐字节一致，默认）。
+    # 幂等键前缀分桶的桶数：1 = 不加前缀（与历史数据逐字节一致，默认）。
     #   实测 8→64 分片 ±0% 增益 ⇒ 保留开关但默认关（1 = 无前缀）。
     #   ⚠️ 将来真要开（>1）的顺序（不可并发）：停流量 → 跑 sql/migrate-ledger-idem-shard.sql 回填旧行 → 起新镜像。
     #     反了会让旧触发重放算出「带前缀」的新键、查不到库里那行「无前缀」旧键 → 当成首次触发 → 重复扣/补。

@@ -264,7 +264,7 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-阻止�
         expect(dec.map((x) => x.result), '第 1 轮冻结、第 2 轮自动过审（结论变了但历史行不改）')
           .toEqual(['FROZEN', 'AUTO_PASS'])
         expect(dec[1].matchedPolicyName, '第 2 轮命中策略名应是「淘宝-标准单」').toBe(POLICY_NAME.AUTO_TAOBAO)
-        expect(dec[1].orderStatusSeq, '第 2 轮决策应记下本轮推进出来的 status_seq=1').toBe(1)
+        expect(dec[1].orderStatusSeq, '第 2 轮决策应记下这次 run 推进出来的 status_seq=1').toBe(1)
 
         const after = orderFactOf('QT-1005')
         expect(after.status, '第 2 轮后订单应推进到 8 待发货').toBe(8)

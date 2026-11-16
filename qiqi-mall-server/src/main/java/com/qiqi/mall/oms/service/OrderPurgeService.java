@@ -160,7 +160,7 @@ public class OrderPurgeService {
     /**
      * 该订单名下**未取消且已出库**（{@code status >= 已出库(3)}）的包裹张数 —— 拒删守卫的第 3 条依据。
      *
-     * <p>与 {@code OrderController#countOutboundDeliveries}（ship 闸门）同一个口径：
+     * <p>与 {@code OrderController#countOutboundDeliveries}（ship 的出库校验）同一个口径：
      * 已取消(9) 不算（取消时货已经回补过），其余 3/4/5（已出库/运输中/已签收）都算
      * 「货已离开仓库」。
      */
@@ -279,7 +279,7 @@ public class OrderPurgeService {
      *       否则删单就变成了第二个「同一件货补两次」的漏洞。</li>
      * </ul>
      * 回补走库存接口（{@link StockLedgerService#restore}，即 {@code SkuService.restoreStock} 的同一实现），
-     * <b>绝不裸 UPDATE</b> —— 幂等键与数量守恒两道闸门照旧生效（净额算多了也补不出去）。
+     * <b>绝不裸 UPDATE</b> —— 幂等键与数量守恒两道校验照旧生效（净额算多了也补不出去）。
      *
      * <p><b>不额外记一行「回补台账」</b>：紧接着台账行就要被整体删掉，专门再记一行毫无意义。
      * 但<i>库存接口内部</i>会为这次回补写一行即时流水（同时动库存才动账），它与本订单其余台账行
@@ -290,7 +290,7 @@ public class OrderPurgeService {
      * 那个规格已经没有库存可补，删单本身没有错。
      */
     private void settleStockLedger(Order order) {
-        // 回补那一步会写一行即时台账 → 所以台账行必须在**回补之后**重新读，删行闸门才对得上
+        // 回补那一步会写一行即时台账 → 所以台账行必须在**回补之后**重新读，删行时的影响行数校验才对得上
         List<StockLedger> before = ledgerRowsOf(order.getId());
 
         Map<Long, Integer> netBySku = new LinkedHashMap<>();
@@ -388,7 +388,7 @@ public class OrderPurgeService {
         return restored;
     }
 
-    /** 该订单名下的库存台账行（按主键升序）—— 净额、reason 合计、删行闸门都从这一份口径来 */
+    /** 该订单名下的库存台账行（按主键升序）—— 净额、reason 合计、删行时的影响行数校验都从这一份口径来 */
     private List<StockLedger> ledgerRowsOf(Long orderId) {
         return stockLedgerMapper.selectList(new LambdaQueryWrapper<StockLedger>()
                 .eq(StockLedger::getOrderId, orderId)
@@ -470,7 +470,7 @@ public class OrderPurgeService {
 
     // ------------------------------------------------------------------ 小工具
 
-    /** 影响行数闸门：预期与实际必须相等，否则回滚（0 行不等于成功） */
+    /** 影响行数校验：预期与实际必须相等，否则回滚（0 行不等于成功） */
     private void requireExactly(String label, long expected, int actual) {
         if (expected == actual) return;
         throw new IllegalStateException("删除中断：删除" + label + "影响行数不符（预期 " + expected

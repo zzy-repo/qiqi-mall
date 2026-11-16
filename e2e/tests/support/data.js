@@ -1,9 +1,9 @@
 /**
  * 数据准备 —— 只允许放「页面上根本没有入口」的准备动作。
  *
- * 当前清单：**空**。
- * 上一轮已逐一确认，五个业务场景需要的准备动作 admin/portal 都有真实入口，已改走
- * support/ui.js（例如给 SKU 补库存：admin「SKU 管理」页 →「编辑」弹窗 →「库存」）：
+ * 当前清单：**空** —— 意思不是「还没写」，而是「确认过没有一个动作需要放进来」：逐条核过
+ * 下面这些准备动作在 admin / portal 页面上都有真实入口，所以全部走 support/ui.js
+ * （例如给 SKU 补库存：admin「SKU 管理」页 →「编辑」弹窗 →「库存」）：
  *   补库存        → ui.js  adminSetSkuStock()
  *   注册 / 登录   → ui.js  memberRegisterAndLogin()、adminLogin()
  *   加购 / 下单 / 支付 → ui.js  addSpecToCart()、submitCartOrder()

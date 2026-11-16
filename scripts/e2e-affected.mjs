@@ -146,7 +146,7 @@ const RULES = [
   { re: /\.sql$/i, full: '碰到 SQL/migration（含 sql/**、*/migration/**）→ 数据形状可能变了，跑全量' },
   { re: /^sql\//, full: 'sql/** 改动 → 跑全量' },
   { re: /^qiqi-mall-server\/src\/main\/resources\//, full: 'application*.yml / 资源文件改动 → 跑全量' },
-  // shared/ledger 是台账专用、有明确的一对一场景，先于 shared/** 的总闸匹配
+  // shared/ledger 是台账专用、有明确的一对一场景，先于 shared/** 这条兜底规则匹配
   { re: new RegExp(`^${S}/shared/ledger/`), scenes: G.ledger, why: 'shared/ledger → 台账七类六页' },
   { re: new RegExp(`^${S}/shared/`), full: 'shared/common|config|security|web|guard|storage 改动 → 横切面，跑全量' },
   { re: /^qiqi-mall-server\/pom\.xml$/, full: 'pom.xml 改动 → 跑全量' },

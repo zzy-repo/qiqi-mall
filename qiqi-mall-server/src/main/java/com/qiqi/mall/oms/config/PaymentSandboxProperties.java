@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
  * <h3>为什么必须有一个开关，而不是「写了就一直在」</h3>
  * {@code POST /admin/payments/{id}/replay-channel-callback} 是一个**只为验证而存在**的入口：
  * 它按库里那条流水的原 {@code trade_no} 把「第三方重复通知」再走一遍，用来证明
- * {@code payment_record.uk_channel_trade} 这道闸真的挡得住重复通知。
+ * {@code payment_record.uk_channel_trade} 这个唯一键真的挡得住重复通知。
  *
  * <p>它对外部世界没有业务价值，却是一个「能让服务端主动去撞唯一键」的口子。生产环境留着一个
  * 可以反复触发资金记账路径的接口，等于把「钱」这条链路交给运气 —— 所以：

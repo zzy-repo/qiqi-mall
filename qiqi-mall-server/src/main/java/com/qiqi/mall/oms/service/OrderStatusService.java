@@ -13,7 +13,7 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 /**
- * 订单状态写入的<b>唯一入口</b>（P2 第一步：收敛写点，行为不变）。
+ * 订单状态写入的<b>唯一入口</b>：所有改 {@code order.status} 的路径都走这里。
  *
  * <h3>为什么要有它</h3>
  * 收敛前 {@code order.status} 有 15 个写点散在 5 个类里（审核通过/审核不通过/发货/支付/确认收货/
@@ -24,19 +24,20 @@ import java.util.function.Consumer;
  *   <li>加一行台账 INSERT 要改 15 处，漏一处就少一条证据。</li>
  * </ul>
  * 现在所有写点都走 {@link #change}：合法性在一处判定，{@code status} / {@code status_seq} /
- * {@code version} 在同一句 UPDATE 里改完，第二步加台账 INSERT 只改这一个类。
+ * {@code version} 在同一句 UPDATE 里改完，台账写入也只挂在这一处。
  *
- * <h3>这一步**不写台账**</h3>
- * 本轮只收敛入口、不动台账（台账 INSERT 是第二步）。所以这里 {@code reason}/{@code reasonDetail}
- * 只被带进来、不落库 —— 它们就是第二步写 {@code order_status_ledger} 时那两个列的值，
- * 先让每个调用点把「这次是什么事件」说清楚，第二步就不用再回头猜。
+ * <h3>台账跟着状态一起写</h3>
+ * {@link #change} 在 UPDATE 成功（{@code rows > 0}）之后才调 {@code StatusLedgerWriter#orderChanged}，
+ * 与状态写入在同一个事务里；{@code rows == 0} 说明有人抢先改过、状态其实没变，这时一行台账都不写
+ * （写了就是「记一笔没发生的事」）。{@code reason}/{@code reasonDetail} 就是
+ * {@code order_status_ledger} 的那两列，所以每个调用点必须把「这次是什么事件」说清楚。
  *
  * <h3>与旧写法的等价性（逐条对齐，行为不变是硬门槛）</h3>
  * <ol>
  *   <li><b>一条 UPDATE</b>：{@code SET status=?, status_seq = status_seq + 1, version = version + 1
  *       WHERE id = ? AND version = ?} —— 旧写法 {@code updateById} 由 MyBatis-Plus 的
  *       {@code @Version} 生成的条件与自增完全一致，这里只是多带了 {@code status_seq}；</li>
- *   <li><b>条件按 version，不按 status</b>：旧写法的并发闸门就是 version（{@code WHERE version = ?}），
+ *   <li><b>条件按 version，不按 status</b>：旧写法的并发保护就是 version（{@code WHERE version = ?}），
  *       这里不额外加 {@code AND status = ?} —— 加了会把「status 没变但 version 变了」的其它场景
  *       从「照常写入」变成「409」，那是<b>新的业务规则</b>，本轮不引入；</li>
  *   <li><b>返回值</b>：返回影响行数，调用方照旧用 {@code OptimisticLockGuard.requireAffected(rows, 文案)}
@@ -55,8 +56,8 @@ public class OrderStatusService {
     private static final Logger log = LoggerFactory.getLogger(OrderStatusService.class);
 
     // ---- 事件原因（reason 列口径）----
-    // 常量本身住在 shared/ledger/ReasonCodes（唯一来源）；这里保留同名别名，是为了让 P2 第一步
-    // 已经写好的一批调用点（OrderStatusService.REASON_PAY 之类）一个字都不用改。
+    // 常量本身住在 shared/ledger/ReasonCodes（唯一来源）；这里保留同名别名，是为了让已经写好的一批
+    // 调用点（OrderStatusService.REASON_PAY 之类）一个字都不用改。
     // 台账写入时 reason 会原样落到 order_status_ledger.reason（VARCHAR(32)）。
     public static final String REASON_CREATE = ReasonCodes.ORDER_CREATE;
     public static final String REASON_PAY = ReasonCodes.ORDER_PAY;
@@ -80,7 +81,7 @@ public class OrderStatusService {
      * 逐条来源见 {@code docs} 里的状态图与各入口的守卫文案。
      */
     private static final Map<Integer, Set<Integer>> TRANSITIONS = Map.of(
-            // 0 待付款：支付 → 7 待审核（PortalOrderController#pay；口径②「支付即送审」）
+            // 0 待付款：支付 → 7 待审核（PortalOrderController#pay；口径「支付即送审」）
             0, Set.of(7),
             // 1 已付款：发货 → 2（OrderController#ship，历史直发单）；申请退货 → 5（PortalReturnController#apply）
             1, Set.of(2, 5),
@@ -102,7 +103,7 @@ public class OrderStatusService {
             9, Set.of(5));
 
     /**
-     * 聚合推导值：父单状态是<b>子单的推导值</b>（口径②：子单是事实源）。
+     * 聚合推导值：父单状态是<b>子单的推导值</b>（口径：子单是事实源）。
      *
      * <p>为什么它们不走 {@link #TRANSITIONS}：{@code recomputeOrderStatus} 每收到一次包裹事件就重算一遍，
      * 算出来的可能就是当前值（例如订单已是 9 部分发货，又有一个包裹出库但还没全出库 → 再写一次 9）。
@@ -187,7 +188,8 @@ public class OrderStatusService {
 
     /**
      * 流转（带触发单据）：{@code refType/refId} 记「这次流转是被哪张单据触发的」
-     * （退货申请审核 → RETURN_APPLY#12、支付 → PAYMENT#…），P3 的时间线视图靠它把单据串起来。
+     * （退货申请审核 → RETURN_APPLY#12、支付 → PAYMENT#…）——
+     * 审核时间线（{@code AuditQueryService#timeline}）就是靠它把一单的三段证据串起来的。
      */
     public int change(Order order, int to, String reason, String reasonDetail,
                       Consumer<LambdaUpdateWrapper<Order>> extraSets, String refType, Long refId) {

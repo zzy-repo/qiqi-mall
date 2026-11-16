@@ -145,5 +145,5 @@ if (STRICT) {
   process.exit(1)
 }
 
-console.log('\n（验收档只警告不阻断：dev 栈测试用的是源码热更新，不需要重建镜像）')
+console.log('\n（`npm test` 只警告不阻断：dev 栈测试用的是源码热更新，不需要重建镜像）')
 process.exit(0)

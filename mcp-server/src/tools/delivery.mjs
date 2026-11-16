@@ -13,7 +13,7 @@
 //     POST   /admin/deliveries/{id}/merge  收 body.version   → action=merge  需要
 //     DELETE /admin/deliveries/{id}        **收 query.version**（不是 body）→ action=delete 需要
 //     POST   /admin/deliveries/{id}/dispatch、/{id}/cancel  **不收 version**
-//            —— 它们由「仅待下发」状态守卫 + UPDATE 影响行数闸门兜住（后端刻意如此：
+//            —— 它们由「仅待下发」状态守卫 + UPDATE 影响行数校验（0 行 → 409）兜住（后端刻意如此：
 //               WMS/运维拿不到前端页面上的 version）
 //   所以本工具的 `version` 只能是 zod 可选 + 描述里写清「哪些 action 必填」，
 //   而**必填性由后端 fail-closed 保证**：缺了直接 400「缺少版本号」，failWrite 会把它带出来。
@@ -204,7 +204,7 @@ export function registerDeliveryTools(server, { writeEnabled } = {}) {
       },
     },
     async ({ action, orderId, deliveryId, targetId, warehouseId, newWarehouseId, items, event, version, dryRun, page, size }) => {
-      // ① 写动作门禁（write=0 时 action 枚举里已经没有它们，这里是第二道闸）
+      // ① 写动作门禁（write=0 时 action 枚举里已经没有它们，这里是第二道校验）
       if (!writeEnabled && !ACTIONS_READONLY.includes(action)) {
         return fail(new Error(`写操作未启用：delivery(action=${action}) 需要 MCP_ENABLE_WRITE=1（当前只开放 ${ACTIONS_READONLY.join(' / ')}）`));
       }

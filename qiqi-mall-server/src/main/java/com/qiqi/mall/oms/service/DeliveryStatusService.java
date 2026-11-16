@@ -13,7 +13,7 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 /**
- * 包裹（发货单）状态写入的<b>唯一入口</b>（P2 第一步：收敛写点，行为不变）。
+ * 包裹（发货单）状态写入的<b>唯一入口</b>：所有改 {@code delivery_order.status} 的路径都走这里。
  *
  * <p>与 {@link OrderStatusService} 同一套口径，只是主体是 {@code delivery_order}：
  * <pre>
@@ -38,7 +38,7 @@ public class DeliveryStatusService {
     private static final Logger log = LoggerFactory.getLogger(DeliveryStatusService.class);
 
     // ---- 事件原因（reason 列口径）----
-    // 常量唯一来源是 shared/ledger/ReasonCodes；这里保留别名，P2 第一步的调用点不用改。
+    // 常量唯一来源是 shared/ledger/ReasonCodes；这里保留别名，已经写好的调用点（REASON_*）一个字都不用改。
     // 台账写入时原样落到 delivery_status_ledger.reason（VARCHAR(32)）。
     public static final String REASON_CREATE = ReasonCodes.DELIVERY_CREATE;
     public static final String REASON_DISPATCH = ReasonCodes.DELIVERY_DISPATCH;

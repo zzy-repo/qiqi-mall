@@ -10,7 +10,7 @@ import java.util.List;
  *
  * <p>字段取舍（只留「建内部订单 + 回传发货」真正需要的东西）：
  * <ul>
- *   <li>{@code platformSn}：平台单号。<b>它 + 店铺</b> 是幂等闸门（{@code channel_order_map.uk_map}），
+ *   <li>{@code platformSn}：平台单号。<b>它 + 店铺</b> 是查重键（{@code channel_order_map.uk_map}），
  *       所以这个字段不许被改写、不许由业务键派生；</li>
  *   <li>{@code channel}：落到 {@code order.channel}（销售渠道），审核策略的 CHANNEL 条件用得到；</li>
  *   <li>{@code buyerName}：平台买家标识，只做展示（内部订单的买家统一挂「平台买家」账号，

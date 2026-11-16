@@ -102,7 +102,7 @@ test.describe('业务 › 订单-自动审核 › 审核策略与优先级', () 
    *   所以走键盘：点进「名称」→ Tab 一格就落在优先级 input 上（焦点实测 value=10）→
    *   Ctrl+A 覆盖 → 输入数字。这条路真人同样走得通，且不碰任何 DOM 注入。
    *   这是**前端布局缺陷**（优先级一栏 `:span="4"` + 96px 标签宽度 + 内层 flex 挤到 0），
-   *   本轮已登记在交付说明里，不在用例里"绕过并装作没看见"：断言一律回读库里的真实优先级。
+   *   这个缺陷已登记在交付说明里，不在用例里"绕过并装作没看见"：断言一律回读库里的真实优先级。
    */
   const setEditorPriority = async (page, dlg, value) => {
     await dlg.getByTestId('policy-form-name').click()

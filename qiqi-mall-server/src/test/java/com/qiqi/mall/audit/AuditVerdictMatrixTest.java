@@ -38,18 +38,18 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>{@code downgrade_reason} —— MANUAL 三支来路（被排除 / STOCK_SHORT / COST_MISSING）靠它区分；</li>
  *   <li>{@code advancesStatus} —— 状态是否推进（只有 AUTO_PASS 推；这是「结论」与「动作」的分界）；</li>
  *   <li>{@code would_be_auto_policy_name} —— 被拦/冻结时回填「本来会不会自动过」；</li>
- *   <li>{@code other_gates} —— 被拦/冻结时回填「<b>另一类</b>闸门里也命中的那些」：判定链整段跑、
+ *   <li>{@code other_gates} —— 被拦/冻结时回填「<b>另一类</b>拦截策略里也命中的那些」：判定链整段跑、
  *       命中即 return，[3] 一旦命中 [4] 就没跑过，所以「这单还挂着一笔退款申请」只能靠回填进证据。
  *       期望值为空 = <b>整个 {@code other_gates} 键不出现</b>（不是空数组）。</li>
  * </ol>
  * 另外每行还要过三条<b>不变量</b>（写在用例体里，不逐行抄进表，免得表变成噪音）：
  * <pre>
  *  · 非 SKIPPED 的证据里一定有 stock 段，且 stock.short 永远如实反映「桶里够不够」——
- *    与结论无关（这正是修正①的全部意义：事实写进证据，结论不许被它改写）；
+ *    与结论无关（事实如实写进证据，结论不许被它改写）；
  *  · stock.hint 只在 NO_MATCH 上出现（判定链 [7b]：只写证据、不改结论的那条支路）；
  *  · stock.warning 只在「LENIENT 档 + 真的缺货 + 仍然 AUTO_PASS」时出现；
  *  · other_gates 只在 BLOCKED / FROZEN 上可能出现，且一条也没有时整个键不出现
- *    （「有没有别的闸门」的判据是一条布尔判断，不该逼前端区分「空数组」与「缺失」两种空）。
+ *    （「有没有别的拦截策略命中」的判据是一条布尔判断，不该逼前端区分「空数组」与「缺失」两种空）。
  * </pre>
  *
  * <h3>期望值怎么来的：先读实现，再如实写</h3>
@@ -69,7 +69,7 @@ class AuditVerdictMatrixTest {
     /**
      * 判定矩阵：<b>一行 = 一个输入组合</b>。
      *
-     * <p>行序按「判定链」排：先五类基线 → 再各道闸门之间的叠加态 → 再库存档位 → 最后同类内
+     * <p>行序按「判定链」排：先五类基线 → 再各类拦截策略之间的叠加态 → 再库存档位 → 最后同类内
      * priority 竞争与停用 → 三种以上的叠加态收尾。读表的人和改链的人看到的是同一个顺序。
      */
     static Stream<Arguments> matrix() {
@@ -79,44 +79,44 @@ class AuditVerdictMatrixTest {
     static List<Row> rows() {
         return List.of(
                 // ---------------- ① 五判定各一个基线 ----------------
-                row("M01", "AUTO_PASS 基线：淘宝 268 元 2 件，淘宝-标准单条件全满足", "无干扰项 → 自动过审（唯一会推进状态的结论）",
+                row("baseline-auto-pass", "AUTO_PASS 基线：淘宝 268 元 2 件，淘宝-标准单条件全满足", "无干扰项 → 自动过审（唯一会推进状态的结论）",
                         AuditScenario.qt1001(),
                         AuditResult.AUTO_PASS, AuditScenario.POLICY_AUTO_TAOBAO, null, true, null),
 
-                row("M02", "MANUAL 基线：同 M01，但客服备注含「改」→ 命中全局排除", "条件全满足却被 ALL_AUTO 排除 → 留人工（不是不命中）",
+                row("baseline-manual-excluded", "MANUAL 基线：与 AUTO_PASS 基线同一个单（淘宝 268 元 2 件），但客服备注含「改」→ 命中全局排除", "条件全满足却被 ALL_AUTO 排除 → 留人工（不是不命中）",
                         AuditScenario.qt1002(),
                         AuditResult.MANUAL, AuditScenario.POLICY_AUTO_TAOBAO, null, false, null),
 
-                row("M03", "BLOCKED 基线：直营 199 元、毛利 −12", "BLOCK 命中即结论；AUTO 只回填不执行",
+                row("baseline-blocked", "BLOCKED 基线：直营 199 元、毛利 −12", "BLOCK 命中即结论；AUTO 只回填不执行",
                         AuditScenario.qt1004(),
                         AuditResult.BLOCKED, AuditScenario.POLICY_BLOCK_PROFIT, null, false, AuditScenario.POLICY_AUTO_DIRECT),
 
-                row("M04", "FROZEN 基线：淘宝 320 元、有待处理退款申请", "EXCEPTION 命中 → 冻结（打标，不动状态）",
+                row("baseline-frozen", "FROZEN 基线：淘宝 320 元、有待处理退款申请", "EXCEPTION 命中 → 冻结（打标，不动状态）",
                         AuditScenario.qt1005Round1(),
                         AuditResult.FROZEN, AuditScenario.POLICY_EXCEPTION_RETURN, null, false, AuditScenario.POLICY_AUTO_TAOBAO),
 
-                row("M05", "NO_MATCH 基线：抖音 1580 元（三条 AUTO 都不命中），桶里够", "全都不中 → 不命中；库存够时 hint 说「人工审核不会因缺货失败」",
+                row("baseline-no-match", "NO_MATCH 基线：抖音 1580 元（三条 AUTO 都不命中），桶里够", "全都不中 → 不命中；库存够时 hint 说「人工审核不会因缺货失败」",
                         AuditScenario.qt1003(),
                         AuditResult.NO_MATCH, null, null, false, null),
 
-                // ---------------- ② 闸门叠加：谁先谁后 ----------------
-                row("M06", "已冻结 × 需库存预检（桶 5 < 需求 8）× AUTO 条件全满足",
+                // ---------------- ② 多类拦截策略叠加：谁先谁后 ----------------
+                row("frozen-skips-stock-precheck", "已冻结 × 需库存预检（桶 5 < 需求 8）× AUTO 条件全满足",
                         "【冻结优先于预检、也优先于 AUTO】[2] 在 [5][7a][7b] 之前 → SKIPPED，连 would_be 都不算",
                         frozenShortStock(1201L, "QT-1201"),
                         AuditResult.SKIPPED, null, null, false, null),
 
-                row("M07", "状态 8（已发货）× 策略全满足 × 需库存预检",
+                row("status-8-skips-precheck", "状态 8（已发货）× 策略全满足 × 需库存预检",
                         "【状态优先于一切】[1] 最前 → SKIPPED",
                         shippedShortStock(1202L, "QT-1202"),
                         AuditResult.SKIPPED, null, null, false, null),
 
-                row("M08", "阻止命中（毛利 0 ≤ 0）× 自动策略也满足（淘宝 268）",
+                row("block-beats-auto-with-would-be", "阻止命中（毛利 0 ≤ 0）× 自动策略也满足（淘宝 268）",
                         "【BLOCK 优先于 AUTO】结论是 BLOCKED，但被丢弃的 AUTO 仍回填 would_be",
                         builder(1203L, "QT-1203", 7, "淘宝", "268.00")
                                 .grossProfit("0.00").itemQty(2).itemKinds(1).stock(100, 100).build(),
                         AuditResult.BLOCKED, AuditScenario.POLICY_BLOCK_PROFIT, null, false, AuditScenario.POLICY_AUTO_TAOBAO),
 
-                rowWithGates("M09", "异常命中（有退款申请）× 阻止也命中（毛利 −5）",
+                rowWithGates("block-before-exception-with-other-gates", "异常命中（有退款申请）× 阻止也命中（毛利 −5）",
                         "【实现事实：BLOCK 在 EXCEPTION 之前】[3] 先于 [4] → BLOCKED（不是 FROZEN）；"
                                 + "但 [4] 那段没跑过，必须靠 other_gates 回填「这单还挂着一笔退款申请」",
                         builder(1204L, "QT-1204", 7, "淘宝", "268.00")
@@ -124,48 +124,48 @@ class AuditVerdictMatrixTest {
                         AuditResult.BLOCKED, AuditScenario.POLICY_BLOCK_PROFIT, null, false, AuditScenario.POLICY_AUTO_TAOBAO,
                         "EXCEPTION:" + AuditScenario.POLICY_EXCEPTION_RETURN),
 
-                row("M10", "异常命中（有退款申请）× 需库存预检（桶 5 < 需求 8）",
+                row("exception-before-stock-precheck", "异常命中（有退款申请）× 需库存预检（桶 5 < 需求 8）",
                         "【冻结优先于预检】[4] 在 [7a][7b] 之前 → FROZEN；证据里仍如实写 short=true（事实与结论分离）",
                         builder(1205L, "QT-1205", 7, "淘宝", "320.00")
                                 .grossProfit("80.00").itemQty(8).itemKinds(1).hasReturnApply(true).stock(5, 999).build(),
                         AuditResult.FROZEN, AuditScenario.POLICY_EXCEPTION_RETURN, null, false, AuditScenario.POLICY_AUTO_TAOBAO),
 
-                row("M11", "不命中（种类数 6 > 5）× 需库存预检（桶 5 < 需求 6）",
+                row("no-match-precheck-only-writes-evidence", "不命中（种类数 6 > 5）× 需库存预检（桶 5 < 需求 6）",
                         "【结论不变、只写证据】[7b] 只写 stock 段 + hint → 仍是 NO_MATCH，绝不改成 MANUAL/STOCK_SHORT",
                         builder(1206L, "QT-1206", 7, "淘宝", "420.00")
                                 .grossProfit("100.00").itemQty(6).itemKinds(6).stock(5, 999).build(),
                         AuditResult.NO_MATCH, null, null, false, null),
 
-                row("M12", "自动策略满足 × 排除命中（客服备注「改」）× 需库存预检",
+                row("excluded-before-stock-precheck", "自动策略满足 × 排除命中（客服备注「改」）× 需库存预检",
                         "【排除优先于预检】[5b] 在 [7a] 之前 → MANUAL（被排除，无 downgrade），不 STOCK_SHORT",
                         builder(1207L, "QT-1207", 7, "淘宝", "268.00")
                                 .grossProfit("62.00").itemQty(8).itemKinds(1)
                                 .csRemark("客户改地址：朝阳区xx路2号").stock(5, 999).build(),
                         AuditResult.MANUAL, AuditScenario.POLICY_AUTO_TAOBAO, null, false, null),
 
-                row("M13", "自动策略满足 × 库存不足（STRICT）",
+                row("strict-stock-short-downgrades-to-manual", "自动策略满足 × 库存不足（STRICT 档）",
                         "[7a] STRICT：绝不带着缺口自动过审 → MANUAL + STOCK_SHORT（MANUAL 的子类，不新增枚举）",
                         AuditScenario.qtStockShort(),
                         AuditResult.MANUAL, AuditScenario.POLICY_AUTO_TAOBAO, AuditVerdict.DOWNGRADE_STOCK_SHORT, false, null),
 
                 // ---------------- ③ 库存档位：同一个单，两个档位两个结论 ----------------
-                row("M14", "自动策略满足 × 库存不足（LENIENT）—— 与 M13 同一个单，只换档位",
+                row("lenient-stock-short-still-auto-pass", "自动策略满足 × 库存不足（LENIENT 档）—— 与「STRICT 档缺货降级为人工」同一个单，只换档位",
                         "[7a] LENIENT：仍放行 → AUTO_PASS（状态会推进），缺口只落 evidence.stock.warning",
                         AuditScenario.qtStockShort(), AuditScenario.lenient(),
                         AuditResult.AUTO_PASS, AuditScenario.POLICY_AUTO_TAOBAO, null, true, null),
 
                 // ---------------- ④ 同类内 priority 竞争与停用 ----------------
-                row("M15", "多 AUTO 同时满足（直营-小单 prio 100 ∩ 淘宝-标准单 prio 200）",
+                row("two-auto-policies-lowest-priority-wins", "多 AUTO 同时满足（直营-小单 prio 100 ∩ 淘宝-标准单 prio 200）",
                         "【同类内 priority 升序】取优先级最小那条 → 直营-小单",
                         bothAutoMatch(1208L, "QT-1208"), AuditScenario.policies(), AuditScenario.strict(),
                         AuditResult.AUTO_PASS, AuditScenario.POLICY_AUTO_DIRECT, null, true, null),
 
-                row("M16", "同 M15，但「直营-小单」被停用（enabled=false）",
+                row("disabled-policy-falls-through-to-next", "与「两条自动策略同时满足取最小 priority」同一个单，但「直营-小单」被停用（enabled=false）",
                         "【停用策略不参与】次优的那条接上 → 淘宝-标准单",
                         bothAutoMatch(1208L, "QT-1208"), disable(AuditScenario.POLICY_AUTO_DIRECT), AuditScenario.strict(),
                         AuditResult.AUTO_PASS, AuditScenario.POLICY_AUTO_TAOBAO, null, true, null),
 
-                row("M17", "两条 EXCEPTION 同时命中（退款申请 prio 10 ∩ 平台备注 2 小时内被改 prio 20）",
+                row("two-exception-policies-lowest-priority-wins", "两条 EXCEPTION 同时命中（退款申请 prio 10 ∩ 平台备注 2 小时内被改 prio 20）",
                         "【同类内 priority 升序】被哪条冻的必须一眼看出 → 退款申请冻结",
                         builder(1211L, "QT-1211", 7, "淘宝", "320.00")
                                 .grossProfit("80.00").itemQty(2).itemKinds(1).hasReturnApply(true)
@@ -173,7 +173,7 @@ class AuditVerdictMatrixTest {
                                 .stock(100, 100).build(),
                         AuditResult.FROZEN, AuditScenario.POLICY_EXCEPTION_RETURN, null, false, AuditScenario.POLICY_AUTO_TAOBAO),
 
-                row("M18", "两条 BLOCK 同时命中（毛利不为正 prio 10 ∩ 双地址 prio 20）",
+                row("two-block-policies-lowest-priority-wins", "两条 BLOCK 同时命中（毛利不为正 prio 10 ∩ 双地址 prio 20）",
                         "【同类内 priority 升序】命中「毛利不为正」—— 原因文案才带具体数值差",
                         builder(1212L, "QT-1212", 7, "直营", "199.00")
                                 .customerTag("直营门店").grossProfit("-12.00").itemQty(1).itemKinds(1)
@@ -181,23 +181,23 @@ class AuditVerdictMatrixTest {
                         AuditResult.BLOCKED, AuditScenario.POLICY_BLOCK_PROFIT, null, false, AuditScenario.POLICY_AUTO_DIRECT),
 
                 // ---------------- ⑤ 三种以上的叠加态 ----------------
-                row("M19", "三者叠加：已冻结 × 阻止命中 × 不命中（抖音 1580 元、毛利 −12、已有 FROZEN 标）",
+                row("frozen-beats-block-and-no-match", "三者叠加：已冻结 × 阻止命中 × 不命中（抖音 1580 元、毛利 −12、已有 FROZEN 标）",
                         "【冻结最先】[2] 在 [3][5] 之前 → SKIPPED（既不 BLOCKED 也不 NO_MATCH）",
                         builder(1209L, "QT-1209", 7, "抖音", "1580.00")
                                 .grossProfit("-12.00").itemQty(8).itemKinds(2)
                                 .frozen(true, "FROZEN").stock(5, 999).build(),
                         AuditResult.SKIPPED, null, null, false, null),
 
-                row("M20", "阻止命中 × 不命中（抖音 1580 元、毛利 −12，无冻结）",
+                row("blocked-with-no-auto-match", "阻止命中 × 不命中（抖音 1580 元、毛利 −12，无冻结）",
                         "【BLOCK 与「AUTO 不命中」不冲突】拦住就够，would_be 为空（本来也不会自动过）",
                         builder(1210L, "QT-1210", 7, "抖音", "1580.00")
                                 .grossProfit("-12.00").itemQty(8).itemKinds(2).stock(100, 100).build(),
                         AuditResult.BLOCKED, AuditScenario.POLICY_BLOCK_PROFIT, null, false, null),
 
-                // M09 那行两条策略 priority 相同（都是 10），区分不出「类型顺序」与「全局 priority」。
+                // 「BLOCK 先于 EXCEPTION」那行两条策略 priority 相同（都是 10），区分不出「类型顺序」与「全局 priority」。
                 // 这一行让 EXCEPTION 的 priority 数字更小（10 < 20）：若按全局 priority 排 → FROZEN；
                 // 实得 BLOCKED，说明跨类型比的是**类型顺序**，priority 只在同类内有效。
-                rowWithGates("M21", "阻止命中（双地址 prio 20）× 异常命中（退款申请 prio 10）—— 异常那条的数字更小",
+                rowWithGates("block-wins-over-exception-despite-priority", "阻止命中（双地址 prio 20）× 异常命中（退款申请 prio 10）—— 异常那条的数字更小",
                         "【跨类型只认类型顺序，不认 priority 数字】[3] 整段在 [4] 之前 → BLOCKED（不是 FROZEN）",
                         builder(1213L, "QT-1213", 7, "淘宝", "268.00")
                                 .grossProfit("62.00").itemQty(2).itemKinds(1)
@@ -205,9 +205,9 @@ class AuditVerdictMatrixTest {
                         AuditResult.BLOCKED, AuditScenario.POLICY_BLOCK_ADDRESS, null, false, AuditScenario.POLICY_AUTO_TAOBAO,
                         "EXCEPTION:" + AuditScenario.POLICY_EXCEPTION_RETURN),
 
-                // ---------------- ⑥ 另一道闸门：被拦时把「也命中的那一类」写进证据 ----------------
-                rowWithGates("M22", "阻止命中（毛利 −12）× 异常也命中（平台备注 2 小时内被改）",
-                        "结论仍 BLOCKED（[3] 先于 [4]），但证据要回答「还有哪道闸门也踩了」→"
+                // ---------------- ⑥ 另一类拦截策略：被拦时把「也命中的那一类」写进证据 ----------------
+                rowWithGates("blocked-with-exception-other-gates", "阻止命中（毛利 −12）× 异常也命中（平台备注 2 小时内被改）",
+                        "结论仍 BLOCKED（[3] 先于 [4]），但证据要回答「还有哪类拦截策略也命中了」→"
                                 + " other_gates 一条：EXCEPTION/平台备注冻结（[4] 那段此刻根本没跑）",
                         builder(1214L, "QT-1214", 7, "淘宝", "268.00")
                                 .grossProfit("-12.00").itemQty(2).itemKinds(1)
@@ -216,7 +216,7 @@ class AuditVerdictMatrixTest {
                         AuditResult.BLOCKED, AuditScenario.POLICY_BLOCK_PROFIT, null, false, AuditScenario.POLICY_AUTO_TAOBAO,
                         "EXCEPTION:" + AuditScenario.POLICY_EXCEPTION_PLATFORM_REMARK),
 
-                row("M23", "异常命中（平台备注 2 小时内被改）× 阻止不命中（毛利 62）",
+                row("frozen-with-no-other-gates", "异常命中（平台备注 2 小时内被改）× 阻止不命中（毛利 62）",
                         "【对称的反面】FROZEN 且没有任何 BLOCK 命中 → other_gates 整个键不存在"
                                 + "（按链序 [3] 整段先于 [4]，所以 FROZEN 时它永远为空）",
                         builder(1215L, "QT-1215", 7, "淘宝", "268.00")
@@ -246,7 +246,7 @@ class AuditVerdictMatrixTest {
         assertThat(nameOf(v.wouldBePolicy())).as("[%s] %s → would_be_auto_policy_name",
                 row.id(), row.combo()).isEqualTo(row.wouldBePolicyName());
 
-        // ---------------- 第六个字段：other_gates（另一类闸门也命中时才有） ----------------
+        // ---------------- 第六个字段：other_gates（另一类拦截策略也命中时才有） ----------------
         assertOtherGates(v, row);
 
         // ---------------- 不变量一：证据里的 stock 段与结论无关 ----------------
@@ -259,7 +259,7 @@ class AuditVerdictMatrixTest {
             assertThat(v.reasonText()).as("[%s] SKIPPED 必须说清为什么跳过", row.id()).isNotBlank();
         } else {
             Map<String, Object> stock = stockOf(v, row);
-            assertThat(stock).as("[%s] 非 SKIPPED 的证据里一定有 stock 段（含不命中的单 —— 修正①的口径）", row.id())
+            assertThat(stock).as("[%s] 非 SKIPPED 的证据里一定有 stock 段（含不命中的单 —— 事实写进证据、不改结论）", row.id())
                     .containsKeys("bucket_sum", "sku_stock_cache", "demand", "guard", "short");
             assertThat(stock.get("bucket_sum")).as("[%s] 预检判据是 SUM(sku_bucket.stock)，不是 sku.stock 缓存", row.id())
                     .isEqualTo(row.ctx().stockAvailable());
@@ -307,18 +307,18 @@ class AuditVerdictMatrixTest {
     }
 
     /**
-     * 表自身的体检：行号唯一、每行都写了「为什么是这个结论」、五判定各自有基线、必备叠加态齐全。
+     * 表自身的体检：用例 ID 唯一、每行都写了「为什么是这个结论」、五判定各自有基线、必备叠加态齐全。
      *
      * <p>没有这条，矩阵最容易的腐坏方式不是断言变红，而是<b>悄悄少了一行</b>：
      * 复制一行过去忘改单号 → 少一个组合，但整个类还是全绿。
      */
     @Test
-    @DisplayName("矩阵自检：行号唯一、每行写清优先级、五判定各有基线、必备叠加态齐全")
+    @DisplayName("矩阵自检：用例 ID 唯一、每行写清优先级、五判定各有基线、必备叠加态齐全")
     void matrixIsWellFormed() {
         List<Row> rows = rows();
 
         Set<String> ids = new HashSet<>();
-        rows.forEach(r -> assertThat(ids.add(r.id())).as("行号 %s 重复（复制行忘改号 = 少测一个组合）", r.id()).isTrue());
+        rows.forEach(r -> assertThat(ids.add(r.id())).as("用例 ID %s 重复（复制行忘改 ID = 少测一个组合）", r.id()).isTrue());
         rows.forEach(r -> assertThat(r.why()).as("[%s] 必须写清「为什么是这个结论」（优先级说明）", r.id()).isNotBlank());
 
         assertThat(rows).as("矩阵至少 12 行，少了就说明组合没铺开").hasSizeGreaterThanOrEqualTo(12);
@@ -367,10 +367,10 @@ class AuditVerdictMatrixTest {
                 .anyMatch(r -> r.result() == AuditResult.BLOCKED && !r.otherGates().isEmpty());
         assertThat(rows).as("必须有「异常命中 × 阻止不命中 → FROZEN 且 other_gates 不出现」的行")
                 .anyMatch(r -> r.result() == AuditResult.FROZEN && r.otherGates().isEmpty());
-        assertThat(rows).as("other_gates 只允许出现在被闸门拦下的两类结论上（BLOCKED / FROZEN）")
+        assertThat(rows).as("other_gates 只允许出现在被拦截策略拦下的两类结论上（BLOCKED / FROZEN）")
                 .allMatch(r -> r.otherGates().isEmpty()
                         || r.result() == AuditResult.BLOCKED || r.result() == AuditResult.FROZEN);
-        assertThat(rows).as("必须有三种事实叠加的行（两个以上闸门同时适用）")
+        assertThat(rows).as("必须有三种事实叠加的行（两条以上拦截策略同时适用）")
                 .anyMatch(r -> r.ctx().frozen() && r.ctx().grossProfit() != null
                         && r.ctx().grossProfit().signum() <= 0 && r.result() == AuditResult.SKIPPED);
     }
@@ -414,7 +414,7 @@ class AuditVerdictMatrixTest {
         assertThat(v.evidence()).doesNotContainKey("other_gates");
         assertThat(v.evidence().get("other_gates")).as("空数组也是一种「有」，会把前端判据搅浑").isNull();
 
-        // 对照：同样被拦、但一条异常闸门也没踩的单，也不该有这一段
+        // 对照：同样被拦、但一条 EXCEPTION 策略也没命中的单，也不该有这一段
         AuditVerdict blockedOnly = ENGINE.evaluate(AuditScenario.qt1004(), AuditScenario.policies(), AuditScenario.strict());
         assertThat(blockedOnly.result()).isEqualTo(AuditResult.BLOCKED);
         assertThat(blockedOnly.evidence()).as("QT-1004 毛利 −12 但没有退款申请/备注改动").doesNotContainKey("other_gates");
@@ -425,7 +425,7 @@ class AuditVerdictMatrixTest {
     /**
      * 矩阵的一行。
      *
-     * @param id                行号（M01…，唯一，报告里按它引用）
+     * @param id                用例 ID：英文短横线命名、说明这条用例验的是什么，唯一，报告里按它引用
      * @param combo             输入组合（一句话说清哪几条规则同时适用）
      * @param why               为什么落这个结论（优先级说明 —— 这列是这张表真正的正文）
      * @param ctx               订单上下文
@@ -499,7 +499,7 @@ class AuditVerdictMatrixTest {
                 .frozen(true, "FROZEN").build();
     }
 
-    /** 状态 8 + 桶不够 + AUTO 条件全满足：状态闸门在一切之前 */
+    /** 状态 8 + 桶不够 + AUTO 条件全满足：状态检查在一切之前 */
     private static AuditContext shippedShortStock(Long id, String sn) {
         return builder(id, sn, 8, "淘宝", "268.00")
                 .grossProfit("62.00").itemQty(8).itemKinds(1).stock(5, 999).build();
@@ -523,22 +523,22 @@ class AuditVerdictMatrixTest {
     }
 
     /**
-     * {@code evidence.other_gates}：被拦/冻结时「另一类闸门里也命中的那些」。
+     * {@code evidence.other_gates}：被拦/冻结时「另一类拦截策略里也命中的那些」。
      *
      * <p>两个方向都断言：声明了期望的行必须<b>逐条</b>出现（type / policy_name / text 三个键齐），
-     * 没声明的行必须<b>整个键不存在</b>（不是空数组）—— 后者才是前端判「还有没有别的闸门」的依据。
+     * 没声明的行必须<b>整个键不存在</b>（不是空数组）—— 后者才是前端判「还有没有别的拦截策略命中」的依据。
      */
     @SuppressWarnings("unchecked")
     private static void assertOtherGates(AuditVerdict v, Row row) {
         Object raw = v.evidence().get("other_gates");
 
         if (row.otherGates().isEmpty()) {
-            assertThat(v.evidence()).as("[%s] 没有另一类闸门也命中 → other_gates 整个键不出现（不是空数组）", row.id())
+            assertThat(v.evidence()).as("[%s] 没有另一类拦截策略命中 → other_gates 整个键不出现（不是空数组）", row.id())
                     .doesNotContainKey("other_gates");
             return;
         }
 
-        assertThat(raw).as("[%s] 另一类闸门也命中 → evidence.other_gates 应是数组", row.id())
+        assertThat(raw).as("[%s] 另一类拦截策略也命中 → evidence.other_gates 应是数组", row.id())
                 .isInstanceOf(List.class);
         List<Map<String, Object>> gates = (List<Map<String, Object>>) raw;
         assertThat(gates).extracting(g -> g.get("type") + ":" + g.get("policy_name"))
@@ -547,7 +547,7 @@ class AuditVerdictMatrixTest {
         assertThat(gates).allSatisfy(g -> {
             assertThat(g).as("[%s] 每条 gate 三个键齐", row.id())
                     .containsKeys("type", "policy_name", "text");
-            assertThat(String.valueOf(g.get("type"))).as("[%s] type 只可能是这两类闸门", row.id())
+            assertThat(String.valueOf(g.get("type"))).as("[%s] type 只可能是这两类策略（BLOCK / EXCEPTION）", row.id())
                     .isIn("EXCEPTION", "BLOCK");
             // 与 matched_condition 里条件人话同格式（ConditionTrace.text()）：相等/包含类写
             // 「有退款申请 = 是（实际 是）」，关系比较类写「平台备注更新距今(小时) 2 ≤ 24」；

@@ -34,7 +34,7 @@ import java.util.Map;
  * <p>**本接口的 7 个写操作全部是 L3（高影响/不可逆）**，统一契约：
  * <pre>
  * ① 预演  POST/PUT/DELETE ...?dryRun=true → 不落库，只返回 { willDo:"中文描述" }
- * ② 执行  同一地址（不带 dryRun）→ 走下面三道闸门
+ * ② 执行  同一地址（不带 dryRun）→ 走下面三道校验
  * </pre>
  * 预演方法（{@code DeliveryFlowService#previewXxx / DeliveryEditService#previewXxx}）与执行路径共用同一套守卫，
  * 所以预演阶段就会把「该包裹已下发不能改」这类问题直接告诉调用方。
@@ -239,7 +239,7 @@ public class DeliveryController {
         // ③ 乐观锁（query 参数）
         OptimisticLockGuard.requireVersion(version);
         OptimisticLockGuard.requireSameVersion(version, current.getVersion());
-        // ④ 业务守卫 + 落库（有明细时内部转 merge，同样走 markManual 的影响行数闸门）
+        // ④ 业务守卫 + 落库（有明细时内部转 merge，同样走 markManual 的影响行数校验）
         return Result.ok(deliveryEditService.delete(id, targetId));
     }
 

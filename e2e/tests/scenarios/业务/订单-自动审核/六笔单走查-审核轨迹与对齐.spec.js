@@ -43,7 +43,7 @@ import {
  *
  * ── 「强对齐」到底强在哪（这一条只能靠接口 + 库证明）─────────────────────
  *   决策行的 `order_status_seq` 说的是「这一轮推进出来的那条台账的序号」，
- *   台账行的 `ref_type='AUDIT_RUN' && ref_id=run_id` 说的是「这条台账是本轮 run 写的」。
+ *   台账行的 `ref_type='AUDIT_RUN' && ref_id=run_id` 说的是「这条台账是这次 run 写的」。
  *   两者同时成立 = **RUN_REF 强对齐**（同一条因果）；只有序号相同 = STATUS_SEQ 弱对齐。
  *   前端目前只显示「已对齐状态台账 seq=N」，`matchedBy / strong` 两个字段被 mapTrailEntry 丢掉了
  *   （已登记前端缺口），所以断言打在接口的 `aligned` 与库的 `ref_type/ref_id` 上。
@@ -151,7 +151,7 @@ test.describe('业务 › 订单-自动审核 › 六笔单走查-审核轨迹�
         expect(actions, '审计段应含人工解冻 AUDIT_UNFREEZE').toContain('AUDIT_UNFREEZE')
       })
 
-      await test.step('④ 直查库：决策 seq 与台账 seq 同一个数，且台账 ref 指回本轮 run', async () => {
+      await test.step('④ 直查库：决策 seq 与台账 seq 同一个数，且台账 ref 指回这次 run', async () => {
         const id = orderFactOf('QT-1005').id
         const dec = decisionsOf(id)
         expect(dec.map((d) => d.result), '库里两轮结论分别是 FROZEN / AUTO_PASS').toEqual(['FROZEN', 'AUTO_PASS'])

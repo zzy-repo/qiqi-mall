@@ -54,21 +54,21 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *
  * <h3>为什么必须单开一个类（这是原来 e2e 的盲区）</h3>
  * 既有 e2e「支付并发冲突」场景（{@code e2e/tests/scenarios/并发与竞态/重复提交与幂等/支付并发冲突.spec.js}）
- * 走的是**两道业务闸**，根本到不了 {@code payment_record}：
+ * 走的是**两道状态校验**，根本到不了 {@code payment_record}：
  * <pre>
  * ① 状态守卫 PortalOrderController#pay（status != 0 → code=1「当前订单状态不可支付」）
  * ② 状态 CAS  PortalOrderController#pay（WHERE version=? 影响 0 行 → 409「订单状态已变化，请刷新后重试」）
  * </pre>
  * 第二笔在调用 {@code record()} **之前**就被拒了，所以 {@code uk_idem} 一次都没被命中 ——
  * 「幂等键兜重放」一直是设计意图，不是被验事实。同一个坑对退款更明显：退货审核的重复提交
- * 同样先被状态闸门挡住。
+ * 同样先被状态守卫挡住。
  *
  * <h3>九条用例各证明什么</h3>
  * <ol>
  *   <li><b>①命中幂等键</b>：**绕过 controller**，直接调 {@link PaymentRecordService#record} 两次
  *       （同 orderSn 同类型、同幂等键）→ 库里只有 1 行、第二次不抛异常（静默 return，视为重放）；</li>
- *   <li><b>②幂等键与业务闸的分工</b>：走 controller 的支付接口重放 → 被**业务闸**拒（code=1），
- *       流水仍是 1 行。把「这一条是业务闸挡的、不是幂等键挡的」固化进断言注释，
+ *   <li><b>②幂等键与状态守卫的分工</b>：走 controller 的支付接口重放 → 被**状态守卫**拒（code=1），
+ *       流水仍是 1 行。把「这一条是状态守卫挡的、不是幂等键挡的」固化进断言注释，
  *       免得后人看见「1 行」就以为幂等键被验过了；</li>
  *   <li><b>③退款幂等键</b>：同 returnApplyId 重复退款 → 1 行，幂等键 = {@code {orderSn}:REFUND:{id}}
  *       （不同申请各退一笔则不该被吞 —— 幂等键带 refId 的全部理由）；</li>
@@ -141,7 +141,7 @@ class PaymentIdemKeyTest {
     // ================================================================== ① 命中幂等键
 
     /**
-     * ① **幂等键真的被撞到了**：绕开 controller 的两道业务闸，直接调 service 记录两次。
+     * ① **幂等键真的被撞到了**：绕开 controller 的两道状态校验，直接调 service 记录两次。
      *
      * <p>这是本类存在的理由：e2e 里那个「并发支付」永远在 {@code record()} 之前就被拒，
      * 所以 {@code uk_idem} 到底会不会被撞、撞了之后是不是静默 return，此前**没人验过**。
@@ -186,10 +186,10 @@ class PaymentIdemKeyTest {
                 + afterSecond + "；idem_key='" + idemKey + "' → " + countByIdemKey(idemKey));
     }
 
-    // ================================================================== ② 幂等键与业务闸的分工
+    // ================================================================== ② 幂等键与状态守卫的分工
 
     /**
-     * ② **这条走的不是幂等键，是业务闸** —— 把两者的分工钉在代码里。
+     * ② **这条走的不是幂等键，是状态守卫** —— 把两者的分工钉在代码里。
      *
      * <p>同一笔支付请求经 controller 重放（订单已经是已付款/待审核状态）：
      * <ul>
@@ -197,7 +197,7 @@ class PaymentIdemKeyTest {
      *   <li>第二笔：{@code PortalOrderController#pay} 第一行守卫 {@code order.getStatus() != 0}
      *       直接命中 → {@code Result.fail("当前订单状态不可支付")}（HTTP 200 + code=1）。
      *       <b>它根本没走到 {@code paymentRecordService.record()}</b>，所以这里「流水仍是 1 行」
-     *       证明的是**业务闸**有效，与 {@code uk_idem} 无关（幂等键是第 ① 条验的）。</li>
+     *       证明的是**状态守卫**有效，与 {@code uk_idem} 无关（幂等键是第 ① 条验的）。</li>
      * </ul>
      *
      * <p>为什么必须把这句话写进断言：e2e 里断言「没有第二条流水」的那两条用例，走的正是这里这条路径；
@@ -208,7 +208,7 @@ class PaymentIdemKeyTest {
      */
     @Test
     @Order(2)
-    @DisplayName("② controller 重放支付 → 被业务闸拒（code=1「当前订单状态不可支付」），流水仍 1 行；这条不是幂等键的功劳")
+    @DisplayName("② controller 重放支付 → 被状态守卫拒（code=1「当前订单状态不可支付」），流水仍 1 行；这条不是幂等键的功劳")
     void replayViaController_blockedByBusinessGate_notByIdemKey() {
         PortalSession buyer = registerPortalMember();
         String orderSn = uniqueSn("IDEM");
@@ -234,12 +234,12 @@ class PaymentIdemKeyTest {
             // 断言口径（按现状）：状态守卫是 code=1 的**可读业务失败**（HTTP 200），
             // 不是 409 —— 409 属于「读出来之后被别人改过」的 CAS 落空分支（真并发才走得到）。
             assertThat(resp.getStatusCode().value()).as("业务守卫是 HTTP 200 + code=1，不是 4xx").isEqualTo(200);
-            assertThat(body.path("code").asInt()).as("被业务闸拒绝：code=1").isEqualTo(1);
+            assertThat(body.path("code").asInt()).as("被状态守卫拒绝：code=1").isEqualTo(1);
             assertThat(body.path("message").asText())
                     .as("买家视角文案（PortalOrderController#pay 的状态守卫）")
                     .isEqualTo("当前订单状态不可支付");
 
-            // ★ 这条断言证明的是**业务闸**，不是幂等键 ★
+            // ★ 这条断言证明的是**状态守卫**，不是幂等键 ★
             assertThat(countByOrderSn(orderSn))
                     .as("**重放没有多记流水 —— 但拦下它的是 PortalOrderController 的状态守卫"
                             + "（status != 0 → code=1），不是 payment_record.uk_idem："

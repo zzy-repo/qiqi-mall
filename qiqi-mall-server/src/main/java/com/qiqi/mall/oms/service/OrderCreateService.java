@@ -16,7 +16,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * 模块边界约定：本类是 **portal → oms 的唯一合法入口**（portal 允许 import 本类，
  * 其余 oms 具体实现类不允许被 portal 直接引用）；将来引入 OrderFacade 时由它替代本类的对外角色。
  *
- * 见 benchmark/oversell/deadlock-fix.mmd 步骤 3~5：
+ * 死锁重试成立的三条前提（改这里之前先确认它们还成立）：
  * 事务整体回滚 → 零残留 → 重试安全；重试沿用同一 HTTP 请求，不再消费幂等令牌；
  * 重试次数用尽仍死锁 → 抛「系统繁忙，请重试」（不暴露 SQL 原文）。
  */
@@ -25,7 +25,7 @@ public class OrderCreateService {
 
     private static final Logger log = LoggerFactory.getLogger(OrderCreateService.class);
 
-    /** 最多重试 3 次（即最多 4 次执行；文档口径：重试 1~3 次） */
+    /** 最多重试 3 次（即最多执行 4 次：首次 + 3 次重试） */
     private static final int MAX_RETRY = 3;
 
     private final OrderTransactionalCreator creator;

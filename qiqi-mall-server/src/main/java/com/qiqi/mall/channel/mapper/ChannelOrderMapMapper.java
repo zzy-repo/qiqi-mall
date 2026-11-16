@@ -8,7 +8,7 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
 /**
- * 平台单号映射 DAO —— <b>幂等闸门在这里</b>。
+ * 平台单号映射 DAO —— <b>拦重复的唯一约束在这里</b>。
  *
  * <p>{@link #insertIfAbsent} 的返回值是有语义的：
  * <ul>

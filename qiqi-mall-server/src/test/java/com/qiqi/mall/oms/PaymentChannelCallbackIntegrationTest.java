@@ -57,7 +57,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *       并且「按 operatorType 筛选时 PAYMENT 支<b>照实参与</b>（付款行 MEMBER / 退款行 ADMIN 各归各的）」——<b>只有</b>
  *       STOCK 支不参与（它没有 operator 列，口径见 {@code LedgerSql#STOCK_FILTER}）；</li>
  *   <li><b>② 重复通知被 uk_channel_trade 挡住</b>：重放端点连调两次都是 code=0 +「重复通知，已忽略」，
- *       行数与金额总和都不变；再反向证明「闸是活的」：换一个新的 trade_no 应当入账（不是一律拒绝）；
+ *       行数与金额总和都不变；再反向证明「这道唯一键真的拦得住」：换一个新的 trade_no 应当入账（不是一律拒绝）；
  *       同时绕开 service 直插「同 channel+trade_no、不同 idem_key」必须抛 uk_channel_trade；</li>
  *   <li><b>③ 同一张单的第二笔**不同**流水号 = 疑似重复扣款 → 必须报错而不是静默忽略</b>
  *       （把「重复通知」与「真丢钱」分开，这是本次加固最容易被合并错的两件事）；</li>
@@ -225,7 +225,7 @@ class PaymentChannelCallbackIntegrationTest {
     // ================================================================== ② 重复通知
 
     /**
-     * ② **渠道重复通知不会变成两笔钱** —— {@code uk_channel_trade} 是最后一道闸。
+     * ② **渠道重复通知不会变成两笔钱** —— 最后靠 {@code uk_channel_trade} 这个唯一键真的拦住。
      *
      * <p>走真实的重放端点（{@code POST /admin/payments/{id}/replay-channel-callback}），
      * 它用该流水**原来的** trade_no 再走一遍渠道回调逻辑，等于「第三方把同一笔通知又发了一次」：
@@ -234,14 +234,14 @@ class PaymentChannelCallbackIntegrationTest {
      * ② 端点重放第 1 次 → code=0 +「重复通知，已忽略」，仍是 1 行
      * ③ 端点重放第 2 次 → 同上（重复是幂等的：重放多少次都还是 1 行）
      * ④ 反向对照：换一个**新的**流水号（另一张单）应当照常入账 —— 证明这不是「一律拒绝」
-     * ⑤ 活闸证据：绕开 service 直插「同 channel+trade_no、不同 idem_key」→ 必须抛 uk_channel_trade
+     * ⑤ 约束真生效的证据（不是代码自觉）：绕开 service 直插「同 channel+trade_no、不同 idem_key」→ 必须抛 uk_channel_trade
      *    （排掉「其实是 uk_idem 挡的」这种误判：两条唯一键同时被撞时，谁在拦必须能被指认）
      * </pre>
      * 断言落在「行数 + 金额总和」而不只是返回码：返回码对了但库里多一行，才是真事故。
      */
     @Test
     @Order(2)
-    @DisplayName("② 重放渠道回调两次 → 都是 code=0「重复通知，已忽略」，行数与金额不变；uk_channel_trade 是活闸")
+    @DisplayName("② 重放渠道回调两次 → 都是 code=0「重复通知，已忽略」，行数与金额不变；uk_channel_trade 在库上真的拦得住")
     void replayChannelCallback_duplicateNoticeIgnored() {
         String orderSn = uniqueSn("REPLAY");
         Long orderId = insertOrder(orderSn, 1);   // 1 已付款
@@ -283,14 +283,14 @@ class PaymentChannelCallbackIntegrationTest {
                 ChannelCallbackService.Outcome other = channelCallbackService.onNotice(notice(
                         otherOrderId, otherSn, "PAYCBC-OTHER-" + otherSn, PaymentRecord.TYPE_PAY, new BigDecimal("12.00")));
                 System.out.printf("② ④ 反向对照：另一个流水号 → %s，行数=%d%n", other, countByOrderSn(otherSn));
-                assertThat(other).as("新流水号是新的一笔钱：必须入账（否则闸会把正常通知也挡掉）")
+                assertThat(other).as("新流水号是新的一笔钱：必须入账（否则唯一键会把正常通知也挡掉）")
                         .isEqualTo(ChannelCallbackService.Outcome.RECORDED);
                 assertThat(countByOrderSn(otherSn)).isEqualTo(1);
             } finally {
                 deletePayments(otherSn);
             }
 
-            // ⑤ 活闸证据：绕开 service，用「同 channel+trade_no、不同 idem_key」直插
+            // ⑤ 约束真生效的证据：绕开 service，用「同 channel+trade_no、不同 idem_key」直插
             List<Map<String, Object>> indexes = jdbc.queryForList(
                     "SELECT index_name, non_unique, GROUP_CONCAT(column_name ORDER BY seq_in_index) AS cols "
                             + "FROM information_schema.statistics "
@@ -307,7 +307,7 @@ class PaymentChannelCallbackIntegrationTest {
                     "INSERT INTO payment_record (order_sn, order_id, amount, type, channel, trade_no, idem_key) "
                             + "VALUES (?, ?, 88.00, 1, 1, ?, ?)",
                     orderSn, orderId, tradeNo, orderSn + ":PAY:PROBE"))
-                    .as("同一个 (channel, trade_no) 换个幂等键直插也必须被拒 —— 证明这道闸不是靠幂等键冒充的")
+                    .as("同一个 (channel, trade_no) 换个幂等键直插也必须被拒 —— 证明拦住它的是 uk_channel_trade，不是幂等键")
                     .isInstanceOf(DuplicateKeyException.class)
                     .hasMessageContaining("uk_channel_trade");
 

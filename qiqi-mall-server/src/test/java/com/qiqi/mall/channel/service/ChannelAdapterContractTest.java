@@ -29,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * <ul>
  *   <li>{@link ChannelOrderImporter#parseSkuId} 是「平台商品编码 → 本地 sku」唯一的桥，
  *       写错一个前缀匹配就等于全量 {@code SKU_NOT_MATCHED}；</li>
- *   <li>报文解析决定 {@code platformSn} 有没有被正确取到 —— 它是幂等闸门的一半，
+ *   <li>报文解析决定 {@code platformSn} 有没有被正确取到 —— 它是查重键（{@code channel_order_map.uk_map}）的一半，
  *       取错（或退化成空串）会让同一张单被反复导入；</li>
  *   <li>「非 2xx 必须抛 {@link ChannelException} 而不是返回空列表」这条口径，
  *       直接决定 sync_log 里是 FAIL 还是「成功但 0 单」——那两件事完全不同。</li>

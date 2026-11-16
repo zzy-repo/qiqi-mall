@@ -30,7 +30,8 @@ import java.util.Map;
  * 于是**任何带 order:write 的 API Key 都能冻结/解冻订单**，与「AI 绝不能解冻」直接冲突。
  * 挪到独立前缀后：读方法要 {@code audit:read}（可授予），写方法要 {@code audit:write}（不存在 ⇒ 永远 403）。
  *
- * <p>冻结解冻也刻意不放进 {@code OrderController}：它们改的是**审核标**不是订单状态（决策 J1）。
+ * <p>冻结解冻也刻意不放进 {@code OrderController}：它们改的是**审核标**（{@code order_audit_tag}）
+ * 而不是 {@code order.status} —— 冻一张单不推进状态机，订单仍停在 7 待审核。
  * 放在订单控制器里最容易被人顺手写成 {@code setStatus(...)} —— 那正是要避免的事。
  */
 @Tag(name = "管理端-订单自动审核", description = "触发 run、人工队列、审核时间线、冻结/解冻")

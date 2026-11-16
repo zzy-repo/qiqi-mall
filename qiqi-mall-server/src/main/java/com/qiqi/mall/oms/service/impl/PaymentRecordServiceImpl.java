@@ -20,9 +20,10 @@ import java.time.format.DateTimeFormatter;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * 支付流水写入（{@code payment_record}，P2 第二步：加固为「可溯源」）。
+ * 支付流水写入（{@code payment_record}）：每行都能回答「这笔钱属于哪张单、谁让它动的、
+ * 因为哪张单据动的、会不会被记两遍」。
  *
- * <h3>加固后的四个问题各有答案</h3>
+ * <h3>这四个问题各有答案</h3>
  * <ol>
  *   <li><b>这笔钱属于哪张订单</b> → {@code order_id}（+ 既有的 {@code order_sn}）；</li>
  *   <li><b>谁让它动的</b> → {@code operator_type/id/name}（{@code ActorResolver}）；</li>

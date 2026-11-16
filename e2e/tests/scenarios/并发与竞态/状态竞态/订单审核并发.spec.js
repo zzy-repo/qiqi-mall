@@ -25,7 +25,7 @@ import { receiverOf } from '../../../support/fixtures.js'
  * 两个管理员**同时**审核同一笔待审核订单：甲点「确认通过」成功，乙随后点「确认通过」被服务端拦下。
  *
  * ⚠️ 这条走的是**业务状态守卫**，不是 409：
- *   OrderController#auditPass 的第一道闸是 `status != 7 → Result.fail("只有待审核订单可以审核通过")`
+ *   OrderController#auditPass 的第一道状态守卫是 `status != 7 → Result.fail("只有待审核订单可以审核通过")`
  *   —— 返回的是 **HTTP 200 + code=1 + 中文原因**（不是乐观锁的 409）。
  *   所以断言按实际返回写：HTTP 200、body.code=1、body.message 是那句守卫原文，
  *   前端把原因留在确认弹窗的 `danger-confirm-error` 里（弹窗不关）。

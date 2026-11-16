@@ -31,7 +31,7 @@ import java.util.Map;
  *
  * <h3>三个关键取数口径</h3>
  * <ol>
- *   <li><b>可用库存 = SUM(sku_bucket.stock)</b>，不是 {@code sku.stock}（决策 D5）。
+ *   <li><b>可用库存 = SUM(sku_bucket.stock)</b>，不是 {@code sku.stock}。
  *       {@code sku.stock} 只是展示缓存，允许滞后；拿它裁决会出现「页面显示 999 所以放行，
  *       实际桶里只有 5」—— QT-1006 就是钉这个的。SKU 还没有桶（历史数据）时先幂等回填一次。</li>
  *   <li><b>订单级可用量 = 瓶颈 SKU 的桶合计</b>（min）：多 SKU 单只要有一个 SKU 不够，

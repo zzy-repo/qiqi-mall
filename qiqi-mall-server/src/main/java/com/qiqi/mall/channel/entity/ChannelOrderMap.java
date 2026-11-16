@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 /**
  * 平台单号 → 内部订单 的映射（{@code channel_order_map}）。
  *
- * <p>{@code uk_map(shop_id, platform_sn)} 是本模块的**幂等闸门**：重复拉单只认这一张表。
+ * <p>{@code uk_map(shop_id, platform_sn)} 是本模块拦重复拉单的唯一约束：重复拉单只认这一张表。
  * 它的键由平台给出的事实拼成（店铺 + 平台单号），<b>不许由业务键派生</b> ——
  * 派生出来的键会在「平台改号 / 大小写 / 前后空格」这类现实差异上失守。
  *

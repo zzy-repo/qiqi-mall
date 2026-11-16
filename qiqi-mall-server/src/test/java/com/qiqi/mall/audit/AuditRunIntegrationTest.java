@@ -228,7 +228,7 @@ class AuditRunIntegrationTest {
         assertThat(d5.get("matched_policy_name")).isEqualTo("退款申请冻结");
         assertThat(d5.get("would_be_auto_policy_name")).isEqualTo("淘宝-标准单");
         assertThat(d5.get("round_no")).isEqualTo(1);
-        assertThat(statusOf("QT-1005")).as("冻结不是状态码（决策 J1）").isEqualTo(7);
+        assertThat(statusOf("QT-1005")).as("冻结不是状态码：FROZEN 只落在审核标上，order.status 仍是 7").isEqualTo(7);
         Integer frozenTags = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM order_audit_tag t JOIN `order` o ON o.id = t.order_id "
                         + "WHERE o.order_sn = 'QT-1005' AND t.active = 1 AND t.tag_code = 'FROZEN'", Integer.class);

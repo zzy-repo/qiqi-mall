@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # jdbc-url.sh —— 只改 JDBC URL 参数（useLocalSessionState）的注入口：不重建镜像、不改代码、不改池
 #
-#   ./jdbc-url.sh apply true  /tmp/loadgen/jar/b/app.jar    # useLocalSessionState=true（实验臂 B）
-#   ./jdbc-url.sh apply false /tmp/loadgen/jar/b/app.jar    # 同 jar、同 URL 其他参数，只是不带该参数（臂 A）
+#   ./jdbc-url.sh apply true  /tmp/loadgen/jar/b/app.jar    # useLocalSessionState=true（实验组 B）
+#   ./jdbc-url.sh apply false /tmp/loadgen/jar/b/app.jar    # 同 jar、同 URL 其他参数，只是不带该参数（实验组 A）
 #   ./jdbc-url.sh off                                       # 还原发行态：拆掉 URL 注入 + jar 挂载 + GC 日志
 #
-# 为什么 A 臂也用这个脚本注入：两个臂除了 URL 里那一个参数，连「注入路径」都必须一致，
-# 否则「A 少了参数会不会是注入方式带来的差异」就说不清。A 臂注入的是**与 application-test.yml
+# 为什么 A 组也用这个脚本注入：两个组除了 URL 里那一个参数，连「注入路径」都必须一致，
+# 否则「A 少了参数会不会是注入方式带来的差异」就说不清。A 组注入的是**与 application-test.yml
 # 完全等价**的 URL（只是占位符已展开）。
 #
 # 生效的硬证据不是日志，而是 performance_schema：注入 true 后

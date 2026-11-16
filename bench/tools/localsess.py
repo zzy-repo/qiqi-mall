@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
-"""localsess.py —— useLocalSessionState 对照实验的判读（两臂三档中位数 + 探针条数 + 预测对撞）
+"""localsess.py —— 「同一个 jar，只把 JDBC URL 里的 useLocalSessionState 打开/关掉」这组 A/B 对照的判读
 
-    python3 localsess.py --a <armA 轮目录...> --b <armB 轮目录...> [--ref <上一轮参照轮...>] [--qps-cap 8215]
+它读的都是 `bench/results/<轮>/` 里的原始 CSV，输出四样东西：各档逐轮值 + 中位数、每单探针条数、
+用「机器语句率上限 ÷ 每单语句数」预测 ok/s 再和实测对比、以及冷启动档的作废标记。
+
+    python3 localsess.py --a <A 组轮目录...> --b <B 组轮目录...> [--ref <参照轮目录...>] [--qps-cap 8215]
+
+  A 组 = URL 不带 useLocalSessionState（驱动缺省 false）；B 组 = 同一个 jar、URL 加 useLocalSessionState=true；
+  `--ref` 可选，给一批既有轮次目录做连续性对照（不影响 A/B 结论）。
 
 输出：
-  ① 每臂每档：ok/s 的**逐轮值 + 中位数**、p50/p95/p99 中位数、每单语句数中位数、SQL/s、
+  ① 每组每档：ok/s 的**逐轮值 + 中位数**、p50/p95/p99 中位数、每单语句数中位数、SQL/s、
      MySQL 核数、行锁/s、fsync/s、堆峰、GC%
   ② **探针条数**：`SELECT @@SESSION.transaction_read_only` 与 `SET autocommit = ?` 的条/单
      —— 这是「改动是否生效」的语句级硬证据（吞吐会被 JIT/GC/热机污染，探针条数不会）
   ③ 预测 vs 实测：ok/s_pred = QPS_cap ÷ 每单语句数，逐档给误差百分比
-  ④ 冷启动门禁：该档 SQL/s < 7500 ⇒ 标 ⚠冷，该档数据作废（口径沿用上一轮 §13.8）
+  ④ 冷启动标记：某档 SQL/s 明显低于本组其它档（代码里的判据是「< 本组各档 SQL/s 中位 × 0.85」）
+     ⇒ 标 ⚠冷，该档数据作废。旧口径的绝对阈值「SQL/s < 7500 ⇒ 判冷」是按「19~20 条 SQL/单」
+     标定的，每单条数被压到 12~13 条的组套它会全档误判，所以这里不再用绝对阈值。
 
 为什么分母用 ladder.csv 的 ok_s×时长：sqlprofile.csv 的 count 是服务端语句计数，
 它的窗口边界来自 steps.csv（±1 个采样间隔），用同一窗口里的 ok 单数做分母才是「每单」。
@@ -164,11 +172,11 @@ def line_arm(name, A):
     for t in sorted(A):
         r = A[t]
         vals = "/".join(f"{v:.1f}" for v in sorted(r["vals"]))
-        # 冷启动判据（本轮改法，理由见报告）：
-        #   ① 该档 SQL/s < 本臂各档 SQL/s 中位数 × 0.85  ⇒ 语句率还没爬到本臂的墙
+        # 冷启动判据（两条，理由见下面这段注释）：
+        #   ① 该档 SQL/s < 本组各档 SQL/s 中位数 × 0.85  ⇒ 语句率还没爬到本组的墙
         #   ② 或 没达成目标（<99%）且有丢弃 = 请求在客户端排队溢出
-        # 绝对阈值 7500 是上一轮按「19~20 条/单」标定的，本轮 B 臂只有 12.4 条/单，
-        # 它的墙本来就在 5.7~6.3k，套绝对阈值会把每一档都误判成冷（见报告 §3.3）。
+        # 为什么不用绝对阈值 7500：那个数是按「19~20 条 SQL/单」标定的；B 组把每单压到 12.4 条后，
+        # 它的墙本来就在 5.7~6.3k，套绝对阈值会把每一档都误判成冷。判据因此改成组内相对比较。
         cold = ""
         if (r["queries_s"] or 0) < 0.85 * (med_q or 0):
             cold = " ⚠冷(SQL/s)"
@@ -223,15 +231,15 @@ def main(argv):
         print(__doc__)
         return 2
     A, B = arm(a), arm(b)
-    print(f"A 臂（useLocalSessionState 缺省=false）= {len(a)} 轮: {[os.path.basename(x) for x in a]}")
-    print(f"B 臂（useLocalSessionState=true）    = {len(b)} 轮: {[os.path.basename(x) for x in b]}")
+    print(f"A 组（useLocalSessionState 缺省=false）= {len(a)} 轮: {[os.path.basename(x) for x in a]}")
+    print(f"B 组（useLocalSessionState=true）    = {len(b)} 轮: {[os.path.basename(x) for x in b]}")
     if ref:
-        print(f"参照（上一轮最好状态）= {len(ref)} 轮: {[os.path.basename(x) for x in ref]}")
-    print("\n⚠冷 = 该档 SQL/s < 7500（上一轮 §13.8 的冷启动门禁），该档数据作废")
-    line_arm("A 臂（18.77 条/单那一版 jar，URL 不带参数）", A)
-    line_arm("B 臂（同 jar，URL 加 useLocalSessionState=true）", B)
+        print(f"参照 R（--ref 给的既有轮次，供连续性对照）= {len(ref)} 轮: {[os.path.basename(x) for x in ref]}")
+    print("\n⚠冷 = 该档 SQL/s < 本组各档中位 × 0.85（旧口径的绝对阈值 7500 已弃用），该档数据作废")
+    line_arm("A 组（18.77 条/单那一版 jar，URL 不带参数）", A)
+    line_arm("B 组（同 jar，URL 加 useLocalSessionState=true）", B)
     if ref:
-        line_arm("参照 R（上一轮 sqlfix 最好轮，供连续性对照）", arm(ref))
+        line_arm("参照 R（--ref 给的既有轮次，供连续性对照）", arm(ref))
     print("\n=== 并排对照（λ 逐档）===")
     hdr = (f"{'λ':>4} | {'A ok/s':>7} {'B ok/s':>7} {'Δ':>7} | {'A 语句/单':>9} {'B 语句/单':>9} "
            f"| {'B 探针/单':>9} | {'A p99':>7} {'B p99':>7} | {'A SQL/s':>8} {'B SQL/s':>8}")
@@ -246,7 +254,7 @@ def main(argv):
               f"{fmt(ra['per_order'],2):>9} {fmt(rb['per_order'],2):>9} | {fmt(rb['probe_per_order'],2):>9} | "
               f"{fmt(ra['p99'],0):>7} {fmt(rb['p99'],0):>7} | {fmt(ra['queries_s'],0):>8} {fmt(rb['queries_s'],0):>8}")
     predict(A, B, cap, f"QPS_cap={cap:.0f}")
-    print("\n=== 不变式自证：每臂「ok/s × 语句/单」= 语句率常量 ===")
+    print("\n=== 不变式自证：每组「ok/s × 语句/单」= 语句率常量 ===")
     for name, X in (("A", A), ("B", B)):
         for t in sorted(X):
             r = X[t]

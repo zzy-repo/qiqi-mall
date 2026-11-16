@@ -24,7 +24,7 @@ import java.util.Map;
  *       而不是「业务成功、日志悄悄丢了」。</li>
  * </ul>
  *
- * <p><b>幂等闸</b>（V2 迁移的 {@code uk_sync_idem}）：{@code SHIP_PUSH} 行由库里的生成列
+ * <p><b>唯一约束拦重复</b>（V2 迁移的 {@code uk_sync_idem}）：{@code SHIP_PUSH} 行由库里的生成列
  * {@code idem_key = {shopId}:SHIP_PUSH:{refId}:{attempt}} 兜底 —— 同一个包裹的同一次尝试
  * 被重放（人工连点、调度重入、异常重放）只会留下第一行；第二次插入走 ODKU 的空转分支
  * （不修改任何列、不抛异常），本类把它当「这次尝试已记过账」→ 按 SKIP 处理，<b>不报错</b>。

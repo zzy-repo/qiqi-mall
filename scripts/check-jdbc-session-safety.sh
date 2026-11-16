@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
-# scripts/check-jdbc-session-safety.sh —— useLocalSessionState=true 的**安全前提**门禁
+# scripts/check-jdbc-session-safety.sh —— useLocalSessionState=true 的**安全前提**校验
 # =============================================================================
 #
-# 用法（CI 与发布前都跑这一条；publish.sh 的 preflight 已把它当硬门禁）
+# 用法（CI 与发布前都跑这一条；publish.sh 的 preflight 已把它当失败即拦的校验）
 #   bash scripts/check-jdbc-session-safety.sh
 #
 #   退出码：
@@ -25,7 +25,7 @@
 #   驱动仍以为在事务里 → 一批本该回滚的写变成逐条自动提交）。
 #
 # 所以"仓库里 0 处绕过写法"不是一次性 grep 结论，而是一条**持续约束** = 本脚本。
-# 破坏它会以"静默"的方式发生（没人报错、没人发现），只有门禁能拦住回潮。
+# 破坏它会以"静默"的方式发生（没人报错、没人发现），只有校验能拦住回潮。
 #
 # -----------------------------------------------------------------------------
 # 扫描范围
@@ -64,10 +64,10 @@
 # 备注
 # -----------------------------------------------------------------------------
 #   · 本脚本只读，不改任何文件、不连数据库、不需要容器。
-#   · 反向验证（证明门禁真能抓）：在任一 src/main 文件里临时加一行 `stmt.execute("SET SESSION x=1")`
+#   · 反向验证（证明校验真能抓）：在任一 src/main 文件里临时加一行 `stmt.execute("SET SESSION x=1")`
 #     （或 .sql 里加一行非注释的 `SET SESSION x=1;`）→ 重跑应 exit 1 且打印该 file:line；
 #     删掉再跑应 exit 0。注意**必须是非注释行**：整行注释被有意跳过（见「注释行」）。
-#   · 相关文档：bench/README.md §15「JDBC 会话状态红线」（收益/风险/下一闸门）。
+#   · 相关文档：bench/README.md §15「JDBC 会话状态红线」（收益/风险/下一个瓶颈）。
 # =============================================================================
 
 set -uo pipefail
@@ -76,7 +76,7 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SELF_DIR/.." && pwd)"
 
 for tool in find grep; do
-  command -v "$tool" >/dev/null 2>&1 || { echo "✗ 缺少工具：$tool（门禁跑不起来，不当成通过）" >&2; exit 2; }
+  command -v "$tool" >/dev/null 2>&1 || { echo "✗ 缺少工具：$tool（校验跑不起来，不当成通过）" >&2; exit 2; }
 done
 [ -d "$REPO_ROOT/qiqi-mall-server/src/main" ] || { echo "✗ 找不到 $REPO_ROOT/qiqi-mall-server/src/main（工作区不对？）" >&2; exit 2; }
 [ -d "$REPO_ROOT/sql" ] || { echo "✗ 找不到 $REPO_ROOT/sql（工作区不对？）" >&2; exit 2; }
@@ -129,7 +129,7 @@ report_kind() { # $1=标题 $2=正则 $3=补充说明
   return 0
 }
 
-echo "JDBC 会话状态安全门禁（useLocalSessionState=true 的前提）"
+echo "JDBC 会话状态安全校验（useLocalSessionState=true 的前提）"
 echo "扫描范围：${#FILES[@]} 个文件 = qiqi-mall-server/src/main + sql/（排除 sql/_rollback/）"
 echo
 
@@ -183,7 +183,7 @@ fi
 
 echo
 if [ "$FAILED_KINDS" -ne 0 ]; then
-  echo "✗ 门禁未通过：$FAILED_KINDS 类问题，共 $HITS_TOTAL 处禁止命中。"
+  echo "✗ 校验未通过：$FAILED_KINDS 类问题，共 $HITS_TOTAL 处禁止命中。"
   echo "  这些写法会让驱动本地会话视图与服务器真实状态分叉 —— useLocalSessionState=true 的前提不成立。"
   echo "  修法见本脚本头（禁止形态 / 允许清单），或 bench/README.md §15「JDBC 会话状态红线」。"
   exit 1

@@ -104,7 +104,7 @@ test.describe('并发与竞态 › 重复提交与幂等 › 平台重推与503�
         if (health && health.runId === RUN_ID) break
         await page.waitForTimeout(500)
       }
-      expect(health && health.runId, `mock 平台服务应在本轮 RUN_ID=${RUN_ID} 起来（端口 ${MOCK_PORT}）`).toBe(RUN_ID)
+      expect(health && health.runId, `mock 平台服务应在本次 RUN_ID=${RUN_ID} 起来（端口 ${MOCK_PORT}）`).toBe(RUN_ID)
 
       await adminLoginHardened(page)
       await page.goto(`${ADMIN}/channel`)
@@ -275,9 +275,9 @@ test.describe('并发与竞态 › 重复提交与幂等 › 平台重推与503�
       //   uk_sync_idem = {shopId}:SHIP_PUSH:{refId}:{attempt}，人工再点一次时 attempt 又从 1 开始，
       //   必然撞上第一次那条 attempt=1 的行 ⇒ ChannelSyncLogMapper#insertOrTouch 走 ODKU 空转分支
       //   ⇒ 不插入、不报错、不覆盖，ChannelSyncLogWriter.write() 返回 false（计为 skipped）。
-      //   即「同一个包裹的同一次尝试被重放（人工连点）只会留下第一行」——幂等闸挡在唯一索引上。
-      //   （原断言写的是"追加一行 SKIP"，那等于在考"幂等闸失灵"，方向错了）
-      expect(after.length, '重复回传不应在库里追加任何行（幂等闸挡在 uk_sync_idem 上）').toBe(before.length)
+      //   即「同一个包裹的同一次尝试被重放（人工连点）只会留下第一行」——幂等由唯一索引拦住。
+      //   （原断言写的是"追加一行 SKIP"，那等于在考"幂等没拦住"，方向错了）
+      expect(after.length, '重复回传不应在库里追加任何行（幂等由 uk_sync_idem 唯一索引拦住）').toBe(before.length)
       // 「老行一条不改」的硬证据：全列快照逐字相同（id/attempt/result/reason/耗时/报文/时间戳全比）
       expect(after, '老的两行必须逐字不变（不是重写历史）').toEqual(before)
       expect(pushBody.data?.skipped, '重复回传应回报 skipped=1（幂等命中，不是错误）').toBe(1)

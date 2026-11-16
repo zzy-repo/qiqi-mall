@@ -39,7 +39,7 @@ import { queryDb, dbOfApi } from '../../../support/db.js'
  *
  * 三个刻意的测试手法（都有原因，别照抄成坏习惯）：
  *  1) mock 服务由本 spec 用**精确 PID** 起停（`spawn` + `kill(SIGTERM)`，绝不 pkill 宽匹配）；
- *     `MOCK_RUN_ID` 每次唯一 → 平台单号每次都是一批新单，重复跑不会撞上一轮的映射；
+ *     `MOCK_RUN_ID` 每次唯一 → 平台单号每次都是一批新单，重复跑不会撞上库里已有的映射；
  *  2) 商城那笔单来自**真实买家下单支付**（不是造假数据）→ 证明「商城开放接口读的是真订单」；
  *  3) 拉单前把 MALL 店铺水位钉到「刚创建那笔单的支付时间前 1 秒」：
  *     e2e 库里有别的场景留下的历史已付款单，不钉水位的话它们会被一起拉进来，
@@ -48,7 +48,7 @@ import { queryDb, dbOfApi } from '../../../support/db.js'
 test.describe('业务 › 渠道-多平台接入 › 接入主链路', () => {
   const MOCK_PORT = 19090
   const MOCK = `http://127.0.0.1:${MOCK_PORT}`
-  /** 本轮的批次标识：拼进 mock 平台单号，保证「这批单」每次运行都不同 */
+  /** 本次运行的批次标识：拼进 mock 平台单号，保证「这批单」每次运行都不同 */
   const RUN_ID = `E2E${stamp()}`
 
   let mockProcess = null
@@ -108,7 +108,7 @@ test.describe('业务 › 渠道-多平台接入 › 接入主链路', () => {
       }
       expect(healthy, `mock 平台服务应在 ${MOCK} 起来（端口被占？见 mock-platform/README.md）`).toBeTruthy()
       const health = await (await request.get(`${MOCK}/health`)).json()
-      expect(health.runId, 'mock 批次号应等于本轮 RUN_ID').toBe(RUN_ID)
+      expect(health.runId, 'mock 批次号应等于本次 RUN_ID').toBe(RUN_ID)
 
       // ---- 管理员登录（后台走真实登录页）----
       await adminLoginHardened(page)
@@ -168,7 +168,7 @@ test.describe('业务 › 渠道-多平台接入 › 接入主链路', () => {
       const snsSql = inList(batchSns)
       expect(
         num(`SELECT COUNT(*) FROM channel_order_map WHERE platform_sn IN (${snsSql})`),
-        'channel_order_map 应有本批 4 行（uk_map 幂等闸门写入）'
+        'channel_order_map 应有本批 4 行（uk_map 唯一索引拦重复）'
       ).toBe(4)
       expect(
         num(`SELECT COUNT(*) FROM channel_order_map m JOIN \`order\` o ON o.id = m.order_id `

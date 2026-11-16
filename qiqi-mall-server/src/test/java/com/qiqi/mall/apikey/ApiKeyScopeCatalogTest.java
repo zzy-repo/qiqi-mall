@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 权限目录的**只读闸门**单测（不连库）。
+ * 权限目录的**只读校验**单测（不连库）。
  *
  * <p>背景：{@code ApiKeyAuthFilter} 只能按路径前缀匹配。为了让
  * {@code /admin/order-audit/**}（读 queue/runs/trail、写 run/freeze/unfreeze）对 API Key

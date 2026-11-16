@@ -111,7 +111,7 @@ class StatusEntryGuardTest {
     }
 
     @Test
-    @DisplayName("① 订单：UPDATE 带 version 条件（CAS 闸门），且 status/status_seq/version 在同一条 SET 里")
+    @DisplayName("① 订单：UPDATE 带 version 条件（CAS 条件），且 status/status_seq/version 在同一条 SET 里")
     @SuppressWarnings("unchecked")
     void orderUpdateIsSingleStatementWithVersionGuard() {
         Order target = order(7, 5);
@@ -130,7 +130,7 @@ class StatusEntryGuardTest {
                 .contains("status_seq = status_seq + 1")
                 .contains("version = version + 1");
         assertThat(wrapper.getSqlSegment())
-                .as("CAS 闸门：条件里必须有 version（= 读到的 5），否则就是无条件覆盖")
+                .as("CAS 条件：条件里必须有 version（= 读到的 5），否则就是无条件覆盖")
                 .contains("version")
                 .doesNotContain("status");
         assertThat(wrapper.getParamNameValuePairs().values())
@@ -158,7 +158,7 @@ class StatusEntryGuardTest {
     }
 
     @Test
-    @DisplayName("① 退货申请（没有 version 列）：CAS 闸门是 status=读到的值，仍然写在 WHERE 里")
+    @DisplayName("① 退货申请（没有 version 列）：CAS 条件是 status=读到的值，仍然写在 WHERE 里")
     @SuppressWarnings("unchecked")
     void returnApplyGuardsOnStatusInWhere() {
         ReturnApply apply = new ReturnApply();
@@ -242,7 +242,7 @@ class StatusEntryGuardTest {
     }
 
     @Test
-    @DisplayName("② 订单：建单初始状态白名单（只有 0/1/7 能出生）")
+    @DisplayName("② 订单：建单初始状态只接受 0/1/7（别的状态不许出生）")
     void orderBirthWhitelist() {
         OrderStatusService svc = orderService(orderMapperReturning(1));
 

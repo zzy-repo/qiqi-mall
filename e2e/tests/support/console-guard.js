@@ -15,12 +15,13 @@
  *
  * 机制：
  *   监听 page.on('console') / page.on('pageerror')，命中「组件/指令解析失败」的 warning 就记账，
- *   用例结束时（fixture teardown）若有未豁免的命中，**让该用例失败**，错误信息里带 warning 原文。
+ *   用例结束时（fixture teardown）若还有没被下面那份「已知无害告警」清单放行的命中，
+ *   **让该用例失败**，错误信息里带 warning 原文。
  *
  * 开关（都走环境变量，不需要改代码）：
- *   E2E_ALLOW_VUE_WARN=1     临时放行：只记录不失败。**只用于排查**，不许在 CI / 发布门禁里用。
- *   E2E_VUE_WARN_ALLOW=...   追加白名单，逗号分隔的子串（子串命中即豁免），用于已知无害的告警。
- *                            默认白名单见 DEFAULT_ALLOWLIST。
+ *   E2E_ALLOW_VUE_WARN=1     临时放行：只记录不失败。**只用于排查**，不许在 CI / 发布前校验里用。
+ *   E2E_VUE_WARN_ALLOW=...   追加允许清单，逗号分隔的子串（命中任一子串就不再判红），用于已知无害的告警。
+ *                            默认清单见 DEFAULT_ALLOWLIST。
  */
 
 /** 命中即视为「组件静默失效」的模式 */
@@ -31,8 +32,8 @@ const RESOLVE_PATTERNS = [
 ]
 
 /**
- * 已知无害的白名单（子串匹配）。
- * 往这里加东西要谨慎：白名单只允许放「与组件解析无关」的弃用/用法提示，
+ * 已知无害的告警清单（子串匹配）。
+ * 往这里加东西要谨慎：只允许放「与组件解析无关」的弃用/用法提示，
  * 绝不能放 `Failed to resolve` 一类的解析失败告警，否则守卫就形同虚设。
  */
 const DEFAULT_ALLOWLIST = [
@@ -93,7 +94,7 @@ export function createConsoleGuard(testInfo) {
       return violations
     },
     /**
-     * 用例结束时调用。有未豁免的解析失败 → 抛错让用例红。
+     * 用例结束时调用。有没被允许清单放行的解析失败 → 抛错让用例红。
      * 错误信息带完整原文（前 5 条 + 总数），方便直接定位是哪个组件。
      */
     assertClean() {

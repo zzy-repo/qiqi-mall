@@ -51,7 +51,7 @@ public class ReturnApplyController {
     private final SkuService skuService;
     private final PaymentRecordService paymentRecordService;
     private final DeliveryFlowService deliveryFlowService;
-    /** 订单状态写入的唯一入口（P2 第一步收敛：申请退货 5 退款中 / 审核通过 6 已退款 / 拒绝回 1 已付款） */
+    /** 订单状态写入的唯一入口（申请退货 5 退款中 / 审核通过 6 已退款 / 拒绝回 1 已付款） */
     private final OrderStatusService orderStatusService;
     /** 退货申请状态写入的唯一入口（含原来那句手写 UPDATE ... WHERE status=0 的原子守卫） */
     private final ReturnStatusService returnStatusService;
@@ -158,12 +158,12 @@ public class ReturnApplyController {
      * 审核退货：status 0待处理 1通过 2拒绝。
      * 守门：仅「待处理」可审核；审核通过 → 订单退款中(5)→已退款(6) + 退款流水 + 库存回补
      *       （**订单当前必须是 5 退款中**，否则拒绝并说明原因 —— 不许把已关闭(4) 之类的单写成已退款）；
-     *       审核拒绝 → **有在途包裹时交回包裹聚合**（口径②：子单是事实源），无包裹的直发单才回已付款(1)。
+     *       审核拒绝 → **有在途包裹时交回包裹聚合**（口径：子单是事实源），无包裹的直发单才回已付款(1)。
      *
      * <p>校验顺序：**① 参数/存在性（申请不存在 / 已处理 / 结论非法）→ ② 业务守卫（status=0）→ ③ 执行**。
      * 这几条属于「这次请求本身就不成立」，先回原因比别的都清楚。
      *
-     * <p>并发：{@code return_apply} 表没有 version 列，靠**两道影响行数闸门**（都在本方法同一个
+     * <p>并发：{@code return_apply} 表没有 version 列，靠**两处影响行数校验**（都在本方法同一个
      * {@code @Transactional} 里，失败即整笔回滚）：
      * <ol>
      *   <li>申请行：{@code UPDATE ... WHERE id=? AND status=0}（把「待处理」守卫写进 SQL）影响 0 行
@@ -198,7 +198,7 @@ public class ReturnApplyController {
         //    钱没退、货没回、单子却显示退款完成，是最难查的那类错账。
         //    5 的唯一写者是 PortalReturnController#apply（买家申请退货），所以「当前必须是 5」
         //    等价于「这张订单确实有一笔申请在审批中」，这也正是本接口处理的那笔申请。
-        //    **白名单只有 5**：代码里没有任何其它入口会把订单写成 6，也没有别的状态能合法地直接变 6。
+        //    **只允许从 5 进入 6**：代码里没有任何其它入口会把订单写成 6，也没有别的状态能合法地直接变 6。
         //    放在 dryRun 之前：预演与真做同一套守卫（预演不许说「将通过」而后真做被拒）。
         if (target == 1 && order != null && (order.getStatus() == null || order.getStatus() != 5)) {
             return Result.fail("只有「退款中」的订单可以审核通过为「已退款」：该订单当前是「"
@@ -256,7 +256,7 @@ public class ReturnApplyController {
             int rows = orderStatusService.change(order, 6, OrderStatusService.REASON_RETURN_APPROVE, null,
                     null, ReasonCodes.REF_RETURN_APPLY, exist.getId());
             OptimisticLockGuard.requireAffected(rows);
-            // 退款流水（P2 第二步加固）：ref=这张退货申请，origin_flow_id=原支付流水 ——
+            // 退款流水（溯源字段）：ref=这张退货申请，origin_flow_id=原支付流水 ——
             // 「这笔退款是谁批的、因为哪张申请、退的是哪一笔钱」三件事都落在库里；
             // 幂等键 {orderSn}:REFUND:{申请id}，同一张申请被重放不会退两条。
             paymentRecordService.record(order.getOrderSn(), order.getTotalAmount(),
@@ -274,7 +274,7 @@ public class ReturnApplyController {
                 StockLedgerContext.close(outer);
             }
         } else {
-            // ④ 拒绝：不再无条件硬写 1 已付款 —— 口径②（子单是事实源）下，父单状态该由包裹推导。
+            // ④ 拒绝：不再无条件硬写 1 已付款 —— 口径「子单是事实源」下，父单状态该由包裹推导。
             //    旧行为：订单的包裹可能已经出库/签收，硬写 1 就造出「已付款却挂着已签收包裹」的分叉，
             //    之后任何一次包裹回传按子单重新聚合又会把它改回 2/9（真实的状态倒退序列）。
             if (deliveryFlowService.activeDeliveryCount(order.getId()) > 0) {

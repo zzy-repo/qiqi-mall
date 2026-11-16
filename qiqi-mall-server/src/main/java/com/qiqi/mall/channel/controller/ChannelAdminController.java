@@ -61,7 +61,7 @@ public class ChannelAdminController {
      * <p>返回汇总：{@code total / created / skipped / failed / orderIds / platformSns}。
      * 失败抛业务异常，由 GlobalExceptionHandler 转成中文提示。
      */
-    @Operation(summary = "立即拉单：平台 → 待审核订单(7)，重复单靠 channel_order_map 幂等闸门跳过")
+    @Operation(summary = "立即拉单：平台 → 待审核订单(7)，重复单靠 channel_order_map 撞唯一键跳过")
     @PostMapping("/channel-shops/{id}/pull")
     public Result<Map<String, Object>> pull(@PathVariable Long id) {
         return Result.ok(syncService.pull(id));

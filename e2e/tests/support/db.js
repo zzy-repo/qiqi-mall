@@ -20,7 +20,7 @@ import { API } from './env.js'
 /**
  * 端口 → 数据库名：e2e 分片库（8091~8094）+ 容器栈测试库（18080）+ 本机 dev（8081）。
  *
- *  8081  qiqi_mall         本机 dev 后端（scripts/dev*.sh）
+ *  8081  qiqi_mall         本机 dev 后端（`cd qiqi-mall-server && mvn spring-boot:run -Dspring-boot.run.profiles=dev`）
  *  8091  qiqi_mall_e2e_a   e2e shard a（scripts/e2e-run.sh 的 SHARDS 表）
  *  8092  qiqi_mall_e2e_b   e2e shard b
  *  8093  qiqi_mall_e2e_c   e2e shard c

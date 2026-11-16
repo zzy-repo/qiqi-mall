@@ -2,7 +2,7 @@
   "name": "qiqi-mall-e2e",
   "private": true,
   "version": "1.0.0",
-  "description": "七七商城五个业务场景的 Playwright E2E 测试（全真实 UI 点击驱动）",
+  "description": "七七商城的 Playwright E2E 测试（全真实 UI 点击驱动）：tests/scenarios 下 58 个 spec，按 业务 / 库存 / 台账与取证 / 并发与竞态 分目录（_legacy 为旧用例）",
   "type": "module",
   "scripts": {
     "pretest": "node scripts/precheck-env.mjs",

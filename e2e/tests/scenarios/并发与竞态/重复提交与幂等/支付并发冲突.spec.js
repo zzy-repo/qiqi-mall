@@ -32,7 +32,7 @@ import { memberNickOf, addressOf } from '../../../support/fixtures.js'
  */
 
 /**
- * 分片库名：pay 的并发闸门是数据库行级版本号，只有直接查库才能证明「没有第二条流水」
+ * 分片库名：pay 的并发保护是数据库行级版本号，只有直接查库才能证明「没有第二条流水」
  * （payment_record 没有任何对外接口）。库名由 API_BASE 端口决定 —— 映射唯一维护在
  * e2e/tests/support/db.js 的 DB_OF_PORT（本 spec 原先自带一份、缺 18080，已收口）。
  */

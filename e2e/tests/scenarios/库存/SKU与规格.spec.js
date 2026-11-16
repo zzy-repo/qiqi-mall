@@ -160,7 +160,7 @@ test.describe('库存 › SKU与规格', () => {
     const token = await adminTokenOf(page)
 
     // ① 种子商品1 的第一个 SKU 被订单引用 → 被拒
-    // 按 id=1 精确取（列表第一条会随着本轮新建商品漂移，全量跑时 [0] 不是种子商品）
+    // 按 id=1 精确取（列表第一条会随着本次新建商品漂移，全量跑时 [0] 不是种子商品）
     await openProducts(page)
     const seedProduct = (await getAdminProductsApi(request, token)).find((p) => p.id === 1)
     expect(seedProduct, '种子商品1 应存在于后台商品列表').toBeTruthy()

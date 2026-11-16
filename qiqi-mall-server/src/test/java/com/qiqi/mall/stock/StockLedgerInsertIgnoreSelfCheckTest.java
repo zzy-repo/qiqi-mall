@@ -108,7 +108,7 @@ class StockLedgerInsertIgnoreSelfCheckTest {
     }
 
     @Test
-    @DisplayName("库存不足 → 撤掉刚记的台账行（不留「账上扣了、库存没扣」的假账）")
+    @DisplayName("库存不足 → 撤掉刚记的台账行（不留「账上扣了、库存没扣」这种账实不符的行）")
     void insufficientStockRollsBackLedgerRow() {
         when(ledgerMapper.insertIgnore(anyLong(), anyLong(), anyInt(), anyString(), any(), any(), any(), anyString()))
                 .thenReturn(1);

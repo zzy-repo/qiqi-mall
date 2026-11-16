@@ -60,19 +60,19 @@ public class Order {
     private Integer version;
 
     /**
-     * 状态流转序号（P2 第二步）：{@code status_seq} 与 {@code status} 在<b>同一条</b> UPDATE 里自增
+     * 状态流转序号：{@code status_seq} 与 {@code status} 在<b>同一条</b> UPDATE 里自增
      * （见 {@code OrderStatusService#change}），是状态台账幂等键 {@code {orderId}:{statusSeq}} 的来源。
      *
      * <p><b>只读字段</b>：{@code insertStrategy / updateStrategy = NEVER} —— 本实体永远不写这一列，
      * 唯一的写者是状态服务那句 {@code SET status_seq = status_seq + 1}。若让它参与 {@code updateById}，
      * 任何一次「顺手保存订单」都会把 seq 写回旧值，幂等键立刻失去意义。
-     * <p>{@code @JsonIgnore}：不给接口响应加字段（P2 的硬门槛是「行为不变」）。
+     * <p>{@code @JsonIgnore}：不给接口响应加字段 —— 这一列是台账内部的幂等依据，接口一个字段都不该多。
      */
     @TableField(value = "status_seq", insertStrategy = FieldStrategy.NEVER, updateStrategy = FieldStrategy.NEVER)
     @JsonIgnore
     private Integer statusSeq;
 
-    // ================================================================ 自动审核的判定上下文（P4）
+    // ================================================================ 自动审核的判定上下文
     // 这些列是策略条件的输入（渠道/店铺/毛利/备注/多地址），全部可空：
     // 历史订单没有这些信息，字段取值函数对 NULL 返回「无值」，由 EXISTS/NOT_EXISTS 表达。
 

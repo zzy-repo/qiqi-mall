@@ -24,7 +24,7 @@ import java.util.List;
  *       「0 行」语义依赖连接的 CLIENT_FOUND_ROWS 标志（Connector/J 默认设置它，无变更的
  *       duplicate 会返回 1 而不是 0），拿返回值判断去重是不可靠的；INSERT ... SELECT ... WHERE
  *       NOT EXISTS 返回的就是真实插入行数。并发下两个事务同时通过 NOT EXISTS 时，
- *       表上的 UNIQUE KEY 是最后一道硬闸（服务层捕获 DuplicateKeyException，按「已回补过」跳过）。</li>
+ *       表上的 UNIQUE KEY 会真的拦住（服务层捕获 DuplicateKeyException，按「已回补过」跳过）。</li>
  *   <li>{@link #addDelta}：同一次触发里同一个 SKU 出现多条明细（例如同一订单两行买同一规格）时，
  *       把件数合并进同一行台账 —— 台账口径是「一次触发 × 一个规格 = 一行」，与 UNIQUE 键一致。</li>
  * </ul>
@@ -42,8 +42,8 @@ public interface StockLedgerMapper extends BaseMapper<StockLedger> {
      * 也就是说：访问路径本身是 uk_idem 上的等值探查（不是全表扫），**问题出在「读侧加了锁」**。
      * 本机探针（8 连接 × 200 条新键）：naive 出现 3 次 1213；改成 INSERT IGNORE 后 0 次。
      *
-     * <p>而且压测的 P2 实验（100% 冷门 SKU、彻底无热点，c16 只比热点快 0.9%）说明：
-     * **真正的全局串行点是这张台账表，不是 sku 那一行**。所以这条插入写法的收益可能比分桶更大。
+     * <p>而且压测里把流量全压到冷门 SKU（彻底无热点、并发 16）时，TPS 也只比热点场景快 0.9% ——
+     * 说明**真正的全局串行点是这张台账表，不是 sku 那一行**。所以这条插入写法的收益可能比分桶更大。
      *
      * <p>记一行台账；幂等键已存在时返回 0（插入 0 行，不覆盖）
      */

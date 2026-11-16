@@ -11,7 +11,7 @@
 #   · 每档 p50/p95/p99 从 samples.csv 原始样本切（不用"每秒分位数再平均"，会低估 p99）。
 #   · Little's Law：L ≈ ok_rps × W；L 取该档 inflight 的时间加权均值（gen.mjs 精确积分）。
 #   · 环境列：该档窗口内 load1 的 min/中位/max 与 MemAvailable 最小值；
-#     某档 load1 峰值 > 本轮各档峰值中位数 × 1.5 ⇒ disturbed=1（受扰，数字要打折看）。
+#     某档 load1 峰值 > 同一轮里各档峰值的中位数 × 1.5 ⇒ disturbed=1（受扰，数字要打折看）。
 
 import csv
 import json

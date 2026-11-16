@@ -18,8 +18,8 @@ package com.qiqi.mall.shared.ledger;
  * 这不是「台账记不上就算」的事：宁可业务失败，也不能让台账少一条。
  * {@code ReasonCodesTest} 用单测把这些宽度钉死（改常量时超长立刻红）。
  *
- * <h3>与 P2 第一步的关系</h3>
- * 三个状态服务里的 {@code REASON_*} 常量在第一步就被调用点广泛引用。这里**不删它们**，
+ * <h3>为什么三个状态服务里还留着同名的 {@code REASON_*} 别名</h3>
+ * 那批常量早被调用点广泛引用（{@code OrderStatusService.REASON_PAY} 之类）。这里**不删它们**，
  * 而是让它们变成本类的别名（{@code public static final String REASON_PAY = ReasonCodes.ORDER_PAY;}）——
  * 调用点一个字不改，常量只有一个来源。
  */
@@ -126,7 +126,12 @@ public final class ReasonCodes {
     // ---- 自动审核（策略配置 / 一次 run / 冻结解冻）----
     /** 触发了一次自动审核 run（summary 里带 runId 与五类计数） */
     public static final String ACTION_AUDIT_RUN = "AUDIT_RUN";
-    /** 人工冻结订单（决策 J1：不是状态流转，只写标 + 这条审计） */
+    /**
+     * 人工冻结订单：<b>不是状态流转</b>，只写一条 {@code order_audit_tag} 加这条审计。
+     *
+     * <p>冻结时订单仍停在 7 待审核 —— 它还没审完，只是被按住，状态机里没有对应的新状态可记，
+     * 所以这条审计是「这单被冻上了」唯一能落库的痕迹（{@code order_status_ledger} 里不会有它的行）。
+     */
     public static final String ACTION_AUDIT_FREEZE = "AUDIT_FREEZE";
     /** 人工解冻订单 */
     public static final String ACTION_AUDIT_UNFREEZE = "AUDIT_UNFREEZE";

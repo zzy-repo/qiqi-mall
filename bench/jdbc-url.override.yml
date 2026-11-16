@@ -1,6 +1,6 @@
 # bench/jdbc-url.override.yml —— JDBC URL 参数对照实验的注入口（compose override，**只在显式 -f 时生效**）
 #
-# 本轮要验的唯一变量是 Connector/J 的 `useLocalSessionState`（URL 参数）。
+# 这组对照要验的唯一变量是 Connector/J 的 `useLocalSessionState`（URL 参数）。
 #   · 不改代码（业务代码一行不动）
 #   · 不重建镜像（镜像仍是 qiqi-mall-server:test，同一 digest）
 #   · 不改池子、不改 JAVA_OPTS、不改表结构
@@ -10,10 +10,10 @@
 #   且**优先级高于 application-test.yml 里的同名项**（实测证据见报告：注入后
 #   `SELECT @@SESSION.transaction_read_only` 探针从 7.04 条/单掉到 ~0，说明真的生效了）。
 #
-# ⚠️ 为什么用「完整 URL」而不是「追加一个参数」：两臂必须只有一个字符级差异，
+# ⚠️ 为什么用「完整 URL」而不是「追加一个参数」：两组必须只有一个字符级差异，
 #    而 yml 里的 URL 带 ${MYSQL_HOST}/${MYSQL_PORT}/${MYSQL_DATABASE} 占位符，
 #    在 compose 的 env 里做「拼接」会引入第二个变量（占位符展开与否）。
-#    这里干脆把两臂的完整 URL 都写死在调用方（tools/jdbc-url.sh），yml 只做透传。
+#    这里干脆把两组的完整 URL 都写死在调用方（tools/jdbc-url.sh），yml 只做透传。
 #
 # 用法（见 tools/jdbc-url.sh）：
 #   export BENCH_JDBC_URL='jdbc:mysql://mysql:3306/qiqi_mall_test?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useLocalSessionState=true'

@@ -3,7 +3,7 @@ package com.qiqi.mall.audit.dto;
 import java.util.List;
 
 /**
- * 一次 run 的结果：runId + 五类计数（决策 C3：**一次 run 同时产出五类结果**）+ 逐单摘要。
+ * 一次 run 的结果：runId + 五类计数（**一次 run 同时产出五类结果**，不是一类跑一次）+ 逐单摘要。
  *
  * <h3>{@code total} 与五类、skipped 的关系（唯一口径，别再各算各的）</h3>
  * <pre>

@@ -57,7 +57,7 @@ def load_steps(d):
         out.append(dict(i=int(r["index"]), target=fnum(r["target_rps"]),
                         ep0=int(fnum(r["epoch_start"])), ep1=int(fnum(r["epoch_end"])),
                         # 样本的 planned_ms 是**压测内部轴**（从进程启动算），档窗口要用 start_ms/end_ms，
-                        # 不能拿墙上 epoch 去比 —— 这两个轴混用会得到「ok=0」这种假数字（本轮踩过）
+                        # 不能拿墙上 epoch 去比 —— 这两个轴混用会得到「ok=0」这种假数字（实测踩过）
                         s0=fnum(r["start_ms"]), s1=fnum(r["end_ms"]),
                         dur=fnum(r["duration_ms"]) / 1000.0))
     return out

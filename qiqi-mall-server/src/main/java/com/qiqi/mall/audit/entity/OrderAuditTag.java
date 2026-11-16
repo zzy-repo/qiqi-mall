@@ -10,7 +10,10 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 订单审核标记（{@code order_audit_tag}）：冻结/挂起<b>用标表达，不动 order.status</b>（决策 J1）。
+ * 订单审核标记（{@code order_audit_tag}）：冻结/挂起<b>用标表达，不动 order.status</b> ——
+ * 冻结不是一种订单状态：订单仍停在待审核(7)，只是多了一条 active 的审核标记。
+ * 做成状态码会让状态机多出一个「既能继续审核、又像已结束」的中间态，
+ * 所以它落在标记表里，与状态机正交。
  *
  * <p>{@code active_tag} 是数据库的**虚拟生成列**（active=1 时 = {@code orderId:tagCode}，否则 NULL），
  * 唯一键 {@code uk_active} 建在它上面 ⇒ 「同一单同一标只允许一条 active」由 DB 兜底，

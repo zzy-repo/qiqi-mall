@@ -187,7 +187,7 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
             return;
         }
         if (decision.outcome() == Outcome.DENY) {
-            log.warn("API Key 访问被拒（黑/白名单）: {} {} - {}", request.getMethod(), request.getRequestURI(), decision.message());
+            log.warn("API Key 访问被拒（路径规则不允许）: {} {} - {}", request.getMethod(), request.getRequestURI(), decision.message());
             writeError(response, decision.status(), decision.message());
             return;
         }

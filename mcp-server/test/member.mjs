@@ -156,7 +156,7 @@ async function main() {
         detail: `id=${j.id} username=${j.username} version=${j.version}`,
       };
     });
-    await check('③c member(action=update) **不带 version** → isError 并说明必须给 version（后端 fail-closed 的前置闸）', async () => {
+    await check('③c member(action=update) **不带 version** → isError 并说明必须给 version（后端 fail-closed 的前置校验）', async () => {
       const r = await expectError(client, 'member', { action: 'update', memberId, nickname: '不该生效' });
       const row = dbMember(memberId);
       return {

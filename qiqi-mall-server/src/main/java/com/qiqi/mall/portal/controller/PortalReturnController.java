@@ -29,7 +29,7 @@ public class PortalReturnController {
     private final ReturnApplyService returnApplyService;
     private final ReturnReasonService returnReasonService;
     private final OrderService orderService;
-    /** 订单状态写入的唯一入口（P2 第一步收敛：申请退货把订单写成 5 退款中） */
+    /** 订单状态写入的唯一入口（申请退货把订单写成 5 退款中） */
     private final OrderStatusService orderStatusService;
     /** 退货申请状态写入的唯一入口（出生：新建申请 = 待处理(0)） */
     private final ReturnStatusService returnStatusService;

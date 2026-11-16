@@ -13,7 +13,8 @@ export const updateSku = (id, data) => request.put(`${BASE}/${id}`, data)
 export const listSkuAttributes = (productId) => request.get(`${BASE}/attributes`, { params: { productId } })
 
 /**
- * 删除规格（L3 高危）：被订单明细 / 购物车引用时后端拒绝，并回中文原因。
+ * 删除规格（不可逆的高危写操作：先 ?dryRun=true 预演，再执行）：
+ * 被订单明细 / 购物车引用时后端拒绝，并回中文原因。
  * 确认码已下线 —— 删除不再需要「码」，只保留「?dryRun=true 预演」与真正执行两条路径。
  */
 export const deleteSku = (id) => request.delete(`${BASE}/${id}`)

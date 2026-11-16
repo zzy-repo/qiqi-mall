@@ -20,7 +20,8 @@ public interface AuditPolicyConditionMapper extends BaseMapper<AuditPolicyCondit
 
     /**
      * 全局排除（scope=ALL_AUTO，policy_id 为 NULL）：所有 AUTO 策略共用的例外。
-     * 决策 C1：「客服备注含改」不属于任何一条策略，删任何策略都不该把它带走。
+     * 「客服备注含改」这类排除不属于任何一条策略（{@code policy_id} 为 NULL），
+     * 所以只能按 scope 查：删掉任何一条策略都不该把它一起带走。
      */
     @Select("SELECT * FROM audit_policy_condition WHERE scope = 'ALL_AUTO' AND kind = 'EXCLUDE' "
             + "ORDER BY seq ASC, id ASC")

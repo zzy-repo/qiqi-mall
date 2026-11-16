@@ -13,7 +13,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * {@code channel_sync_log} 幂等闸（V2 的生成列 {@code idem_key} + {@code uk_sync_idem}）行为测试。
+ * {@code channel_sync_log} 唯一约束拦重复（V2 的生成列 {@code idem_key} + {@code uk_sync_idem}）行为测试。
  *
  * <h3>要钉住的三条口径</h3>
  * <ol>
@@ -127,7 +127,7 @@ class ChannelSyncLogIdemTest {
 
         for (int i = 0; i < 2; i++) {
             assertThat(writer.write(shop, ChannelSyncLog.ACTION_PULL, "PLATFORM_ORDER", null,
-                    "platform-sn-P1", null, ChannelSyncLog.RESULT_SKIP,
+                    "platform-sn-1", null, ChannelSyncLog.RESULT_SKIP,
                     ChannelSyncLog.REASON_IDEMPOTENT, 1, 0)).isTrue();
         }
 

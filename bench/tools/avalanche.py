@@ -368,7 +368,7 @@ def verdict_v2(rows):
                    f"Tomcat 线程 {hit['thr_http_max']:.0f} / MySQL Threads_running {hit['my_run_max']:.0f} / "
                    f"行锁等待 {hit['row_lock_waits_s']:.0f}/s")
     else:
-        out.append("★ 没有档位同时满足三个条件 —— 拐点不在本轮阶梯覆盖范围内（要么还没到，要么已经越过）")
+        out.append("★ 没有档位同时满足三个条件 —— 拐点不在这次阶梯的覆盖范围内（要么还没到，要么已经越过）")
     return "\n".join(out)
 
 

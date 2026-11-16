@@ -53,7 +53,7 @@ fi
 # 显式给 MCP_INSPECTOR_API_TOKEN 后就不再随机生成，静态链接长期有效。
 INSPECTOR_TOKEN="${INSPECTOR_TOKEN:-qiqi-mall-mcp-inspector-2026}"
 
-# Origin 白名单：浏览器 Origin 必须登记，否则点「连接」会 403 Invalid origin。
+# Origin 放行名单：浏览器 Origin 必须登记在里面，否则点「连接」会 403 Invalid origin。
 # 注意 ALLOWED_ORIGINS 一旦设置就整体覆盖默认值，本机地址要一并列上。
 ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-${PUBLIC_ORIGIN},http://localhost:${CLIENT_PORT},http://127.0.0.1:${CLIENT_PORT}}"
 

@@ -4,7 +4,9 @@ import { adminLogin, adminSetSkuStock, memberRegister } from '../../support/ui.j
 import { memberTokenOf, getProductApi, getMemberOrdersApi, getMemberOrderApi } from '../../support/assert.js'
 
 /**
- * 场景2 购买下单（docs/flows/4-场景2-购买下单.mmd）
+ * 场景2 购买下单 —— 旧结构遗留的 spec（2026-11-14 结构重构前写的），现行对应文档：
+ *   docs/flows/02-业务场景/业务/买家侧/结算下单与支付/正文.md + docs/flows/03-机制时序/4-下单与支付.mmd
+ *   （头部原本写的 `docs/flows/4-场景2-购买下单.mmd` 已在重组时删除，仓库里没有这个文件。）
  *   查看详情 → 加购（匿名存本地）→ 未登录被拦截 → 注册即登录 → 合并购物车
  *   → 结算 → 提交订单（快照 + 扣库存）→ 模拟支付 → 订单已付款
  *

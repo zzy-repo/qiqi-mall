@@ -11,7 +11,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 幂等键打散前缀的**纯单测**（不连库、不起 Spring）。
+ * 幂等键前缀分桶的**纯单测**（不连库、不起 Spring）。
  *
  * <h3>要钉住的四条</h3>
  * <ol>
@@ -83,7 +83,7 @@ class IdemKeyShardTest {
     // ------------------------------------------------------------------ 唯一性
 
     @Test
-    @DisplayName("打散后唯一性不变：1 万条 (orderId, skuId) 组合的键两两不同，且与未打散一一对应")
+    @DisplayName("加前缀分桶后唯一性不变：1 万条 (orderId, skuId) 组合的键两两不同，且与不加前缀一一对应")
     void uniquenessIsPreserved() {
         Set<String> sharded = new HashSet<>();
         Set<String> plain = new HashSet<>();
@@ -96,8 +96,8 @@ class IdemKeyShardTest {
             }
         }
         assertThat(sharded).as("1 万个键不许有任何碰撞").hasSize(n * n);
-        assertThat(sharded.size()).as("打散不改变键的数量（一一对应）").isEqualTo(plain.size());
-        assertThat(sharded).as("打散后的键必须真的不同于原键").doesNotContainAnyElementsOf(plain);
+        assertThat(sharded.size()).as("分桶不改变键的数量（一一对应）").isEqualTo(plain.size());
+        assertThat(sharded).as("分桶后的键必须真的不同于原键").doesNotContainAnyElementsOf(plain);
     }
 
     @Test

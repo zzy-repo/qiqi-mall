@@ -7,7 +7,7 @@
 // 逐条断言：
 //   ① tools/list 含 5 个新写工具（中文 title/description），且 write=0 时全部消失
 //   ② create_order：协议层必填（缺 items / 缺收货人）→ 被 zod 拒；正常建单 → 金额=明细单价×数量（后端重算）、version=0
-//   ②a2 初始状态白名单：create_order 传 8（待发货，需要包裹这个前置事实）→ 协议层被拒 + 中文原因 + 一行不落库；1 与 7 放行
+//   ②a2 初始状态只收 0/1/7：create_order 传 8（待发货，需要包裹这个前置事实）→ 协议层被拒 + 中文原因 + 一行不落库；1 与 7 放行
 //   ③ update_order：假 version → 409 且**数据一个字段都没被覆盖**；正确 version → 成功、version +1（回读 + DB 双确认）
 //   ④ ship_order：状态守卫（只有已付款能发）→ dryRun 不落库 → 真执行 1→2 → 重复被拒
 //   ⑤ audit_reject_order：dryRun 不落库 → 真执行 7→4，并把总池库存回补（回补量原样减回去，不污染共用测试库）
@@ -147,8 +147,8 @@ async function main() {
       };
     });
 
-    // ②a2 初始状态白名单（与后端 OrderController#create 同一口径）：只收 0/1/7
-    await check('②a2 create_order 初始状态白名单：8 被协议层拒且一行不落库；1 与 7 放行', async () => {
+    // ②a2 初始状态只收 0/1/7（与后端 OrderController#create 同一口径）
+    await check('②a2 create_order 初始状态只收 0/1/7：8 被协议层拒且一行不落库；1 与 7 放行', async () => {
       // 8 待发货需要「包裹」这个前置事实 —— 真实流程产不出的初始状态，必须在协议层就收掉
       const badSn = `QQWBAD8${stamp()}`;
       const bad = await expectError(client, 'create_order', {
@@ -156,7 +156,7 @@ async function main() {
         memberId: Number(member.id),
         status: 8,
         payType: 1,
-        receiverName: '白名单用例-待发货',
+        receiverName: '初始状态用例-待发货',
         receiverPhone: '13800000000',
         receiverAddress: '浙江省杭州市西湖区测试路 3 号',
         items: [item],

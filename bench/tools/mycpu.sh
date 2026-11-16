@@ -4,7 +4,7 @@
 #   用法： ./mycpu.sh <输出.csv> [容器名]           # 默认 qiqi-mysql
 #          INTERVAL_MS=1000 ./mycpu.sh out/mycpu.csv
 #
-# 为什么需要它：上一轮的不变式「每单 19 条 SQL × 这台机 7.7k QPS」只是**强相关**，
+# 为什么需要它：bench/README.md §13 那条不变式「每单 19 条 SQL × 这台机 7.7k QPS」当时只是**强相关**，
 #   要变成因果必须采 MySQL 侧的算力占用。但 cgwatch.sh 只采 server-1/-2，没有 DB。
 #
 # 采什么（每行 = 一次采样；全部是宿主机直读 cgroup v2 / proc，零 docker exec）：

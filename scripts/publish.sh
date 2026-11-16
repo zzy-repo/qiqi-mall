@@ -7,14 +7,14 @@
 #   scripts/publish.sh --version v0.2.0 [--dry-run] [--skip-docs] [--skip-frontend] [--skip-backend]
 #   scripts/publish.sh --version v0.2.0 --docs-engine=rspress   # 可选：文档站用哪个引擎（默认 docsify）
 #   scripts/publish.sh --rollback v0.1.0 [--dry-run]        # 回滚到指定镜像 tag
-#   scripts/publish.sh --version v0.2.0 --dry-run           # 只演练：打印命令 + 校验前置，不动任何东西
+#   scripts/publish.sh --version v0.2.0 --dry-run           # 只演练：打印命令 + 先跑各项校验，不动任何东西
 #
-#   --force-low-mem   逃生开关：跳过"内存/交换区不足"硬门禁（报告里标红，OOM 风险自负）
+#   --force-low-mem   逃生开关：跳过"内存/交换区不足"失败即拦的校验（报告里标红，OOM 风险自负）
 #
 #   --docs-engine=docsify|rspress   文档站用哪个引擎构建+体检（默认 docsify = 现状，逐字节不变）
 #     docsify : node /root/docsify/build-material.mjs --mode=prod → /root/docsify/dist-prod
 #     rspress : (cd /root/docs-rspress && npm run build)          → /root/docs-rspress/doc_build
-#               门禁自动追加 --page-ext=html；上传目标 OSS 前缀**不变**（仍是 oss://<bucket>/），
+#               check-docs-site.mjs 会自动追加 --page-ext=html；上传目标 OSS 前缀**不变**（仍是 oss://<bucket>/），
 #               CDN 刷新的"静态资源目录"从 _vendor/ 换成 static/（Rspress 把 js/css 打在这儿）。
 #               切换那天只改这一个参数；两套产物能同时发，出问题立刻切回 docsify。
 #
@@ -24,8 +24,8 @@
 #     DRAIN_SECONDS=15       docker stop 的优雅退出窗口（让在途请求跑完）
 #     FRONTEND_BUILD_MODE=test  vite 构建模式（与 docker-compose.yml 的 BUILD_MODE 一致）
 #     EXPECT_MALL=200 EXPECT_ADMIN=401 EXPECT_DOCS=200 EXPECT_HEALTH=200   冒烟期望码
-#     MEM_MIN_MB=1200 SWAP_MIN_MB=200   内存/交换区硬门禁阈值（低于就直接 die，除非 --force-low-mem）
-#     PROBE_LOGIN=1      是否在每台实例健康之后追加登录探测门禁（=0 关掉，只留浅健康检查，不推荐）
+#     MEM_MIN_MB=1200 SWAP_MIN_MB=200   内存/交换区失败即拦的校验阈值（低于就直接 die，除非 --force-low-mem）
+#     PROBE_LOGIN=1      是否在每台实例健康之后追加登录探测校验（=0 关掉，只留浅健康检查，不推荐）
 #
 # -----------------------------------------------------------------------------
 # 一次发布按顺序做这些事（任一步失败即停，并打印回滚提示）
@@ -39,11 +39,11 @@
 #   6 build_frontend     portal-web / admin-web 各建一个 $VER 镜像
 #   7 rolling_frontend   两个前端一起换（静态资源，无状态，见下方缓存策略）
 #   8 build_docs         node build-material.mjs --mode=prod → dist-prod/
-#   8.5 docs_gate        ★文档产物硬门禁（scripts/check-docs-site.mjs 十二项，含「私人文稿零泄漏」+「产物洁净度」+「侧边栏编号连续性」）：
+#   8.5 docs_gate        ★文档产物失败即拦的校验（scripts/check-docs-site.mjs 十二项，含「私人文稿零泄漏」+「产物洁净度」+「侧边栏编号连续性」）：
 #                        不过就 die，一个字节都不上传 —— 详见【十二】
 #   9 publish_docs       oss2 同步 dist-prod → oss://qiqi-mall-docs/ + docs/**/*.mmd → _src/ + CDN 刷新（html/md/目录首页 + _vendor/ 的 js/css）
 #  10 smoke              线上 5 个探针 + 登录接口（失败只提示回滚，不自动回滚：先让人看一眼）
-#                        （登录在第 5 步已经当门禁用过了；这里是从网关再验一遍全链路，不是唯一防线）
+#                        （登录在第 5 步已经当校验用过了；这里是从网关再验一遍全链路，不是唯一防线）
 #  11 report             版本号 / 三个镜像 tag / tag commit / 耗时 / 每步结果表
 #
 # =============================================================================
@@ -55,7 +55,7 @@
 #   双实例的全部价值就在于：**同一时刻只有一台不在服务**。
 #     - 一次只停一台 → 另一台接着扛全部流量 → 用户完全无感（最坏是多一次 TCP 重试）。
 #     - 两台一起停 → 网关两个 upstream 全不可用 → 直接 502 断服。这是硬红线。
-#   所以本脚本的滚动循环是串行的、带健康门禁的：
+#   所以本脚本的滚动循环是串行的、带健康校验的：
 #       停 A → 起新镜像 A → 轮询 A 的 /api/health 直到 ok → **才允许**动 B。
 #   A 起不来（新镜像炸了/起得比超时还慢）→ 立刻用 A 的旧镜像把它起回来，exit 1，
 #   绝不在 A 还病着的时候去动 B（否则就是"两台一起坏"）。
@@ -140,14 +140,14 @@
 #     **不验证 DB/Redis/OSS**：容器"健康"不等于业务可用。所以滚动时每台实例健康之后
 #     还要过一道登录探测（见【十】）——那才是"这台真能查库"的证据。
 #   - 宿主机交换区接近耗尽 + 多智能体并行时，maven 构建可能被 OOM kill。
-#     这条从"警告"升级成**硬门禁**：SwapFree < 200MB 或 MemAvailable < 1200MB 直接 die。
+#     这条从"警告"升级成**失败即拦的校验**：SwapFree < 200MB 或 MemAvailable < 1200MB 直接 die。
 #     理由：maven 多阶段构建 + 两个 JVM 冷启动会同时要内存，宿主机彻底没 swap 时内核
 #     OOM killer 挑的是"最大的进程"——很可能是**正在服务的另一台实例或别人的容器**，
 #     那不是"发布失败"，是直接把线上打断。逃生开关 --force-low-mem（报告里标红）。
 #   - 冒烟用公网域名，依赖 ECS Caddy → tailscale → 本机这条链路；
 #     链路问题时冒烟会红，但那不是本次发布的锅（看 smoke 的失败明细再判断）。
 #
-# 【十】登录探测 = 发布门禁（不是最后一步的冒烟）
+# 【十】登录探测 = 发布校验（不是最后一步的冒烟）
 #   上一版把登录冒烟放在最后（smoke），失败了只报警不回滚 —— 太晚：那时两台实例都已经
 #   切完、新版本已经在扛流量了。现在提前到滚动循环里，**每台实例** /api/health 通过之后
 #   立刻补一次登录探测，过了才允许 reload 网关把它放进 upstream；不通过 = 这台不健康 →
@@ -191,11 +191,11 @@
 #         ② 提交后**必须回读校验**（抽 5 条 HEAD，看 X-Cache 从 HIT 变 MISS/EXPIRED）——
 #            这个接口错了也返回成功，没有回读就等于没有证据。
 #
-# 【十二】文档产物硬门禁 = 上传 OSS 之前必须整条 PASS（check-docs-site.mjs 十二项）
+# 【十二】文档产物失败即拦的校验 = 上传 OSS 之前必须整条 PASS（check-docs-site.mjs 十二项）
 #   历史教训：口语稿（作者口述稿）和 build-material.mjs 里 PRIVATE_DOCS 那 12 篇私人笔记
 #   属于「私人文稿」，**只能出现在 dev 站**。prod 侧原先只靠 build-material.mjs 的实现细节
 #   保证干净（`if (MODE !== 'dev') return null` 不读口语稿、prod 分支不拷那 12 篇）——
-#   那是代码层约定，**没有任何外部门禁**：谁改了那个 if、加一个新素材目录、或手工往 dist-prod
+#   那是代码层约定，**没有任何外部校验**：谁改了那个 if、加一个新素材目录、或手工往 dist-prod
 #   塞一个文件，没有任何东西会拦下来，而它会被直接同步上 OSS。
 #   为什么后果特别重：html/md 是 no-cache（发版能刷），但 svg/mp4/_vendor 下的 js/css 是
 #   **30 天缓存**（见【六】）。私人笔记/口语稿一旦传上去，就算事后删了源对象、刷了 CDN，
@@ -214,7 +214,7 @@
 #   playwright-report、_deploy/_evidence）+ 正文里的内网 IP / 绝对路径 /root/ /tmp/ / 容器名 /
 #   docker compose。理由：这些原先全靠 build-material「不拷」这个约定，PRIVATE_DOCS 又是逐篇登记，
 #   新加一篇私人笔记忘了登记就漏 —— ⑪ 是那条路的兜底。
-#   ⚠ 门禁本身被绕过的方式只剩「改脚本」，所以 check-docs-site.mjs 的 --private-ok（dev 站豁免）
+#   ⚠ 校验本身被绕过的方式只剩「改脚本」，所以 check-docs-site.mjs 的 --private-ok（只在 dev 站才开的放行开关）
 #     绝不能出现在这里的命令行里。
 #
 # 【十三】JDBC 会话状态红线 = useLocalSessionState=true 的**可执行前提**（不是一次性 grep）
@@ -229,9 +229,9 @@
 #   为什么挂在 preflight（第 1 步）而不是 8.5 那十二项体检（docs_gate）：
 #     · 8.5 判的是**产物字节**（dist-prod 能不能上 OSS），这条判的是**源码与配置**，两码事；
 #     · 8.5 排在 build_backend + 两次滚动重启**之后**，一条源码约束在那里才炸 = 白折腾线上；
-#     · 8.5 会被 --skip-docs 整个跳过（"这次不发文档"），源码门禁跟着消失就是漏洞；
+#     · 8.5 会被 --skip-docs 整个跳过（"这次不发文档"），源码校验跟着消失就是漏洞；
 #     · preflight 失败时**连 tag 都不打、镜像也不构建**，这是源码类约束唯一正确的位置。
-#   回滚模式跳过本项（紧急通道不重跑源码门禁，且回滚用的是老镜像、新 yml 不参与）。
+#   回滚模式跳过本项（紧急通道不重跑源码校验，且回滚用的是老镜像、新 yml 不参与）。
 #
 # 【十四】前端样式纪律 = 「不侵入组件」的**可执行前提**（scripts/check-style-discipline.mjs）
 #   admin/portal 的 scoped <style> 里一度有自己重写的一整套组件外观：筛选胶囊 23 行 CSS
@@ -239,10 +239,10 @@
 #   10 处 :deep() 直接撬 el-tag / el-table / el-card / el-checkbox 的内部类名。
 #   代价是看得见的：紫色只活在 order-audit 一个 scoped 块里，别的页拿到同一个类名什么也不会发生；
 #   而 :deep() 的目标是组件的私有 DOM，EP 一次升级就可能全碎，且碎法是"样式静默失效"。
-#   于是把它变成一条可执行的分档约束（不是"以后注意点"）：
-#     · :deep() > 0        → **fail**（撬组件内部 = 升级即碎，一处都不允许；当前是 0）
-#     · 外观声明 > 0       → warn（自有样式里有 color/font-size 是正常的，EP 只有 5 档字号、
-#                            没有等宽/斜体/紫档语义，该留就得留；这一档只看趋势向下）
+#   于是把它变成两条可执行的约束（不是"以后注意点"）：
+#     · :deep() > 0        → **失败即拦**（撬组件内部 = 升级即碎，一处都不允许；当前是 0）
+#     · 外观声明 > 0       → 只警告不拦（自有样式里有 color/font-size 是正常的，EP 只有 5 档字号、
+#                            没有等宽 / 斜体 / 紫色语义，该留就得留；这一条只要求趋势向下）
 #   为什么挂 preflight 而不是 docs_gate：与【十三】同理 —— 判的是源码不是产物字节，
 #   而且 preflight 失败时连 tag 都不打，是源码类约束唯一正确的位置。
 #   回滚模式同样跳过。
@@ -276,18 +276,18 @@ HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-120}"
 HEALTH_INTERVAL="${HEALTH_INTERVAL:-3}"
 DRAIN_SECONDS="${DRAIN_SECONDS:-15}"
 FRONTEND_BUILD_MODE="${FRONTEND_BUILD_MODE:-test}"
-# 内存/交换区硬门禁（见脚本头【九】）。可覆盖，但 --force-low-mem 才是正经逃生门：
+# 内存/交换区失败即拦的校验（见脚本头【九】）。可覆盖，但 --force-low-mem 才是正经逃生门：
 # 环境变量适合"这台机器确实小一点"的长期调整，command-line 开关适合"我知道现在很紧，就发这一次"。
 MEM_MIN_MB="${MEM_MIN_MB:-1200}"     # MemAvailable 低于它就 die
 SWAP_MIN_MB="${SWAP_MIN_MB:-200}"    # SwapFree 低于它就 die
-# 每台实例健康之后的登录探测门禁（见脚本头【十】）；=0 只留浅健康检查（不推荐）
+# 每台实例健康之后的登录探测校验（见脚本头【十】）；=0 只留浅健康检查（不推荐）
 PROBE_LOGIN="${PROBE_LOGIN:-1}"
 
 DOCS_SRC_DIR="/root/docsify"
 DOCS_BUILD="$DOCS_SRC_DIR/build-material.mjs"
 DOCS_DIST="$DOCS_SRC_DIR/dist-prod"
 # 文档站引擎（--docs-engine，默认 docsify）。下面的 DOCS_* 变量由 resolve_docs_engine() 定稿；
-# 这里给的是 **缺省值 = docsify 现状**，保证不带参数时命令串/产物路径/门禁参数全部与改动前一致。
+# 这里给的是 **缺省值 = docsify 现状**，保证不带参数时命令串/产物路径/校验参数全部与改动前一致。
 DOCS_ENGINE="docsify"
 RSPRESS_DIR="/root/docs-rspress"
 DOCS_ASSET_DIR="_vendor"   # CDN 刷新说明里那个"静态资源目录"：docsify=_vendor/，rspress=static/
@@ -317,8 +317,8 @@ DRY_RUN=0
 SKIP_DOCS=0
 SKIP_FRONTEND=0
 SKIP_BACKEND=0
-FORCE_LOW_MEM=0       # --force-low-mem：跳过内存/交换区硬门禁（报告里标红）
-FORCE_LOW_MEM_USED=0  # 记录"门禁真的被跳过了"，供收尾报告标红
+FORCE_LOW_MEM=0       # --force-low-mem：跳过内存/交换区失败即拦的校验（报告里标红）
+FORCE_LOW_MEM_USED=0  # 记录"校验真的被跳过了"，供收尾报告标红
 
 # ------------------------------------------------------------------ 运行期状态
 T0=0
@@ -457,7 +457,7 @@ resolve_docs_engine() {
     docsify)
       DOCS_BUILD="$DOCS_SRC_DIR/build-material.mjs"
       DOCS_DIST="$DOCS_SRC_DIR/dist-prod"
-      DOCS_GATE_FLAGS=""          # 现状：门禁不带任何额外参数
+      DOCS_GATE_FLAGS=""          # 现状：校验不带任何额外参数
       DOCS_ASSET_DIR="_vendor"
       ;;
     rspress)
@@ -585,7 +585,7 @@ PY
   return 0
 }
 
-# 内存/交换区：**硬门禁**，不是提示（上一版只是 <1.5GB 时 warning，等于把判断推给人）
+# 内存/交换区：**失败即拦的校验**，不是提示（上一版只是 <1.5GB 时 warning，等于把判断推给人）
 # 为什么必须拦：maven 多阶段构建 + 两个 JVM 冷启动会同时吃内存；宿主机真的没内存没 swap
 # 的时候，内核 OOM killer 挑的是"最大的进程"——大概率是**正在服务的另一台实例**或别人的
 # 容器。那不是"这次构建失败"，是直接把线上打断，比中止发布严重得多。所以：
@@ -596,7 +596,7 @@ check_resources() {
   avail="$(awk '/^MemAvailable:/{print int($2/1024)}' /proc/meminfo)"
   swap_free="$(awk '/^SwapFree:/{print int($2/1024)}' /proc/meminfo)"
   avail="${avail:-0}"; swap_free="${swap_free:-0}"
-  info "可用内存 ${avail}MB（门禁 ≥${MEM_MIN_MB}）/ 空闲 swap ${swap_free}MB（门禁 ≥${SWAP_MIN_MB}）"
+  info "可用内存 ${avail}MB（要求 ≥${MEM_MIN_MB}）/ 空闲 swap ${swap_free}MB（要求 ≥${SWAP_MIN_MB}）"
 
   if [ "$swap_free" -lt "$SWAP_MIN_MB" ]; then
     why="SwapFree ${swap_free}MB < ${SWAP_MIN_MB}MB"
@@ -604,18 +604,18 @@ check_resources() {
   if [ "$avail" -lt "$MEM_MIN_MB" ]; then
     why="${why:+$why；}MemAvailable ${avail}MB < ${MEM_MIN_MB}MB"
   fi
-  [ -n "$why" ] || { info "内存/交换区门禁通过 ✓"; return 0; }
+  [ -n "$why" ] || { info "内存/交换区校验通过 ✓"; return 0; }
 
   if [ "$FORCE_LOW_MEM" -eq 1 ]; then
     # 标红是刻意的：这个开关用过一次就要在报告里留痕，事后复盘能对上是哪次发布冒的险
-    printf '%s⚠ 内存/交换区门禁被 --force-low-mem 强制跳过：%s（OOM 风险自负）%s\n' \
+    printf '%s⚠ 内存/交换区校验被 --force-low-mem 强制跳过：%s（OOM 风险自负）%s\n' \
       "$C_R" "$why" "$C_0" >&2
     FORCE_LOW_MEM_USED=1
     return 0
   fi
   if [ "$DRY_RUN" -eq 1 ]; then
     # 演练只报不拦：内存紧张的机器也得能演练，但话要说死，别让人以为真实发布会照样放行
-    err "内存/交换区不足（硬门禁不通过）：$why"
+    err "内存/交换区不足（失败即拦的校验不通过）：$why"
     warn "dry-run：只报不拦，继续演练 —— 真实发布会在这里直接 die（加 --force-low-mem 才是唯一的绕过方式）"
     return 1
   fi
@@ -652,8 +652,8 @@ check_gateway_retry() {
 check_jdbc_session_safety() {
   local checker="$REPO_ROOT/scripts/check-jdbc-session-safety.sh" out rc=0
   if [ ! -f "$checker" ]; then
-    err "门禁脚本缺失：$checker"
-    info "没有门禁就不能声称「0 处绕过驱动改会话状态」—— useLocalSessionState=true 的前提是**可执行的约束**，不是一句口号。"
+    err "校验脚本缺失：$checker"
+    info "没有校验就不能声称「0 处绕过驱动改会话状态」—— useLocalSessionState=true 的前提是**可执行的约束**，不是一句口号。"
     return 1
   fi
   out="$(bash "$checker" 2>&1)" || rc=$?
@@ -663,40 +663,40 @@ check_jdbc_session_safety() {
   fi
   # 命中：把脚本逐条 file:line 原样打出来（人一眼知道改哪一行），再给结论
   printf '%s\n' "$out" | sed 's/^/      /' >&2
-  err "JDBC 会话安全门禁未通过（EXIT=$rc）→ useLocalSessionState=true 的前提不成立"
+  err "JDBC 会话安全校验未通过（EXIT=$rc）→ useLocalSessionState=true 的前提不成立"
   info "修法：删掉那些 SET SESSION / SET autocommit / init-SQL / 原生 getConnection；"
   info "      会话状态一律交给驱动 API（Spring 事务管理器）。允许清单见脚本头。"
   return 1
 }
 
-# 前端样式纪律（见【十四】）：:deep() > 0 硬拦，外观声明只 warn。
+# 前端样式纪律（见【十四】）：:deep() > 0 失败即拦，外观声明只警告不拦。
 # 只读 .vue 源码、不跑构建、不需要容器，几十毫秒。
 check_style_discipline() {
   local checker="$REPO_ROOT/scripts/check-style-discipline.mjs" out rc=0
   if [ ! -f "$checker" ]; then
-    err "门禁脚本缺失：$checker"
-    info "没有门禁就不能声称「0 处 :deep() 覆盖」—— 这条必须是可执行的约束，不是一句口号。"
+    err "校验脚本缺失：$checker"
+    info "没有校验就不能声称「0 处 :deep() 覆盖」—— 这条必须是可执行的约束，不是一句口号。"
     return 1
   fi
   if ! command -v node >/dev/null 2>&1; then
-    err "找不到 node，无法执行前端样式门禁（$checker）"
+    err "找不到 node，无法执行前端样式校验（$checker）"
     info "这一项判的是前端源码，machine 上没有 node 说明构建前置不满足，按失败处理。"
     return 1
   fi
   out="$(node "$checker" --brief 2>&1)" || rc=$?
   if [ "$rc" -eq 0 ]; then
-    # 通过时只留一行事实：外观声明 N 处（warn）、:deep 0 处 ✓
+    # 通过时只留一行事实：外观声明 N 处（只警告）、:deep 0 处 ✓
     info "前端样式纪律 ✓ $(printf '%s' "$out" | tail -n 1)"
     return 0
   fi
   # 命中：把违规的 file + 选择器原样打出来，再给修法
   printf '%s\n' "$out" | sed 's/^/      /' >&2
-  err "前端样式门禁未通过（EXIT=$rc）→ 有 :deep() 撬了 Element Plus 的内部样式"
+  err "前端样式校验未通过（EXIT=$rc）→ 有 :deep() 撬了 Element Plus 的内部样式"
   info "修法（三选一，按优先级）："
   info "  ① 组件有等价 props → 改纯 props（row-style / body-style / el-col :span …）"
   info "  ② 组件没有该语义，但有公开 CSS 变量 → 绑 --el-* 变量（--el-tag-bg-color 这类，属官方主题 API）"
   info "  ③ 组件确实没有 → 退回一小段自有样式，别去撬内部 DOM"
-  info "判据与白名单（含每条的理由）见 scripts/check-style-discipline.mjs 头部注释。"
+  info "判据与允许保留清单（含每条的理由）见 scripts/check-style-discipline.mjs 头部注释。"
   return 1
 }
 
@@ -764,7 +764,7 @@ preflight() {
   fi
   check_deps || bad=1
   check_gateway_retry || bad=1     # 零停机前提：网关必须显式声明重试
-  check_resources || bad=1         # 硬门禁：内存/交换区不足直接 die（--force-low-mem 可绕过）
+  check_resources || bad=1         # 失败即拦的校验：内存/交换区不足直接 die（--force-low-mem 可绕过）
   record_prev_images
 
   if [ "$bad" -ne 0 ]; then
@@ -899,7 +899,7 @@ wait_http_200() { # $1=url $2=名字
   return 1
 }
 
-# ------------------------------------------------------------------ 登录探测（发布门禁）
+# ------------------------------------------------------------------ 登录探测（发布校验）
 # 见脚本头【十】。目标只有一个：证明"这台新实例真的查得到库"。
 # /api/health 只回 status/env/service，不碰 DB；登录必查 admin 表，是现成的真业务探针。
 # ★ 但登录按**用户名**记失败次数（CaptchaStore，5 次之后要图形验证码 = 等于锁号），所以：
@@ -961,15 +961,15 @@ probe_login_negative() { # $1=容器 $2=端口
   return 1
 }
 
-# ★ 发布门禁本体：这台能登录（= 能查库）才允许被 reload 进 upstream
+# ★ 发布校验本体：这台能登录（= 能查库）才允许被 reload 进 upstream
 probe_login_instance() { # $1=容器 $2=端口 → 0=健康 1=不健康（调用方走 rollback_one_instance）
   local out code
   if [ "$PROBE_LOGIN" -eq 0 ]; then
-    warn "PROBE_LOGIN=0：跳过登录门禁（只剩 /api/health 浅检查，DB 可用性无人验证）"
+    warn "PROBE_LOGIN=0：跳过登录校验（只剩 /api/health 浅检查，DB 可用性无人验证）"
     return 0
   fi
   if [ ! -r "$ADMIN_SECRET_FILE" ]; then
-    warn "读不到 $ADMIN_SECRET_FILE → 跳过登录门禁（浅健康检查照旧，但 DB 可用性没被验证）"
+    warn "读不到 $ADMIN_SECRET_FILE → 跳过登录校验（浅健康检查照旧，但 DB 可用性没被验证）"
     return 0
   fi
 
@@ -1085,7 +1085,7 @@ rolling_backend() {
     fi
     # 2) 用新镜像重建（compose 负责沿用 env/网络/healthcheck，唯一变化是 image）
     exe_cmp_up "$svc" || die "$name 重建失败"
-    # 3) 健康门禁：没通过就立刻退回旧镜像，并且**不去动另一台**
+    # 3) 健康校验：没通过就立刻退回旧镜像，并且**不去动另一台**
     if [ "$DRY_RUN" -eq 0 ]; then
       if ! wait_backend_healthy "$name" "$port"; then
         err "$name 新镜像不健康 → 立刻回退，且不碰另一台（保证至少有一台在服务）"
@@ -1093,7 +1093,7 @@ rolling_backend() {
         step_end fail
         exit 1
       fi
-      # 3.5) ★ 登录门禁（在健康之后、reload 之前）：/api/health 只证明 JVM 活着，
+      # 3.5) ★ 登录校验（在健康之后、reload 之前）：/api/health 只证明 JVM 活着，
       #      这一步才证明"这台真的查得到库"。没过 = 这台不健康 = 立刻回旧镜像，
       #      绝不把它放进 upstream、绝不继续动另一台。见脚本头【十】。
       if ! probe_login_instance "$name" "$port"; then
@@ -1104,7 +1104,7 @@ rolling_backend() {
       fi
     else
       info "[dry-run] 会轮询 $name:$port$HEALTH_PATH（上限 ${HEALTH_TIMEOUT}s）"
-      info "[dry-run] 健康后追加登录探测（发布门禁，见脚本头【十】）："
+      info "[dry-run] 健康后追加登录探测（发布校验，见脚本头【十】）："
       info "[dry-run]   GET  http://$name:$port/admin/auth/captcha-required?username=admin   # 只读，先看是否已被限流"
       info "[dry-run]   POST http://$name:$port/admin/auth/login  用户名=admin（口令读 $ADMIN_SECRET_FILE，不进 argv/不回显）"
       info "[dry-run]   → 200 + accessToken = 这台能查库；400/401 只补 1 次负例 probe_<epoch>（一次性用户名）"
@@ -1186,24 +1186,24 @@ build_docs() {
   fi
 }
 
-# --------------------------------------------------- 8.5 文档产物硬门禁（十二项体检）
+# --------------------------------------------------- 8.5 文档产物失败即拦的校验（十二项体检）
 # 见脚本头【十二】：口语稿 / PRIVATE_DOCS 那 12 篇私人笔记一旦上了 OSS + 刷了 CDN，
 # svg/mp4/_vendor 下 js/css 是 30 天缓存，**公网上撤不干净**。所以必须在 publish_docs 之前拦：
-# 这条门禁只看退出码，不看代码怎么写的（产物字节里有没有那些东西，由 check-docs-site.mjs 判）。
+# 这条校验只看退出码，不看代码怎么写的（产物字节里有没有那些东西，由 check-docs-site.mjs 判）。
 check_docs_gate() {
-  step_begin "文档产物门禁（十二项体检：私人文稿零泄漏 + 产物洁净度 + 侧边栏编号连续性）"
+  step_begin "文档产物校验（十二项体检：私人文稿零泄漏 + 产物洁净度 + 侧边栏编号连续性）"
   if [ "$SKIP_DOCS" -eq 1 ]; then info "--skip-docs：跳过"; step_end skip; return 0; fi
 
   local checker="$REPO_ROOT/scripts/check-docs-site.mjs"
   local dist="$DOCS_DIST"
-  # 仅演练用：--dry-run 时允许把门禁指向一份"手脚不干净"的副本，用来证明门禁真的会 die。
-  # 真实发布（DRY_RUN=0）**不认**这个变量，永远只看 $DOCS_DIST —— 门禁不能被环境变量骗过去。
+  # 仅演练用：--dry-run 时允许把校验指向一份"手脚不干净"的副本，用来证明校验真的会 die。
+  # 真实发布（DRY_RUN=0）**不认**这个变量，永远只看 $DOCS_DIST —— 校验不能被环境变量骗过去。
   if [ "$DRY_RUN" -eq 1 ] && [ -n "${DOCS_GATE_ROOT:-}" ]; then dist="$DOCS_GATE_ROOT"; fi
 
-  [ -f "$checker" ] || die "门禁脚本缺失：$checker（没有门禁就不许上传：宁可这次不发文档，也不发一份没验过的产物）"
-  command -v node >/dev/null 2>&1 || die "node 不可用，跑不了文档门禁（$checker）"
+  [ -f "$checker" ] || die "校验脚本缺失：$checker（没有校验就不许上传：宁可这次不发文档，也不发一份没验过的产物）"
+  command -v node >/dev/null 2>&1 || die "node 不可用，跑不了文档校验（$checker）"
   if [ ! -d "$dist" ]; then
-    if [ "$DRY_RUN" -eq 1 ]; then info "[dry-run] 没有产物目录 $dist，门禁无从跑起"; step_end dry; return 0; fi
+    if [ "$DRY_RUN" -eq 1 ]; then info "[dry-run] 没有产物目录 $dist，校验无从跑起"; step_end dry; return 0; fi
     die "产物目录不存在：$dist（文档构建没成功？拒绝在没产物的状态下继续发布文档）"
   fi
 
@@ -1218,7 +1218,7 @@ check_docs_gate() {
   # shellcheck disable=SC2086  # 有意分词：空串 → 不传参数；非空 → 单个 --flag=value
   node "$checker" --root "$dist" --skip-http $DOCS_GATE_FLAGS 2>&1 | sed 's/^/      /' || rc=$?
   if [ "$rc" -ne 0 ]; then
-    die "文档产物门禁未通过（EXIT=$rc）→ 拒绝上传：dist-prod 里有不该上公网的东西（口语稿 / PRIVATE_DOCS 私人笔记 / 私密文件名 / 原始录屏 / 内网 IP 与绝对路径 等，见上面每条命中）。\
+    die "文档产物校验未通过（EXIT=$rc）→ 拒绝上传：dist-prod 里有不该上公网的东西（口语稿 / PRIVATE_DOCS 私人笔记 / 私密文件名 / 原始录屏 / 内网 IP 与绝对路径 等，见上面每条命中）。\
 一旦传上 OSS 再刷 CDN，svg/mp4/_vendor 是 30 天缓存，公网上撤不干净（见脚本头【十二】）"
   fi
   info "十二项体检全 PASS：没有口语稿/私人笔记，也没有私密文件名、原始录屏、绝对路径，侧边栏编号连续 ✓"
@@ -1910,8 +1910,8 @@ final_report() {
   fi
   # ★ 用了逃生开关就在报告里标红留痕（不是告警完就算，事后复盘要能一眼看到"这次发布冒了 OOM 的险"）
   if [ "$FORCE_LOW_MEM" -eq 1 ]; then
-    local memstate="门禁本来就能过（开关没用上）"
-    [ "$FORCE_LOW_MEM_USED" -eq 1 ] && memstate="内存/交换区门禁被强制跳过，OOM 风险自负"
+    local memstate="校验本来就能过（开关没用上）"
+    [ "$FORCE_LOW_MEM_USED" -eq 1 ] && memstate="内存/交换区校验被强制跳过，OOM 风险自负"
     printf '%s%s ⚠ --force-low-mem 已启用：%s；本次不作内存安全承诺%s\n' \
       "$C_B" "$C_R" "$memstate" "$C_0"
   fi
@@ -1990,7 +1990,7 @@ main() {
   build_frontend
   rolling_frontend
   build_docs
-  check_docs_gate     # ★硬门禁：产物里有口语稿/私人文稿就 die，一个字节都不上传
+  check_docs_gate     # ★失败即拦的校验：产物里有口语稿/私人文稿就 die，一个字节都不上传
   publish_docs
 
   if ! smoke; then

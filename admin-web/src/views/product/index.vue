@@ -228,7 +228,7 @@ const submit = async () => {
     const payload = {
       product: {
         name: form.name,
-        // 描述必须一起提交：之前这里只白名单了 5 个字段，弹窗里填的描述被静默丢掉
+        // 描述必须一起提交：之前这里只挑了 5 个字段提交，弹窗里填的描述被静默丢掉
         description: form.description,
         categoryId: form.categoryId,
         typeId: form.typeId,

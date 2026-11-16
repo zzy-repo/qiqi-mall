@@ -9,14 +9,14 @@
 #     ./auditcost.sh restore                           # 还原容器（拆挂载、去掉环境变量覆盖）
 #
 # 为什么需要它：
-#   任务书要求「审计写入到底占多少」用 performance_schema DIGEST 量，并按 450 rps 档做「开/关审计」A/B。
+#   这次实验要回答「审计写入到底占多少」用 performance_schema DIGEST 量，并按 450 rps 档做「开/关审计」A/B。
 #   本脚本只负责**跑**和**取证**，判断留给 auditcost.py / 报告。
 #
-# 铁律（与本轮任务书一致）：
+# 铁律（这次实验的约束）：
 #   · 不重建镜像、不动业务代码：镜像 qiqi-mall-server:test 不变，只多一个只读 bind mount + 一个环境变量
-#   · 两臂唯一差异 = QIQI_LEDGER_AUDIT_ENABLED（audit 分项），status/wms/payment-trace 全开不变
+#   · 两组唯一差异 = QIQI_LEDGER_AUDIT_ENABLED（audit 分项），status/wms/payment-trace 全开不变
 #   · 压测前置：prepare.sh reset（只删 lg_% 名下）+ 桶重置 + 灌令牌；跑完再 reset 一次回干净态
-#   · 独占：调用方自己拿 bench-lock.sh（本脚本不抢锁，避免嵌套）
+#   · 独占：调用方自己拿 /root/.qiqi-standing/bench-lock.sh（本脚本不抢锁，避免嵌套）
 set -uo pipefail
 SELF=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 BENCH=$(cd "$SELF/.." && pwd)
@@ -57,7 +57,7 @@ cmd_deploy() {
     [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/health" || true)" = "200" ] && break
     sleep 1
   done
-  # 生效证据：只看启动日志那一行（打的是**生效值**，已经与总闸与过）
+  # 生效证据：只看启动日志那一行（打的是**生效值**，已经与总开关核对过）
   local line
   line=$(docker logs qiqi-server-1 2>&1 | grep -o '\[ledger\].*' | tail -1)
   echo "  server-1 $line"
@@ -68,7 +68,7 @@ cmd_deploy() {
   say "✅ 开关已生效并核对"
 }
 
-# ---------------------------------------------------------------- 数据前置（两臂完全一致）
+# ---------------------------------------------------------------- 数据前置（两组完全一致）
 prep_data() {
   local need=$1
   say "--- reset 订单/台账（prepare.sh reset）"
@@ -81,9 +81,9 @@ prep_data() {
                                 ' drift=',(select count(*) from sku s where s.id between 1 and 21 and s.stock<>coalesce((select sum(stock) from sku_bucket b where b.sku_id=s.id),0)));")
   say "  自检 $chk"
   case "$chk" in *bad=0*drift=0*) ;; *) echo "✗ 库存自检不过：$chk" >&2; return 1 ;; esac
-  # reset 会一次删掉上一轮几万单（order/order_item/stock_ledger/台账），InnoDB 的 purge 线程
+  # reset 会一次删掉前一轮压测留下的几万单（order/order_item/stock_ledger/台账），InnoDB 的 purge 线程
   # 要消化这批 undo —— 如果压测立刻开跑，purge 会和业务写抢磁盘，整轮 p50 会被抬到秒级
-  # （本轮实测：同开关的两轮 p50 相差 200 倍，就是因为一轮撞上了 purge）。所以这里**等它消化完**。
+  # （实测：同开关的两轮 p50 相差 200 倍，就是因为一轮撞上了 purge）。所以这里**等它消化完**。
   local lag=0 waited=0
   while [ "$waited" -lt 40 ]; do
     lag=$(sql_db "select count from information_schema.innodb_metrics where name='trx_rseg_history_len';" | tr -d '\r')
@@ -95,7 +95,7 @@ prep_data() {
   # 令牌池：**每轮都用一片全新的**。
   #   为什么不能复用 tokens.txt 开头：gen.mjs 的 tokenIdx 每次都从 0 开始，而令牌是
   #   GETDEL **一次性消费**的 —— 第二轮再喂同一批令牌会成片报「请勿重复提交订单」
-  #   （本轮实测过：12000/12000 全失败）。所以用一条滚动偏移量切一刀，
+  #   （实测过：12000/12000 全失败）。所以用一条滚动偏移量切一刀，
   #   保证每轮 seed 的 key 集合与之前完全不重叠。
   local off_file=$LG/.token_offset
   local off
@@ -137,7 +137,7 @@ cmd_run() {
   MYSQL_PASSWORD="$MYSQL_PASSWORD" INTERVAL_S=1 TOPN=200 "$SELF/sqldigest.sh" "$out/sqldigest.csv" >>"$log" 2>&1 &
   local dig=$!
   # 宿主机侧的「环境漂移」取证：这台是共享机，CPU steal 会整段整段地变（实测两轮之间吞吐
-  # 能差 45%）。vmstat 的 us/sy/id/wa/st 列 + loadavg 每 5s 一行，用来解释「两臂差异到底是不是环境」。
+  # 能差 45%）。vmstat 的 us/sy/id/wa/st 列 + loadavg 每 5s 一行，用来解释「两组差异到底是不是环境」。
   ( : > "$out/env.csv"; echo "epoch,us,sy,id,wa,st,load1" > "$out/env.csv"
     while :; do
       read -r us sy id wa st _ <<< "$(vmstat 1 2 | tail -1 | awk '{print $13,$14,$15,$16,$17}')"

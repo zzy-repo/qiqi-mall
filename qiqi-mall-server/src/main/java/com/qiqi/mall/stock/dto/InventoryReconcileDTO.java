@@ -58,7 +58,7 @@ public class InventoryReconcileDTO {
      * <p><b>如实说明</b>：{@code sku} 表没有 {@code updated_at} 之类的列，回写动作本身没有留时间戳，
      * 所以这里给的是**最接近的可观测时间** {@code MAX(sku_bucket.updated_at)}（该 SKU 桶最近一次变动），
      * 一个桶都没有时为 {@code null}（前端显示「无记录」）。
-     * 它不等于「缓存回写时刻」，两者在缓存滞后的窗口内会差一点 —— 见交付报告里的说明。
+     * 它不等于「缓存回写时刻」，两者在缓存滞后的窗口内会差一点 —— 这是接口如实返回、不替它对账的原因。
      */
     private LocalDateTime lastRefreshAt;
 

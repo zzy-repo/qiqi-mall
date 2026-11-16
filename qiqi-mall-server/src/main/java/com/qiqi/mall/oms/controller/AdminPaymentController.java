@@ -21,10 +21,10 @@ import java.util.Map;
  * 管理端「支付流水」—— 目前只有一个**沙箱**端点：重放渠道回调。
  *
  * <h3>为什么需要它</h3>
- * {@code payment_record} 有两道闸，但「第三方重复通知」这一道此前**造不出来**：
+ * {@code payment_record} 有两道唯一键校验，但「第三方重复通知」这一道此前**造不出来**：
  * 模拟支付（{@code PortalOrderController#pay}）的 {@code trade_no} 是本地按时间戳生成的，
  * 没有任何入口能拿「同一个流水号」再通知一次 —— 于是 {@code uk_channel_trade} 只能是
- * 列注释里的一句声明。这个端点就是那道闸的验证入口：拿库里那条流水的**原 trade_no**
+ * 列注释里的一句声明。这个端点就是那条唯一键的验证入口：拿库里那条流水的**原 trade_no**
  * 重新走一遍 {@link ChannelCallbackService#onNotice}，等于模拟渠道把同一笔通知又发了一次。
  *
  * <h3>三个约束（缺一个就会变成生产事故）</h3>
@@ -36,7 +36,7 @@ import java.util.Map;
  *       {@code AiApiKeyService.ALL_SCOPES} 里 ⇒ 任何 API Key 调这个 POST 都 403
  *       （失败不会被静默当成「重复通知」），只有人工 JWT 能调；</li>
  *   <li><b>只记账、不推状态</b>：重放走的是渠道回调的记账路径，订单状态推进不在这里重演 ——
- *       否则「重复通知被挡住」会被状态闸抢先解释掉（详见 {@link ChannelCallbackService} 类注释）。</li>
+ *       否则「重复通知被挡住」会被状态守卫抢先解释掉（详见 {@link ChannelCallbackService} 类注释）。</li>
  * </ol>
  *
  * <p><b>返回值语义</b>：{@code code=0} 表示「这次通知处理完了」，不表示「新增了一行」。

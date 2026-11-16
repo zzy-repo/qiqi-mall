@@ -24,9 +24,9 @@ import java.math.BigDecimal;
  * <b>走的是同一条代码路径，不是测试专用分支</b>。测试专门分支证明不了生产路径。
  *
  * <h3>本类只负责「记账」，不负责「推进订单状态」</h3>
- * 支付请求侧（{@code PortalOrderController#pay}）的状态推进有自己的业务闸
+ * 支付请求侧（{@code PortalOrderController#pay}）的状态推进有自己的前置校验
  * （{@code status != 0 → 「当前订单状态不可支付」} + 乐观锁 CAS）。如果回调这里也去推状态，
- * 那么「重复通知被挡住」就会被**状态闸**抢先解释掉，{@code uk_channel_trade} 反而永远走不到
+ * 那么「重复通知被挡住」就会被**状态守卫**（status != 0 → 拒绝）抢先解释掉，{@code uk_channel_trade} 反而永远走不到
  * （这正是 {@code PaymentIdemKeyTest} ② 记录的那个盲区）。所以这里刻意只做记账：
  * 让「同一笔钱不会被记两次」由 payment_record 自己的两道唯一键来回答。
  *

@@ -12,7 +12,7 @@
  *   ① Element Plus 组件的 props（type / effect / size / tag / body-style …）
  *   ② Element Plus 公开的 CSS 变量（--el-*），且**只在组件默认值在该处确实坏掉时才覆盖**
  *   ③ 设计令牌（admin-web/src/assets/styles/main.css 里的 --qiqi-*）
- *   ④ 页面骨架（布局外壳）的最小自有样式 —— 见下面 B 组
+ *   ④ 页面骨架（布局外壳）的最小自有样式 —— 见下面 PAGE_SHELL 清单
  *
  * 判据（本轮重写过，这里是唯一标准）
  * ----------------------------------
@@ -23,16 +23,17 @@
  *   被废弃的旧判据：「删掉之后像素会不会不同？不同就保留」。
  *   那等于说"任何视觉差异都值得永久维护一段自定义 CSS"：600 还是 700、虚线还是实线、
  *   浅蓝底还是 el-tag 的语义色 —— 不影响业务、不影响阅读、不影响任何人做事。
- *   按旧判据这个白名单曾有 41 个 key / 103 条声明；按新判据只剩 7 个 key / 10 条。
+ *   按旧判据，允许保留清单曾长到 41 个选择器 / 103 条声明；按新判据只剩 7 个选择器 / 10 条。
  *
- * 三段式输出（三个数字必须分开看，混在一起就会把"分类错了"读成"组件做不到"）
+ * 三个数字分开报（混在一起就会把"分类错了"读成"组件做不到"）
  * ----------------------------------------------------------------------------
- *   ① 组件外观声明（未豁免）  目标 0。scoped <style> 里还剩多少条纯外观声明。
- *   ② 组件能力缺（A 组）      目标 0~1。EP 的 props / slots / CSS 变量 / 令牌确实表达不了，
- *        且删了会丢信息或丢可读性 —— **只有这一组的数字才叫"组件做不到"**。当前 0 条。
- *   ③ 页面骨架（S 组）        侧栏/顶栏/内容区/登录入口面的底色与分界线，10 条。
+ *   ① 没登记的外观声明      目标 0。scoped <style> 里还有多少条颜色 / 背景 / 边框 / 圆角 /
+ *        阴影 / 字体类声明，既没删掉、也没写进下面那份允许保留清单。
+ *   ② 组件做不到的          目标 0~1。Element Plus 的 props / slots / CSS 变量 / 设计令牌确实
+ *        表达不了，且删了会丢信息或丢可读性 —— 只有这一类的数字才叫"组件做不到"。当前 0 条。
+ *   ③ 页面骨架自己画的底色  侧栏/顶栏/内容区/登录入口面的底色与分界线，10 条。
  *        这是骨架自己的事（el-container 是栅格，不是"带底色的容器"；任何 EP 后台模板都这么写），
- *        不属"组件能力缺"，单独统计、单独打印。
+ *        不算"组件做不到"，单独统计、单独打印。
  *
  * 与"视觉统一"的关系（本轮的第二条铁律）
  * --------------------------------------
@@ -42,15 +43,15 @@
  *   现在全站 el-text 只有 3 种字号（14 默认 / 12 size=small / 16 size=large），
  *   el-card 只有 1 种圆角（4px），el-tag 只有 EP 那一套色阶。
  *
- * 两档门禁（关键区别）
+ * 两类判定（关键区别）
  * --------------------
- *  `:deep()` > 0  → **立刻 fail**。撬组件内部 DOM 才是真问题：组件的内部类名不是 API，
- *                  升级就碎。这一条是 0，没有任何例外。
- *  外观声明 > 0   → **warn**（不阻塞）。目标不是归零，而是"每一条都答得出删了会丢什么"。
+ *  `:deep()` > 0  → **失败即拦**（退出码 1）。撬组件内部 DOM 才是真问题：组件的内部类名
+ *                  不是 API，升级就碎。这一条必须是 0，没有任何例外。
+ *  外观声明 > 0   → **只警告不拦**（退出码仍是 0）。目标不是归零，而是"每一条都答得出删了会丢什么"。
  *
  * 用法
  * ----
- *   node scripts/check-style-discipline.mjs            # 门禁档（:deep 命中即 exit 1）
+ *   node scripts/check-style-discipline.mjs            # 默认：:deep 命中即 exit 1，外观声明只警告
  *   node scripts/check-style-discipline.mjs --brief    # 只打一行摘要（publish.sh 的 preflight 用）
  *   node scripts/check-style-discipline.mjs --strict   # 外观声明也当错误
  *   node scripts/check-style-discipline.mjs --verbose  # 逐条列出命中
@@ -84,22 +85,22 @@ const APPEARANCE = [
 ]
 
 /* ---------------------------------------------------------------------------
- * 2) 豁免清单：两类，分开统计、分开打印 —— 永远不许混成一个"组件做不到"的数字
+ * 2) 允许保留清单：两份，分开统计、分开打印 —— 永远不许混成一个"组件做不到"的数字
  *
- *   A 组 COMPONENT_GAPS「组件能力真缺」
- *       EP 的 props / slots / CSS 变量 / 令牌确实表达不了，**且删了会丢信息或丢可读性**。
- *       只有这一组的数字才叫"组件能力缺"。
- *   S 组 PAGE_SHELL「页面骨架」
+ *   COMPONENT_GAPS「组件做不到的」
+ *       Element Plus 的 props / slots / CSS 变量 / 设计令牌确实表达不了，**且删了会丢信息或丢可读性**。
+ *       只有这份清单里的条目才叫"组件做不到"。
+ *   PAGE_SHELL「页面骨架」
  *       侧栏 / 顶栏 / 内容区 / 登录入口面的底色与分界线。这是页面骨架自己的事
- *       （任何 Element Plus 后台模板都这么写），**不是**某组件缺一个 prop。
+ *       （任何 Element Plus 后台模板都这么写），**不是**某组件少一个 prop。
  *
  * 判据（唯一标准）：删掉这条声明之后，会不会丢**信息**或丢**可读性**？
- *   会   → 留在 COMPONENT_GAPS，理由写清"删了会丢什么信息 / 哪一处读不清"
+ *   会   → 写进 COMPONENT_GAPS 或 PAGE_SHELL，理由写清"删了会丢什么信息 / 哪一处读不清"
  *   不会 → 接受组件默认样子，把自定义删掉
  *   被废弃的旧判据：「删掉之后像素会不会不同？不同就保留」—— 那等于说"任何视觉差异都值得
- *   永久维护一段自定义 CSS"，按它这个白名单曾长到 41 个 key / 103 条声明。
+ *   永久维护一段自定义 CSS"，按它这份清单曾长到 41 个选择器 / 103 条声明。
  *
- * 本轮把 4 类判错的从 A 组清掉（A 组 5 条 → 0 条），错在同一个地方：**没查组件自己给不给**。
+ * 本轮把 4 类判错的从"组件做不到的"里清掉（5 条 → 0 条），错在同一个地方：**没查组件自己给不给**。
  *   ① 等宽字体 3 处（.key-prefix / .reveal-value / .cond-seq）—— 判错
  *      el-text 有 `tag` prop（text.mjs，type String，default "span"）⇒ `el-text tag="code"`
  *      渲染成 `<code class="el-text">`，等宽来自浏览器 UA 样式表对 `<code>` 的 font-family: monospace。
@@ -116,7 +117,7 @@ const APPEARANCE = [
  *      改 `el-text tag="p"`（自带 margin:0 + overflow-wrap:break-word）即可，规则整条删。
  *      若哪天真要按行分点 / 按仓分条：后端把 willDo 改成数组（见下面 WILLDO_TODO），
  *      这不是"前端该用哪条 CSS"能解决的问题。
- *   ④ 布局外壳 10 条 —— 不是"组件做不到"，是**分类错了**，已整体移进 PAGE_SHELL（S 组）。
+ *   ④ 布局外壳 10 条 —— 不是"组件做不到"，是**分类错了**，已整体移进 PAGE_SHELL（页面骨架）。
  * ------------------------------------------------------------------------- */
 const COMPONENT_GAPS = [
   /* 当前 0 条。
@@ -130,7 +131,7 @@ const COMPONENT_GAPS = [
    */
 ]
 
-/* ---- S 组｜页面骨架（PAGE_SHELL）：不参与"组件能力缺"的统计 ----
+/* ---- 页面骨架（PAGE_SHELL）：不参与"组件做不到的"统计 ----
  * 共同理由：这些是页面骨架的底色与分界线。el-container / el-aside / el-header / el-main
  * 是**栅格**，不是"带底色的容器"：container.scss 全文没有 background，el-header 只有 height，
  * 文档 Attributes 也只有 direction / width / height。给骨架一层底色不是"组件缺 prop"，
@@ -192,7 +193,7 @@ const PAGE_SHELL = [
  * 2b) 被保留的 `--el-*` 覆盖（不属"外观声明"，故不参与上面的计数，但同样要答"删了会丢什么"）
  *
  * 为什么单独列：`--el-text-color: X` 这类**自定义属性赋值**不在 APPEARANCE 清单里（清单看的是
- * `color:` / `font-size:` 这种真声明），所以它们不会出现在"未豁免"里 —— 但它们是同一件事：
+ * `color:` / `font-size:` 这种真声明），所以它们不会出现在"没登记"里 —— 但它们是同一件事：
  * 让组件在本页长得跟别处不一样。留着就必须有理由，否则下次又会悄悄长回来。
  *
  * 判据同上一节：删了会不会丢信息 / 可读性。目前 7 条，全部是"组件缺这一档语义/语义色"。
@@ -228,7 +229,7 @@ const RETAINED_OVERRIDES = [
 /* ---------------------------------------------------------------------------
  * 2c) 待办：willDo 该是结构化数据，而不是一整串带换行的中文
  *
- * 这条**不是**样式问题，所以不进任何豁免清单 —— 记在这里是为了别再有人为了它往
+ * 这条**不是**样式问题，所以不进任何允许保留清单 —— 记在这里是为了别再有人为了它往
  * scoped <style> 里加一条 white-space。当前 willDo 全是单行句子，pre-wrap 已删（见 ① ② ③）。
  * 一旦产品要求「将要发生什么」按行/按仓分点，正确改法在后端：
  * ------------------------------------------------------------------------- */
@@ -285,7 +286,7 @@ const parseRules = (css, startLine) => {
   return rules
 }
 
-/** 扫描期只用这一张合并表；统计与打印时 A / S 两组严格分开 */
+/** 扫描期只用这一张合并表；统计与打印时两份清单（组件做不到的 / 页面骨架）严格分开 */
 const EXEMPT = [
   ...COMPONENT_GAPS.map((e) => ({ ...e, group: 'A' })),
   ...PAGE_SHELL.map((e) => ({ ...e, group: 'S' }))
@@ -316,8 +317,8 @@ for (const app of APPS) {
       for (const dm of body.matchAll(/:deep\(([^)]*)\)/g)) deepHits.push({ file: rel, sel: dm[1] })
       const startLine = text.slice(0, sm.index).split('\n').length
       for (const rule of parseRules(body, startLine)) {
-        // 边界匹配，不用 includes：否则 key `.logo` 会顺带豁免 `.logo-text`、
-        // key `.total` 会顺带豁免 `.total b`（这两处都真发生过）。`(?![\w-])` 保证
+        // 边界匹配，不用 includes：否则 key `.logo` 会顺带放行 `.logo-text`、
+        // key `.total` 会顺带放行 `.total b`（这两处都真发生过）。`(?![\w-])` 保证
         // `.chip` 不会命中 `.chip-group`，但 `.trail-line` 仍能命中 `.trail-line .label`。
         const matches = (k) => {
           const esc = k.replace(/[.$]/g, (c) => '\\' + c)
@@ -326,7 +327,7 @@ for (const app of APPS) {
         const hit = entries.find((e) => matches(e.sel))
         const appearance = rule.decls.filter((d) => APPEARANCE.some((re) => re.test(d.prop)))
         if (hit) {
-          // 豁免按"声明"计数，不按"规则"计数：一条规则可能含 3 条外观声明
+          // 允许保留按"声明"计数，不按"规则"计数：一条规则可能含 3 条外观声明
           for (const d of appearance) {
             whitelisted.push({ file: rel, selector: rule.selector, prop: d.prop, line: rule.line, group: hit.group })
           }
@@ -355,10 +356,10 @@ const ranked = [...byFile.entries()].sort((a, b) => b[1].length - a[1].length)
 
 const DEEP_FAIL = deepHits.length > 0
 
-/* 三段式统计（不许合并）：
- *   ① 组件外观声明   = 未豁免的外观声明（problems）—— 目标 0
- *   ② 组件能力缺     = A 组声明数 —— 目标 0~1（真·EP 表达不了）
- *   ③ 页面骨架       = S 组声明数 —— 骨架自己的底色/分界线，本来就不算组件的事
+/* 三个数分开算（不许合并）：
+ *   ① 没登记的外观声明 = problems 条数 —— 目标 0
+ *   ② 组件做不到的     = COMPONENT_GAPS 里的声明数 —— 目标 0~1（Element Plus 真的表达不了）
+ *   ③ 页面骨架         = PAGE_SHELL 里的声明数 —— 骨架自己的底色/分界线，本来就不算组件的事
  */
 const gapsA = whitelisted.filter((w) => w.group === 'A')
 const shellS = whitelisted.filter((w) => w.group === 'S')
@@ -368,17 +369,17 @@ const keysS = new Set(shellS.map((w) => w.file + w.selector)).size
 // preflight 用的单行摘要：不刷屏，只留一行可 grep 的事实
 if (process.argv.includes('--brief')) {
   const deepNote = DEEP_FAIL ? `:deep ${deepHits.length} 处 ❌` : ':deep 0 处 ✓'
-  // 三段式：① 组件外观的未豁免残留 ② 组件能力真缺 ③ 页面骨架。
-  // 只报 ① 会把"藏进豁免表"误读成"改掉了"；把 ③ 混进 ② 会把"骨架底色"误读成"组件做不到"。
+  // 三个数分开报：① 没登记的外观声明 ② 组件做不到的 ③ 页面骨架自己画的底色。
+  // 只报 ① 会把"写进允许保留清单"误读成"改掉了"；把 ③ 混进 ② 会把"骨架底色"误读成"组件做不到"。
   console.log(
-    `样式纪律：组件外观声明 ${problems.length} 处（未豁免，warn，不阻塞）`
-    + ` + 组件能力缺 ${gapsA.length} 条（${keysA} 个选择器）`
-    + ` + 页面骨架 ${shellS.length} 条（${keysS} 个选择器，不算组件的事），`
+    `样式纪律：<style> 里还有 ${problems.length} 处外观声明没登记（只警告不拦）`
+    + ` + 组件做不到的 ${gapsA.length} 条（${keysA} 个选择器）`
+    + ` + 页面骨架自己画的底色与分界线 ${shellS.length} 条（${keysS} 个选择器，不算组件的事），`
     + `${deepNote}`
   )
   if (DEEP_FAIL) {
     for (const h of deepHits) console.error(`  ✗ ${h.file}  :deep(${h.sel})`)
-    console.error('  :deep() 撬的是组件内部 DOM（不是公开 API），升级就碎 —— 这条是硬门禁。')
+    console.error('  :deep() 撬的是组件内部 DOM（不是公开 API），升级就碎 —— 这条失败即拦（退出码 1）。')
     process.exit(1)
   }
   process.exit(0)
@@ -387,10 +388,10 @@ if (process.argv.includes('--brief')) {
 console.log('\n样式纪律检查（scoped <style> 里只该有"位置"，不该有"外观"）')
 console.log('─'.repeat(72))
 console.log(`扫描：${APPS.join(' + ')} 的 .vue 文件`)
-console.log(`① 组件外观声明（未豁免，目标 0）：${problems.length} 处，分布在 ${ranked.length} 个文件`)
-console.log(`② 组件能力缺 A 组（EP 表达不了且删了会丢信息，目标 0~1）：${gapsA.length} 条 / ${keysA} 个选择器`)
-console.log(`③ 页面骨架 S 组（侧栏/顶栏/内容区/登录入口面的底色与分界线，不算组件的事）：${shellS.length} 条 / ${keysS} 个选择器`)
-console.log(`   ②+③ 合计豁免 ${whitelisted.length} 条；保留的 --el-* 覆盖：${RETAINED_OVERRIDES.length} 处（不属外观声明，逐条写明了"删了会丢什么"）`)
+console.log(`① 没登记的外观声明（目标 0，只警告不拦）：${problems.length} 处，分布在 ${ranked.length} 个文件`)
+console.log(`② 组件做不到的（Element Plus 的 props/slots/CSS 变量/令牌表达不了，删了会丢信息，目标 0~1）：${gapsA.length} 条 / ${keysA} 个选择器`)
+console.log(`③ 页面骨架自己画的（侧栏/顶栏/内容区/登录入口面的底色与分界线，不算组件的事）：${shellS.length} 条 / ${keysS} 个选择器`)
+console.log(`   ②+③ 合计允许保留 ${whitelisted.length} 条；另有保留的 --el-* 变量覆盖 ${RETAINED_OVERRIDES.length} 处（不属外观声明，逐条写明了"删了会丢什么"）`)
 console.log(`   待办 ${WILLDO_TODO.length} 条（非样式问题，不参与上面的计数）：willDo 改结构化数组`)
 console.log(`:deep() 覆盖：${deepHits.length} 处（撬组件内部 DOM，应为 0）`)
 console.log('─'.repeat(72))
@@ -409,34 +410,34 @@ if (ranked.length) {
 }
 
 if (VERBOSE) {
-  console.log('\n逐条（未豁免）：')
+  console.log('\n逐条（没登记的外观声明）：')
   for (const [file, list] of ranked) {
     console.log(`\n  ${file}`)
     for (const p of list) console.log(`    L${p.line}  ${p.selector}  { ${p.prop}: ${p.value} }`)
   }
-  console.log('\n逐条（② 组件能力缺 A 组）：')
+  console.log('\n逐条（② 组件做不到的）：')
   if (!gapsA.length) console.log('  （无 —— 这一组现在是空的）')
-  for (const w of gapsA) console.log(`  [A] ${w.file}  L${w.line}  ${w.selector}  { ${w.prop} }`)
-  console.log('\n逐条（③ 页面骨架 S 组）：')
-  for (const w of shellS) console.log(`  [S] ${w.file}  L${w.line}  ${w.selector}  { ${w.prop} }`)
+  for (const w of gapsA) console.log(`  [组件做不到] ${w.file}  L${w.line}  ${w.selector}  { ${w.prop} }`)
+  console.log('\n逐条（③ 页面骨架自己画的）：')
+  for (const w of shellS) console.log(`  [页面骨架] ${w.file}  L${w.line}  ${w.selector}  { ${w.prop} }`)
   console.log('\n待办（非样式问题）：')
   for (const t of WILLDO_TODO) console.log(`  · ${t.file}\n    ${t.todo}`)
 }
 
 if (deepHits.length) {
-  console.log('\n:deep() 明细（这是最差的一档：用了组件又把组件拆了）：')
+  console.log('\n:deep() 明细（用了组件又把组件内部拆开改，这是最该修的一类）：')
   for (const h of deepHits) console.log(`  ${h.file}  :deep(${h.sel})`)
 }
 
 console.log('')
-// 硬门禁：:deep() 一处都不许有（撬组件内部 DOM = 升级即碎）
+// 失败即拦：:deep() 一处都不许有（撬组件内部 DOM = 升级即碎）
 if (DEEP_FAIL) {
-  console.log('❌ 硬门禁未过：存在 :deep() 覆盖，退出码 1。')
+  console.log('❌ 不通过（失败即拦）：存在 :deep() 覆盖，退出码 1。')
   process.exit(1)
 }
 
 if (!problems.length) {
-  console.log('✅ 通过：没有未豁免的外观声明，也没有 :deep() 覆盖。')
+  console.log('✅ 通过：外观声明 0 处漏登记，也没有 :deep() 覆盖。')
   process.exit(0)
 }
 
@@ -444,7 +445,7 @@ if (STRICT) {
   console.log('❌ --strict：外观声明也有命中，退出码 1。')
   process.exit(1)
 }
-console.log('⚠️  外观声明是 warn（不阻塞）：要么换成 props / --el-* 变量 / --qiqi-* 令牌，')
-console.log('    要么把"删了会丢什么信息/可读性"写进本脚本的 WHITELIST。')
-console.log('    （:deep() 一档是 fail，且当前已是 0 —— 底线守住了。）')
+console.log('⚠️  外观声明只警告不拦：要么换成 props / --el-* 变量 / --qiqi-* 令牌，')
+console.log('    要么把"删了会丢什么信息/可读性"写进本脚本的允许保留清单（COMPONENT_GAPS / PAGE_SHELL）。')
+console.log('    （:deep() 那条是失败即拦，当前是 0。）')
 process.exit(0)

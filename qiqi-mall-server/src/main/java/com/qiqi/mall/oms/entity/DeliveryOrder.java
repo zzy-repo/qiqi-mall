@@ -65,7 +65,7 @@ public class DeliveryOrder {
     private Integer version;
 
     /**
-     * 状态流转序号（P2 第二步）：与 {@code status} 同一条 UPDATE 自增，是包裹状态台账幂等键
+     * 状态流转序号：与 {@code status} 同一条 UPDATE 自增，是包裹状态台账幂等键
      * {@code {deliveryId}:{statusSeq}} 的来源。只读字段（见 {@code Order#statusSeq} 的说明）。
      */
     @TableField(value = "status_seq", insertStrategy = FieldStrategy.NEVER, updateStrategy = FieldStrategy.NEVER)

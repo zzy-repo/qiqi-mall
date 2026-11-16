@@ -72,7 +72,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 代价是单轮不能太大 —— 由调度周期（默认 30 分钟）与候选范围（只跑待审核 + 冻结单）控制。
  *
  * <h3>并发</h3>
- * 两道闸：进程内 {@link #RUNNING} 原子标记（同一实例重复点「立即执行」直接拒），
+ * 两道并发保护：进程内 {@link #RUNNING} 原子标记（同一实例重复点「立即执行」直接拒），
  * 数据库 {@code uk_order_round} / {@code uk_idem}（多实例同时跑时撞键 → 整轮回滚，不留半轮）。
  *
  * <h3>幂等</h3>
@@ -311,7 +311,9 @@ public class AuditExecutor {
             }
             case MANUAL -> {
                 if (AuditVerdict.DOWNGRADE_STOCK_SHORT.equals(verdict.downgradeReason())) {
-                    // 决策 D12：不判 7→4，保持 status=7 + 打 STOCK_SHORT 标挂起
+                    // 库存不足时不把订单判成 4 已关闭：货补上之后这张单还要继续审，关掉就再也进不来。
+                    // 所以保持 status=7（下一轮仍是候选单）+ 打 STOCK_SHORT 标挂起；补货后重跑一轮即可过审，
+                    // 过审时这个标会被自动解掉（见上面 AUTO_PASS 分支）。
                     tagService.ensureActive(order.getId(), OrderAuditTagService.TAG_STOCK_SHORT, verdict.reasonText());
                 } else if (AuditVerdict.DOWNGRADE_COST_MISSING.equals(verdict.downgradeReason())) {
                     tagService.ensureActive(order.getId(), OrderAuditTagService.TAG_COST_MISSING, verdict.reasonText());

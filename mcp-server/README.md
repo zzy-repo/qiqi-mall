@@ -85,7 +85,7 @@
 | 表 | 有 version 列？ | 工具里的口径 |
 |---|---|---|
 | product / sku / member / delivery_order / order | 有 | 写工具必须带 version；缺 → `400`，冲突 → `409`；成功后工具**回读**新 version 返回给模型 |
-| delivery_order 的 dispatch / cancel | 有，但接口不收 | 后端只让 WMS/运维调用，靠「仅待下发」状态守卫 + 影响行数闸门；工具里没有 version 参数 |
+| delivery_order 的 dispatch / cancel | 有，但接口不收 | 后端只让 WMS/运维调用，靠「仅待下发」状态守卫 + 影响行数校验（0 行 → 409）；工具里没有 version 参数 |
 | return_apply / return_reason / warehouse / order_setting / member_address / cart / category / product_type / attribute | **没有** | 接口根本不吃 version；并发靠「UPDATE 影响 0 行 → `409 记录已被删除`」兜底；工具里**不能**造一个 version 参数（那样每次调用都会被当非法入参） |
 
 `version` 在 `delivery(action=update|split|merge|delete)` 里是**按 action 必填**（同一个工具还承载不吃 version 的

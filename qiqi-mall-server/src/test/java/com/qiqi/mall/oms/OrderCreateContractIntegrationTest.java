@@ -29,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 后台建单（{@code POST /admin/orders}）入口的**另外四条收敛**：真起后端 + 真打 HTTP + 真连库。
  *
  * <h3>要固化的缺陷</h3>
- * 状态白名单（0/1/7）只挡住了「非法状态」，但同一个入口还能造出另外一类「流程永远产不出的组合」：
+ * 只接受 0/1/7 的初始状态校验挡住了「非法状态」，但同一个入口还能造出另外一类「流程永远产不出的组合」：
  * <ol>
  *   <li>请求体传 {@code splitStatus=2} 就原样落库 → 「已拆单（split_status=1/2）却零包裹」；</li>
  *   <li>{@code status=0} 却带着 {@code paymentTime} / {@code payType} → 「待付款却有支付时间」；

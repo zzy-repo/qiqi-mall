@@ -38,7 +38,7 @@ import {
  *
  * 这个场景要证明的一件事：
  *   **钱进来的每一次、出去的每一次都能对上订单，也能对上前一笔 ——
- *     而且同一笔钱不会被记两次（渠道流水号 + 本地幂等键两道闸）。**
+ *     而且同一笔钱不会被记两次（渠道流水号 + 本地幂等键各自拦重复）。**
  *
  * ── 本文件此前为什么是 fixme（两个**真实缺口**，不是过期理由）────────────────
  *   ① 台账查询的六类型里没有 PAYMENT（订单/包裹/售后/审计/WMS/库存），
@@ -46,7 +46,7 @@ import {
  *   ② 没有可重放的渠道回调：模拟支付的 trade_no 是本地按时间戳生成的，
  *      「第三方把同一笔通知又发了一次」这个场景造不出来，uk_channel_trade 只能是注释里的声明。
  *
- *   本轮把两件事都补上了（后端 + 前端 + 开关），三条用例才写实：
+ *   后来把这两件事都补上了（后端 + 前端 + 开关），这三条用例才写实：
  *   · 台账 `GET /admin/ledgers?type=PAYMENT`（LedgerSql.PAYMENT_BRANCH）＋ 前端类型下拉「支付流水」；
  *   · `POST /admin/payments/{id}/replay-channel-callback`（用原 trade_no 再走一遍渠道回调，
  *     受 `qiqi.payment.sandbox-endpoints-enabled` 控制，默认 false，只有 dev/test/e2e 打开；
@@ -55,12 +55,12 @@ import {
  * ── 四条用例各钉住一件事 ─────────────────────────────────────────────────
  *   ① 页面上看得见：台账页选「支付流水」+ 业务ID（订单ID）→ 那一行带着订单号、渠道流水号、操作人；
  *   ② 重复通知被挡：重放渠道回调两次 → 都是「重复通知，已忽略」，库里仍 1 行、金额不变，
- *      并且 uk_channel_trade 是**活闸**（直插同 channel+trade_no 会被库拒绝，不是代码自觉）；
+ *      并且 uk_channel_trade 是**活的唯一约束**（直插同 channel+trade_no 会被库拒绝，不是代码自觉）；
  *   ③ 退款可溯源：退款流水带 `{orderSn}:REFUND:{returnApplyId}` 幂等键，
  *      origin_flow_id 指回原支付流水（退的是哪一笔钱，靠这一列回答）。
  *   ④ 页面上点一次「重放渠道通知」→ 台账页必须弹 **warning 级**「重复通知，已忽略」、
  *      **没有 error 级提示**、弹窗收起、**行数点前点后不变**（用例四，断言在 support/replay-toast.js）。
- *      这条是 onError 同步契约的回归门禁：`useDangerConfirm` 判的是 `_onError(e) === true` 且不 await，
+ *      这条是 onError 同步契约的回归校验：`useDangerConfirm` 判的是 `_onError(e) === true` 且不 await，
  *      谁把 ledger 页的 onError 改回 async，`Promise === true` 恒 false ⇒ 重复通知掉进红色错误区、
  *      弹窗不收 ⇒ 用例四红。（这条比前三条多守一件事：**语义不被做反**。）
  *
@@ -119,13 +119,13 @@ const gotoLedger = async (page) => {
 /**
  * 用筛选区收敛到「支付流水 + 某订单ID」。
  *
- * 顺带断言类型下拉里**确实有**「支付流水」这一项 —— 这正是本轮前端改动（constants/status.js →
+ * 顺带断言类型下拉里**确实有**「支付流水」这一项 —— 这正是前端那处改动（constants/status.js →
  * LEDGER_TYPE_OPTIONS 自动长出这一项）的 DOM 证据：选得到才说明下拉加上了。
  */
 const filterLedgerByPayment = async (page, orderId) => {
   await tid(page, 'ledger-type-select').click()
   const option = page.locator('.el-select-dropdown__item:visible').filter({ hasText: '支付流水' }).first()
-  await expect(option, '台账页的类型下拉里必须有「支付流水」（本轮新增的第七类）').toBeVisible({ timeout: 10_000 })
+  await expect(option, '台账页的类型下拉里必须有「支付流水」（这是台账的第七类）').toBeVisible({ timeout: 10_000 })
   await option.click()
   await tid(page, 'ledger-biz-id-input').fill(String(orderId))
   await tid(page, 'ledger-search-submit').click()
@@ -252,7 +252,7 @@ test.describe('台账与取证 › 台账七类 › 支付流水', () => {
     }
   })
 
-  test('用例二：渠道重复通知不会变成两笔钱 —— uk_channel_trade 是最后一道闸', async ({ page, request }) => {
+  test('用例二：渠道重复通知不会变成两笔钱 —— uk_channel_trade 是最后的唯一约束', async ({ page, request }) => {
     test.setTimeout(180_000)
     let orderSn = null
     let orderId = null
@@ -293,7 +293,7 @@ test.describe('台账与取证 › 台账七类 › 支付流水', () => {
         expect(refundFlowsOf(orderSn), '重放支付通知不该产生退款流水').toBe(0)
       })
 
-      await test.step('⑤ uk_channel_trade 是活闸：索引在库上，且直插同一个 (channel, trade_no) 会被拒', async () => {
+      await test.step('⑤ uk_channel_trade 是活的唯一约束：索引在库上，且直插同一个 (channel, trade_no) 会被拒', async () => {
         const idx = queryDb(
           `select group_concat(column_name order by seq_in_index) from information_schema.statistics
             where table_schema = database() and table_name = 'payment_record'
@@ -303,7 +303,7 @@ test.describe('台账与取证 › 台账七类 › 支付流水', () => {
 
         // 直接 SQL 再插一条「同 channel + 同 trade_no、但换一个幂等键」→ 必须被库拒绝。
         // 这一步排掉一种误判：上面两次重放也可能是被 uk_idem 挡的（两条唯一键会同时被撞），
-        // 换掉幂等键后还能被拒，说明 channel+trade_no 这道闸**自己**是活的。
+        // 换掉幂等键后还能被拒，说明 channel+trade_no 这条唯一约束**自己**是活的。
         // （这条 INSERT 注定失败，不会写进任何行；它只是把「约束存在」变成「约束在跑」。）
         let probeError = null
         try {
@@ -408,12 +408,12 @@ test.describe('台账与取证 › 台账七类 › 支付流水', () => {
   })
 
   /**
-   * 用例四：**台账页 UI 上的三态回归门禁**（本轮新增，不改上面三条）。
+   * 用例四：**台账页 UI 上的三态回归断言**（后加的第四条，不改上面三条）。
    *
    * 前三条都在接口/库这一层证明「重复通知不会变成两笔钱」；这一条证明**页面上不把它说错**：
    * 点「重放渠道通知」之后必须是 warning 级「重复通知，已忽略」，不是 error「执行失败」。
    *
-   * 门禁怎么生效（踩过的坑，别再踩）：
+   * 这条校验怎么生效（踩过的坑，别再踩）：
    *   ledger 页 replay() 的 exec 把 outcome=DUPLICATE 转成带 `duplicateNotice` 标记的异常，
    *   交给 onError 认领 → 换 warning 级提示 + 刷新列表 + `return true`（= 已自行处理、收起弹窗）。
    *   而 `useDangerConfirm.execute()` 的判定是 `dangerState._onError(e) === true`，**不 await**。

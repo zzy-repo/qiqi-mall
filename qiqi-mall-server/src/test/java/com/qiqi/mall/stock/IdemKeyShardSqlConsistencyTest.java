@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 「Java 算出来的打散前缀」与「SQL 回填用的公式」是否**逐字节一致** —— 这条不测就等于没测。
+ * 「Java 算出来的分桶前缀值」与「SQL 回填用的公式」是否**逐字节一致** —— 这条不测就等于没测。
  *
  * <h3>为什么必须有这一条</h3>
  * 迁移脚本回填用的是 SQL：{@code CONCAT(LPAD(order_id % N, 宽度, '0'), ':', idem_key)}；
@@ -70,14 +70,14 @@ class IdemKeyShardSqlConsistencyTest {
         categoryId = jdbc.queryForObject("SELECT id FROM category ORDER BY id LIMIT 1", Long.class);
         typeId = jdbc.queryForObject("SELECT id FROM product_type ORDER BY id LIMIT 1", Long.class);
         jdbc.update("INSERT INTO member (username, password, nickname, phone, status) VALUES (?, '', ?, NULL, 1)",
-                "idem-shard-" + System.currentTimeMillis(), "幂等键打散测试会员");
+                "idem-shard-" + System.currentTimeMillis(), "幂等键分桶测试会员");
         memberId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
 
         jdbc.update("INSERT INTO product (name, description, category_id, type_id, publish_status) "
-                + "VALUES (?, '幂等键打散一致性测试（跑完即删）', ?, ?, 0)",
-                "打散测试商品-" + System.nanoTime(), categoryId, typeId);
+                + "VALUES (?, '幂等键分桶一致性测试（跑完即删）', ?, ?, 0)",
+                "分桶测试商品-" + System.nanoTime(), categoryId, typeId);
         productId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
-        // 初值给足：本类三个用例合计要扣 2+3+100=105 件（库存不足会伪装成「打散没生效」的假故障）
+        // 初值给足：本类三个用例合计要扣 2+3+100=105 件（库存不足会伪装成「分桶没生效」的假故障）
         jdbc.update("INSERT INTO sku (product_id, price, stock, version) VALUES (?, ?, 1000, 0)",
                 productId, new BigDecimal("9.90"));
         skuId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
@@ -121,7 +121,7 @@ class IdemKeyShardSqlConsistencyTest {
     }
 
     @Test
-    @DisplayName("打散后幂等仍然有效：同一触发重放只记一行、库存不再变")
+    @DisplayName("加前缀分桶后幂等仍然有效：同一触发重放只记一行、库存不再变")
     void idempotencyStillHoldsWithPrefix() {
         long orderId = 930_000_002L;
         orderIds.add(orderId);
@@ -152,7 +152,7 @@ class IdemKeyShardSqlConsistencyTest {
 
         System.out.printf("① 100 单落在 %d 个不同前缀上（上限 %d）%n", prefixes.size(), SHARDS);
 
-        assertThat(prefixes).as("**必须真的铺开到 64 个 gap：否则等于没打散**").hasSize(SHARDS);
+        assertThat(prefixes).as("**必须真的铺开到 64 个 gap：否则等于没分桶**").hasSize(SHARDS);
     }
 
     // ------------------------------------------------------------------ 辅助

@@ -924,7 +924,7 @@ onMounted(() => {
 .why-would-be {
   display: block; margin-top: 6px;
 }
-/* 抽屉里的小字行（缺货附注 / 其它闸门 / 抽屉内的说明） */
+/* 抽屉里的小字行（缺货附注 / 被后端校验拦住的原因 / 抽屉内的说明） */
 .why-stock-warn, .why-line { display: block; margin-top: 4px; }
 /* 后端原话 = el-alert(info)：浅底 + 图标，左边那条 3px 竖线删掉（信息量 0） */
 .why-reason { margin-top: 8px; }

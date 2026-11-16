@@ -22,7 +22,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 支付沙箱端点的**关闸**形态：{@code qiqi.payment.sandbox-endpoints-enabled=false} 时，
+ * 支付沙箱端点的**开关关着**形态：{@code qiqi.payment.sandbox-endpoints-enabled=false} 时，
  * 渠道回调重放一律拒绝。
  *
  * <h3>为什么这条必须单独一个上下文</h3>
@@ -80,7 +80,7 @@ class PaymentSandboxOffTest {
     @AfterAll
     void cleanup() {
         int rows = jdbc.update("DELETE FROM payment_record WHERE order_sn LIKE ?", SN_PREFIX + "%");
-        System.out.printf("[清理] 关闸用例自造的流水 %d 行已删除%n", rows);
+        System.out.printf("[清理] 开关关着的用例自造的流水 %d 行已删除%n", rows);
     }
 
     @Test
@@ -90,22 +90,22 @@ class PaymentSandboxOffTest {
 
         JsonNode onExisting = post("/admin/payments/" + payId + "/replay-channel-callback");
         JsonNode onMissing = post("/admin/payments/99999999/replay-channel-callback");
-        System.out.printf("关闸：已存在的 id → code=%d message=%s；不存在的 id → code=%d message=%s%n",
+        System.out.printf("开关关着：已存在的 id → code=%d message=%s；不存在的 id → code=%d message=%s%n",
                 onExisting.path("code").asInt(), onExisting.path("message").asText(),
                 onMissing.path("code").asInt(), onMissing.path("message").asText());
 
         for (JsonNode body : new JsonNode[]{onExisting, onMissing}) {
-            assertThat(body.path("code").asInt()).as("关闸时必须是可读的业务失败（不是 code=0）").isNotZero();
+            assertThat(body.path("code").asInt()).as("开关关着时必须是可读的业务失败（不是 code=0）").isNotZero();
             assertThat(body.path("message").asText())
                     .as("文案要说清「为什么调不通」：只在非生产环境开放")
                     .contains("非生产环境开放")
                     .contains("sandbox-endpoints-enabled=false");
         }
         assertThat(onExisting.path("message").asText())
-                .as("关闸判断必须发生在查流水之前：否则这个开关就成了「哪些 id 存在」的探针")
+                .as("开关判断必须发生在查流水之前：否则这个开关就成了「哪些 id 存在」的探针")
                 .isEqualTo(onMissing.path("message").asText());
 
-        assertThat(countRows()).as("关闸时不许有任何写库动作（含新增与改写）").isEqualTo(before);
+        assertThat(countRows()).as("开关关着时不许有任何写库动作（含新增与改写）").isEqualTo(before);
         assertThat(countRows()).isEqualTo(1);
     }
 

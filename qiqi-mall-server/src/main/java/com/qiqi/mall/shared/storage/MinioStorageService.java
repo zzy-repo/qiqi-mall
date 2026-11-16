@@ -37,7 +37,7 @@ import java.util.zip.GZIPInputStream;
 @Service
 public class MinioStorageService {
 
-    /** 白名单 content-type → 扩展名 */
+    /** 允许上传的 content-type → 扩展名 */
     private static final Map<String, String> ALLOWED = Map.of(
             "image/jpeg", "jpg",
             "image/png", "png",
@@ -104,7 +104,7 @@ public class MinioStorageService {
     //     —— 这几段能把 IPv4 私有地址嵌进 v6 地址里，是 IPv4 黑名单的旁路，见 BLOCKED_IPV6；
     //  ③ 不跟随重定向 —— 3xx 直接拒（HttpClient.Redirect.NEVER 的等价物：这里手写 HTTP，压根不发第二次请求）；
     //  ④ 超时与体积：连接 5s、读取 10s（整体读预算，不是单次 read），正文上限 5MB，超了立刻中断；
-    //  ⑤ MIME 嗅探不看 Content-Type —— 读前 16 字节判真实类型，只收 jpg/png/webp（与现有白名单同一张表）；
+    //  ⑤ MIME 嗅探不看 Content-Type —— 读前 16 字节判真实类型，只收 jpg/png/webp（与上面 ALLOWED 同一张表）；
     //  ⑥ 防 DNS 重绑定 —— 先解析一次拿 IP，**后面就用这个 IP 连**（不交给 HTTP 客户端再解析一次），
     //     TLS 的 SNI 与证书主机名校验仍按原域名做（见 openTls）。
     //  ⑦ 端口只允许 443 —— https 默认端口之外一律拒（见 fetchFromUrl 的端口校验）。目标 IP 虽然是公网的，
@@ -325,7 +325,7 @@ public class MinioStorageService {
                         + "（服务端自称 Content-Type=" + response.serverContentType() + "，很可能是网页/JSON/错误页）");
             }
             if (!ALLOWED.containsKey(sniffed)) {
-                throw new ImageFetchRejected(415, "该格式不在上传白名单内（嗅探到 " + sniffed
+                throw new ImageFetchRejected(415, "该格式不在允许上传的类型里（嗅探到 " + sniffed
                         + "），与现有 /admin/upload/image 一致，只接受 jpg / png / webp");
             }
             return new FetchedImage(response.body(), sniffed);

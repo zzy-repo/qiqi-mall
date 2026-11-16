@@ -118,7 +118,7 @@ test.describe('业务 › 商家-商品管理 › 商品维护', () => {
       const name = productNameOf(`${seed}-pub`)
       await openProducts(page)
       await addProduct(page, { name, categoryName: CATEGORY, typeName: TYPE })
-      // 拿到本轮这条的 id，后续一律按 id 定位（同名商品在库里会累积，按文本会取到旧那条）
+      // 拿到刚建这条的 id，后续一律按 id 定位（同名商品在库里会累积，按文本会取到旧那条）
       const created = newestByName(await getAdminProductsApi(request, token, name), name)
       expect(created, '商品应创建成功').toBeTruthy()
       // 补一张主图（新建时不带图也能建，这里补上便于 C 端可见性断言）
@@ -160,7 +160,7 @@ test.describe('业务 › 商家-商品管理 › 商品维护', () => {
 
     // ① 被订单明细引用的商品（种子商品1）→ 被拒，且提示可改为下架
     // 按 **id=1** 精确取（种子商品1 被演示订单引用）：列表第一条会随着用例不停新建商品而漂移，
-    // 全量跑时 [0] 往往已经是本轮新建的空商品，删除会成功 → 断言假失败。
+    // 全量跑时 [0] 往往已经是本次新建的空商品，删除会成功 → 断言假失败。
     const seedProduct = (await getAdminProductsApi(request, token)).find((p) => p.id === 1)
     expect(seedProduct, '种子商品1 应存在于后台商品列表').toBeTruthy()
     const usedRow = page.getByTestId('product-row-1')

@@ -9,7 +9,7 @@
 //
 // ── 后端真实形态（已读 shared/ledger/controller/AdminLedgerController.java 确认）──
 //   ① **真分页**（MyBatis-Plus Page）→ {records,total,size,current,pages}；size 后端夹 1..50，工具层再夹一次；
-//   ② type 是**白名单七选一**，拼错后端**直接报错并列出可选值**（不返回空数组 ——
+//   ② type 只接受七类之一，拼错后端**直接报错并列出可选值**（不返回空数组 ——
 //      「选错类型」和「这段时间真没记录」在页面上长得一样，后端刻意不许混淆）；
 //   ③ bizId 的口径随 type 变：
 //      · 不带 type = 「一根主键的全链路」：订单分支按订单 id、售后分支按冗余 order_id、

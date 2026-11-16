@@ -9,7 +9,7 @@
 #      （容器以 USER app 运行，target/ 里的 jar 是 0600 root:root —— 直接挂上去 JVM 读不了）
 #   ② docker compose -f docker-compose.yml -f bench/jvm-gc.override.yml -f bench/jar-mount.override.yml
 #      up -d --no-deps --force-recreate server-1 server-2
-#      （GC 日志两臂**都开**，保证 A/B 同构；镜像不变，只多一个只读 bind mount）
+#      （GC 日志两组**都开**，保证 A/B 同构；镜像不变，只多一个只读 bind mount）
 #   ③ 重启 gateway（nginx 启动时缓存 upstream IP，重建 server 后不重启会 502 —— 已踩过）
 #   ④ 打印生效证据：容器里 /app/app.jar 的 md5 必须等于宿主机那份；镜像 digest 必须没变
 set -uo pipefail

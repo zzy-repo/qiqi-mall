@@ -1316,7 +1316,7 @@ class OptimisticLockIntegrationTest {
         assertThat(stockOf(skuId)).as("**库存一件都不许回补**").isEqualTo(stockBefore);
     }
 
-    // ================================================================== ㉘ ship：8 待发货 / 1 已付款 + 出库闸门
+    // ================================================================== ㉘ ship：8 待发货 / 1 已付款 + 出库校验
 
     static final String MSG_PARCEL_NOT_OUTBOUND = "该订单还有包裹未出库，不能标记为已发货；请先在履约页下发并等待仓库回传出库";
 

@@ -43,7 +43,7 @@ import java.util.Map;
 public class OrderController {
 
     private final OrderService orderService;
-    /** 订单状态写入的唯一入口（P2 第一步收敛：状态只在 OrderStatusService 里写） */
+    /** 订单状态写入的唯一入口（状态只在 OrderStatusService 里写） */
     private final OrderStatusService orderStatusService;
     private final OrderItemService orderItemService;
     private final ReturnApplyService returnApplyService;
@@ -138,7 +138,7 @@ public class OrderController {
      *       而不是掉到 SQL 外键（「数据处理失败」）或「库存不足：规格 X 只剩 0 件」（文案误导）。</li>
      * </ol>
      *
-     * <p><b>初始状态白名单（本接口只接受 0 / 1 / 7）</b>：建单原来是「请求体里的 status 原样落库」，
+     * <p><b>初始状态只接受 0 / 1 / 7</b>：建单原来是「请求体里的 status 原样落库」，
      * 于是能造出任何真实流程都产不出的状态组合 —— 「8 待发货却一张包裹都没有」「6 已退款却没有退款流水」
      * 「3 已完成却没有任何包裹」。这些组合一旦落库，所有按状态聚合的图与文档都必须为它开例外。
      * 所以这里只放行**不需要任何前置事实就成立**的三种初始状态：
@@ -157,7 +157,7 @@ public class OrderController {
     @Transactional(rollbackFor = Exception.class)
     public Result<Order> create(@RequestBody OrderCreateRequest request) {
         Order order = request.getOrder();
-        // ① 初始状态白名单（fail-closed）：不许把请求体里的 status 原样落库
+        // ① 初始状态只接受 0/1/7（fail-closed）：不许把请求体里的 status 原样落库
         String badStatus = initialStatusProblem(order);
         if (badStatus != null) return Result.fail(badStatus);
         order.setId(null);
@@ -291,7 +291,7 @@ public class OrderController {
      * **① 订单存在 → ② 业务守卫（status==7）→ ③ 执行**；{@code ?dryRun=true} 时同样先过 ①②，
      * 再把「将要发生什么」用中文说清楚（{@code {willDo}}），不落库、不发凭证。
      *
-     * <p>并发：本接口不带客户端 {@code version}（改的是订单状态，走的是状态守卫这层闸门），
+     * <p>并发：本接口不带客户端 {@code version}（改的是订单状态，靠状态守卫 + 写回时校验影响行数），
      * 但**写回时校验影响行数**（{@code @Version} → {@code WHERE version = ?}）：0 行说明「读到 status=7
      * 之后、写回之前」被别人改过（另一个审核员抢先审了 / 别的实例改了收货地址），
      * 直接抛 {@code code=409「数据已被他人修改（可能其他人在编辑），请刷新后重试」}，
@@ -636,7 +636,7 @@ public class OrderController {
     }
 
     /**
-     * 建单初始状态校验（{@link #create} 的第一道闸门）。
+     * 建单初始状态校验（{@link #create} 的第一道校验）。
      *
      * @return {@code null} = 通过（请求体不传 status 时顺手落成 0 待付款）；
      *         否则返回**给用户看的中文原因** —— 说清收到的是哪个状态、允许哪三个、

@@ -12,22 +12,22 @@
  *
  * 用法：
  *   # dev 站（内网专用）：首页 README.md 就是内网索引页，本来就列着内网 IP/端口/测试账号，
- *   # 那是有意为之、不是泄露，所以 dev 站用 --internal-ok 让第 ⑥ 项豁免 README.md 这一个文件。
- *   # dev 站还要加 --private-ok（口语稿/私人笔记/_deploy/_evidence 在 dev 都是刻意的，第 ⑩⑪ 项对 dev 豁免）。
+ *   # 那是有意为之、不是泄露，所以 dev 站用 --internal-ok 让第 ⑥ 项单独放行 README.md 这一个文件。
+ *   # dev 站还要加 --private-ok（口语稿/私人笔记/_deploy/_evidence 在 dev 都是刻意的，第 ⑩⑪ 项在 dev 站不参与判定）。
  *   node scripts/check-docs-site.mjs --root /root/docsify --base http://100.113.135.55:3027 --internal-ok --private-ok
  *   # prod 站（公网）：**绝对不要加 --internal-ok**，README.md 也必须过内网信息扫描。
  *   node scripts/check-docs-site.mjs --root /root/docsify/dist-prod --base https://docs.rose7.cn
  *   node scripts/check-docs-site.mjs --root /root/docsify --skip-http --internal-ok --private-ok   # 只做静态检查
- *   # 一句话：dev 站 = --internal-ok --private-ok；prod 站 = 不带任何豁免开关（带了就是把问题藏起来）。
+ *   # 一句话：dev 站 = --internal-ok --private-ok；prod 站 = 不带任何放行开关（带了就是把问题藏起来）。
  *
  * 参数：--root 站点产物目录（必填） / --base 站点基址（除非 --skip-http） / --skip-http 只查本地文件
- *       --internal-ok 仅 dev 站用：第 ⑥ 项豁免首页文件（默认 README.md，见 --internal-ok-files），其余文件照扫
- *       --internal-ok-files=a,b  dev 站豁免的内网扫描文件名列表（default README.md）。Rspress 站传
+ *       --internal-ok 仅 dev 站用：第 ⑥ 项只放行首页文件（默认 README.md，见 --internal-ok-files），其余文件照扫
+ *       --internal-ok-files=a,b  dev 站放行的内网扫描文件名列表（default README.md）。Rspress 站传
  *                     index.html,index.md —— 它的首页不叫 README.md
  *       --page-ext=md|html  产物里「页面」的扩展名（default md）。Rspress 静态产物是 .html
  *       --sidebar=<path>    侧边栏文件（default <root>/_sidebar.md）。Rspress 站根不放它，
  *                     指到 /root/docs-rspress/_sidebar.md（与 config 侧边栏同源同序）
- *       --private-ok 仅 dev 站用：第 ⑩ 项（私人文稿零泄漏）+ 第 ⑪ 项（产物洁净度）整体豁免 ——
+ *       --private-ok 仅 dev 站用：第 ⑩ 项（私人文稿零泄漏）+ 第 ⑪ 项（产物洁净度）整体不参与判定 ——
  *       dev 站刻意含口语稿/私人笔记，也刻意保留 _deploy/_evidence（nginx deny 的内网材料）
  *       --private-src 指定 build-material.mjs（第 ⑩ 项的 PRIVATE_DOCS 名单来源；默认自动在
  *       --root 及其上一级找，找不到就降级成关键词扫描并判 FAIL）
@@ -35,16 +35,16 @@
  *       dev 站的 /_assets/{img,video} 是 nginx alias 到这两个源目录的，prod 站则真拷进产物，故两者都要知道。
  *       --floor scenes=10[,pages=20] 覆盖下方 FLOOR 的下限阈值（可多次给，也可用环境变量
  *       CHECK_DOCS_FLOOR="scenes=10 pages=20" 或单项 CHECK_DOCS_FLOOR_SCENES=10）。
- * 退出码：全 PASS = 0，有 FAIL = 1（可直接接进 publish.sh 当门禁）；参数/阈值写错 = 2。
+ * 退出码：全 PASS = 0，有 FAIL = 1（publish.sh 直接看退出码决定往下走还是停）；参数/阈值写错 = 2。
  *
  * 为什么需要「下限断言（floor）」：
  *   第 ⑤ 项（场景图+视频齐全）和第 ⑨ 项（侧边栏死链）都是「先扫到东西，再判断扫到的东西对不对」。
  *   一旦什么都没扫到，它们会说「场景 0 个，缺件 0」「链接 0 个，死链 0」并判 ✅ ——
- *   `--docs` 指错目录、docs/flows/02-业务场景 被改名、站点产物被清空时，门禁会输出
+ *   `--docs` 指错目录、docs/flows/02-业务场景 被改名、站点产物被清空时，本脚本会输出
  *     ✅ ⑤  场景图+视频齐全  场景 0 个，缺件 0
  *     ✅ ⑨  侧边栏一致性  链接 0 个，死链 0
  *     结论：PASS      EXIT=0
- *   也就是**什么都没检查就放行**（fail-open）。publish.sh 用退出码当门禁，这种「空跑即通过」等于没有门禁。
+ *   也就是**什么都没检查就放行**（fail-open）。publish.sh 只看退出码，这种「空跑即通过」等于没做检查。
  *   所以十二项检查之后加一节「下限断言」：每个维度的实测数量必须 ≥ FLOOR 里的下限，
  *   不达标就整条 FAIL、退出码 1 —— 宁可因为「扫到的东西太少」拦下来，也不要因为「问题数为 0」放过去。
  *   第 ⑩⑪ 项同理：产物里连一个 .md/.html 都没扫到（--root 指错/产物被清空）时不许判 ✅，
@@ -70,12 +70,12 @@ const ROOT = resolve(opt('--root') ?? '')
 const BASE = (opt('--base') ?? '').replace(/\/+$/, '')
 const SKIP_HTTP = argv.includes('--skip-http')
 // dev 站专用开关：dev 首页 README.md 是内网索引页（本来就列着内网 IP/端口/测试账号），
-// 第 ⑥ 项豁免它一个文件；prod 站不许带（prod 的 README.md 也必须过内网信息扫描）。
+// 第 ⑥ 项只放行它一个文件；prod 站不许带（prod 的 README.md 也必须过内网信息扫描）。
 const INTERNAL_OK = argv.includes('--internal-ok')
-// 豁免哪些「首页文件」不做内网信息扫描。docsify 的首页是 README.md；Rspress 的首页是 index.html
+// 放行哪些「首页文件」不做内网信息扫描。docsify 的首页是 README.md；Rspress 的首页是 index.html
 // （还带一份 index.md 的 llms 镜像）→ 用列表表达，默认仍是 README.md，docsify 侧行为逐字节不变。
 // 支持简单通配 *（按站点相对路径整串匹配）。为什么需要：Rspress 站把首页内容同时 SSR 进
-// index.html 和它那条 route-<hash>.js 分片里，只豁免 html 会让「首页同一段内容」从 JS 侧照旧命中。
+// index.html 和它那条 route-<hash>.js 分片里，只放行 html 会让「首页同一段内容」从 JS 侧照旧命中。
 const INTERNAL_OK_FILES = (opt('--internal-ok-files') ?? 'README.md')
   .split(',').map((x) => x.trim()).filter(Boolean)
 const globToRe = (g) => new RegExp(`^${g.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`)
@@ -169,20 +169,20 @@ for (let i = 0; i < argv.length; i++) {
   }
 }
 
-/* ============================================================== 无界面场景白名单（第 ⑤ 项用） */
+/* ============================================================== 没有页面 UI 的场景名单（第 ⑤ 项用） */
 
 // 无界面场景：产品本身没有 UI（MCP / AI 工具能力），
 // 用户口径是"不做视频级验证"，验收方式 = mcp-server 测试套件断言。
-// 豁免的只是"必须有视频"，图仍然必须有。
-// 注意：只列「产品没有页面 UI」的场景。业务/AI集成/令牌管理 有后台真实 UI 页面，**不豁免**。
+// 名单放行的只是"必须有视频"这一项，图仍然必须有。
+// 注意：只列「产品没有页面 UI」的场景。业务/AI集成/令牌管理 有后台真实 UI 页面，**不进这个名单**。
 // 唯一数据源：判定逻辑只查下面的 Set，不要在别处重复写场景名。
 const NO_UI_SCENES = [
   // 键 = 场景目录的 rel 路径（桶/子分类/场景名），与 build-material.mjs 的 NO_UI_SCENE_HINTS 逐字相同。
-  // 名单里的场景只免「必须有视频」，图与口语稿照旧必查（豁免不等于免检）。
+  // 名单里的场景只免「必须有视频」这一项，图与口语稿照旧必查（放行一项不等于免检）。
   //
   // 业务/AI集成/MCP最小闭环 与 并发与竞态/版本冲突/AI端并发 **不在本名单里**（2026-11-14 摘掉）：
   // MCP 调试器（scripts/start-inspector.sh）能列工具 → 调工具 → 看返回，是真界面，
-  // 「无界面」是错的口径。摘掉后 ⑤ 的缺件数 +2 —— 这是把真缺口露出来，不是放松门禁。
+  // 「无界面」是错的口径。摘掉后 ⑤ 的缺件数 +2 —— 这是把真缺口露出来，不是放松检查。
   '业务/AI集成/工具能力矩阵',
   // 纯概念页：内容是「平台同步日志」与「仓库交换台账」逐行对照，没有专属界面。
   // 验收口径见 build-material 的 HINT_NO_UI_LEDGER（本页字段对照 + 两侧台账只读 SQL），不借邻居场景的录屏。
@@ -217,7 +217,7 @@ const NO_UI_SET = new Set(NO_UI_SCENES)
 // 与 NO_UI_SCENES 的区别：那是「视频不适用」，这是「视频欠着」—— 技术债必须显式登记，不许悄悄绿。
 // 规则（每条都由第 ⑤ 项强制校验，不是注释）：
 //   · 命中清单 → 该项降级为 ⚠ 并计入「待补 N 项」，⑤ 仍算通过；
-//   · 不在清单里的缺视频 → 照旧判红（门禁没有放松）；
+//   · 不在清单里的缺视频 → 照旧判红（判定标准没有放松）；
 //   · 每条必须同时写 reason（为什么缺）与 plan（何时/怎么补），缺一即 FAIL；
 //   · 清单长度 ≤ PENDING_VIDEO_MAX（防止长成垃圾桶）；
 //   · 清单里的 path 必须真的存在（场景改名/删了却没清清单 → FAIL）；
@@ -232,7 +232,7 @@ const NO_UI_SET = new Set(NO_UI_SCENES)
 //     以及后台与 AI 端同改一个商品 → AI 写成功、后台拿旧 version 保存 → 409 冲突）。
 // 于是清单清空、上限回到 3 —— 数字与清单必须同步回退，否则下一个看到「上限 6」的人
 // 会以为补录窗口还开着（那正是当初把这个数字留在注释里的用意）。
-// 空清单不是"关掉门禁"：判据没变，第 ⑤ 项照旧逐页查「图 + 视频」，缺视频且不在本清单 → 判红。
+// 空清单不是"关掉这项检查"：判据没变，第 ⑤ 项照旧逐页查「图 + 视频」，缺视频且不在本清单 → 判红。
 // 以后再遇到「能演未演」的场景，照旧登记 reason + plan，并遵守上限定 3 条（防止长成垃圾桶）。
 const PENDING_VIDEO_MAX = 3
 const PENDING_VIDEO = [
@@ -353,12 +353,12 @@ const SCENES = join(DOCS, 'flows', '02-业务场景')
  * 场景目录的**发现规则**（2026-11-14 结构重构后）：递归扫 02-业务场景，凡「目录里直接有 .mmd」的就是一个场景。
  *
  * 为什么不再写死两层（<类别>/<N-场景>）：新结构是 桶/子分类/场景名 三层，压测与容量那类桶还没有子分类
- * （两层）。写死层数的门禁在结构一变就扫到 0 个场景，然后「0 个场景、缺件 0」判 ✅ —— fail-open。
+ * （两层）。写死层数的检查在结构一变就扫到 0 个场景，然后「0 个场景、缺件 0」判 ✅ —— fail-open。
  * 用「目录里有 .mmd」当身份，桶目录/子分类目录本身不含文件，天然不会被误当场景。
  *
  * 每个场景的三元组（这就是「齐全」的定义，缺哪项就点名哪项）：
  *   ① 图：本目录下的 .svg/.png，且 .mmd 源码要在（图与源码配对由 ④ 全量查，这里只要求「有」）
- *   ② 视频：e2e/report/videos/<同名 rel>/ 下至少一个 <段序>-<段名>.mp4（无界面场景白名单免）
+ *   ② 视频：e2e/report/videos/<同名 rel>/ 下至少一个 <段序>-<段名>.mp4（没有页面 UI 的场景免这一项）
  *   ③ 口语稿：本目录下的 口语稿.txt（一页一份，图和视频共用）
  */
 function findSceneDirs() {
@@ -500,13 +500,13 @@ push('④', '图与源码配对', mmdOnly.length === 0 && svgOnly.length === 0,
 
 /* ============================================================== ⑤ 场景「图 + 视频」齐全 */
 
-// 无界面场景（白名单）只免「必须有视频」；图照旧必查，名单外的场景行为完全不变。
+// 没有页面 UI 的场景只免「必须有视频」；图照旧必查，名单外的场景行为完全不变。
 const noUiList = sceneList.filter((s) => s.noUi)
-// 反向保护：白名单里写了但目录不存在 = 名单已过期/写错（不会放宽检查，只提示，避免悄悄失效）
+// 反向保护：名单里写了但目录不存在 = 名单已过期/写错（不会放宽检查，只提示，避免悄悄失效）
 const noUiStale = NO_UI_SCENES.filter((n) => !sceneList.some((s) => s.path === n))
 
-// ⑤ 分三类：被待补清单登记的（⚠ 降级）、没登记的（❌ 照旧判红）、无界面白名单（免视频）。
-// 清单自身的腐烂（超长 / 路径不存在 / 条目重复 / 缺 reason|plan / 已经有视频）同样判红 —— 门禁只管是否「登记过」，不管是否「合规矩」就等于没人管。
+// ⑤ 分三类：被待补清单登记的（⚠ 降级）、没登记的（❌ 照旧判红）、以及没有页面 UI 的场景（免视频）。
+// 清单自身的腐烂（超长 / 路径不存在 / 条目重复 / 缺 reason|plan / 已经有视频）同样判红 —— 这项检查只管是否「登记过」，不管是否「合规矩」就等于没人管。
 const pendingHits = sceneGaps.filter((g) => PENDING_VIDEO_MAP.has(g.path))
 const hardGaps = sceneGaps.filter((g) => !PENDING_VIDEO_MAP.has(g.path))
 const pendingProblems = []
@@ -546,7 +546,7 @@ push('⑤', '场景图+视频齐全', hardGaps.length === 0 && pendingProblems.l
       ? [`（待补 ${pendingHits.length} 项 / 清单上限 ${PENDING_VIDEO_MAX} 项）`]
       : ['（待补清单为空：无待补视频）']),
     ...pendingProblems.map((x) => `待补清单自检不通过：${x}`),
-    // 被豁免的场景逐个打印出来，不悄悄跳过
+    // 被放行的场景逐个打印出来，不悄悄跳过
     ...noUiList.map((s) => `无界面场景免视频：${s.path}（图 ${s.imgs} 个 / 口语稿 ${s.spoken ? '有' : '无'}，图已在⑦⑧校验）`),
     ...noUiStale.map((n) => `提示：NO_UI_SCENES 里的 ${n} 未匹配到任何场景目录（名单已过期？）`),
   ])
@@ -554,7 +554,7 @@ const pendingCount = pendingHits.length
 
 /* ============================================================== ⑦⑧ SVG 体检对象 */
 
-// 两处都要验：源素材（下一版重建就发布它，是「事前」门禁）+ 产物里的 SVG 副本（prod 站真发布的字节）。
+// 两处都要验：源素材（下一版重建就发布它，是「事前」就有的检查）+ 产物里的 SVG 副本（prod 站真发布的字节）。
 // dev 站的图靠 nginx alias 直出源目录，产物里没有副本，所以它只有源这一份。
 const svgSrc = docFiles.filter((f) => f.endsWith('.svg')).sort(zhSort)
 const svgArt = allFiles.filter((f) => f.endsWith('.svg')).sort(zhSort)
@@ -572,11 +572,11 @@ const LEAK_WORDS = [
   ['admin/123456', /admin\s*\/\s*123456/gi], ['MCP Inspector', /MCP\s?Inspector/gi], ['qiqi2026', /qiqi2026/gi],
 ].map(([label, re]) => ({ label, re }))
 // 扫描对象 = 产物里的 md/html/js + 全部 SVG（源 svg 会被 dev 站 alias 直出，产物 svg 是 prod 真发布的字节）
-// --internal-ok（仅 dev 站）：只豁免根目录 README.md 这一个文件（dev 索引页），其它文件照扫，不是把问题藏起来。
+// --internal-ok（仅 dev 站）：只放行根目录 README.md 这一个文件（dev 索引页），其它文件照扫，不是把问题藏起来。
 const isLeakExemptByName = (f) => INTERNAL_OK && INTERNAL_OK_RES.some((re) => re.test(f))
-// 被豁免的首页 HTML **引用的** route-*.js 分片一并豁免：那是同一页内容的 SSR 载荷，
+// 被放行的首页 HTML **引用的** route-*.js 分片一并放行：那是同一页内容的 SSR 载荷，
 // 换个文件形态还是同一段内容（Rspress 把首页正文同时写进 index.html 和它的 route 分片）。
-// 只跟被豁免的 HTML 走，不会波及别的页面的分片 —— 不是「JS 一律不看」。
+// 只跟被放行的 HTML 走，不会波及别的页面的分片 —— 不是「JS 一律不看」。
 const leakDerived = new Set()
 if (INTERNAL_OK) {
   for (const rel of allFiles.filter((f) => f.endsWith('.html') && isLeakExemptByName(f))) {
@@ -612,14 +612,14 @@ const IS_LEGACY_INTERNAL_OK = INTERNAL_OK_FILES.length === 1 && INTERNAL_OK_FILE
 push('⑥',
   INTERNAL_OK
     ? (IS_LEGACY_INTERNAL_OK
-      ? '内网信息泄露（已豁免 README.md：dev 站索引页，内网专用）'
-      : `内网信息泄露（已豁免 ${leakExemptLabel}：dev 站首页及其 SSR 分片，内网专用）`)
+      ? '内网信息泄露（README.md 已放行：dev 站索引页，内网专用）'
+      : `内网信息泄露（${leakExemptLabel} 已放行：dev 站首页及其 SSR 分片，内网专用）`)
     : '内网信息泄露',
   leakHits.length === 0,
   `扫描 ${leakTargets.length} 个文件，命中 ${leakHits.length}（prod 环境不要加 --internal-ok）`
   + (!INTERNAL_OK || IS_LEGACY_INTERNAL_OK
     ? ''
-    : `；豁免 ${leakExempted.length} 个：${leakExempted.slice(0, 6).join(', ')}${leakExempted.length > 6 ? ' …' : ''}`),
+    : `；已放行 ${leakExempted.length} 个：${leakExempted.slice(0, 6).join(', ')}${leakExempted.length > 6 ? ' …' : ''}`),
   leakHits)
 
 /* ============================================================== ⑦ SVG 硬指标 */
@@ -683,7 +683,7 @@ push('⑨', '侧边栏一致性', deadLinks.length === 0, `链接 ${sidebarLinks
 // 为什么单列这一项：口语稿（作者口述用的私人材料）和 build-material.mjs 里 PRIVATE_DOCS 那 12 篇
 // 业务笔记，都**只该在 dev 站出现**。prod 侧现在靠 build-material.mjs 的实现细节保证干净
 // （`if (MODE !== 'dev') return null` 不读口语稿、prod 分支不拷那 12 篇），但那是代码层约定、
-// 没有任何外部门禁：有人改那个 if、加一个新素材目录、或手工往 dist-prod 塞个文件，没人会拦。
+// 没有任何外部检查：有人改那个 if、加一个新素材目录、或手工往 dist-prod 塞个文件，没人会拦。
 // 而一旦这些字节上了 OSS + 刷了 CDN，就是 30 天缓存留在公网（见 publish.sh 头部【六】），撤不干净。
 // 所以这里按「产物字节」判，不看代码怎么写的：
 //   a) 文件名：任何 口语稿* / *spoken* 文件 → 泄漏
@@ -761,7 +761,7 @@ if (!PRIVATE_OK) {
       }
     }
   } else {
-    // 名单读不到 → 退化成关键词扫描，但照样判 FAIL：门禁不能因为「规则找不到」就放行
+    // 名单读不到 → 退化成关键词扫描，但照样判 FAIL：不能因为「规则找不到」就放行
     // （priScanned 已在上面 b) 的循环里统计过，这里不重复计数）
     for (const rel of priTextFiles) {
       const text = readText(join(ROOT, rel))
@@ -775,20 +775,20 @@ const priSource = PRI.file
   ? `${PRI.file}${PRI.names.length ? `（${PRI.names.length} 篇）` : '（未解析到 PRIVATE_DOCS，已降级关键词扫描）'}`
   : '未找到 build-material.mjs（已降级关键词扫描）'
 push('⑩',
-  PRIVATE_OK ? '私人文稿零泄漏（dev 站豁免：内网完整版，刻意含口语稿/私人笔记）' : '私人文稿零泄漏',
+  PRIVATE_OK ? '私人文稿零泄漏（dev 站不参与判定：内网完整版，刻意含口语稿/私人笔记）' : '私人文稿零泄漏',
   PRIVATE_OK ? true : priHits.length === 0 && PRI.names.length > 0,
   PRIVATE_OK
-    ? '已豁免（--private-ok）：本项不参与判定；prod 发布绝不允许带这个开关'
+    ? '已跳过（--private-ok）：本项不参与判定；prod 发布绝不允许带这个开关'
     : `文件名扫 ${allFiles.length} 个 / 文本扫 ${priScanned} 个，私人名单 ${priSource}，命中 ${priHits.length}`,
   PRIVATE_OK
-    ? ['⚠ dev 站豁免：口语稿 + 私人笔记是内网完整版的一部分；prod 产物里出现它们的任何字节都算泄漏']
+    ? ['⚠ dev 站不参与判定：口语稿 + 私人笔记是内网完整版的一部分；prod 产物里出现它们的任何字节都算泄漏']
     : priHits)
 
 /* ============================================================== ⑪ 产物洁净度（私密文件名 / 原始录屏 / 绝对路径） */
 
 // 和 ⑩ 的分工：⑩ 管「已经登记过的私人文稿」（口语稿 + PRIVATE_DOCS 12 篇）不许漏进产物；
 // ⑪ 管「根本不该出现在产物里的东西」——**不需要逐篇登记**，靠名字/正文特征就能判死。
-// 为什么必须有这一项：下面这些现在全靠 build-material「不拷」这个约定（纯代码层），没有门禁；
+// 为什么必须有这一项：下面这些现在全靠 build-material「不拷」这个约定（纯代码层），没有检查；
 // 而 PRIVATE_DOCS 是逐篇登记的，新加一篇私人笔记忘了登记就会漏 —— ⑪ 是那条路的兜底。
 // 每条规则自带标签，失败输出必须指出**是哪条规则**命中的（规则表是唯一数据源，别在别处另写正则）。
 const CLEAN_NAME_RULES = [
@@ -798,7 +798,7 @@ const CLEAN_NAME_RULES = [
   { label: '内部目录', re: /(?:^|\/)_(?:deploy|evidence)\// },
 ]
 // 正文规则：口径同 build-material 的 PROD_NEUTRAL（它把 /root//tmp/ 换成 /），但那只是构建期替换、
-// **没有独立门禁验证「替换后 0 命中」** —— 替换规则漏一个词就漏一个，所以这里独立扫一遍产物正文。
+// **没有独立检查验证「替换后 0 命中」** —— 替换规则漏一个词就漏一个，所以这里独立扫一遍产物正文。
 const CLEAN_TEXT_RULES = [
   { label: '内网 IP', re: /100\.113\.135\.55/ },
   { label: '绝对路径', re: /\/root\/|\/tmp\// },
@@ -845,13 +845,13 @@ const cleanCounts = [...CLEAN_NAME_RULES, ...CLEAN_TEXT_RULES]
   .map((r) => `${r.label} ${cleanHits.filter((h) => h.startsWith(`[${r.label}]`)).length}`)
   .join(' / ')
 push('⑪',
-  PRIVATE_OK ? '产物洁净度（dev 站豁免：内网完整版，刻意保留 _deploy/_evidence）' : '产物洁净度（私密名/原始录屏/绝对路径）',
+  PRIVATE_OK ? '产物洁净度（dev 站不参与判定：内网完整版，刻意保留 _deploy/_evidence）' : '产物洁净度（私密名/原始录屏/绝对路径）',
   PRIVATE_OK ? true : cleanHits.length === 0,
   PRIVATE_OK
-    ? '已豁免（--private-ok）：本项不参与判定；prod 发布绝不允许带这个开关'
+    ? '已跳过（--private-ok）：本项不参与判定；prod 发布绝不允许带这个开关'
     : `路径扫 ${cleanPaths} 个 / 正文扫 ${cleanTextFiles.length} 个，命中 ${cleanHits.length}（${cleanCounts}）`,
   PRIVATE_OK
-    ? ['⚠ dev 站豁免：dev 站的 _deploy/_evidence 是内网材料（nginx deny），prod 产物里出现即泄漏']
+    ? ['⚠ dev 站不参与判定：dev 站的 _deploy/_evidence 是内网材料（nginx deny），prod 产物里出现即泄漏']
     : cleanHits)
 
 /* ============================================================== ⑫ 侧边栏顺序一致性 */
@@ -914,7 +914,7 @@ const floorActual = {
   cleanScanned: cleanPaths,
 }
 const floorItems = FLOOR_KEYS.map((key) => {
-  // dev 站整体豁免第 ⑩ 项（--private-ok），它那两条下限也随之不参与判定，但要显式打出来
+  // dev 站整体不参与第 ⑩ 项（--private-ok），它那两条下限也随之不参与判定，但要显式打出来
   if (PRIVATE_OK && (key === 'privacyScanned' || key === 'privateDocs' || key === 'cleanScanned')) {
     return { key, label: FLOOR_LABEL[key], actual: '—', floor: FLOOR[key], ok: true, skipped: true }
   }
@@ -941,7 +941,7 @@ console.log('')
 console.log('── 下限断言（防止空跑通过）──')
 for (const f of floorItems) {
   console.log(f.ok
-    ? `✅ ${f.label} ${f.actual} ≥ ${f.floor}（${f.key}）${f.skipped ? '  ← dev 站豁免第 ⑩⑪ 项，不参与' : ''}`
+    ? `✅ ${f.label} ${f.actual} ≥ ${f.floor}（${f.key}）${f.skipped ? '  ← dev 站第 ⑩⑪ 项不参与判定' : ''}`
     : `❌ ${f.label} ${f.actual} < ${f.floor}（${f.key}，差 ${f.floor - f.actual}）`)
 }
 
@@ -955,8 +955,8 @@ console.log(`页面 ${scenarioPages + diagramPages}（场景 ${scenarioPages} / 
 console.log(`孤儿图 ${mmdOnly.length + svgOnly.length}  场景缺件 ${sceneGaps.length}`
   + (pendingCount ? `（待补 ${pendingCount}）` : '') + '  '
   + `泄露命中 ${leakHits.length}  SVG 不合规 ${svgBad.length}  死链 ${deadLinks.length}  `
-  + `私密命中 ${PRIVATE_OK ? 'n/a（dev 豁免）' : priHits.length}`
-  + `  洁净命中 ${PRIVATE_OK ? 'n/a（dev 豁免）' : cleanHits.length}`)
+  + `私密命中 ${PRIVATE_OK ? 'n/a（dev 站不查）' : priHits.length}`
+  + `  洁净命中 ${PRIVATE_OK ? 'n/a（dev 站不查）' : cleanHits.length}`)
 // 失败原因先写下限（它解释的是「为什么上面的 ✅ 不算数」），再写常规项
 const reasons = []
 if (floorFailed.length) reasons.push(`下限断言：${floorFailed.map((f) => `${f.label} ${f.actual} < ${f.floor}`).join('、')}`)

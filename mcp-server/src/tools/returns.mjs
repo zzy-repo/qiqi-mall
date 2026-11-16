@@ -8,7 +8,7 @@
 //   ② **没有** GET /admin/return-applies/{id} → action=get 只能「取列表再挑一条」（工具层做，含判空）
 //   ③ 审核：PUT /admin/return-applies/{id}  body {status:1通过/2拒绝, description?}，支持 ?dryRun=true
 //   ④ ⚠️ **return_apply 表没有 version 列**，所以这个接口**根本不收 version** —— 并发控制在后端用
-//      两道影响行数闸门（同一事务内）：申请行 UPDATE ... WHERE id=? AND status=0 影响 0 行 → 409；
+//      两处影响行数校验（同一事务内）：申请行 UPDATE ... WHERE id=? AND status=0 影响 0 行 → 409；
 //      订单行 @Version 更新 0 行 → 409 **整笔回滚**（绝不会「申请已通过、货没退、库存回补两次」）。
 //      工具层**不能**凭空造一个 version 参数：那会让每一次审核都被后端当成非法入参。
 //      （这就是本域与 update_product / member(update) 的区别，别照抄那两处的「zod 必填 version」。）
@@ -80,7 +80,7 @@ export function registerReturnsTools(server, { writeEnabled } = {}) {
         '⚠️ audit 的后果很重：**通过(1) = 订单退款 + 记一条退款流水 + 把该订单全部明细的数量回补到 SKU 总池库存 + 订单转已退款(6)**；' +
         '**拒绝(2) = 订单退回已付款(1)，不退款、不回补库存**。两者都不可撤回（后端只允许「待处理」被审核一次）。' +
         '所以：先 list / get 看清申请与订单，把「退多少钱、回补多少件」念给用户确认，并建议先 dryRun=true 预演（后端会返回 willDo 的中文后果描述）再执行。' +
-        '后端没有版本号可传（return_apply 表无 version 列），并发靠「仅待处理可审」的状态守卫 + 影响行数闸门兜住：' +
+        '后端没有版本号可传（return_apply 表无 version 列），并发靠「仅待处理可审」的状态守卫 + 影响行数校验（0 行 → 409）兜住：' +
         '别人刚审过 / 订单被别人改过 → 409，此时请重新读一次再决定，不要盲目重试。',
       inputSchema: {
         action: z

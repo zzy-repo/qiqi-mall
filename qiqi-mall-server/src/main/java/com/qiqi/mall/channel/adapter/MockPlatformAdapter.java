@@ -30,7 +30,8 @@ import java.util.Map;
  * —— 这样「两个平台」在注册表里是两个适配器，业务层不需要知道它们是同一份代码。
  *
  * <p>关于 {@code ?fail=503}：它是 mock 侧的**故障注入**开关，用来证明
- * 「失败会落 FAIL 日志 + 重试一次」这条路径真的在工作（见 e2e 阶段 4）。
+ * 「失败会落 FAIL 日志 + 重试一次」这条路径真的在工作
+ * （回归用例：e2e/tests/scenarios/并发与竞态/重复提交与幂等/平台重推与503重试.spec.js）。
  */
 public class MockPlatformAdapter implements ChannelAdapter {
 

@@ -8,7 +8,7 @@ export const listReturnApplies = () => request.get(BASE)
 export const createReturnApply = (data) => request.post(BASE, data)
 
 /**
- * 审核退货申请（L3 高危）：status 1通过 / 2拒绝。
+ * 审核退货申请（高危写操作：先 ?dryRun=true 预演，再执行）：status 1通过 / 2拒绝。
  * body = { ...原参数(status/description/...) }（确认码已下线）。
  * 通过会退款 + 回补库存，拒绝会让订单回到已付款 —— 所以仍然走「预演 → 确认 → 执行」。
  */

@@ -8,11 +8,11 @@ package com.qiqi.mall.audit.engine;
  */
 public record AuditSetting(boolean autoAuditEnabled, StockGuard stockGuard) {
 
-    /** 库存判据两档（决策 D5） */
+    /** 库存判据两档：两档都按 SUM(sku_bucket.stock) 判，不用 sku.stock 缓存 */
     public enum StockGuard {
         /** 默认：可用 &lt; 需求 → 降级人工 + STOCK_SHORT（绝不带着缺口自动过审） */
         STRICT,
-        /** 宽松：可用 &lt; 需求仍然自动过审，但记 STOCK_SHORT 告警（扣减 SQL 仍是防超卖的最终闸门） */
+        /** 宽松：可用 &lt; 需求仍然自动过审，但记 STOCK_SHORT 告警（超卖仍由扣减 SQL 的条件更新真的拦住 —— 库存不足时影响 0 行） */
         LENIENT;
 
         public static StockGuard of(String raw) {

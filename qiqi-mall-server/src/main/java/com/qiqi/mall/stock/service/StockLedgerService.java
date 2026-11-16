@@ -23,7 +23,7 @@ import java.time.LocalDateTime;
  * </pre>
  * 先「审核通过又取消包裹」或「审核不通过后又从别的入口退款」，同一件货就被补两次 → 库存虚增。
  *
- * <h3>两道闸门（都必须过）</h3>
+ * <h3>两道校验（都必须过）</h3>
  * <ol>
  *   <li><b>幂等键</b> {@code orderId:skuId:reason:refId}（台账表 UNIQUE）：同一个触发重放时，
  *       {@code INSERT ... ON DUPLICATE KEY} 返回 0 → <b>不重复回补</b>，记一条 warn
@@ -37,7 +37,7 @@ import java.time.LocalDateTime;
  * <h3>记账顺序</h3>
  * <b>先记账、后动库存</b>：账记不上（幂等键已存在 / 守恒不成立）就一步都不动库存。
  * 反过来（先加库存再记账）一旦记账失败就会留下「库存已加、账上没有」的黑洞。
- * 扣减方向若因库存不足失败，会把刚记的那行撤销（补偿），不留「账上扣了、库存没扣」的假账。
+ * 扣减方向若因库存不足失败，会把刚记的那行撤销（补偿），不留「账上扣了、库存没扣」这种账实不符的行。
  *
  * <h3>记账之后动的是「桶」，不是 sku.stock</h3>
  * 扣减/回补的实际落点是 {@code sku_bucket}（见 {@link SkuBucketService}）：同一份库存物理拆成 N 行，
@@ -59,7 +59,7 @@ public class StockLedgerService {
     private final StockLedgerMapper ledgerMapper;
     /**
      * 库存落点（启动时二选一：legacy 单行 UPDATE / bucket 分桶）。
-     * 本类只负责记账与两道闸门 —— 台账逻辑在两条路径下**完全共用**，
+     * 本类只负责记账与两道校验（幂等键 + 数量守恒）—— 台账逻辑在两条路径下**完全共用**，
      * 不允许出现「分桶有账、legacy 没账」这种两套账。
      */
     private final StockStore stockStore;
@@ -133,7 +133,7 @@ public class StockLedgerService {
     }
 
     /**
-     * 回补库存（审核不通过 / 取消包裹 / 退货退款）。先过两道闸门，再记正数台账，
+     * 回补库存（审核不通过 / 取消包裹 / 退货退款）。先过幂等键与数量守恒两道校验，再记正数台账，
      * 最后把货加回**台账里记的那个桶**（没有桶号的历史账按 sku 任选一个桶）。
      *
      * @return 实际回补件数；**0 = 已回补过（或已无剩余可回补量），本次跳过、库存未变**
@@ -143,7 +143,7 @@ public class StockLedgerService {
         StockLedgerContext.Attribution attribution = requireContext("回补");
         String idemKey = attribution.idemKey(skuId, properties.getIdemKeyShards());
 
-        // 闸门 ②：数量守恒（不同入口回补同一件货时只有这一道拦得住）
+        // 校验 ②：数量守恒（不同入口回补同一件货时只有这一道拦得住）
         int allowed = clampToOrderedQty(attribution.orderId(), skuId, quantity);
         if (allowed <= 0) {
             log.warn("跳过回补（数量守恒）：订单 {} 的规格 {} 下单 {} 件、已回补 {} 件，本次要求再补 {} 件"
@@ -155,7 +155,7 @@ public class StockLedgerService {
             return 0;
         }
 
-        // 闸门 ①：幂等键（同一触发重放）
+        // 校验 ①：幂等键（同一触发重放）
         boolean merged = false;
         if (StockLedgerContext.alreadyTouchedInThisRun(idemKey)) {
             merged = ledgerMapper.addDelta(idemKey, allowed) > 0;
@@ -239,7 +239,7 @@ public class StockLedgerService {
                 return ledgerMapper.insertIfAbsent(attribution.orderId(), skuId, delta, attribution.reason(),
                         attribution.refType(), attribution.refId(), idemKey, LocalDateTime.now());
             } catch (DuplicateKeyException e) {
-                // 并发下两个请求同时通过 NOT EXISTS：唯一键是最后一道闸，按「已记过账」处理
+                // 并发下两个请求同时通过 NOT EXISTS：最后靠表上的唯一键真拦住（撞键抛 DuplicateKeyException），按「已记过账」处理
                 log.warn("台账幂等键并发撞键（{}），按已记账处理：{}", idemKey, e.getMessage());
                 return 0;
             }

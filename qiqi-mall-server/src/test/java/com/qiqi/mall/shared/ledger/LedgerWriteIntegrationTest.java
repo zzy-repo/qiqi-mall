@@ -35,7 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * 台账写入的**真库**集成测试（P2 第二步）。
+ * 台账写入的**真库**集成测试：订单状态每流转一次就必须落一条台账行，重放则静默跳过。
  *
  * <h3>要证明的五件事</h3>
  * <ol>

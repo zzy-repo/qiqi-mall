@@ -37,7 +37,7 @@ const inner = computed({
   set: (v) => emit('update:modelValue', v)
 })
 
-/** 前端先挡一层：类型白名单 + 5MB（后端同样校验） */
+/** 前端先挡一层：只收图片类型 + 5MB 上限（后端同样校验） */
 const beforeUpload = (file) => {
   const okType = ['image/jpeg', 'image/png', 'image/webp'].includes(file.type)
   if (!okType) {

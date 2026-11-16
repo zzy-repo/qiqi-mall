@@ -27,7 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 开关关闭时的**等价性证明**（{@code qiqi.ledger.enabled=false}）。
  *
  * <h3>要证明什么</h3>
- * 关掉台账后，业务行为必须与 P2 第一步**逐字一致**：状态照改、{@code status_seq} 照涨、
+ * 关掉台账后，业务行为必须与**开着台账时**逐字一致：状态照改、{@code status_seq} 照涨、
  * {@code version} 照涨、返回值照旧 —— 只有台账一行不写。
  *
  * <p>为什么这条必须单独一个测试类：{@code @SpringBootTest(properties=…)} 需要另一个 Spring 上下文。

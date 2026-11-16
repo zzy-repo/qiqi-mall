@@ -36,7 +36,7 @@ import java.util.Map;
 public class PortalOrderController {
 
     private final OrderService orderService;
-    /** 订单状态写入的唯一入口（P2 第一步收敛：支付/确认收货的状态都不再就地 setStatus） */
+    /** 订单状态写入的唯一入口（支付/确认收货都不再就地 setStatus，一律走它） */
     private final OrderStatusService orderStatusService;
     private final OrderItemService orderItemService;
     private final PaymentRecordService paymentRecordService;
@@ -142,14 +142,14 @@ public class PortalOrderController {
         Order order = orderService.getById(id);
         if (order == null || !order.getMemberId().equals(CurrentUser.id())) return Result.fail("订单不存在");
         if (order.getStatus() != 0) return Result.fail("当前订单状态不可支付");
-        // 口径②：支付成功后自动进入「待审核」，无需管理员手动提交
+        // 口径：支付成功后自动进入「待审核」，无需管理员手动提交
         // 状态流转：0待付款 →（支付）1已付款 →（OMS 自动交付）7待审核
         // 状态统一走 OrderStatusService：payType / paymentTime 与 status 在**同一条** UPDATE 里
         // （拆成两条会多涨一次 version，买家的乐观锁语义就变了）
         java.time.LocalDateTime paidAt = LocalDateTime.now();
         order.setPayType(payType);
         order.setPaymentTime(paidAt);
-        // **并发支付的唯一闸门**（order 表有 @Version）：0 行 = 读出来之后订单已经被改过
+        // **并发支付的唯一保护**（order 表有 @Version，UPDATE ... WHERE version = 读到的值）：0 行 = 读出来之后订单已经被改过
         // （最常见就是「同一张单被并发付了两次」）。这时绝不能当成功返回：
         // 用户会以为付了两笔、实际只记一笔，或者状态根本没变还说支付成功。
         // 抛 409 → 事务回滚（支付流水也不会落库），前端提示买家刷新。
@@ -158,7 +158,7 @@ public class PortalOrderController {
                 update -> update.set(Order::getPayType, payType).set(Order::getPaymentTime, paidAt));
         OptimisticLockGuard.requireAffected(rows, OptimisticLockGuard.MSG_ORDER_STATE_CHANGED);
         // 支付流水（对账键 = 订单号）：与上面的状态推进在同一个事务里，要么都成、要么都不记。
-        // P2 第二步加固：带 orderId / 操作者 / 幂等键（{orderSn}:PAY）—— 重放时撞 uk_idem 静默跳过，
+        // 溯源字段：带 orderId / 操作者 / 幂等键（{orderSn}:PAY）—— 重放时撞 uk_idem 静默跳过，
         // 不会因为「同一次支付被提交两遍」而记两条钱。
         paymentRecordService.record(order.getOrderSn(), order.getTotalAmount(),
                 PaymentRecord.TYPE_PAY, payType, order.getId(), null, null, null);
@@ -168,7 +168,7 @@ public class PortalOrderController {
     /**
      * 确认收货：已发货(2) → 已完成(3)；守卫：仅本人订单且 status=2。
      *
-     * <p><b>口径②（用户拍板）：子单是事实源 —— 父单状态是推导值，这里不再硬写 order.status=3。</b>
+     * <p><b>口径（业务已确认）：子单是事实源 —— 父单状态是推导值，这里不再硬写 order.status=3。</b>
      * 顺序是「先把事实推到位，再让聚合算父单」：
      * <pre>
      * ① {@link com.qiqi.mall.oms.service.DeliveryFlowService#signRemainingDeliveries} 把该订单所有

@@ -29,7 +29,7 @@ import java.util.function.Function;
  * 字段取不到值（从未更新过平台备注 / 未支付 / 没有客户标签）时取值函数返回 {@code null}，
  * 于是 {@code EXISTS / NOT_EXISTS} 才有意义；此时任何带值操作符一律判为「不满足」并给出
  * 「实际 无值」的文案 —— 绝不把 null 当 0 参与比较（null 当 0 会让「毛利缺失」看起来像「毛利 0」，
- * 正好放过最该拦的那类单，见风险③ COST_MISSING）。
+ * 正好放过最该拦的那类单，所以缺失一律判「不满足」，交给 COST_MISSING 转人工）。
  */
 public final class FieldRegistry {
 

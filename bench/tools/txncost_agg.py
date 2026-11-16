@@ -4,7 +4,7 @@
 用法： ./txncost_agg.py <root> prefix1 prefix2 ...
 例：   ./txncost_agg.py bench/results/2026-11-14-txn-count base- after-
 
-输出：每个前缀 × 每个 rps 档的轮次明细、中位数、极差(%), 以及两臂对比的差值。
+输出：每个前缀 × 每个 rps 档的轮次明细、中位数、极差(%), 以及两组对比的差值。
 为什么要中位而不是均值：这台机器噪声是**单边**的（偶发一轮 p50 翻 3 倍），均值会被那一轮带走。
 """
 import sys, os, json, glob, statistics
@@ -32,7 +32,7 @@ for p in prefixes:
         rps = label.split('-')[-2] if label.split('-')[-2].isdigit() else '?'
         groups.setdefault((p, rps), []).append((label, d))
 
-print(f"{'臂':10s} {'档':>4s} {'轮':>2s}  " + '  '.join(f'{n:>10s}' for _, n, _ in KEYS))
+print(f"{'组':10s} {'档':>4s} {'轮':>2s}  " + '  '.join(f'{n:>10s}' for _, n, _ in KEYS))
 agg = {}
 for (p, rps), items in sorted(groups.items()):
     for label, d in items:
@@ -48,7 +48,7 @@ for (p, rps), items in sorted(groups.items()):
     print(f"{p:10s} {rps:>4s} {'M':>2s}  " + '  '.join(f"{fmt.format(med[k]):>10s}" for k, _, fmt in KEYS))
     print(f"{'':10s} {'':>4s} {'±%':>2s}  " + '  '.join(f"{rng[k]:>10.1f}" for k, _, _ in KEYS))
 
-# 两臂对比（同档）
+# 两组对比（同档）
 if len(prefixes) == 2:
     a, b = prefixes
     print()

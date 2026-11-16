@@ -113,11 +113,11 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-自动�
       await test.step('② 队列页点「立即审核一轮」→ run 接口把两笔单判成一绿一黄', async () => {
         await gotoAuditQueue(page)
 
-        // 卡片/表格就位：本轮之前队列里还没有这两笔单的决策，所以行不该存在
+        // 卡片/表格就位：跑这次 run 之前队列里还没有这两笔单的决策，所以行不该存在
         await expect(auditQueueRow(page, 'QT-1001'), '判之前队列里不该有 QT-1001 的行').toHaveCount(0)
 
         run = await runAuditViaUi(page)
-        expect(run.total, `本轮范围内应至少包含六笔演示单（实到 ${run.total}）`).toBeGreaterThanOrEqual(6)
+        expect(run.total, `这次 run 范围内应至少包含六笔演示单（实到 ${run.total}）`).toBeGreaterThanOrEqual(6)
 
         const d1 = run.decisions.find((d) => d.orderSn === 'QT-1001')
         const d2 = run.decisions.find((d) => d.orderSn === 'QT-1002')
@@ -252,7 +252,7 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-自动�
         expect(dec1[0].result, 'QT-1001 决策结果应是 AUTO_PASS').toBe('AUTO_PASS')
         expect(dec1[0].matchedPolicyName, 'QT-1001 命中策略名快照应是「淘宝-标准单」').toBe(POLICY_NAME.AUTO_TAOBAO)
         expect(dec1[0].matchedPolicyVersionNo, 'QT-1001 命中的应是第 1 版策略（seed 初版）').toBe(1)
-        expect(dec1[0].orderStatusSeq, 'QT-1001 决策应记下本轮推进出来的 status_seq=1').toBe(1)
+        expect(dec1[0].orderStatusSeq, 'QT-1001 决策应记下这次 run 推进出来的 status_seq=1').toBe(1)
         expect(dec1[0].downgradeReason, 'QT-1001 不该有预检降级原因').toBeNull()
         expect(dec1[0].wouldBePolicyName, 'AUTO_PASS 不该有 would-be 回填（它本来就过了）').toBeNull()
 
@@ -266,7 +266,7 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-自动�
         expect(led1[0].to, '台账后态应是 8 待发货').toBe(8)
         expect(led1[0].reason, '自动过审的台账原因码应是 AUDIT_AUTO_PASS（与人工 AUDIT_PASS 分开）')
           .toBe('AUDIT_AUTO_PASS')
-        expect(led1[0].refType, '台账应记下「本轮 run 推的」ref_type=AUDIT_RUN').toBe('AUDIT_RUN')
+        expect(led1[0].refType, '台账应记下「这次 run 推的」ref_type=AUDIT_RUN').toBe('AUDIT_RUN')
         expect(led1[0].refId, '台账的 ref_id 应是这一轮 run 的 id').toBe(Number(run.runId))
         expect(led1[0].idemKey, `台账幂等键应是 {orderId}:{status_seq} = ${id1}:1`).toBe(`${id1}:1`)
         expect(activeTagsOf(id1), '自动过审不该给订单打任何标').toHaveLength(0)
@@ -292,7 +292,7 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-自动�
 
         // ---- QT-1002 ----
         const dec2 = decisionsOf(id2)
-        expect(dec2, 'QT-1002 也应恰好落 1 条决策（它参与了本轮）').toHaveLength(1)
+        expect(dec2, 'QT-1002 也应恰好落 1 条决策（它参与了这次 run）').toHaveLength(1)
         expect(dec2[0].result, 'QT-1002 决策结果应是 MANUAL').toBe('MANUAL')
         expect(dec2[0].matchedPolicyName, 'QT-1002 应记下「本来命中的是淘宝-标准单」').toBe(POLICY_NAME.AUTO_TAOBAO)
         expect(dec2[0].roundNo, 'QT-1002 是第 1 轮').toBe(1)

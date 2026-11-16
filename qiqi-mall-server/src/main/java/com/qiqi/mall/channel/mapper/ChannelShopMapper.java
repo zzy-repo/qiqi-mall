@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
  *
  * <p>三条自定义语句都刻意不用 {@code UPDATE ... WHERE id=?} 之外的条件：
  * 水位推进是「拉单已经成功」之后的事，不需要乐观锁（同一店铺被两个人同时点拉单，
- * 后写的覆盖先写的只是水位抖动，下一次拉单重叠一次，被幂等闸门吃掉）。
+ * 后写的覆盖先写的只是水位抖动，下一次拉单重叠一次，被 {@code channel_order_map.uk_map} 撞键挡掉）。
  */
 @Mapper
 public interface ChannelShopMapper extends BaseMapper<ChannelShop> {

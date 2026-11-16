@@ -1,5 +1,5 @@
 /**
- * 台账页「重放渠道通知」的三态回归门禁（toast 级别 + 弹窗去向 + 行数不变）。
+ * 台账页「重放渠道通知」的三态回归校验（toast 级别 + 弹窗去向 + 行数不变）。
  *
  * ── 这个文件为什么存在 ───────────────────────────────────────────────────────
  * `views/ledger/index.vue` 的 replay() 按后端 `data.outcome` 分三态提示：
@@ -54,7 +54,7 @@ export const REPLAY_TOAST = {
   },
   DUPLICATE: {
     level: 'warning',
-    // 只锁前半句：括号里的「（流水未增加）」是给人看的补充，改措辞不该让门禁红
+    // 只锁前半句：括号里的「（流水未增加）」是给人看的补充，改措辞不该让这条校验红
     text: '重复通知，已忽略',
     why: 'DUPLICATE 是渠道的正常重复投递，不是错误 —— 必须是 warning，绝不能是 error'
   },
@@ -207,7 +207,7 @@ export const expectReplayToast = async (page, outcome, opts = {}) => {
   ).not.toHaveLength(0)
 
   if (outcome === REPLAY_OUTCOME.DUPLICATE) {
-    // ③ 绝不能有 error 级 ★ 这条就是「onError 写成 async」的回归门禁
+    // ③ 绝不能有 error 级 ★ 这条就是「onError 写成 async」的回归校验
     //    （async ⇒ 接管失效 ⇒ 真失败才该出现的红色进弹窗，重复通知被当成执行失败）
     await expectNoLevel(page, 'error', '重复通知不是错误：不许出现 error 级 toast')
     // ④ 也不能是 success：「已入账」只属于 RECORDED，绿色提示会把「没多记」说成「记上了」

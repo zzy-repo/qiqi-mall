@@ -20,7 +20,7 @@ import java.util.Map;
  * [4] EXCEPTION 命中                   → FROZEN（打标 + 冻结）
  *     [3][4] 命中后**仍继续跑 [5]，只看不执行**，回填 would_be_auto_policy
  *     [3] 命中后另对 [4] 整段做一次**只读求值**（[4] 命中后对 [3] 整段同理），
- *         把「也命中的另一类闸门」写进 evidence.other_gates（不改判定）
+ *         把「也命中的另一类拦截策略」写进 evidence.other_gates（不改判定）
  * [5] AUTO（priority 升序）逐条：
  *     5a MATCH 条件没全满足 → 记 miss_reason（哪条、expected vs actual）
  *     5b 排除条件（本策略 POLICY 级 ∪ 全部 ALL_AUTO 级）任一成立 → 记 excluded_by
@@ -28,7 +28,7 @@ import java.util.Map;
  * [6] 全都不中 → 若曾有策略「条件全满足、只被排除挡掉」→ MANUAL（被排除）；否则 NO_MATCH（逐条「差在哪」）
  * [7a] AUTO 候选的预检（**可改结论**，AUTO_PASS 专用分支）：
  *     库存 SUM(sku_bucket.stock) &gt;= 需求，不足 → MANUAL + STOCK_SHORT；
- *     成本：毛利 ≤ 0 而成本价缺失 → MANUAL + COST_MISSING（风险③：不许沉默放行）
+ *     成本：毛利 ≤ 0 而成本价缺失 → MANUAL + COST_MISSING（不许沉默放行）
  * [7b] NO_MATCH 的库存预检（**只写证据、不改结论**）：见 {@link #noMatchEvidence}
  * </pre>
  *
@@ -49,7 +49,7 @@ import java.util.Map;
  * 命中方式完全一样，但结果只写进决策行的回填列，不推进任何状态。
  *
  * <h3>为什么排除要分两级</h3>
- * POLICY 级 = 这条策略自己的例外；ALL_AUTO 级 = 所有 AUTO 策略共用的全局例外（决策 C1：
+ * POLICY 级 = 这条策略自己的例外；ALL_AUTO 级 = 所有 AUTO 策略共用的全局例外（例如
  * 「客服备注含改」）。全局例外必须在评估**每一条** AUTO 策略时都并进来 —— 否则它就成了
  * 「只有配置它的那条策略才认」的策略级排除，与设计相反。
  */
@@ -71,12 +71,12 @@ public final class AuditEngine {
         List<PolicyView> active = policies == null ? List.of()
                 : policies.stream().filter(PolicyView::enabled).toList();
 
-        // ---------------- [1] 状态闸门 ----------------
+        // ---------------- [1] 状态检查：不是 7 待审核就直接 SKIPPED ----------------
         if (ctx.status() == null || ctx.status() != AuditContext.STATUS_PENDING_AUDIT) {
             return skipped(ctx, "当前状态 " + ctx.status() + " ≠ 7（待审核），不参与本轮");
         }
 
-        // ---------------- [2] 冻结闸门 ----------------
+        // ---------------- [2] 冻结检查：已有 FROZEN 标就直接 SKIPPED ----------------
         if (ctx.frozen()) {
             String tag = ctx.frozenTag() == null ? ActionSpec.DEFAULT_TAG : ctx.frozenTag();
             return skipped(ctx, "订单已被冻结（active tag=" + tag + "），本轮跳过，需人工解冻后重新判定");
@@ -183,7 +183,8 @@ public final class AuditEngine {
 
     private AuditVerdict autoPassOrDowngrade(AuditContext ctx, AuditSetting setting, PolicyView policy,
                                              List<ConditionTrace> traces, List<PolicyMiss> misses) {
-        // 风险③：毛利 ≤ 0（或没算过）而成本价缺失（=0/NULL）→ 不许沉默放行
+        // 毛利 ≤ 0（或没算过）而成本价缺失（=0/NULL）→ 不许沉默放行：
+        // 成本没维护不等于没有成本，静默放行就是把亏损单放出去
         BigDecimal profit = ctx.grossProfit();
         boolean profitNonPositive = profit == null || profit.signum() <= 0;
         if (profitNonPositive && ctx.costMissing()) {
@@ -194,7 +195,7 @@ public final class AuditEngine {
                     evidence(ctx, setting, "MANUAL", WouldBe.none(), null));
         }
 
-        // 库存预检：判据是 SUM(sku_bucket.stock)，不是 sku.stock 缓存（决策 D5）
+        // 库存预检：判据是 SUM(sku_bucket.stock)（桶里的真实余量），不是 sku.stock 缓存（展示用，允许滞后）
         if (stockShort(ctx)) {
             String text = "转人工：库存不足 —— 可用 " + ctx.stockAvailable() + " < 需求 " + ctx.itemQtyTotal()
                     + "（判据 SUM(sku_bucket.stock)=" + ctx.stockAvailable()
@@ -204,7 +205,7 @@ public final class AuditEngine {
                         null, List.of(), AuditVerdict.DOWNGRADE_STOCK_SHORT, text,
                         evidence(ctx, setting, "MANUAL", WouldBe.none(), null));
             }
-            // LENIENT：不阻断（扣减 SQL 仍是防超卖的最终闸门），但把告警留在证据里
+            // LENIENT：不阻断（超卖仍由扣减 SQL 的条件更新真的拦住 —— 库存不足时影响 0 行、扣不动），但把告警留在证据里
             Map<String, Object> ev = evidence(ctx, setting, "AUTO_PASS", WouldBe.none(), null);
             @SuppressWarnings("unchecked")
             Map<String, Object> stock = (Map<String, Object>) ev.get("stock");
@@ -279,10 +280,10 @@ public final class AuditEngine {
         return WouldBe.none();
     }
 
-    // ================================================================== 回填「另一类闸门也命中」
+    // ================================================================== 回填「另一类拦截策略也命中」
 
     /**
-     * 只读回填 {@code evidence.other_gates}：把<b>另一类</b>闸门里也命中的策略列出来，一个字都不改结论。
+     * 只读回填 {@code evidence.other_gates}：把<b>另一类</b>（BLOCK 或 EXCEPTION 那一段）里也命中的策略列出来，一个字都不改结论。
      *
      * <h3>为什么需要它</h3>
      * 判定链是「整段跑、命中即返回」：[3] 一旦 BLOCK 命中就 return，[4] 那一段<b>根本没跑</b>。
@@ -297,9 +298,9 @@ public final class AuditEngine {
      * <h3>三个口径</h3>
      * <ul>
      *   <li><b>只跨类型</b>：BLOCKED 回填 EXCEPTION 段，FROZEN 回填 BLOCK 段。同类里「第二条也命中」
-     *       是 priority 竞争的问题（哪条更优先已在 {@code matched_policy} 里答了），不属于「另一道闸门」；</li>
+     *       是 priority 竞争的问题（哪条更优先已在 {@code matched_policy} 里答了），不属于「另一类拦截策略」；</li>
      *   <li><b>空就不写键</b>：一条也没有时 {@code other_gates} <b>整个键不存在</b>，不是空数组 ——
-     *       前端判「有没有别的闸门」只需 {@code !!evidence.other_gates}，不必再区分「空数组/缺失」两种空；</li>
+     *       前端判「有没有别的拦截策略命中」只需 {@code !!evidence.other_gates}，不必再区分「空数组/缺失」两种空；</li>
      *   <li><b>按当前链序，[4] 命中时这一列必为空</b>：[3] 整段在 [4] 之前，能走到 [4] 就说明没有任何
      *       BLOCK 命中。代码仍然对称地算一遍（不写死成「必然为空」），是为了将来调链序时证据不会静默
      *       少一份 —— 那种缺失没有任何断言会红，只会让运营少看到一句话。</li>
@@ -313,7 +314,7 @@ public final class AuditEngine {
         List<Map<String, Object>> gates = new ArrayList<>();
         for (PolicyView policy : sorted(active, type)) {
             List<ConditionTrace> traces = evalMatches(ctx, policy);
-            if (!allSatisfied(traces)) continue;        // 只收「整条策略也命中」的，半命中不算闸门
+            if (!allSatisfied(traces)) continue;        // 只收「整条策略也命中」的，只命中一部分条件的不算
             Map<String, Object> gate = new LinkedHashMap<>();
             gate.put("type", type.name());
             gate.put("policy_name", policy.name());

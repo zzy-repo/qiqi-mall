@@ -37,7 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <h3>现在的口径</h3>
  * 该订单存在**未取消（≠9）且已出库（status ≥ 3）**的包裹时拒删，中文原因（需求钉死的原文）：
  * <pre>该订单有 N 个包裹已出库（货已离开仓库），不能删除；请先完成签收或改为关闭订单</pre>
- * 口径与 ship 闸门（{@code OrderController#countOutboundDeliveries}）完全一致：已取消(9) 不算 ——
+ * 口径与 ship 的出库校验（{@code OrderController#countOutboundDeliveries}）完全一致：已取消(9) 不算 ——
  * 取消时货已经回补过，不能拿它替「已出库」作证。
  *
  * <p>并且这条守卫必须**在回补之前**生效：被拒时订单/台账/库存一件都不许动。

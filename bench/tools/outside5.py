@@ -6,7 +6,7 @@
   samples <run目录> <warmup_s> <dur_s>
      从 gen.mjs 的 samples.csv 直接算 p50/p95/p99（**不筛 ok**）——
      框架探针（items=[] 提前返回）在服务端是 200+code=1，gen.mjs 记成 ok=0，
-     txncost.py 只统计 ok，所以探针臂必须由这里算延迟。
+     txncost.py 只统计 ok，所以探针组必须由这里算延迟。
 
   nginx <startByte> <endByte>
      从网关 qiqi-access.log 的字节切片里读 rt=$request_time / urt=$upstream_response_time，

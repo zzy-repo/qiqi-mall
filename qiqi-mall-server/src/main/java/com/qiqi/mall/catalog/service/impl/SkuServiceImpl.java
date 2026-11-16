@@ -14,7 +14,7 @@ import org.springframework.stereotype.Service;
  * {@code UPDATE sku SET stock = stock + N}，无台账、无查重、无互斥）。
  * 现在这里是**库存变更的唯一收口**：每个入口先声明
  * {@link com.qiqi.mall.stock.StockLedgerContext}（订单 + 原因 + 触发单据），
- * 由台账服务记一行账、过幂等键与数量守恒两道闸门，再动**分桶**。
+ * 由台账服务记一行账、过幂等键（同一触发重放只记一行）与数量守恒（累计回补不超过下单量）两道校验，再动**分桶**。
  * 没有上下文会直接抛异常（fail-closed）—— 不允许出现「改了库存但账上没有」。
  *
  * <h3>本次变化：真正的落点是 sku_bucket，不是 sku.stock</h3>

@@ -18,7 +18,7 @@ import java.util.UUID;
 
 /**
  * 后台图片上传（见 docs/flows/9-图片上传时序图）：
- * 独立于商品提交；校验文件类型白名单 + 大小上限；重写文件名；PutObject 到 MinIO；返回可直连 URL。
+ * 独立于商品提交；校验文件类型（只接受 jpg/png/webp）+ 大小上限；重写文件名；PutObject 到 MinIO；返回可直连 URL。
  *
  * <p>两个入口、**同一套落地规则**（同一个 bucket / objectKey 前缀 / products/年/月 归档 / 同一个返回结构）：
  * <ul>
@@ -75,7 +75,7 @@ public class AdminUploadController {
      * 按 URL 拉取图片并落到对象存储（AI / MCP 用，人类 JWT 也能用）。
      *
      * <p>与 {@link #uploadImage} 的区别只有「图片从哪来」：一个来自 multipart 文件流，一个由后端按 URL 下载；
-     * 之后的校验（白名单 / 5MB）、归档路径（products/yyyy/MM/uuid.ext）、返回值（{url, objectName}）完全一致。
+     * 之后的校验（类型只收 jpg/png/webp / 5MB）、归档路径（products/yyyy/MM/uuid.ext）、返回值（{url, objectName}）完全一致。
      *
      * <p>失败一律是**明确的中文原因 + 对应 HTTP 状态码**（400 参数/目标站问题、403 内网地址、
      * 413 超 5MB、415 不是图片、502/504 网络与超时），绝不回 500 —— MCP 侧会把 message 原样透给模型。
