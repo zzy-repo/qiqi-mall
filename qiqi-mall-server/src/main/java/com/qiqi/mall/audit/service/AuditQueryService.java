@@ -3,6 +3,7 @@ package com.qiqi.mall.audit.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.qiqi.mall.audit.engine.AuditResult;
 import com.qiqi.mall.audit.engine.PolicyView;
 import com.qiqi.mall.audit.entity.AuditRun;
 import com.qiqi.mall.audit.explain.AuditExplainLayers;
@@ -557,6 +558,23 @@ public class AuditQueryService {
      *   <li>{@code valueMismatch}（<b>真冲突</b>）：判定结论标与 {@code result} 不相等。</li>
      * </ol>
      *
+     * <h3>⚠️ 「不落标」的结论不是缺口（2026-11-17 修：这条判据曾让端点<b>永久假红</b>）</h3>
+     * 判缺口之前必须先问一句<b>这一类结论天生落标吗</b>，即 {@link ConclusionTags#producesTag}：
+     * <ul>
+     *   <li>{@code AUTO_PASS}：<b>{@code codeOf} 恒回 {@code null}</b> —— 用户 2026-11-16 16:38 的拍板
+     *       「通过与否由状态表达，不由标表达」（见 {@link ConclusionTags#codeOf}）；</li>
+     *   <li>{@code SKIPPED}：跳过就不落标（它「为什么没判」由那枚 active 冻结标回答）。</li>
+     * </ul>
+     * 这两类<b>永远补不上标</b>。旧判据却把「status=7 且无标」<b>一律</b>算 {@code pendingTagMissing}
+     * ⇒ 只要库里真出现这么一行，这个数就再也回不到 0 ⇒ 端点成了<b>永久假红</b>（实测：临时库
+     * backfill 完 {@code pendingTagMissing=2}，正是 AUTO_PASS + SKIPPED 两行）。
+     *
+     * <p>现在的口径：它们归 {@code noTagByDesign}（<b>设计如此，不判红</b>），并逐条列在
+     * {@code noTagByDesignSamples} 里 —— <b>可见，但不计入 {@code inconsistent}</b>。
+     * 这不是「把阈值调松」也不是「把 {@code pendingTagMissing} 清零」：{@code MANUAL / BLOCKED /
+     * NO_MATCH / FROZEN} 这四类<b>照样一条都跑不掉</b>（{@code producesTag} 回 true）；
+     * 判不出是什么结论（result 为空或未来新增的枚举值）时<b>仍按"该有标"处理</b>，宁可报红也不替数据开脱。</p>
+     *
      * <h3>结算事实标（已申请退货）单独计</h3>
      * {@code RETURN_APPLIED} 回答的是"这单进了退货流程"，与 {@code result} 是两个问题、<b>不比</b>，
      * 计入 {@code answeredBySettlementFact}（见 {@link ConclusionTags#isSettlementFact}）。
@@ -568,6 +586,8 @@ public class AuditQueryService {
     public Map<String, Object> conclusionParity(int limit) {
         int sampleLimit = Math.min(Math.max(1, limit), 100);
         List<Map<String, Object>> samples = new ArrayList<>();
+        // 「天生不落标」的单：**可见但不判红**（AUTO_PASS / SKIPPED，见方法注释）
+        List<Map<String, Object>> noTagByDesignSamples = new ArrayList<>();
         Map<String, Integer> byPair = new LinkedHashMap<>();
 
         long scanned = 0;
@@ -577,6 +597,7 @@ public class AuditQueryService {
         long noConclusionTag = 0;
         long legacyDecision = 0;
         long noAuditConclusionByDesign = 0;
+        long noTagByDesign = 0;
         long pendingTagMissing = 0;
         long unmappedTagCode = 0;
         long multipleConclusionTags = 0;
@@ -634,13 +655,26 @@ public class AuditQueryService {
                 } else {
                     // 标里没有结论 —— 这一档必须分清「正常」与「真缺口」
                     noConclusionTag++;
-                    classification = missingConclusionBucket(leaveRows.get(orderId), orderStatus);
+                    // 判缺口前先看"这一类结论天生落标吗"（AUTO_PASS / SKIPPED 恒不落标）
+                    classification = missingConclusionBucket(leaveRows.get(orderId), orderStatus, result);
                     switch (classification) {
                         case "LEGACY_DECISION" -> legacyDecision++;
                         case "NO_AUDIT_CONCLUSION" -> noAuditConclusionByDesign++;
+                        case "NO_TAG_BY_DESIGN" -> noTagByDesign++;
                         default -> pendingTagMissing++;
                     }
                     inconsistent = "PENDING_TAG_MISSING".equals(classification);
+                    if ("NO_TAG_BY_DESIGN".equals(classification) && noTagByDesignSamples.size() < sampleLimit) {
+                        // 不判红，但要看得见：这一档不是"藏起来"，是"分成另一个桶"
+                        Map<String, Object> soft = new LinkedHashMap<>();
+                        soft.put("orderId", orderId);
+                        soft.put("orderSn", row.get("order_sn"));
+                        soft.put("result", result);
+                        soft.put("orderStatus", orderStatus);
+                        soft.put("activeConclusionTags", shadow.tagCodes());
+                        soft.put("why", "noTagByDesign：这一类结论（AUTO_PASS / SKIPPED）恒不落标，不算缺口");
+                        noTagByDesignSamples.add(soft);
+                    }
                 }
 
                 byPair.merge(pairLabel(result, shadow), 1, Integer::sum);
@@ -675,19 +709,22 @@ public class AuditQueryService {
         out.put("inconsistent", inconsistentTotal);        // 真冲突 + 真缺口（不含"正常退回决策行"）
         out.put("valueMismatch", valueMismatch);           // 判定轴两边都有结论但不相等（真冲突）
         out.put("unmappedTagCode", unmappedTagCode);       // 有结论标但码不在映射表里
-        out.put("pendingTagMissing", pendingTagMissing);   // 真缺口：还在 7 被判过、却没有任何结论标（只有这一档是 gap）
+        out.put("pendingTagMissing", pendingTagMissing);   // 真缺口：还在 7、被判成"该落标的那四类"、却一条结论标都没有（只有这一档是 gap）
         out.put("multipleConclusionTags", multipleConclusionTags);  // 一单多条 active 结论标（互斥漏了哪条路径）
         // ── 标回答了结论的单 ───────────────────────────────────────────────
         out.put("answeredByTag", answeredByTag);                     // 判定结论：标与 result 一致
         out.put("answeredBySettlementFact", answeredBySettlementFact); // 结算事实标（已申请退货）：不与 result 比
         // ── 标里没有结论的单：**离开待审核的一律算设计如此，不算 gap** ──────────────
-        out.put("noConclusionTag", noConclusionTag);                 // 合计（= 下面三项之和）
+        out.put("noConclusionTag", noConclusionTag);                 // 合计（= 下面四项之和）
         out.put("noAuditConclusionByDesign", noAuditConclusionByDesign); // 正常：已离开待审核 —— V9 结算只解不落
         out.put("legacyDecision", legacyDecision);                   // 正常：无"离开 7"台账的历史单 → 退回决策行
+        out.put("noTagByDesign", noTagByDesign);                     // 正常：AUTO_PASS / SKIPPED 天生不落标（**不判红**）
+        out.put("noTagByDesignSamples", noTagByDesignSamples);       // 上面这一档逐条列出来（可见，不进 inconsistent）
         // ── 端点的自身定位（别让读者把它当体检结论）────────────────────────────
         out.put("internalOnly", true);                               // V9 起：口径迁移已暂停，这是内部排障工具
         out.put("internalNote", "口径迁移已暂停（V9 收回了『通过/不通过』标）。本端点仅供排障，"
-                + "不对业务承诺零 gap；离开待审核的单没有结论标是设计如此，计入 noAuditConclusionByDesign。");
+                + "不对业务承诺零 gap；离开待审核的单没有结论标是设计如此，计入 noAuditConclusionByDesign；"
+                + "AUTO_PASS / SKIPPED 天生不落标，计入 noTagByDesign（不判红）。");
         out.put("consistent", scanned - inconsistentTotal);
         out.put("consistencyRate", scanned == 0 ? 1.0
                 : Math.round((scanned - inconsistentTotal) * 10000.0 / scanned) / 10000.0);
@@ -714,19 +751,41 @@ public class AuditQueryService {
      * @return {@code PENDING_TAG_MISSING}（真缺口）/ {@code NO_AUDIT_CONCLUSION}（正常：已离开 7）/
      *         {@code LEGACY_DECISION}（正常：无离开台账、状态也不在 7 ⇒ 证明不了它"该有"结论标）
      */
-    private static String missingConclusionBucket(Map<String, Object> leave, Integer orderStatus) {
+    /**
+     * 「标里没有结论」这一档到底算什么：<b>只有 PENDING_TAG_MISSING 是缺口</b>。
+     *
+     * @param result 这一单的 {@code order_audit_decision.result}，用来先问"这一类结论天生落标吗"
+     */
+    private static String missingConclusionBucket(Map<String, Object> leave, Integer orderStatus, String result) {
         if (leave != null) {
             // 台账里有"离开 7"的记录 ⇒ 结算已经把这个单的结论标解干净了。
             // 是包裹聚合推导（DELIVERY_AGGREGATE）还是人工放行，结果都一样：**没有结论标是对的**。
             return "NO_AUDIT_CONCLUSION";
         }
         if (orderStatus != null && orderStatus == 7) {
-            // 还在待审核、而且进了队列（队列 = 有决策行）⇒ 这一轮判定本该落标却没有 ⇒ 真缺口
-            return "PENDING_TAG_MISSING";
+            // 还在待审核、而且进了队列（队列 = 有决策行）⇒ 正常情况下这一轮判定本该落标。
+            // ⚠️ 但 AUTO_PASS / SKIPPED **天生不落标**（见 ConclusionTags#codeOf）：它们永远补不上，
+            //    旧判据把它们算成缺口 ⇒ 这个数再也回不到 0 ⇒ 端点永久假红（实测 2 行）。
+            //    所以先问 producesTag：不产标 ⇒ 单列 noTagByDesign，不判红。
+            return producesTagFor(result) ? "PENDING_TAG_MISSING" : "NO_TAG_BY_DESIGN";
         }
         // 台账里没有"离开 7"的记录、状态却不在 7：早期没有台账的旧单 / 直接造的数据。
         // 证明不了它"该有"结论标，按历史单处理（判据不知道时不许冤枉数据）。
         return "LEGACY_DECISION";
+    }
+
+    /**
+     * 这一类结论天生落标吗（{@link ConclusionTags#producesTag} 的字符串版）。
+     *
+     * <p><b>判不出来时一律回 {@code true}</b>：result 为空 / 是未来新增的枚举值 —— 这时"没有标"
+     * 仍然可能是真缺口，宁可报红也不替数据开脱（这正是"把 pendingTagMissing 清零"最危险的地方）。
+     */
+    private static boolean producesTagFor(String result) {
+        if (result == null || result.isBlank()) return true;
+        for (AuditResult r : AuditResult.values()) {
+            if (r.name().equals(result.trim())) return ConclusionTags.producesTag(r);
+        }
+        return true;
     }
 
     /** 配对分布里的一格：一眼看出"哪些结论在被标改写" */

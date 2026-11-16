@@ -8,6 +8,7 @@ import com.qiqi.mall.audit.service.AuditExecutor;
 import com.qiqi.mall.audit.service.AuditFreezeReasonService;
 import com.qiqi.mall.audit.service.AuditQueryService;
 import com.qiqi.mall.audit.service.AuditTagCatalogService;
+import com.qiqi.mall.audit.service.ConclusionTagMapping;
 import com.qiqi.mall.audit.service.OrderAuditTagService;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.oms.service.OrderService;
@@ -97,6 +98,26 @@ public class OrderAuditController {
     @GetMapping("/order-audit/queue/conclusion-parity")
     public Result<Map<String, Object>> conclusionParity(@RequestParam(defaultValue = "20") int limit) {
         return Result.ok(queryService.conclusionParity(limit));
+    }
+
+    /**
+     * <b>一次性补标脚本（T4）的只读依赖</b>：把「result → 该落哪个标码」这张表
+     * 从运行中的服务里取出来（映射的唯一出处仍是 {@code ConclusionTags#codeOf}）。
+     *
+     * <h3>为什么让脚本从这里取，而不是自己内嵌一张表</h3>
+     * 补标脚本必须回答"这条决策行该落哪个码"。若它在 JS 里再抄一份映射，两份就会漂：
+     * 引擎改了（V9 就把 AUTO_PASS 的标收回去了），脚本还按老规矩补 —— 补出来的标
+     * 冒充"引擎判过"，比没有标更糟。所以脚本不内嵌映射，只消费本端点（见
+     * {@code ConclusionTagMapping} 的类注释）。
+     *
+     * <p>⚠️ <b>纯只读、无库访问、无副作用</b>，不是业务接口：任何业务方都不该读它。
+     * <p>⚠️ GET ⇒ 按 {@code ApiKeyAuthFilter} 的前缀规则只要 {@code audit:read}；
+     * 它不提供任何写能力，补标本身在脚本里做（不新增"一键补标"的写接口 —— 那会永久多一条
+     * "能批量往单上打标"的路，一次性纠偏不该留下这种门）。
+     */
+    @GetMapping("/order-audit/conclusion-tag-mapping")
+    public Result<Map<String, Object>> conclusionTagMapping() {
+        return Result.ok(ConclusionTagMapping.describe());
     }
 
     /**

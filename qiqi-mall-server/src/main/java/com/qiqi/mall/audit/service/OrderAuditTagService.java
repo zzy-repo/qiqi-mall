@@ -52,6 +52,23 @@ public class OrderAuditTagService {
     /** 人工审核不通过（7→4 已关闭，终局）结算结论标时的解除人：单子已关，结论不必再挂着 */
     public static final String RELEASED_BY_AUDIT_REJECT = "SYSTEM:AUDIT_REJECT";
 
+    /**
+     * 一次性补标的来源标记（T4，2026-11-17）：<b>写在 {@code released_by} 列上</b>。
+     *
+     * <h3>为什么来源标记借用 {@code released_by}</h3>
+     * active 行上这一列本来是空的（还没人解除它），所以"有值 = 这条标不是判定链当场落的"一眼可判；
+     * 事件后查「哪些标是补的」只需 {@code WHERE released_by = 'SYSTEM:BACKFILL_V10'}。
+     * 补标脚本（{@code scripts/backfill-audit-tags.mjs}）用这一个值，{@link ConclusionTagMapping}
+     * 把它连同映射一起发给脚本 —— 字符串只在这一处。
+     *
+     * <h3>⚠️ 它的寿命只到下一次 release</h3>
+     * 这条标将来一旦被互斥（{@code SYSTEM:SUPERSEDED}）或结算（{@code SYSTEM:AUDIT_PASS} …）解除，
+     * {@code release} 会<b>覆盖</b>这一列 —— 于是"它是补的"这件事只剩 {@code reason} 里的
+     * 「补标：依据 run_id=…/decision_id=…」那句可查。所以脚本必须<b>同时</b>把 provenance 写进
+     * {@code reason} 前缀：列会变，reason 不会（release 只动 active / released_at / released_by）。
+     */
+    public static final String RELEASED_BY_BACKFILL = "SYSTEM:BACKFILL_V10";
+
     public static final String TAG_FROZEN = "FROZEN";
     public static final String TAG_STOCK_SHORT = "STOCK_SHORT";
     public static final String TAG_COST_MISSING = "COST_MISSING";
