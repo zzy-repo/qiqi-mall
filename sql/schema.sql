@@ -190,8 +190,8 @@ CREATE TABLE `audit_policy_condition` (
   `kind` enum('MATCH','EXCLUDE') NOT NULL COMMENT 'MATCH=必须满足 / EXCLUDE=命中即排除',
   `scope` enum('POLICY','ALL_AUTO') NOT NULL DEFAULT 'POLICY' COMMENT 'POLICY=本策略级 / ALL_AUTO=全部 AUTO 策略共用（全局排除）',
   `field_code` varchar(48) NOT NULL COMMENT '字段码；**不做 DDL CHECK 闭集**，由 FieldRegistry 校验',
-  `op_code` varchar(24) NOT NULL COMMENT '操作符码；由 OperationRegistry 校验',
-  `value_type` enum('NUM','TEXT','BOOL','JSON') NOT NULL COMMENT '值的类型（决定读哪个 value_* 列）',
+  `op_code` varchar(24) NOT NULL COMMENT '操作符码；闭集在 OpCode（EQ/NE/LT/LTE/GT/GTE/CONTAINS/NOT_CONTAINS/HAS/NOT_HAS/EXISTS/NOT_EXISTS），DDL 刻意不设 CHECK',
+  `value_type` enum('NUM','TEXT','BOOL','JSON','LIST') NOT NULL COMMENT '值的类型（决定读哪个 value_* 列）；LIST = 多值集合（条件值落 value_text 的一个元素码）',
   `value_num` decimal(20,4) DEFAULT NULL COMMENT 'NUM/BOOL 值（BOOL 用 1/0）',
   `value_text` varchar(255) DEFAULT NULL COMMENT 'TEXT 值',
   `value_json` json DEFAULT NULL COMMENT 'JSON 值（预留：IN 列表 / 区间等）',
@@ -201,7 +201,7 @@ CREATE TABLE `audit_policy_condition` (
   CONSTRAINT `fk_audit_policy_condition_policy` FOREIGN KEY (`policy_id`) REFERENCES `audit_policy` (`id`) ON DELETE CASCADE,
   CONSTRAINT `ck_audit_policy_condition_owner` CHECK ((((`scope` = _utf8mb4'POLICY') and (`policy_id` is not null)) or ((`scope` = _utf8mb4'ALL_AUTO') and (`policy_id` is null)))),
   CONSTRAINT `ck_audit_policy_condition_scope_kind` CHECK (((`scope` = _utf8mb4'POLICY') or (`kind` = _utf8mb4'EXCLUDE'))),
-  CONSTRAINT `ck_audit_policy_condition_value` CHECK ((((`value_num` is null) and (`value_text` is null) and (`value_json` is null)) or ((`value_type` = _utf8mb4'NUM') and (`value_num` is not null) and (`value_text` is null) and (`value_json` is null)) or ((`value_type` = _utf8mb4'BOOL') and (`value_num` is not null) and (`value_text` is null) and (`value_json` is null)) or ((`value_type` = _utf8mb4'TEXT') and (`value_text` is not null) and (`value_num` is null) and (`value_json` is null)) or ((`value_type` = _utf8mb4'JSON') and (`value_json` is not null) and (`value_num` is null) and (`value_text` is null))))
+  CONSTRAINT `ck_audit_policy_condition_value` CHECK ((((`value_num` is null) and (`value_text` is null) and (`value_json` is null)) or ((`value_type` = _utf8mb4'NUM') and (`value_num` is not null) and (`value_text` is null) and (`value_json` is null)) or ((`value_type` = _utf8mb4'BOOL') and (`value_num` is not null) and (`value_text` is null) and (`value_json` is null)) or ((`value_type` = _utf8mb4'TEXT') and (`value_text` is not null) and (`value_num` is null) and (`value_json` is null)) or ((`value_type` = _utf8mb4'JSON') and (`value_json` is not null) and (`value_num` is null) and (`value_text` is null)) or ((`value_type` = _utf8mb4'LIST') and (`value_text` is not null) and (`value_num` is null) and (`value_json` is null))))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='审核策略条件（行模型：一条条件一行，不用 JSON 列）';
 
 -- audit_policy_version

@@ -251,10 +251,13 @@ export const AUDIT_TRIGGER_TEXT = { MANUAL: '人工触发', SCHEDULE: '定时调
 export const AUDIT_SEGMENT_TEXT = { DECISION: '决策', STATUS: '状态台账', AUDIT: '操作审计' }
 export const AUDIT_SEGMENT_TAG = { DECISION: 'primary', STATUS: 'success', AUDIT: 'warning' }
 
-/* 操作符：与后端 OpCode 的 symbol 一致（10 个；EXISTS/NOT_EXISTS 不带值） */
+/* 操作符：与后端 OpCode 的 symbol 一致（12 个；EXISTS/NOT_EXISTS 不带值） */
 export const AUDIT_OP_TEXT = {
   EQ: '=', NE: '≠', LT: '<', LTE: '≤', GT: '>', GTE: '≥',
-  CONTAINS: '含', NOT_CONTAINS: '不含', EXISTS: '有值', NOT_EXISTS: '无值'
+  CONTAINS: '含', NOT_CONTAINS: '不含',
+  // 期 2：多值字段（ACTIVE_TAGS，集合语义）专用 —— 是「有标/无标」，不是「文本含/不含」
+  HAS: '有标', NOT_HAS: '无标',
+  EXISTS: '有值', NOT_EXISTS: '无值'
 }
 /** 不带配置值的操作符（值控件要跟着隐藏） */
 export const AUDIT_OP_NO_VALUE = ['EXISTS', 'NOT_EXISTS']

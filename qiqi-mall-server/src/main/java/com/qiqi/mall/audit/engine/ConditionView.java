@@ -47,4 +47,15 @@ public record ConditionView(
         return new ConditionView(null, 0, ConditionKind.EXCLUDE, scope,
                 fieldCode, opCode, ValueType.TEXT, null, text, null);
     }
+
+    /**
+     * 多值（{@link ValueType#LIST}）字段的条件：{@code ACTIVE_TAGS HAS "VIP_CUSTOMER"} 这样一条。
+     *
+     * <p>值是<b>一个元素码</b>（落在 {@code valueText} 上），不是逗号串 —— 集合在字段侧，
+     * 条件侧只问"集合里有没有这一个"（见 {@code ValueType#LIST} 与 {@code ConditionEvaluator#evaluateList}）。
+     */
+    public static ConditionView matchList(String fieldCode, String opCode, String element) {
+        return new ConditionView(null, 0, ConditionKind.MATCH, ConditionScope.POLICY,
+                fieldCode, opCode, ValueType.LIST, null, element, null);
+    }
 }

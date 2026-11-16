@@ -43,7 +43,10 @@ const NO_VALUE_OPS = ['EXISTS', 'NOT_EXISTS']
 /** 操作符符号（与后端 OpCode.symbol 一致）：文案里用 ≤ 而不是 LTE，人一眼看得懂 */
 const OP_SYMBOL = {
   EQ: '=', NE: '≠', LT: '<', LTE: '≤', GT: '>', GTE: '≥',
-  CONTAINS: '含', NOT_CONTAINS: '不含', EXISTS: '有值', NOT_EXISTS: '无值'
+  CONTAINS: '含', NOT_CONTAINS: '不含',
+  // 期 2：多值字段（ACTIVE_TAGS）是**集合包含元素**，不是字符串包含 —— 符号必须是「有标/无标」
+  HAS: '有标', NOT_HAS: '无标',
+  EXISTS: '有值', NOT_EXISTS: '无值'
 }
 const sym = (op) => OP_SYMBOL[String(op || '').toUpperCase()] || String(op || '')
 
@@ -130,6 +133,9 @@ export const compareCondition = (cond, actual, known) => {
     if (op === 'NE') return a !== b
     return null
   }
+  // LIST（多值字段，如 ACTIVE_TAGS）不在前端重算：集合语义（元素相等，不是子串包含）
+  // 只有后端知道该单实际挂着哪些标，前端"猜"就会把 FROZEN_RETURN_APPLY 判成命中 FROZEN
+  if (type === 'LIST') return null
   const a = String(actual ?? '')
   const b = String(cond.valueText ?? '')
   switch (op) {
@@ -149,6 +155,8 @@ const condText = (cond, expected, actual) => {
     case 'NE': return `${label} ≠ ${expected}（实际 ${actual}）`
     case 'CONTAINS': return `${label} 含「${expected}」（实际 ${actual}）`
     case 'NOT_CONTAINS': return `${label} 不含「${expected}」（实际 ${actual}）`
+    case 'HAS': return `${label} 有标「${expected}」（实际 ${actual}）`
+    case 'NOT_HAS': return `${label} 无标「${expected}」（实际 ${actual}）`
     case 'EXISTS': return `${label} 有值（实际 ${actual}）`
     case 'NOT_EXISTS': return `${label} 无值（实际 ${actual}）`
     // 关系比较：把「毛利 −12 ≤ 0」直接写出来，数值差一眼可见

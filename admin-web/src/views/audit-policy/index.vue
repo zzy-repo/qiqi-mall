@@ -305,7 +305,7 @@
                       v-else
                       v-model="c.valueText"
                       size="small"
-                      placeholder="文本（含/不含 按原样比较，% 不是通配符）"
+                      :placeholder="typeOf(c) === 'LIST' ? '标码（精确匹配，不按子串）' : '文本（含/不含 按原样比较，% 不是通配符）'"
                       :data-testid="`cond-value-text-${i}`"
                     />
                   </template>
@@ -432,7 +432,7 @@ const metaError = ref('')
 const policies = ref([])
 const globalExclusions = ref([])
 const fieldsMeta = ref([])
-// 后端给的全量操作符清单（OpCode 10 个）；具体某个字段能用哪些由 fields[].allowedOps 决定，
+// 后端给的全量操作符清单（OpCode 12 个）；具体某个字段能用哪些由 fields[].allowedOps 决定，
 // 这份清单只作为「字段元数据缺失时」的兜底展示来源
 const operators = ref([])
 
@@ -624,6 +624,8 @@ const validate = () => {
     if (needsValue(c)) {
       const t = typeOf(c)
       if (t === 'TEXT' && !String(c.valueText ?? '').trim()) return `第 ${i} 条条件还缺文本值`
+      // LIST（多值字段，如「当前标记」）：必须给出一个标码，空值会被后端拒（HAS 判的是"这一个元素"）
+      if (t === 'LIST' && !String(c.valueText ?? '').trim()) return `第 ${i} 条条件还缺标码`
       if (t === 'NUM' && (c.valueNum === null || c.valueNum === undefined || c.valueNum === '')) return `第 ${i} 条条件还缺数值`
     }
   }

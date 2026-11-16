@@ -227,6 +227,8 @@ final class AuditScenario {
         private String city = "北京市";
         private boolean frozen;
         private String frozenTag;
+        /** 该单当前挂着的标（期 2 的「读标」事实源）；默认空集合 = 一个标都没有，不是"没装配" */
+        private java.util.List<String> tags = java.util.List.of();
 
         private Builder(Long id, String sn, Integer status, String channel, BigDecimal amount) {
             this.id = id;
@@ -304,11 +306,17 @@ final class AuditScenario {
             return this;
         }
 
+        /** 该单挂着的标码（策略条件 ACTIVE_TAGS HAS/NOT_HAS 读它） */
+        Builder tags(String... codes) {
+            this.tags = java.util.List.of(codes);
+            return this;
+        }
+
         AuditContext build() {
             return new AuditContext(id, sn, status, channel, "官方旗舰店", amount, grossProfit, customerTag,
                     csRemark, platformRemark, platformRemarkUpdatedAt, hasReturnApply, addressMulti,
                     stockAvailable, skuStockCache, itemKinds, itemQty, costMissing, payTime, city,
-                    "北京市朝阳区xx路1号", frozen, frozenTag, NOW);
+                    "北京市朝阳区xx路1号", frozen, frozenTag, tags, NOW);
         }
     }
 }

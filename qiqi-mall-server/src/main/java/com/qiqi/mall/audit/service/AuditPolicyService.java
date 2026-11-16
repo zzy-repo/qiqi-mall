@@ -65,19 +65,23 @@ public class AuditPolicyService {
     private final ObjectMapper json;
     /** 冻结原因字典：校验 action_json 里的 reason_code 是不是真的存在 */
     private final AuditFreezeReasonService freezeReasonService;
+    /** 标目录：校验 {@code ACTIVE_TAGS} 的条件只引用「特征」标（结论标在保存时拒掉，见 {@link #validateTagReference}） */
+    private final AuditTagCatalogService tagCatalogService;
 
     public AuditPolicyService(AuditPolicyMapper policyMapper,
                               AuditPolicyConditionMapper conditionMapper,
                               AuditPolicyVersionMapper versionMapper,
                               AdminAuditWriter auditWriter,
                               ObjectMapper json,
-                              AuditFreezeReasonService freezeReasonService) {
+                              AuditFreezeReasonService freezeReasonService,
+                              AuditTagCatalogService tagCatalogService) {
         this.policyMapper = policyMapper;
         this.conditionMapper = conditionMapper;
         this.versionMapper = versionMapper;
         this.auditWriter = auditWriter;
         this.json = json;
         this.freezeReasonService = freezeReasonService;
+        this.tagCatalogService = tagCatalogService;
     }
 
     // ================================================================== 读
@@ -299,6 +303,9 @@ public class AuditPolicyService {
         if (def.type() == ValueType.JSON) {
             throw new IllegalArgumentException("字段 " + def.code() + " 暂不支持配置");
         }
+        // 期 2 步骤 1 口径①：ACTIVE_TAGS 只许引用「特征」标（结论标在这里被拒掉）。
+        // 放在求值探针之前 —— 结论标不是"求值会失败"，而是"这条策略根本不该存在"，报错要直说原因。
+        validateTagReference(def, req.valueText());
         // 用求值器「空跑」一次做类型相容与值完整性校验：与判定时完全同一套规则，不会出现
         // 「保存时通过、判定时抛异常」的两套口径
         AuditPolicyCondition probeRow = new AuditPolicyCondition();
@@ -320,16 +327,74 @@ public class AuditPolicyService {
         row.setFieldCode(def.code());
         row.setOpCode(op.name());
         row.setValueType(def.type().name());
-        row.setValueNum(def.type() == ValueType.TEXT ? null : req.valueNum());
-        row.setValueText(def.type() == ValueType.TEXT ? req.valueText() : null);
+        // 值落在哪一列由字段类型决定（DDL 的 ck_audit_policy_condition_value 钉住这个对应关系）：
+        // TEXT / LIST → value_text；NUM / BOOL → value_num。写错列会被 CHECK 拒掉，
+        // 但那时报的是一句 MySQL 的约束错误，没人看得懂，所以这里先把口径摆正。
+        row.setValueNum(storeNum(def.type()) ? req.valueNum() : null);
+        row.setValueText(storeText(def.type()) ? req.valueText() : null);
         row.setValueJson(null);
         conditionMapper.insert(row);
     }
 
-    /** 校验用的空上下文：所有字段都是「无值」，只用来触发类型/值完整性检查 */
+    /** 该类型的条件值存在 {@code value_num} 上 */
+    private static boolean storeNum(ValueType type) {
+        return type == ValueType.NUM || type == ValueType.BOOL;
+    }
+
+    /** 该类型的条件值存在 {@code value_text} 上（多值字段的条件值是"一个元素码"，也在这一列） */
+    private static boolean storeText(ValueType type) {
+        return type == ValueType.TEXT || type == ValueType.LIST;
+    }
+
+    /**
+     * 读标条件的守门（期 2 步骤 1 口径①）：{@code ACTIVE_TAGS} 只允许引用 {@code category='特征'} 的标。
+     *
+     * <h3>为什么结论标必须在这里拒绝，而不是在判定时忽略</h3>
+     * 标是在<b>判定之后</b>才落库的。所以「策略 A 打标 → 策略 B 读标」只能等下一轮 ——
+     * 这是<b>轮间传送带</b>，不是链内数据流。引用结论标（BLOCKED / FROZEN / STOCK_SHORT /
+     * NO_POLICY_MATCH…）等于拿<b>上一轮判定的照片</b>做这一轮的决定：
+     * <ul>
+     *   <li>语义上是自相矛盾：这一轮的结论还没出来，条件却在读"这一轮的结论"；</li>
+     *   <li>实际后果是策略之间出现<b>隐性依赖</b>：谁先跑、上一轮谁命中，悄悄改变了这一轮的结果，
+     *       而证据里只看到「读标条件不满足/满足」，看不出它是上一轮的残留；</li>
+     *   <li>它会随「上一轮有没有跑」而变 —— 同一份数据跑两次能得到两种结论，
+     *       正好是「不在流程开头一次算全」忌讳的另一面（拿旧结果当输入）。</li>
+     * </ul>
+     * 判「结论档」的依据是标目录（{@code audit_tag_catalog.category}），而不是代码里枚举几个码：
+     * 将来加一类结论标只改字典，不用回来改这段校验。另外 {@code FROZEN} 前缀也算结论档 ——
+     * 冻结类标是判定的产物，且按前缀识别（{@code FROZEN_RETURN_APPLY} 这种细分未必登记在目录里）。
+     *
+     * <p>目录里<b>查不到</b>的标码不拒（那条纪律见 {@code AuditTagCatalog}：标码允许先落库、目录后补），
+     * 只有<b>明确登记为结论</b>的才拒 —— 否则期 1.6 的特征标还没登记就配不了策略。
+     */
+    private void validateTagReference(FieldRegistry.FieldDef def, String rawCode) {
+        if (!FieldRegistry.ACTIVE_TAGS.equals(def.code())) return;
+        if (rawCode == null || rawCode.isBlank()) return;   // 值完整性由求值探针报（必须配标码）
+        String code = rawCode.trim();
+        // 前缀判定大小写不敏感：冻结类的识别口径与判定链第 2 步一致（那边等价于 LIKE 'FROZEN%' 的 ci 比较），
+        // 两端用同一把尺子，才不会出现"配置放过、运行期按冻结处理"的错位
+        if (code.regionMatches(true, 0, "FROZEN", 0, "FROZEN".length())) {
+            throw new IllegalArgumentException("「" + def.label() + "」只能引用「特征」类的标，不能引用冻结标「"
+                    + code + "」：冻结是判定链第 2 步的产物（结论档），引用它等于拿上一轮的照片做这一轮的决定");
+        }
+        if (tagCatalogService.isConclusion(code)) {
+            String name = tagCatalogService.nameOf(code);
+            throw new IllegalArgumentException("「" + def.label() + "」只能引用「特征」类的标，不能引用结论标「"
+                    + code + "」（" + name + "）：标是判定**之后**才落库的，引用结论标等于拿上一轮的照片做这一轮的决定"
+                    + " —— 特征标（客诉客户 / 双地址 / 平台旗帜…）才是可以跨策略传递的那一类");
+        }
+    }
+
+    /**
+     * 校验用的空上下文：所有字段都是「无值」，只用来触发类型/值完整性检查。
+     *
+     * <p>⚠️ {@code activeTags} 必须传<b>空集合</b>（{@code List.of()}），不是 {@code null}：
+     * null 表示"没装配"，求值器对它会抛异常（口径③），那样一条合法的读标条件在保存时就被打回来了。
+     */
     private static com.qiqi.mall.audit.engine.AuditContext blankContext() {
         return new com.qiqi.mall.audit.engine.AuditContext(0L, "PROBE", 7, null, null, null, null, null, null,
-                null, null, false, false, 0, 0, 0, 0, false, null, null, null, false, null, LocalDateTime.now());
+                null, null, false, false, 0, 0, 0, 0, false, null, null, null, false, null, List.of(),
+                LocalDateTime.now());
     }
 
     private void validateAction(PolicyType type, PolicyRequest req) {
@@ -464,6 +529,8 @@ public class AuditPolicyService {
             case NUM -> "EQ,NE,LT,LTE,GT,GTE,EXISTS,NOT_EXISTS";
             case BOOL -> "EQ,NE,EXISTS,NOT_EXISTS";
             case TEXT -> "EQ,NE,CONTAINS,NOT_CONTAINS,EXISTS,NOT_EXISTS";
+            // 多值字段：集合语义的两个操作符（CONTAINS 是子串语义，在这里是错的，不给）
+            case LIST -> "HAS,NOT_HAS,EXISTS,NOT_EXISTS";
             case JSON -> "";
         };
     }

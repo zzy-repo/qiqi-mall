@@ -2,6 +2,7 @@ package com.qiqi.mall.audit.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.qiqi.mall.audit.engine.AuditContext;
+import com.qiqi.mall.audit.entity.OrderAuditTag;
 import com.qiqi.mall.audit.mapper.OrderAuditTagMapper;
 import com.qiqi.mall.catalog.entity.Sku;
 import com.qiqi.mall.catalog.mapper.SkuMapper;
@@ -29,7 +30,7 @@ import java.util.Map;
  * <p>装配是执行层（可以查库），判定是引擎（纯函数）。分开的好处是：所有「这单的可用库存是多少」
  * 这类**容易查错**的代码集中在一处，引擎单测可以完全绕开它。
  *
- * <h3>三个关键取数口径</h3>
+ * <h3>四个关键取数口径</h3>
  * <ol>
  *   <li><b>可用库存 = SUM(sku_bucket.stock)</b>，不是 {@code sku.stock}。
  *       {@code sku.stock} 只是展示缓存，允许滞后；拿它裁决会出现「页面显示 999 所以放行，
@@ -39,6 +40,11 @@ import java.util.Map;
  *   <li><b>成本价</b>：优先下单快照 {@code order_item.cost_price}，缺失才回落到 {@code sku.cost_price}。
  *       两处都没有（=0/NULL）才算 {@code costMissing} —— 否则新加的成本列会让所有历史单瞬间变成
  *       COST_MISSING，把真正「没维护成本」的单淹掉。</li>
+ *   <li><b>标（期 2 步骤 1）</b>：一次 {@code selectActive} 取全该单 active 标，同时喂两个组件 ——
+ *       {@code activeTags}（「读标」用，策略条件 {@code ACTIVE_TAGS HAS/NOT_HAS} 的事实源）与
+ *       {@code frozen/frozenTag}（判定链第 2 步的冻结短路，见 {@link #frozenOf}）。
+ *       只有一次查询、同一批行，所以"冻结短路"与"读标"看到的是同一时刻的照片，不会互相打脸。</li>
+
  * </ol>
  */
 @Component
@@ -105,7 +111,19 @@ public class AuditContextLoader {
         if (stockAvailable == Integer.MAX_VALUE) stockAvailable = 0;
 
         Member member = order.getMemberId() == null ? null : memberMapper.selectById(order.getMemberId());
-        var frozen = tagMapper.selectActiveFrozen(order.getId());
+
+        // ---------------- 标：一次取全，两个用途 ----------------
+        // 期 2 步骤 1 之前这里只取 selectActiveFrozen（一条 FROZEN 标）。现在多取两件事，
+        // 但**仍然只有一次查询**，而且"冻结短路"的判据与原来逐字同口径 —— 见下面的 frozenOf()。
+        List<OrderAuditTag> activeTags = tagMapper.selectActive(order.getId());
+        OrderAuditTag frozen = frozenOf(activeTags);
+        // 该单当前挂着的全部标码（"读标"的事实源；顺序 = selectActive 的 id 升序，可复现）
+        // ⚠️ 空集合（这张单一个标都没有）与 null（没装配）是两件不同的事：
+        //    这里永远传不可变集合，绝不用 null 表示"没有标"。
+        List<String> activeTagCodes = activeTags.stream()
+                .map(OrderAuditTag::getTagCode)
+                .filter(code -> code != null && !code.isBlank())
+                .toList();
 
         return new AuditContext(
                 order.getId(),
@@ -131,7 +149,40 @@ public class AuditContextLoader {
                 order.getReceiverAddress(),
                 frozen != null,
                 frozen == null ? null : frozen.getTagCode(),
+                activeTagCodes,
                 now);
+    }
+
+    /**
+     * 冻结判定：从**同一批** active 标里挑出第一条 {@code FROZEN} 类标（{@code tag_code} 以
+     * {@code FROZEN} 开头，允许 {@code FROZEN_RETURN_APPLY} 这种细分）。
+     *
+     * <h3>为什么要写成方法，而不是"顺手把 selectActiveFrozen 换成 selectActive 就完了"</h3>
+     * 判定链第 2 步（{@code AuditEngine#evaluate} 的 {@code if (ctx.frozen())} → SKIPPED）
+     * 压在 {@code frozen/frozenTag} 这两个组件上。原来它由 {@code selectActiveFrozen} 直接给，
+     * 那条 SQL 是 {@code ... AND tag_code LIKE 'FROZEN%' ORDER BY id ASC LIMIT 1}。
+     * 换成 {@code selectActive}（全部 active 标）之后，必须在 Java 侧**逐字重现那个筛选**：
+     * <ul>
+     *   <li>同一批行：{@code active=1} 全集（原来那条 SQL 是它的子集）；</li>
+     *   <li>同一个筛选条件：{@code tag_code} 以 {@code FROZEN} 开头，且<b>大小写不敏感</b> ——
+     *       老 SQL 的 {@code LIKE 'FROZEN%'} 跑在 {@code utf8mb4_0900_ai_ci} 下本来就不区分大小写，
+     *       所以这里用 {@code regionMatches(true, ...)} 而不是 {@code startsWith}。
+     *       现有库里全部标码都是大写（实测 qiqi_mall_test / e2e_a / e2e_b），两种写法今天结果相同；
+     *       但只要有人手工写进一条 {@code frozen_xxx}，{@code startsWith} 就会让它<b>不再冻结</b>（
+     *       单子被当成正常单判定），而 {@code regionMatches} 与改动前逐字一致。宁可多一次比较，
+     *       也不要留一条"只有大小写不规范的脏数据才踩到"的行为差异；</li>
+     *   <li>同一个"第一条"：{@code ORDER BY id ASC LIMIT 1} ⇒ 取列表里第一条（selectActive 同样按 id 升序）。</li>
+     * </ul>
+     * 等价性由 {@code AuditTagConditionTest} 的"冻结短路不被读标改动破坏"用例钉住：
+     * 一单同时挂 FROZEN 与别的特征标时仍 SKIPPED，且 {@code frozen_tag} 仍是那条 FROZEN。
+     */
+    private static OrderAuditTag frozenOf(List<OrderAuditTag> activeTags) {
+        for (OrderAuditTag tag : activeTags) {
+            String code = tag.getTagCode();
+            // 与老 SQL 的 LIKE 'FROZEN%'（utf8mb4_0900_ai_ci，大小写不敏感）逐字等价
+            if (code != null && code.regionMatches(true, 0, "FROZEN", 0, "FROZEN".length())) return tag;
+        }
+        return null;
     }
 
     /** 待处理（status=0）的退货/退款申请：异常策略的触发事实 */

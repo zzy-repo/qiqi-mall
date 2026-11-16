@@ -324,14 +324,19 @@ export const toConditionRequest = (c, { kind, scope } = {}) => {
   const op = String(c.opCode || '').toUpperCase()
   const needsValue = op !== 'EXISTS' && op !== 'NOT_EXISTS'
   const valueType = String(c.valueType || 'TEXT').toUpperCase()
+  // 值的落点必须与后端 ck_audit_policy_condition_value 一致：
+  // NUM/BOOL → value_num；TEXT/**LIST** → value_text。
+  // LIST = 多值字段（期 2 的 ACTIVE_TAGS），条件值是「一个元素码」，与 TEXT 同一列 ——
+  // 漏掉这一档会让「当前标记 有标 VIP_CUSTOMER」这条条件在提交时丢掉标码。
+  const textColumn = valueType === 'TEXT' || valueType === 'LIST'
   return {
     kind: kind || c.kind || 'MATCH',
     scope: scope || c.scope || 'POLICY',
     fieldCode: c.fieldCode,
     opCode: op,
     valueType,
-    valueNum: !needsValue || valueType === 'TEXT' ? null : Number(c.valueNum ?? 0),
-    valueText: !needsValue || valueType === 'TEXT' ? (needsValue ? String(c.valueText ?? '') : null) : null,
+    valueNum: !needsValue || textColumn ? null : Number(c.valueNum ?? 0),
+    valueText: !needsValue ? null : (textColumn ? String(c.valueText ?? '') : null),
     valueJson: null
   }
 }
