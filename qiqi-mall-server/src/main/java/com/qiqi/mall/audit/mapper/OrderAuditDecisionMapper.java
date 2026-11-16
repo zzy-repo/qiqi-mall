@@ -107,12 +107,27 @@ public interface OrderAuditDecisionMapper extends BaseMapper<OrderAuditDecision>
     List<Map<String, Object>> selectQueue(@Param("result") String result, @Param("tag") String tag,
                                           @Param("offset") int offset, @Param("limit") int limit);
 
+    /**
+     * {@link #selectQueue} 的计数口径 —— <b>必须与它逐条同构</b>（同一个 FROM/JOIN、同一组 where）。
+     *
+     * <h3>为什么这里也非得 JOIN {@code order}</h3>
+     * 决策台账<b>刻意不建指向 {@code order} 的外键</b>（V1：「证据不随订单级联删除」），
+     * 所以「订单已删、决策行还在」的<b>孤儿行</b>是合法数据。曾有一版 countQueue 少了这个 JOIN：
+     * <pre>
+     *   selectQueue: … FROM order_audit_decision d JOIN `order` o ON o.id = d.order_id  ⇒ 孤儿行不在 rows 里
+     *   countQueue : … FROM order_audit_decision d（无 JOIN）                          ⇒ 孤儿行被算进 total
+     *   ⇒ total &gt; 行数，分页器多出一页空白（dev 库实测 total=4 / rows=2）
+     * </pre>
+     * 修的时候只补 JOIN 是不够的：{@code result} 与 {@code tag} 两条 {@code <if>} 也必须与 selectQueue
+     * <b>逐条一致</b>（{@code tag} 走 EXISTS 而不是 JOIN —— 一单多标时 JOIN 会把行复制成多行，那又是一种口径漂移）。
+     * 这条不变量由 {@code AuditQueueCountParityIntegrationTest} 用「造一条孤儿行」钉住，别再靠删库里那几行治症状。
+     */
     @Select("<script>"
-            + "SELECT COUNT(*) FROM order_audit_decision d "
+            + "SELECT COUNT(*) FROM order_audit_decision d JOIN `order` o ON o.id = d.order_id "
             + "WHERE d.id IN (SELECT MAX(id) FROM order_audit_decision GROUP BY order_id) "
-            + "<if test='result != null and result != \"\"'> AND d.result = #{result}</if>"
             + "<if test='tag != null and tag != \"\"'> AND EXISTS (SELECT 1 FROM order_audit_tag ft "
-            + "     WHERE ft.order_id = d.order_id AND ft.active = 1 AND ft.tag_code = #{tag})</if>"
+            + "     WHERE ft.order_id = d.order_id AND ft.active = 1 AND ft.tag_code = #{tag})</if> "
+            + "<if test='result != null and result != \"\"'> AND d.result = #{result}</if>"
             + "</script>")
     long countQueue(@Param("result") String result, @Param("tag") String tag);
 
