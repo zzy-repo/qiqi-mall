@@ -133,7 +133,7 @@
           <!-- 单元格里是**两个独立事实**，所以上下两枚而不是挤成一枚：
                  · 上：判定徽标 = 引擎这一轮判了什么（result，历史结论，冻/解冻都不改写它）；
                  · 下：冻结标记 = 这单**现在**有没有 active 的冻结标（frozen，来自标表）。
-               人工冻的单没有新决策行（result 仍是 MANUAL / NO_MATCH / BLOCKED…），
+               人工冻的单没有新判定记录（result 仍是 MANUAL / NO_MATCH / BLOCKED…），
                以前只有上面那枚 → 队列里根本看不出它冻着；现在靠下面这枚。
                为什么不开新列：这张表 10 列已经 1647px 顶满（见 playwright.config.js 的 1960 画幅推导），
                加一列就要横向滚动，「原因」列会被挤出画面 —— 把标记叠进判定列既省宽又语义相邻。 -->
@@ -270,9 +270,9 @@
           </el-button>
           <!-- 冻结 / 解冻：判据是 **frozen（标表事实）**，不是 result（引擎结论）。
                —— 2026-11-16 修的就是这里：原来写的是 row.result === 'FROZEN'，
-               而人工冻结**不产生新决策行**，result 仍是 MANUAL/NO_MATCH/… ⇒ 人工冻的单
+               而人工冻结**不产生新判定记录**，result 仍是 MANUAL/NO_MATCH/… ⇒ 人工冻的单
                永远显示「冻结」按钮，解冻只能拿 curl 去救。
-               反向也一样成立：策略冻的单解冻后 result 还是 FROZEN（决策行不该被改写），
+               反向也一样成立：策略冻的单解冻后 result 还是 FROZEN（判定记录不该被改写），
                但标已经放了 ⇒ 这里必须显示「冻结」（否则点下去后端会报「当前没有被冻结」）。 -->
           <el-button
             v-if="row.frozen"
@@ -402,14 +402,14 @@
           </el-text>
         </div>
 
-        <!-- 老行没有 layers（本期之前落的决策行 / 后端未回传）时保持原样：直接给引擎原话 -->
+        <!-- 老行没有 layers（本期之前落的判定记录 / 后端未回传）时保持原样：直接给引擎原话 -->
         <el-alert v-if="!explainLayers" class="why-reason" type="info" :closable="false" :title="whyRow.reason || '后端未回传原因'" />
 
         <div class="why-meta">
           <span>应收 {{ money(whyRow.totalAmount) }}</span>
           <span>商品种类数 {{ whyRow.itemKindCount ?? '—' }}</span>
           <span>毛利 {{ money(whyRow.grossProfit) }}</span>
-          <span>第 {{ whyRow.roundNo ?? '—' }} 轮</span>
+          <span>第 {{ whyRow.roundNo ?? '—' }} 轮判定记录</span>
           <el-tag size="small" :type="whySource === 'BACKEND' ? 'success' : 'info'" effect="plain" data-testid="audit-why-source">
             {{ whySource === 'BACKEND' ? '结论取自后端留痕' : '本地对照（队列未回传条件留痕）' }}
           </el-tag>
@@ -739,6 +739,19 @@
 </template>
 
 <script setup>
+/**
+ * 术语口径（T6）：`order_audit_decision` 这张表在业务口径里的一行叫「判定记录」—
+ * 抽屉说明 / 字段标签 / 提示语一律写「判定记录」，屏幕上不再出现原来那个内部叫法。
+ *
+ * 代码标识符**保持 decision 不动**（表名 order_audit_decision、OrderAuditDecisionMapper、
+ * decisionMapper、roundNo…）：decision 是 DMN 的标准词，标识符没起错，改它只会制造
+ * 一份无意义的 diff。所以：屏幕上说「判定记录」，代码里写 decision —— 两边指同一件事，
+ * 别为了「统一」去全仓替换标识符。
+ *
+ * 唯一没动的一处可见文案：抽屉里那枚 `audit-why-source` chip 仍是「结论取自后端留痕」——
+ * e2e 里两条**现成断言**逐字钉着它（判定链与四结局-不命中 / 自动过审），而本期约定
+ * 「不改任何现成 spec 断言」。为一个词去改测试不是这笔交易要的东西，故让步。
+ */
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -960,7 +973,7 @@ const reasonHead = (row) => {
  * 同样是运营当场要读的那句话，不必前端再分一套分支去拼。
  *
  * <h3>没有 layers 时为什么宁可不显示</h3>
- * 老决策行（本期之前落的）/ 后端未回传时 {@code layers} 为 null。这时前端手里没有任何「哪条最接近」
+ * 老判定记录（本期之前落的）/ 后端未回传时 {@code layers} 为 null。这时前端手里没有任何「哪条最接近」
  * 的判定口径，去猜就等于把「最像哪条」变成页面算的（第二份实现）。宁可少一行，也不编一句。
  *
  * @param {object} row 队列行（已由 mapQueueRow 透传 layers）
@@ -1200,7 +1213,7 @@ const openWhy = (row) => {
  * 而这种不一致不报错、只让人误解。后端 {@code AuditExplainLayers} 的 12 条单测 + 组装器单测
  * 锁着这份口径，前端不许复制一份。
  *
- * <p>老行（本期之前落的决策行）没有这个字段 ⇒ {@code null}，页面退回改造前的单层渲染（不倒退、不空白）。
+ * <p>老行（本期之前落的判定记录）没有这个字段 ⇒ {@code null}，页面退回改造前的单层渲染（不倒退、不空白）。
  */
 const explainLayers = computed(() => whyRow.value?.layers || null)
 
