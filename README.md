@@ -126,6 +126,41 @@ docker compose down               # 停止
 
 两套可同时运行，端口互不冲突。Tailscale 组网内可用 `http://100.113.135.55:<端口>` 访问。
 
+## 前端静态资源上 CDN（`scripts/upload-web-assets.sh`）
+
+前端产物（`assets/*.js|css`）由 `scripts/upload-web-assets.sh` 同步到 OSS，再经 `cdn.rose7.cn` 对外提供；
+`index.html` **永远不上 CDN**（必须由容器提供，否则发版就变成刷 CDN 缓存）。默认是 plan（只比对不写），
+写操作必须显式 `--apply`。
+
+### 上传前门禁（2026-11-16 新增，四道，任一不过即拒绝 + `exit 非 0`）
+
+| 门 | 判据 | 拦下的事故形态 |
+|---|---|---|
+| ① 基址门 | `<dist>/index.html` 里 `src=`/`href=` 至少有一处是 `http(s)://cdn.rose7.cn/…` 的**绝对 URL** | 构建时没传 `CDN_BASE` ⇒ 引用 `/assets/…` 相对路径 ⇒ 传上去是**线上永不引用的孤儿对象**（不白屏、不报错、监控全绿，只是 CDN 白建了、回源压力全落回容器 —— 2026-11-15 19:30 事故原样） |
+| ② 身份门 | 产物必含本 app 特征且不含另一个：`admin-web ⇔ qiqi_admin_token`、`portal-web ⇔ qiqi_member_token`（互斥，来自 `src/utils/auth.js` 的登录令牌键） | admin/portal 张冠李戴（`--dist` 指到了另一侧的产物） |
+| ③ 前缀门 | 从 `index.html` 绝对 URL 反解构建基址（如 `…/qiqi-mall-v111/admin-web/`），必须等于本次 `<OSS_PREFIX>/<app>` | 「传上去了，但页面指向另一个前缀」（先建 v111 镜像、又用默认前缀上传） |
+| ④ 引用完整性 | `index.html` 指到的本地静态文件必须真在 dist 里 | `index.html` 与 `assets/` 不是同一次构建（混装）⇒ 传上去 404 白屏 |
+
+门禁全部通过时脚本会逐条打印 `✅ 基址门 / 身份门 / 前缀门 / 引用完整性`；拒绝时把**原因 + 修复办法**打到 stderr。
+
+### 正确姿势（发 CDN 版）
+
+```bash
+# A) 带前缀重建（前缀必须带结尾斜杠），再从镜像里取产物
+ADMIN_CDN_BASE=https://cdn.rose7.cn/qiqi-mall-v111/admin-web/ docker compose build admin-web
+docker cp qiqi-admin-web:/usr/share/nginx/html /tmp/dist116/admin
+OSS_PREFIX=qiqi-mall-v111 scripts/upload-web-assets.sh --dist /tmp/dist116/admin admin-web --apply
+
+# B) 自托管版本（相对路径）确实要传：显式绕过，会打醒目警告并写审计日志
+scripts/upload-web-assets.sh --allow-relative admin-web --apply
+#   审计默认落 /var/log/qiqi-cdn-upload-audit.log（AUDIT_LOG 可覆盖）
+```
+
+> 注意：`scripts/publish.sh` 的 `build_frontend` 只传 `--build-arg BUILD_MODE`，**不带 `CDN_BASE`**，
+> 所以它建出的 `qiqi-admin-web:$VER` / `qiqi-portal-web:$VER` 镜像里 `index.html` 是相对路径（容器自托管，属正常）。
+> 直接从这种镜像 `docker cp` 出来发 CDN 会被①拦住 —— 这不是误伤，它正是事故形态；发 CDN 必须按上面 A) 的方式带前缀重建。
+> 另外 `publish.sh` 本身**不调用**本脚本（它只发文档站），所以新门禁不影响既有发布流程。
+
 ## 鉴权与接口分流
 
 同一个后端进程，按 URL 前缀分两条独立的 Spring Security 过滤器链：

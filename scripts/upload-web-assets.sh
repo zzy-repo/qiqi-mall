@@ -11,6 +11,7 @@
 #   scripts/upload-web-assets.sh portal-web --apply    # 只处理一个（portal-web | admin-web）
 #   scripts/upload-web-assets.sh --verify              # 只做 CDN 侧 HEAD 自检（不碰 OSS）
 #   scripts/upload-web-assets.sh --dist /tmp/b portal-web --apply   # 指定构建目录（本地验证用）
+#   scripts/upload-web-assets.sh --allow-relative --apply           # ★危险：放行"相对路径"dist（打警告 + 记审计）
 #
 #   环境变量
 #     CDN_HOST=https://cdn.rose7.cn     CDN 域名（verify 用）
@@ -50,6 +51,30 @@
 #      浏览器对 module script 的 MIME 校验很严（text/html / octet-stream 直接拒绝执行）。
 #
 # -----------------------------------------------------------------------------
+# ★ 上传前门禁（防错门）：让"白建 CDN"这类不报错的事故变成不可能
+# -----------------------------------------------------------------------------
+#   2026-11-15 19:30 事故：有人执行 `scripts/upload-web-assets.sh admin-web --apply`，
+#   脚本默认读仓库里的 admin-web/dist —— 那是当天一次**没带 CDN_BASE** 的本地构建，
+#   index.html 引用 /assets/…（相对路径）。结果往 CDN 写了 60 个**线上永远不会引用**的
+#   孤儿对象：不白屏、不报错、监控全绿，只是 CDN 白建了、回源压力全落回容器。
+#
+#   所以上传前先过三道门（全部通过才允许写 OSS，任何一道不过 → 拒绝 + exit 非 0）：
+#     ① 基址门：<dist>/index.html 里必须有 src=/href= 的 http(s) 绝对 URL，且 host 就是
+#               $CDN_HOST 的域名（默认 cdn.rose7.cn）。全是相对路径 ⇒ 构建时没传 CDN_BASE ⇒ 拒绝。
+#     ② 身份门：产物里必须带本 app 的构建特征，且**不含**另一个 app 的特征
+#               （admin-web ⇔ qiqi_admin_token，portal-web ⇔ qiqi_member_token，二者互斥，
+#                来自 src/utils/auth.js 的登录令牌键，构建无关、语义明确，不靠"看起来像"）。
+#               传 admin-web 却拿到 portal 的产物（或反之）⇒ 拒绝。
+#     ③ 前缀门：从 index.html 绝对 URL 反解出构建基址（如 …/qiqi-mall-v111/admin-web/），
+#               必须等于本次 <OSS_PREFIX>/<app>。不一致 ⇒ 拒绝并打印两者
+#               （否则会出现"传上去了，但页面指向另一个前缀"，同样是孤儿对象）。
+#     附：引用完整性 —— index.html 指到的本地文件必须真在 dist 里，防"index 与 assets 混装"
+#               （混装传上去就是 404 白屏）。
+#
+#   显式绕过：--allow-relative 只跳过①与③（给"我就是想发一份自托管版本"的极端情况），
+#   绕过时打印醒目警告并写一行审计（默认 /var/log/qiqi-cdn-upload-audit.log，可用 AUDIT_LOG 覆盖）。
+#
+# -----------------------------------------------------------------------------
 # ★ 红线：永远不要对 qiqi-mall-static 跑 upload-web-assets.sh --prune
 # -----------------------------------------------------------------------------
 #   原因：nginx 对 /assets/ 的兜底是 302 到 CDN，而边缘 Caddy 会给这条 302 也加
@@ -76,10 +101,11 @@ CDN_HOST="${CDN_HOST:-https://cdn.rose7.cn}"
 # 预热/自检时一律带这个 Origin 头。★不要改成本机 curl 默认（= 不带 Origin），原因见【CORS 事故】节
 CDN_ORIGIN="${CDN_ORIGIN:-https://admin.rose7.cn}"
 
-APPLY=0; PRUNE=0; VERIFY=0; DIST_OVERRIDE=""
+APPLY=0; PRUNE=0; VERIFY=0; DIST_OVERRIDE=""; ALLOW_RELATIVE=0
+RELATIVE_BYPASSED=0      # 本次是否有 app 走了 --allow-relative（门禁 bypass 留痕用）
 APPS=()
 
-usage() { sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -87,6 +113,7 @@ while [ $# -gt 0 ]; do
     --plan)   APPLY=0 ;;
     --prune)  PRUNE=1 ;;
     --verify) VERIFY=1 ;;
+    --allow-relative) ALLOW_RELATIVE=1 ;;
     --dist)   DIST_OVERRIDE="${2:?--dist 需要目录}"; shift ;;
     -h|--help) usage; exit 0 ;;
     portal-web|admin-web) APPS+=("$1") ;;
@@ -106,6 +133,239 @@ dist_for() {
 }
 prefix_for() { printf '%s/%s' "$OSS_PREFIX" "$1"; }
 
+# =============================================================================
+# 上传前门禁（防错门）—— 见文件头【★ 上传前门禁】节
+#   全部只读本地文件：不联网、不碰 OSS、不改任何东西，可以在 plan 模式随便跑。
+# =============================================================================
+CDN_HOST_ONLY="${CDN_HOST#*://}"; CDN_HOST_ONLY="${CDN_HOST_ONLY%%/*}"
+
+# 审计留痕：门禁被绕过（--allow-relative）这种事必须留痕，否则又是一次"没人知道发生过"
+audit_log() {
+  local line f
+  line="$(date '+%F %T') $*"
+  printf 'AUDIT │ %s\n' "$line" >&2
+  f="${AUDIT_LOG:-/var/log/qiqi-cdn-upload-audit.log}"
+  printf '%s\n' "$line" >>"$f" 2>/dev/null \
+    || printf 'AUDIT │ （审计文件 %s 不可写，本行只留在输出里）\n' "$f" >&2
+}
+
+# index.html 里所有 src=/href= 的取值（一行一个，已去引号）。覆盖 "x" / 'x' / x 三种写法
+html_refs() {
+  grep -oE "(src|href)[[:space:]]*=[[:space:]]*(\"[^\"]*\"|'[^']*'|[^\"'[:space:]<>]+)" "$1" 2>/dev/null \
+    | sed -E "s/^[A-Za-z]+[[:space:]]*=[[:space:]]*//" \
+    | sed -E "s/^\"(.*)\"$/\1/; s/^'(.*)'$/\1/" || true
+}
+
+ref_host() { local u="${1#*://}"; printf '%s' "${u%%/*}"; }   # http(s)://h/p → h
+
+ref_dir() {  # http(s)://h/a/b/x.js?q#f → a/b（根目录 → 空串）
+  local u="${1#*://}"
+  u="${u%%#*}"; u="${u%%\?*}"
+  case "$u" in
+    */*) u="${u#*/}"
+         case "$u" in */*) printf '%s' "${u%/*}" ;; *) printf '' ;; esac ;;
+    *)   printf '' ;;
+  esac
+}
+
+# gate_check_dist <app> <dist> <prefix>：全过 → 返回 0（放行）；任何一道不过 → 原因打 stderr，返回 1
+gate_check_dist() {
+  local app=$1 dist=$2 prefix=$3
+  local idx="$dist/index.html"
+  local r h b x dup b0 pnorm
+  local -a all_refs=() cdn_refs=() rel_refs=() bases=() missing=()
+
+  echo "=== 上传前门禁：$app（dist=$dist，目标前缀=$prefix）==="
+
+  if [ ! -f "$idx" ]; then
+    {
+      echo
+      echo "❌ 门禁拒绝（$app）：$idx 不存在。"
+      echo "   没有 index.html 就无法证明这份产物是给哪个 app、哪个 CDN 前缀构建的 ——"
+      echo "   既然证明不了，就当它是错的：拒绝上传（几秒后重试的成本，远小于白建一个 CDN）。"
+    } >&2
+    return 1
+  fi
+
+  while IFS= read -r r; do all_refs+=("$r"); done < <(html_refs "$idx")
+  for r in ${all_refs[@]+"${all_refs[@]}"}; do
+    case "$r" in
+      data:*|mailto:*|javascript:*|'#'*|'//'*) continue ;;        # 非静态资源引用 / 协议相对，不参与判据
+      http://*|https://*)
+        h=$(ref_host "$r")
+        if [ "${h,,}" = "${CDN_HOST_ONLY,,}" ]; then cdn_refs+=("$r"); else continue; fi ;;
+      *) rel_refs+=("$r") ;;
+    esac
+  done
+
+  # ---------------------------------------------------------------- ① 基址门
+  if [ ${#cdn_refs[@]} -eq 0 ]; then
+    if [ "$ALLOW_RELATIVE" -eq 1 ]; then
+      RELATIVE_BYPASSED=1
+      {
+        echo
+        echo "  ⚠⚠⚠  ★★ 警告：已用 --allow-relative 放行一个「相对路径」产物 ★★  ⚠⚠⚠"
+        printf '       %s/index.html 里没有任何指向 %s 的绝对 URL（引用全是相对路径）。\n' "$dist" "$CDN_HOST_ONLY"
+        echo  "       意味着：这份 dist 构建时没传 CDN_BASE，它引用的是 <dist>/assets/ 这类容器自托管路径。"
+        echo  "       正常发 CDN 不要这么用；仅当「我就是想发一份自托管版本」时才是本意。"
+        if [ ${#rel_refs[@]} -gt 0 ]; then
+          printf '       本次引用：%s\n' "$(printf '%s ' "${rel_refs[@]}")"
+        fi
+      } >&2
+      audit_log "ALLOW-RELATIVE 绕过基址/前缀门禁 app=$app dist=$dist prefix=$prefix user=$(id -un) pid=$$"
+    else
+      {
+        echo
+        echo "❌ 门禁拒绝（$app）：这个 dist 的 index.html 引用的是相对路径 ⇒ 构建时没传 CDN_BASE。"
+        echo "   dist: $dist"
+        if [ ${#rel_refs[@]} -gt 0 ]; then
+          printf '   引用: %s\n' "$(printf '%s ' "${rel_refs[@]}")"
+        else
+          echo "   引用: （index.html 里没有任何 src=/href= 静态资源引用）"
+        fi
+        echo
+        echo "   为什么必须拒绝：这样的产物传上去，CDN 上会多出一批**线上永远不会引用**的孤儿对象 ——"
+        echo "   站点不白屏、不报错、监控全绿，只是 CDN 白建了、回源压力全落回容器（2026-11-15 19:30 事故原样）。"
+        echo
+        echo "   修复办法（二选一）："
+        echo "     A) 用带前缀的方式重建（前缀必须带结尾斜杠）："
+        case "$app" in
+          admin-web)  echo "          ADMIN_CDN_BASE=$CDN_HOST/$prefix/ docker compose build admin-web" ;;
+          portal-web) echo "          PORTAL_CDN_BASE=$CDN_HOST/$prefix/ docker compose build portal-web" ;;
+          *)          echo "          ${app^^}_CDN_BASE=$CDN_HOST/$prefix/ docker compose build $app" ;;
+        esac
+        echo "     B) 从镜像里 cp 出真产物（本次事故就是这么救回来的）："
+        echo "          docker cp <容器>:/usr/share/nginx/html <目标>"
+        echo "          $0 --dist <目标> $app --apply"
+        echo
+        echo "   若确实要发一份自托管（相对路径）版本，显式加 --allow-relative（会打醒目警告并计入审计）。"
+      } >&2
+      return 1
+    fi
+  fi
+
+  # ---------------------------------------------------------------- ② 身份门
+  local marker_expect marker_foreign has_expect=0 has_foreign=0
+  case "$app" in
+    admin-web)  marker_expect='qiqi_admin_token';  marker_foreign='qiqi_member_token' ;;
+    portal-web) marker_expect='qiqi_member_token'; marker_foreign='qiqi_admin_token' ;;
+    *) echo "❌ 门禁拒绝：未知 app：$app（只认识 admin-web / portal-web，不知道该拿什么特征去验）" >&2; return 1 ;;
+  esac
+  if grep -rqaF -- "$marker_expect"  "$dist" 2>/dev/null; then has_expect=1;  fi
+  if grep -rqaF -- "$marker_foreign" "$dist" 2>/dev/null; then has_foreign=1; fi
+
+  if [ "$has_expect" -eq 0 ] || [ "$has_foreign" -eq 1 ]; then
+    {
+      echo
+      echo "❌ 门禁拒绝（$app）：dist 里没有 $app 的构建特征，张冠李戴。"
+      echo "   dist: $dist"
+      echo "   判据（互斥，来自 src/utils/auth.js 的登录令牌键，构建无关）："
+      echo "     admin-web  ⇔ 必含 qiqi_admin_token"
+      echo "     portal-web ⇔ 必含 qiqi_member_token"
+      echo "   实测：本 dist 含 $marker_expect = $has_expect ；含 $marker_foreign = $has_foreign"
+      if [ "$has_foreign" -eq 1 ]; then
+        echo "   ⇒ 这是一份 $([ "$app" = "admin-web" ] && echo portal-web || echo admin-web) 的产物，被当成 $app 上传了。"
+        echo "     传错 app 的后果：对象全写进 <prefix>/$app/ 但页面永远不引用（孤儿对象），且真产物缺位。"
+      else
+        echo "   ⇒ 既不像 admin-web 也不像 portal-web 的产物（可能是不完整的 dist、或从别处拷来的别的目录）。"
+      fi
+      echo
+      echo "   修复：确认 --dist 指向的是 <app> 自己那次构建/那个镜像的产物："
+      echo "     docker cp qiqi-$app:/usr/share/nginx/html <目标>   # $app 真产物（容器名就是 qiqi-$app）"
+    } >&2
+    return 1
+  fi
+
+  # ---------------------------------------------------------------- ③ 前缀门
+  if [ "$RELATIVE_BYPASSED" -eq 1 ]; then
+    echo "  ⏭  前缀门：跳过（本次 --allow-relative，产物里没有构建基址可比对）"
+  else
+    # 构建基址 = 全部 CDN 绝对 URL 的「公共目录前缀」
+    #   例：…/qiqi-mall-v111/admin-web/favicon.svg 与 …/qiqi-mall-v111/admin-web/assets/x.js
+    #       → 公共目录前缀 qiqi-mall-v111/admin-web/assets → 去掉 assets 这一段 → qiqi-mall-v111/admin-web
+    #   只写相对路径以外的多基址混装（有两份不同基址的 URL）会让公共前缀变短 → 下面报不一致，正确。
+    local -a cur=() acc=() keep=()
+    local have=0 n=0 i=0
+    for r in ${cdn_refs[@]+"${cdn_refs[@]}"}; do
+      path="${r#*://}"
+      case "$path" in */*) path="${path#*/}" ;; *) path="" ;; esac     # 去掉 host
+      path="${path%%#*}"; path="${path%%\?*}"
+      case "$path" in */*) path="${path%/*}" ;; *) path="" ;; esac     # 取目录部分
+      cur=(); IFS='/' read -r -a cur <<< "$path"
+      if [ "$have" -eq 0 ]; then acc=(${cur[@]+"${cur[@]}"}); have=1; continue; fi
+      n=${#acc[@]}; if [ ${#cur[@]} -lt "$n" ]; then n=${#cur[@]}; fi
+      keep=(); i=0
+      while [ "$i" -lt "$n" ] && [ "${acc[$i]}" = "${cur[$i]}" ]; do keep+=("${acc[$i]}"); i=$((i+1)); done
+      acc=(${keep[@]+"${keep[@]}"})
+    done
+    b0=$(IFS=/; printf '%s' "${acc[*]:-}")
+    case "$b0" in */assets) b0="${b0%/assets}" ;; assets) b0="" ;; esac   # assetsDir 不算基址
+    bases=("$b0")
+    pnorm="$prefix"
+    while [ "${b0%/}" != "$b0" ];  do b0="${b0%/}";  done
+    while [ "${pnorm%/}" != "$pnorm" ]; do pnorm="${pnorm%/}"; done
+
+    if [ ${#bases[@]} -eq 0 ] || [ ${#bases[@]} -gt 1 ] || [ "$b0" != "$pnorm" ]; then
+      {
+        echo
+        echo "❌ 门禁拒绝（$app）：构建基址与本次上传前缀不一致。"
+        echo "   dist: $dist"
+        echo "   index.html 反解出的构建基址 : ${bases[*]:-<无>}"
+        echo "   本次要上传的 OSS 前缀      : $prefix   （= OSS_PREFIX 的 \"$OSS_PREFIX\" + \"$app\"）"
+        echo "   完整 URL 形态：构建时 $CDN_HOST/${b0:-<无>}/assets/…   vs 本次 $CDN_HOST/$pnorm/assets/…"
+        echo
+        echo "   后果：对象会被写到 CDN 上页面永远不引用的位置 —— 「传上去了，但页面指向另一个前缀」，"
+        echo "   一样是不报错的孤儿对象（昨晚的坑换了个入口）。"
+        echo
+        echo "   修复（二选一，方向必须一致）："
+        echo "     · 前缀才是对的 → 按该前缀重建前端（ADMIN_CDN_BASE / PORTAL_CDN_BASE=$CDN_HOST/$pnorm/）"
+        echo "     · 产物才是对的 → OSS_PREFIX=\"$b0\"（去掉结尾的 /$app）后再跑本脚本"
+      } >&2
+      return 1
+    fi
+  fi
+
+  # ------------------------------------------------ 附：引用完整性（防 index/assets 混装）
+  if [ "$RELATIVE_BYPASSED" -eq 0 ]; then
+    local path
+    for r in ${cdn_refs[@]+"${cdn_refs[@]}"} ${rel_refs[@]+"${rel_refs[@]}"}; do
+      case "$r" in
+        http://*|https://*)
+          path="${r#*://}"; path="${path#*/}"
+          path="${path%%#*}"; path="${path%%\?*}"
+          if [ -n "$b0" ]; then case "$path" in "$b0"/*) path="${path#"$b0"/}" ;; esac; fi ;;
+        *)  path="${r%%#*}"; path="${path%%\?*}"; path="${path#./}"; path="${path#/}" ;;
+      esac
+      case "$path" in
+        ''|*.html|*.htm) continue ;;       # index 由容器提供，不校验、不上传
+      esac
+      if [ ! -f "$dist/$path" ]; then missing+=("$path"); fi
+    done
+    if [ ${#missing[@]} -gt 0 ]; then
+      {
+        echo
+        echo "❌ 门禁拒绝（$app）：index.html 引用的文件在 dist 里不存在 —— index 与 assets 不是同一次构建（混装）。"
+        echo "   dist: $dist"
+        printf '   缺失: %s\n' "${missing[*]}"
+        echo "   传上去就是 404 → 白屏（比孤儿对象更糟）。请从同一次构建/同一个镜像里取完整产物。"
+      } >&2
+      return 1
+    fi
+  fi
+
+  # ---------------------------------------------------------------- 放行
+  if [ "$RELATIVE_BYPASSED" -eq 1 ]; then
+    printf '  ✅ 身份门：%s（%s 特征），且不含 %s\n' "$marker_expect" "$app" "$marker_foreign"
+    printf '  ✔  基址门/前缀门/引用完整性：已按 --allow-relative 显式绕过（见上方警告与审计）\n'
+  else
+    printf '  ✅ 基址门：index.html 有 %d 处指向 %s 的绝对 URL\n' "${#cdn_refs[@]}" "$CDN_HOST_ONLY"
+    printf '  ✅ 身份门：%s（%s 特征），且不含 %s\n' "$marker_expect" "$app" "$marker_foreign"
+    printf '  ✅ 前缀门：构建基址 %s/ == OSS 前缀 %s/\n' "$b0" "$pnorm"
+    printf '  ✅ 引用完整性：index.html 指到的本地静态文件都在 dist 里\n'
+  fi
+  return 0
+}
+
 # ------------------------------------------------------------------ 前置检查
 fail=0
 for app in "${APPS[@]}"; do
@@ -116,9 +376,16 @@ for app in "${APPS[@]}"; do
     fail=1
   elif [ ! -d "$d/assets" ]; then
     echo "❌ $d 下没有 assets/" >&2; fail=1
+  elif ! gate_check_dist "$app" "$d" "$(prefix_for "$app")"; then
+    # 门禁拒绝：不写 OSS、不预热、不删任何东西，直接退出（exit 非 0 才能拦住 rm -f 之后的 && 链/CI）
+    fail=1
   fi
 done
-[ "$fail" -eq 0 ] || exit 1
+if [ "$fail" -ne 0 ]; then
+  echo >&2
+  echo "❌ 上传前门禁未通过 → 本次不上传、不写 OSS、不碰 CDN。修好上面的问题再跑（详见文件头【★ 上传前门禁】）。" >&2
+  exit 1
+fi
 if [ "$VERIFY" -eq 0 ] && [ ! -r "$CRED_FILE" ]; then
   echo "❌ 读不到凭据文件: $CRED_FILE" >&2; exit 1
 fi
@@ -408,6 +675,12 @@ if [ "$VERIFY" -eq 1 ] || [ "$APPLY" -eq 1 ]; then
                               或换一个未缓存过的前缀重发（只新增对象，不碰 CDN 配置）。
     Cache-Control 不是 max-age=31536000, immutable  ⇒ 检查上传时的 Cache-Control（本脚本写对了；若被 CDN 缓存规则覆盖，看 RUNBOOK 六节）
 TIP
+fi
+
+if [ "$RELATIVE_BYPASSED" -eq 1 ]; then
+  echo
+  echo "⚠⚠  本次运行使用了 --allow-relative（相对路径产物已放行）：${APPS[*]}" >&2
+  echo "    CDN 上这些对象不会有任何线上页面引用（除非你就是要自托管版本）。已记入审计：${AUDIT_LOG:-/var/log/qiqi-cdn-upload-audit.log}" >&2
 fi
 
 if [ "$APPLY" -eq 0 ]; then
