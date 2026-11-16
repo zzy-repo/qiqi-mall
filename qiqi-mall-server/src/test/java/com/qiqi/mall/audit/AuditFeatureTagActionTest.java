@@ -365,6 +365,50 @@ class AuditFeatureTagActionTest {
                 + "（跑完两轮仍是 1）；审计条数=" + auditsOf(QT_3003_ID).size() + "（没变）");
     }
 
+    // ================================================================== ⑦ 清空打标配置必须真的落库
+
+    /**
+     * <b>回归防线（2026-11-16 真站验收发现）</b>：把「命中时打标」全部删掉再保存，必须真的清空。
+     *
+     * <h3>原来为什么清不掉</h3>
+     * {@code AuditPolicyService#update} 用 {@code policyMapper.updateById(update)} 落库，
+     * 而 MyBatis-Plus 的 {@code updateById} 默认<b>忽略 null 字段</b>（字段级 NOT_NULL 策略）：
+     * 动作全删 ⇒ {@code actionJson(req, type)} 返回 null ⇒ 那句 {@code setActionJson(null)}
+     * <b>根本不出现在 SQL 里</b> ⇒ 接口返回 200、版本号 +1、配置却原封不动。
+     * 表现就是"运营点了清空、刷新一看又回来了"，而且没有任何报错。
+     *
+     * <h3>这条用例钉的是什么</h3>
+     * 不钉"能保存"（那早就绿了），钉的是<b>"清空 = 真的没了"</b>：
+     * 直接看 {@code audit_policy.action_json} 这一列，而不是看接口回显。
+     */
+    @Test
+    @Order(7)
+    @DisplayName("⑦清空 featureTags 再保存 → action_json 真的变 NULL（不是静默忽略 null）")
+    void clearingFeatureTagsReallyClearsTheColumn() {
+        Long id = insertAndReturnKey(
+                "INSERT INTO audit_policy (type, priority, name, enabled, action_json, version_no) "
+                        + "VALUES ('BLOCK', 900, ?, 1, ?, 1)",
+                "清空验证策略", "{\"feature_tags\": [\"" + FEATURE_WATCH + "\"]}");
+        assertThat(jdbc.queryForObject("SELECT action_json FROM audit_policy WHERE id = ?", String.class, id))
+                .as("起点：这一列上有打标配置").isNotNull().contains(FEATURE_WATCH);
+
+        policyService.update(id, new PolicyRequest("BLOCK", 900, "清空验证策略", true, null, null, null,
+                List.of(new ConditionRequest("MATCH", "POLICY", "GROSS_PROFIT", "LTE", "NUM",
+                        new BigDecimal("-9999"), null, null)),
+                null, List.of()));
+
+        String after = jdbc.queryForObject("SELECT action_json FROM audit_policy WHERE id = ?", String.class, id);
+        System.out.printf("⑦ 清空 featureTags 后 action_json=%s%n", after);
+        assertThat(after)
+                .as("★ 传空列表 = 真的清空。若这一列还是带 feature_tags 的 JSON，说明 null 被 updateById 静默丢弃了")
+                .isNull();
+        assertThat(policyService.list().policies().stream().filter(p -> p.id().equals(id)).findFirst()
+                .orElseThrow().featureTags()).as("回显也必须是空").isEmpty();
+
+        jdbc.update("DELETE FROM audit_policy_condition WHERE policy_id = ?", id);
+        jdbc.update("DELETE FROM audit_policy WHERE id = ?", id);
+    }
+
     // ================================================================== 造数 & 工具
 
     /** 三个单的 id 在 seed 时记下来：审计查询按 order_id 走索引，比 join 单号更直接 */

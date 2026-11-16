@@ -1,6 +1,7 @@
 package com.qiqi.mall.audit.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.qiqi.mall.audit.dto.ConditionDto;
 import com.qiqi.mall.audit.dto.ConditionRequest;
@@ -198,8 +199,19 @@ public class AuditPolicyService {
         update.setEnabled(req.enabled() == null ? before.getEnabled() : (req.enabled() ? 1 : 0));
         // 版本号 +1：改完条件后，历史决策仍然指得到「当时是哪一版」
         update.setVersionNo((before.getVersionNo() == null ? 1 : before.getVersionNo()) + 1);
-        update.setActionJson(actionJson(req, type));
+        String newActionJson = actionJson(req, type);
+        update.setActionJson(newActionJson);
         policyMapper.updateById(update);
+        if (newActionJson == null) {
+            // ⚠️ 必须单独清一次：MyBatis-Plus 的 updateById 默认**忽略 null 字段**（字段级 NOT_NULL 策略），
+            // 所以"把打标配置全删掉再保存"会**静默无效** —— 上面那句 update.setActionJson(null) 根本不出现在 SQL 里，
+            // 接口返回 200、版本号 +1、配置却还在原地。表现就是：运营点了清空、刷新一看又回来了。
+            // （2026-11-16 真站验收时发现：PUT featureTags=[] 之后 action_json 仍是 {"feature_tags":[...]}。）
+            // 这里显式 set null，让"清空"这个动作真的落到列上。
+            policyMapper.update(null, new LambdaUpdateWrapper<AuditPolicy>()
+                    .eq(AuditPolicy::getId, id)
+                    .set(AuditPolicy::getActionJson, null));
+        }
 
         conditionMapper.deleteByPolicy(id);
         int seq = 0;
