@@ -1,6 +1,7 @@
 package com.qiqi.mall.audit;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.qiqi.mall.audit.service.AuditTagCatalogService;
 import com.qiqi.mall.support.ItCleanup;
 import com.qiqi.mall.support.ItDatabase;
 import org.junit.jupiter.api.AfterAll;
@@ -52,9 +53,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * </pre>
  * 现在结算收在 {@code OrderStatusService#change} 里（离开 7 就结算，包含这条），所以本类断言：
  * <ol>
- *   <li>7→5 之后 active 结论标 == []（不是带着 AUDIT_PENDING 走），解除人 = {@code SYSTEM:RETURN_APPLY}；</li>
+ *   <li>7→5 之后 active 结论标 == <b>[RETURN_APPLIED]</b>（不是带着 AUDIT_PENDING 走；也<b>不是空</b> ——
+ *       期 3 步骤 2.5 起结算 = 先解除旧标、再落一条终局标），解除人 = {@code SYSTEM:RETURN_APPLY}；</li>
  *   <li>顺带核「进入 7」这一侧：删掉待处理退货申请把单交回聚合（5→7）时<b>不需要</b>额外处理 ——
- *       进 7 时身上本来就是空的，结论标由下一次判定重新落（本类最后再跑一轮来证明）。</li>
+ *       终局标 RETURN_APPLIED 留在身上（"这单确实申请过退货"是事实，且它不 blocking、不拦下发），
+ *       交回重算后由下一次判定把它挤掉并落 AUDIT_PENDING（本类最后再跑一轮来证明）。</li>
  * </ol>
  *
  * <h3>造数走真实入口（重要）</h3>
@@ -175,10 +178,14 @@ class AuditConclusionSettlementIntegrationTest {
 
         assertThat(statusOf(orderId)).as("7 待审核 → 5 退款中").isEqualTo(5);
 
-        // ---------------- ④ 核心断言：结论标被结算 ----------------
+        // ---------------- ④ 核心断言：结论标被结算（解除旧的 + 落一条终局标） ----------------
         assertThat(activeConclusionCodes(orderId))
-                .as("7→5 也是「离开待审核」：不许带着 AUDIT_PENDING（blocking=1）走，否则期 2 的下发保险会误拦")
-                .isEmpty();
+                .as("7→5 也是「离开待审核」：不许带着 AUDIT_PENDING（blocking=1）走，"
+                        + "但也不能是空的 —— 当前结论变成了「已申请退货」")
+                .containsExactly(AuditTagCatalogService.CODE_RETURN_APPLIED);
+        assertThat(blockingConclusionCount(orderId))
+                .as("RETURN_APPLIED 是 blocking=0：它只是事实（进退货流程了），不是「拦住下单」的承诺")
+                .isZero();
         Map<String, Object> released = anyTagRow(orderId, "AUDIT_PENDING");
         assertThat(((Number) released.get("active")).intValue()).as("不是删行，是置为已解除").isZero();
         assertThat(released.get("released_at")).as("解除时间必须记下").isNotNull();
@@ -194,14 +201,21 @@ class AuditConclusionSettlementIntegrationTest {
         ok(exchange(HttpMethod.DELETE, "/admin/return-applies/" + applyId, null));
         assertThat(statusOf(orderId)).as("无包裹的直发单交回聚合 ⇒ 回待审核(7)").isEqualTo(7);
         assertThat(activeConclusionCodes(orderId))
-                .as("进 7 时身上本来就是空的（上一次离开 7 已经结算干净）").isEmpty();
+                .as("交回待审核不结算（结算只发生在「离开 7」）：终局标 RETURN_APPLIED 如实留着"
+                        + "—— 这单确实申请过退货，这是历史事实；它不 blocking，也不拦下发")
+                .containsExactly(AuditTagCatalogService.CODE_RETURN_APPLIED);
 
         // 下一轮判定重新落标 —— 这就是「结论标由下一次判定重新落」的可执行版本
         ok(post("/admin/order-audit/run", "{}"));
         assertThat(decisionResult(orderId)).as("重新判一轮，仍是 MANUAL").isEqualTo("MANUAL");
         assertThat(activeConclusionCodes(orderId))
-                .as("交回重算后由下一轮判定重新落标（旧的已解除、新的这条是新的结论）")
+                .as("交回重算后由下一轮判定重新落标（RETURN_APPLIED 被互斥挤掉、新的这条是新的结论）")
                 .containsExactly("AUDIT_PENDING");
+        Map<String, Object> returnApplied = anyTagRow(orderId, AuditTagCatalogService.CODE_RETURN_APPLIED);
+        assertThat(((Number) returnApplied.get("active")).intValue())
+                .as("终局标不是删掉，是被新结论取代（行留着）").isZero();
+        assertThat(String.valueOf(returnApplied.get("released_by")))
+                .as("取代者是引擎这一轮的新结论 ⇒ released_by=SYSTEM:SUPERSEDED").isEqualTo("SYSTEM:SUPERSEDED");
 
         System.out.println("[5→7] 订单 " + ORDER_SN + "（删申请交回聚合）status=" + statusOf(orderId)
                 + "，active 结论标 = " + activeConclusionCodes(orderId) + "（由下一轮判定重新落）");

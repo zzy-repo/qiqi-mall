@@ -128,13 +128,33 @@ public interface OrderAuditDecisionMapper extends BaseMapper<OrderAuditDecision>
      *       比逐行查询少 N 次往返，比子查询多不了几个字节。</li>
      * </ul>
      */
+    /**
+     * 一页里这些订单身上的 active 标（期 1：队列行要显示「这单有哪些标」；期 3：影子字段/主标要用）。
+     *
+     * <p>期 3 起多回一列 {@code id}：显示层的压缩规则「阻断型优先 → <b>同类型取最新</b>」需要一个
+     * 可判定的"最新"，而 {@code id} 单调（{@code created_at} 是毫秒截断，同毫秒多标会并列）。
+     * 它<b>只在服务端排序用</b>，不出现在接口返回体里（跨库不稳定的代理键，界面上永远用 {@code tag_code}）。
+     *
+     * <p>排序 {@code ORDER BY order_id, id} 是契约：服务端据此认为"越靠后越新"，不必再自己排一遍。
+     */
     @Select("<script>"
-            + "SELECT order_id, tag_code, reason, created_at FROM order_audit_tag "
+            + "SELECT id, order_id, tag_code, reason, created_at FROM order_audit_tag "
             + "WHERE active = 1 AND order_id IN "
             + "<foreach collection='orderIds' item='oid' open='(' separator=',' close=')'>#{oid}</foreach> "
             + "ORDER BY order_id ASC, id ASC"
             + "</script>")
     List<Map<String, Object>> selectActiveTagsByOrders(@Param("orderIds") java.util.List<Long> orderIds);
+
+    /**
+     * 从**没被判定过**的订单数（一行决策都没有）。
+     *
+     * <p>为什么它要单独存在：人工队列是 {@code FROM order_audit_decision} 的，所以这类单永远不会出现在
+     * 队列里 —— 于是「切换口径会不会漏掉一批单」这个问题，光扫队列是看不见的。
+     * 它们是"标驱动结论"答不出来的最极端一类：标没有、决策行也没有 ⇒ 结论来源 {@code NONE}。
+     */
+    @Select("SELECT COUNT(*) FROM `order` o "
+            + "WHERE NOT EXISTS (SELECT 1 FROM order_audit_decision d WHERE d.order_id = o.id)")
+    long countOrdersWithoutAnyDecision();
 
     @Select("SELECT * FROM order_audit_decision WHERE order_id = #{orderId} ORDER BY round_no ASC, id ASC")
     List<OrderAuditDecision> selectByOrder(@Param("orderId") Long orderId);

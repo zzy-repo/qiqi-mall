@@ -55,9 +55,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li>建 {@code audit_run} 行（决策行要引用 run_id，所以先建行、跑完回写计数）；</li>
  *   <li>逐单装配上下文 → 调 {@link AuditEngine#evaluate}（纯函数）；</li>
  *   <li>按结论执行：AUTO_PASS → {@code OrderStatusService.change(order, 8, AUDIT_AUTO_PASS, …)}
- *       （7→8 与状态台账同一事务）；FROZEN → 打标 + 审计；
+ *       （7→8 与状态台账同一事务；**结算旧结论标 + 落 {@code AUTO_PASSED} 由状态入口那次 change 一并做完**，
+ *       期 3 步骤 2.5 收敛到一处，这里不写标）；
+ *       FROZEN → 打标 + 审计；
  *       <b>然后每种结论都落一个标</b>（{@link ConclusionTags}：MANUAL → AUDIT_PENDING/STOCK_SHORT/COST_MISSING，
- *       BLOCKED → BLOCKED，NO_MATCH → NO_POLICY_MATCH，AUTO_PASS/FROZEN 不额外落）；
+ *       BLOCKED → BLOCKED，NO_MATCH → NO_POLICY_MATCH，AUTO_PASS → AUTO_PASSED 已在上一步落好）；
  *       <b>最后落策略配的特征标</b>（{@link #settleFeatureTags}，期 2 步骤 2：并行动作，
  *       三种策略类型都可能配，与结论标互斥规则无关）；</li>
  *   <li>落 {@code order_audit_decision}（每单每轮一行）—— <b>SKIPPED 不落行</b>（见下）；</li>
@@ -315,11 +317,20 @@ public class AuditExecutor {
                 int rows = orderStatusService.change(order, com.qiqi.mall.audit.engine.AuditContext.STATUS_PENDING_SHIP,
                         ReasonCodes.AUDIT_AUTO_PASS, verdict.reasonText(), null, ReasonCodes.REF_AUDIT_RUN, runId);
                 OptimisticLockGuard.requireAffected(rows, "订单 " + order.getOrderSn() + " 状态已变化，本轮审核未生效");
-                // 过审了（7→8）：这张单身上**所有**结论标都不再是当前结论 ——
-                // 库存/成本挂起标（旧实现只解这两个）、上一轮拦过它的 BLOCKED、更早的 NO_POLICY_MATCH…
-                // 以前只解前两个，于是「BLOCKED 过一轮 → 下一轮自动过审」的单会带着 blocking=1 的 BLOCKED
-                // 一路走到下发环节（期 1.6 修）。逐条按 catalog category='结论' 结算，一条 UPDATE 换空。
-                tagService.releaseAllConclusionTags(order.getId(), OrderAuditTagService.RELEASED_BY_SUPERSEDED);
+                // 过审了（7→8）：结论标随之结算 —— 但**结算不在这次做**（期 3 步骤 2.5 收敛了写点）。
+                //
+                // 上面那句 change(...) 就是「7→8 离开待审核」这个动作本身，而结算挂在这个动作的**唯一写入口**上
+                // （OrderStatusService#change → settleConclusionTagsIfLeavingAuditPending）：
+                //   ① 先 releaseAllConclusionTags(RELEASED_BY_SUPERSEDED) —— 库存/成本挂起标、
+                //      上一轮拦过它的 BLOCKED、更早的 NO_POLICY_MATCH… 一并让位；
+                //   ② 再 ensureActive(AUTO_PASSED) —— 由 ConclusionTags#terminalCodeOf(8, AUDIT_AUTO_PASS) 决定，
+                //      reason 用的是这里传下去的 verdict.reasonText()（引擎的判定原话，与改动前写进去的一字不差）。
+                // 所以这里**一行标都不写**：本类只在"不改状态"的结论（MANUAL / BLOCKED / NO_MATCH / FROZEN）上
+                // 自己落标（见 settleConclusionTag），改状态的那条路由状态入口统一收尾 —— 一处写、不会漂。
+                //
+                // ⚠️ 历史教训，别退回去：期 1.6 以前这里只解库存/成本两个挂起标，于是
+                //    「BLOCKED 过一轮 → 下一轮自动过审」的单会带着 blocking=1 的 BLOCKED 一路走到下发环节。
+                //    现在解的是 catalog category='结论' 的全集，那条漏子仍然堵着。
             }
             case FROZEN -> {
                 ActionSpec action = verdict.matchedPolicy() != null && verdict.matchedPolicy().action() != null
@@ -464,7 +475,10 @@ public class AuditExecutor {
      *
      * <p>映射只在 {@link ConclusionTags#codeOf} 一处决定，这里只负责"写下去"：
      * <ul>
-     *   <li>AUTO_PASS / SKIPPED → 不落（理由见 {@link ConclusionTags} 的映射表）；</li>
+     *   <li>SKIPPED → 不落（它连决策行都不写）；</li>
+     *   <li>AUTO_PASS → {@code AUTO_PASSED}（visible=0），但<b>写入在状态唯一写入口里做</b>
+     *       （{@code OrderStatusService#change → settleConclusionTagsIfLeavingAuditPending}：
+     *       先 release 旧结论标、再落终局标，与 7→8 同一事务），这里直接 return；</li>
      *   <li>MANUAL → AUDIT_PENDING / STOCK_SHORT / COST_MISSING（三支来路靠标拆开）；</li>
      *   <li>BLOCKED → BLOCKED；NO_MATCH → NO_POLICY_MATCH；</li>
      *   <li>FROZEN → 码由 {@code codeOf} 给出，但<b>写库由 {@link OrderAuditTagService#freeze} 独占</b>
@@ -482,8 +496,10 @@ public class AuditExecutor {
      *
      * <p>期 1.5 只在"引擎落新标"这一条路上做了互斥，另外三条路漏了（期 1.6 实测补上）：
      * 人工冻结 / 策略冻结（都在 {@code OrderAuditTagService#freeze} 里补）和
-     * <b>离开待审核时的结算</b>（{@link #applyActions} 的 AUTO_PASS 分支 +
-     * {@code OrderController#auditPass} / {@code #auditReject}）。
+     * <b>离开待审核时的结算</b>（期 3 步骤 2.5 起收敛到状态唯一写入口
+     * {@code OrderStatusService#change → settleConclusionTagsIfLeavingAuditPending}：
+     * 先 release 旧的、再落终局标；{@code OrderController#auditPass} / {@code #auditReject} /
+     * 7→5 退货申请 / AUTO_PASS 那一支全走它）。
      *
      * <p>为什么必须互斥（期 1 的教训，别退回去）：不做互斥时，一单从 NO_MATCH 变成 MANUAL 之后
      * {@code NO_POLICY_MATCH} 与 {@code AUDIT_PENDING} 会并列 active，于是
@@ -500,12 +516,18 @@ public class AuditExecutor {
      */
     private void settleConclusionTag(Order order, AuditVerdict verdict) {
         String code = ConclusionTags.codeOf(verdict);
-        if (code == null) return;                       // AUTO_PASS / SKIPPED：不落标
+        if (code == null) return;                       // 只剩 SKIPPED 会回 null（它连决策行都不写）
         // FROZEN：码是结论标码（FROZEN 或策略配的细分码），但**写库与互斥都在 freeze() 里做完了**
         // （它必须同时写 reason_id / reason_code，那是冻结原因的键）。这里若再落一次，
         // 会出现"细分码 + 通用 FROZEN"两条冻结标（通用那条 reason_id 为空），把一条结论说成两条。
         // 所以 FROZEN 只在这里「确认它已被 conclude 过」—— 互斥规则本身仍由 OrderAuditTagService 一处管。
         if (verdict.result() == AuditResult.FROZEN) return;
+        // 期 3 步骤 1+2.5：AUTO_PASS 这一支**改状态**（7→8），它的结算由状态入口统一做
+        // （{@code OrderStatusService#change → settleConclusionTagsIfLeavingAuditPending}：
+        // 先 release 全部旧结论标、再落 AUTO_PASSED，顺序在同一段里保证）。
+        // 这里若再落一次，同一张单上会出现"落一次、又被结算掉"的来回（AUTO_PASSED 插进去 → 被 release → 再插）。
+        // 谁想改这个分工，先读 {@code AuditExecutor#applyActions} 的 AUTO_PASS 分支那段注释。
+        if (verdict.result() == AuditResult.AUTO_PASS) return;
         // 顺序不能反：先让旧结论让位，再落新标 —— 同一事务，要么都成、要么都回滚。
         // 反过来的话，若 supersede 失败（例如目录缺失），新标已经插进去，就成了"两个结论标"。
         tagService.supersedeOtherConclusionTags(order.getId(), code);

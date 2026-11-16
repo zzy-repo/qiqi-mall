@@ -48,11 +48,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *       （以前 18 条空白单一个标都没有，这就是缺口）；</li>
  *   <li>重复跑同一轮 → <b>不产生第二个同名标</b>（幂等靠 {@code uk_active}，不靠调用方自觉）；</li>
  *   <li>队列按 {@code ?tag=NO_POLICY_MATCH} <b>能筛出它</b>，且不碰 {@code result} 那六个页签的语义；</li>
- *   <li>一张 AUTO_PASS 的单，跑完一轮后<b>「结论」标为 0</b>
- *       —— ⚠️ 注意口径：断的是"结论标为 0"，<b>不是</b>"没有任何标"。
- *       AUTO_PASS 这个<b>结论</b>不产标，但自动过审的单完全可以带特征标
- *       （客诉客户 / 绿旗急发 / 双地址…，吉客云原话：这些单打了标照样自动过审）。
- *       断言按 {@code audit_tag_catalog.category='结论'} 过滤，将来加一个特征标不会误红；</li>
+ *   <li>一张 AUTO_PASS 的单，跑完一轮后<b>「结论」标恰好一条：{@code AUTO_PASSED}（visible=0）</b>
+ *       —— ⚠️ 口径在<b>期 3 步骤 1 变了</b>：期 1 的决定是「AUTO_PASS 不落标」（理由是显示噪声），
+ *       但期 3 要把结论改从标读，最常见的那个结论若是空的，任何"从标反推结论"的实现都会在这批单上
+ *       给不出答案、只能回退读决策行 —— 于是：<b>落标（事实），但 visible=0（不显示）</b>。
+ *       同时仍然成立的是：自动过审的单可以<b>另外</b>带特征标（客诉客户 / 绿旗急发 / 双地址…），
+ *       那些与"过没过"无关，断言一律按 {@code audit_tag_catalog.category='结论'} 过滤；</li>
  *   <li>（修正 ③）标字典<b>从一开始就能新增</b>：人工新增一条自定义标 → 打到单上 → 留审计；</li>
  *   <li>（修正 ②）数据层<b>不设主标</b>：一单多个标就是并列多行，没有任何"主标"列可写。</li>
  * </ol>
@@ -100,12 +101,16 @@ class AuditTagLifecycleIntegrationTest {
 
     private Long memberId;
     private Long productId;
+    /** 开跑前的内置目录项数（清理后必须回到同一个数：只删 builtin=0，不写死 6/7 —— 加标不该改测试） */
+    private int builtinCatalogSize;
 
     // ================================================================== 准备
 
     @BeforeAll
     void seed() {
         ItDatabase.assertIsolatedAndReady(jdbc);
+        builtinCatalogSize = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM audit_tag_catalog WHERE builtin = 1", Integer.class);
         cleanOurData();
         seedCatalogMemberProduct();
         seedTwoOrders();
@@ -132,9 +137,14 @@ class AuditTagLifecycleIntegrationTest {
                 .forEach((table, left) -> assertThat(left).as("清理后 `%s` 还有残留", table).isZero());
         ItCleanup.residueOfCatalog(jdbc, PRODUCT, MEMBER)
                 .forEach((table, left) -> assertThat(left).as("清理后 `%s` 还有残留", table).isZero());
-        assertThat((Integer) jdbc.queryForObject("SELECT COUNT(*) FROM audit_tag_catalog WHERE builtin = 1", Integer.class))
-                .as("内置标目录项不许被清理掉（清理只删 builtin=0）").isEqualTo(6);
-        System.out.println("[清理] 残留断言通过：订单侧 / 商品侧 全部为 0，内置目录项仍 6 条");
+        // 内置项数**从字典读实际值再比对开跑前的快照**，不写死数字：
+        // 写死过一次（6），V7 加 AUTO_PASSED 之后这句就和事实自相矛盾（今天已经因为这类"数数"改过两次了）。
+        assertThat((Integer) jdbc.queryForObject(
+                "SELECT COUNT(*) FROM audit_tag_catalog WHERE builtin = 1", Integer.class))
+                .as("内置标目录项不许被清理掉（清理只删 builtin=0），且数量应与开跑前一致")
+                .isEqualTo(builtinCatalogSize);
+        System.out.println("[清理] 残留断言通过：订单侧 / 商品侧 全部为 0，内置目录项仍 "
+                + builtinCatalogSize + " 条");
     }
 
     // ================================================================== ① NO_MATCH 落标
@@ -258,17 +268,23 @@ class AuditTagLifecycleIntegrationTest {
                 + "；result=NO_MATCH → " + orderSns(queryService.queue("NO_MATCH", null, 1, 50)));
     }
 
-    // ================================================================== ④ AUTO_PASS 不落结论标
+    // ================================================ ④ AUTO_PASS 落 AUTO_PASSED（visible=0）
 
     @Test
     @Order(4)
-    @DisplayName("④AUTO_PASS 的单「结论」标为 0（不是「没有任何标」——特征标可以有）")
-    void autoPassHasNoConclusionTag() {
+    @DisplayName("④AUTO_PASS 的单「结论」标恰好一条 AUTO_PASSED（visible=0；期 3 改了期 1 的口径）")
+    void autoPassLandsInvisibleConclusionTag() {
         assertThat(decisionResult("QT-2002")).isEqualTo("AUTO_PASS");
+        // ⚠️ 口径变更（期 3 步骤 1，V7）：期 1 是「AUTO_PASS 不产标」，现在**必须**产一条 AUTO_PASSED
+        //    （visible=0），否则"结论从标读"在最常见的那个结论上根本没有答案。
         assertThat(conclusionTagCount("QT-2002"))
-                .as("AUTO_PASS 这个**结论**不产标（按 catalog category='结论' 过滤）")
-                .isZero();
-        assertThat(activeTagCodes("QT-2002")).as("本场景里它确实一个标都没有").isEmpty();
+                .as("AUTO_PASS 的结论必须有标（按 catalog category='结论' 过滤，恰好一条）")
+                .isEqualTo(1);
+        assertThat(activeConclusionCodes("QT-2002")).containsExactly(AuditTagCatalogService.CODE_AUTO_PASSED);
+        assertThat(activeTagCodes("QT-2002")).as("本场景里它没有特征标，唯一的标就是那条结论标")
+                .containsExactly(AuditTagCatalogService.CODE_AUTO_PASSED);
+        assertThat(tagCatalog.byCode(AuditTagCatalogService.CODE_AUTO_PASSED).getVisible())
+                .as("visible=0：数据上有事实，队列里不显示（这是它不吵人的唯一原因）").isZero();
 
         // ★ 口径修正 ①：AUTO_PASS 的单**可以**带特征标，且带了也不算"结论标"
         AuditTagCatalog custom = tagCatalog.createCustom(null, "客诉客户", "该客户有过投诉，客服已知会", "特征", 0);
@@ -277,9 +293,12 @@ class AuditTagLifecycleIntegrationTest {
         assertThat(custom.getCategory()).isEqualTo(AuditTagCatalogService.CATEGORY_FEATURE);
 
         tagService.applyManualTag(orderOf("QT-2002"), custom.getCode(), "客服已知会，单据仍按流程走");
-        assertThat(activeTagCodes("QT-2002")).as("特征标打上去了").containsExactly(custom.getCode());
+        assertThat(activeTagCodes("QT-2002")).as("特征标打上去了（与那条结论标并列，互不影响）")
+                .containsExactlyInAnyOrder(custom.getCode(), AuditTagCatalogService.CODE_AUTO_PASSED);
         assertThat(conclusionTagCount("QT-2002"))
-                .as("打了特征标之后，**结论标仍然为 0** —— 标从头到尾没参与判断").isZero();
+                .as("打了特征标之后，**结论标仍然只有那一条 AUTO_PASSED** —— 特征标不参与结论档").isEqualTo(1);
+        assertThat(activeConclusionCodes("QT-2002"))
+                .as("结论档里不许混进特征标").containsExactly(AuditTagCatalogService.CODE_AUTO_PASSED);
 
         // 幂等：同一个标再打一次，不产生第二行
         tagService.applyManualTag(orderOf("QT-2002"), custom.getCode(), "重复打标");
@@ -307,23 +326,51 @@ class AuditTagLifecycleIntegrationTest {
         // 队列里这单现在带着特征标，且 result 仍是 AUTO_PASS（标不改写结论）
         Map<String, Object> row = firstRow(queryService.queue("AUTO_PASS", null, 1, 50));
         assertThat(row.get("result")).isEqualTo("AUTO_PASS");
-        assertThat(strings(row.get("tagCodes"))).containsExactly(custom.getCode());
+        assertThat(strings(row.get("tagCodes")))
+                .as("队列行的 tags/tagCodes 是**可展示的标**（visible=1）⇒ 只剩那枚特征标，AUTO_PASSED 不显示")
+                .containsExactly(custom.getCode());
+        assertThat(strings(row.get("allTagCodes")))
+                .as("数据层（allTagCodes）里两条都在 —— 判断只能读这个，读 tags 会漏掉 visible=0 的标")
+                .containsExactlyInAnyOrder(custom.getCode(), AuditTagCatalogService.CODE_AUTO_PASSED);
 
         System.out.println("[④] QT-2002：结论标=" + conclusionTagCount("QT-2002")
-                + "，active 标=" + activeTagCodes("QT-2002") + "（特征标不影响 AUTO_PASS）");
+                + "，active 标=" + activeTagCodes("QT-2002")
+                + "（队列 tagCodes=" + row.get("tagCodes") + "，allTagCodes=" + row.get("allTagCodes") + "）");
     }
 
     // ================================================================== ⑤ 目录与数据层的形状
 
     @Test
     @Order(5)
-    @DisplayName("⑤标目录：6 条内置结论标 + 没有「主标」列（数据层并列多标）")
+    @DisplayName("⑤标目录：10 条内置结论标（V7 起含 AUTO_PASSED，V8 起含三枚终局标）+ 没有「主标」列")
     void catalogShape() {
         List<TagCatalogDto> conclusion = tagCatalog.enabledByCategory(AuditTagCatalogService.CATEGORY_CONCLUSION);
         assertThat(conclusion).extracting(TagCatalogDto::code).containsExactlyInAnyOrder(
-                "BLOCKED", "FROZEN", "STOCK_SHORT", "COST_MISSING", "AUDIT_PENDING", "NO_POLICY_MATCH");
+                "BLOCKED", "FROZEN", "STOCK_SHORT", "COST_MISSING", "AUDIT_PENDING", "NO_POLICY_MATCH",
+                // 期 3 步骤 1（V7）：AUTO_PASS 的结论也必须有标（visible=0），否则"标驱动结论"在
+                // 最常见的那个结论上给不出答案
+                "AUTO_PASSED",
+                // 期 3 步骤 2.5（V8）：结算 = 落终局标（不再是一把清空）—— 离开待审核之后
+                // "当前结论"仍然存在，只是变成了"它最后怎么了"
+                "AUDIT_PASSED", "AUDIT_REJECTED", "RETURN_APPLIED");
         assertThat(conclusion).extracting(TagCatalogDto::name).containsExactlyInAnyOrder(
-                "被策略拦截", "被冻结", "库存不足", "毛利为负", "待人工审核", "无策略命中");
+                "被策略拦截", "被冻结", "库存不足", "毛利为负", "待人工审核", "无策略命中", "自动过审通过",
+                "人工放行通过", "审核不通过", "已申请退货");
+        // V8 三条的 visible/blocking 就是设计的一部分（不是随手取的）：
+        //   · 过审/关单是绝大多数结局 ⇒ visible=0（否则队列 200 行全被"人工放行通过"刷满）；
+        //   · 已申请退货是少数单、且队列看不到订单状态 ⇒ visible=1；
+        //   · 三条 blocking 一律 0（结论标从不参与下发保险，写 1 就是让字典承诺一件系统不执行的事）。
+        assertThat(conclusion.stream()
+                .filter(c -> "AUDIT_PASSED".equals(c.code()) || "AUDIT_REJECTED".equals(c.code())
+                        || "RETURN_APPLIED".equals(c.code()))
+                .filter(c -> c.blocking() == 0).count())
+                .as("三枚终局标 blocking 必须都是 0").isEqualTo(3);
+        List<String> visibleTerminal = conclusion.stream()
+                .filter(c -> "AUDIT_PASSED".equals(c.code()) || "AUDIT_REJECTED".equals(c.code())
+                        || "RETURN_APPLIED".equals(c.code()))
+                .filter(c -> c.visible() == 1).map(TagCatalogDto::code).toList();
+        assertThat(visibleTerminal).as("只有「已申请退货」可见：过审/关单是绝大多数结局，显示出来就是噪声")
+                .containsExactly("RETURN_APPLIED");
         assertThat(conclusion).allSatisfy(c ->
                 assertThat(c.description()).as("每个标都要有一句话说明（给业务看）").isNotBlank());
 

@@ -50,4 +50,29 @@ public interface AuditTrailMapper {
     @Select("SELECT id, action, target_type, summary, reason, operator_type, operator_name, idem_key, created_at "
             + "FROM admin_audit_log WHERE order_id = #{orderId} ORDER BY created_at ASC, id ASC")
     List<Map<String, Object>> selectAdminAudit(@Param("orderId") Long orderId);
+
+    /**
+     * 一批订单<b>最后一次「离开待审核(7)」</b>的那行台账（{@code from_status = 7}）——
+     * 对账端点用它回答"这张单是怎么离开待审核的、什么时候"。
+     *
+     * <h3>为什么这个信息只在台账里</h3>
+     * {@code order.status} 只说"现在是什么"，说不出"怎么到的"：同样是 status=8，
+     * 可能是人工放行（{@code AUDIT_PASS}）、自动过审（{@code AUDIT_AUTO_PASS}）或包裹聚合推导
+     * （{@code DELIVERY_AGGREGATE}）。而"该不该有终局结论标"恰恰取决于这一列 ——
+     * 聚合推导那支按设计不落标，只有结算的四条路必须落。
+     *
+     * <p>一次批量查（{@code order_id IN (本页 ≤200 个 id)}），不逐单回表：
+     * 分组取 {@code MAX(id)} 再 JOIN 回本表，走 {@code idx_order}，不是 N+1。
+     *
+     * @return 每单一行：{@code order_id / to_status / reason / created_at}
+     */
+    @Select("<script>"
+            + "SELECT l.order_id, l.to_status, l.reason, l.created_at "
+            + "FROM order_status_ledger l "
+            + "JOIN (SELECT order_id, MAX(id) AS mid FROM order_status_ledger "
+            + "      WHERE from_status = 7 AND order_id IN "
+            + "      <foreach item='oid' collection='orderIds' open='(' separator=',' close=')'>#{oid}</foreach>"
+            + "      GROUP BY order_id) m ON m.mid = l.id "
+            + "</script>")
+    List<Map<String, Object>> selectLeaveAuditPendingBatch(@Param("orderIds") java.util.List<Long> orderIds);
 }

@@ -81,6 +81,35 @@ public class OrderAuditController {
         return Result.ok(queryService.queue(result, tag, page, size));
     }
 
+    /**
+     * <b>期 3 · 一致性对账（纯只读）</b>：{@code result}（引擎这轮判了什么）与
+     * {@code conclusionFromTag}（如果结论从标读会是什么）逐单比对。
+     *
+     * <p>这是**切口径前的风险测绘**，不是给人看的报表：如果这个数很大，说明"把结论切到标上"会改变
+     * 业务看到的结论 —— 那必须在切之前知道。三种不一致分开计数（真冲突 / 标里没结论 / 码认不出），
+     * 因为处置方式完全不同（见 {@code AuditQueryService#conclusionParity} 的注释）。
+     *
+     * <p>⚠️ 一条写语句都没有：不写决策行、不补标、不修数据。随手多跑几次是安全的。
+     * <p>⚠️ 它是 `audit:read`（GET + /admin/order-audit/**）—— 与队列同一把钥匙，不含任何写能力。
+     *
+     * @param limit 明细条数上限（默认 20，最大 100）
+     */
+    @GetMapping("/order-audit/queue/conclusion-parity")
+    public Result<Map<String, Object>> conclusionParity(@RequestParam(defaultValue = "20") int limit) {
+        return Result.ok(queryService.conclusionParity(limit));
+    }
+
+    /**
+     * 单张订单的「标 → 结论」影子视图（纯只读）。
+     *
+     * <p>队列给的是"每单一行 + 影子字段"，但队列是决策驱动的 —— 「从没判定过」的单进不去。
+     * 这个入口专门回答那种单会怎样（结论来源 {@code NONE}，而不是被 NO_MATCH 冒充）。
+     */
+    @GetMapping("/order-audit/orders/{id}/conclusion-shadow")
+    public Result<Map<String, Object>> conclusionShadow(@PathVariable Long id) {
+        return Result.ok(queryService.conclusionShadowOf(id));
+    }
+
     /** 立即触发一轮（MANUAL）：返回 runId 与五类计数 */
     @PostMapping("/order-audit/run")
     public Result<RunResultDto> run() {

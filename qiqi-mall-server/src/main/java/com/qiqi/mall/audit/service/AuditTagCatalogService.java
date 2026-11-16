@@ -63,6 +63,45 @@ public class AuditTagCatalogService {
     public static final String CODE_FROZEN = "FROZEN";
     /** 待人工审核：result=MANUAL（被排除条件挡下来的那支） */
     public static final String CODE_AUDIT_PENDING = "AUDIT_PENDING";
+    /**
+     * 自动过审通过：result=AUTO_PASS（<b>visible=0</b>，期 3 步骤 1 新增，见 V7）。
+     *
+     * <p>为什么「最常见的结论」也要有标：期 3 要把结论改从标读，AUTO_PASS 若没有标，
+     * 任何"从标反推结论"的实现都会在这批单上给不出结论、只能回退读决策行 —— 等于把刚切掉的耦合接回来。
+     * 而"自动过审"落成一枚显眼的标又是噪声，所以：<b>数据上有标（事实），队列里不显示（visible=0）</b>。
+     *
+     * <p>⚠️ 它仍然是 {@code category='结论'}：互斥规则 / 结算规则 / 下发保险的 category 判据都按这一档走，
+     * 为了"不显示"把它塞进「特征」档会当场漏掉互斥（一单能同时 active AUTO_PASSED + NO_POLICY_MATCH）。
+     */
+    public static final String CODE_AUTO_PASSED = "AUTO_PASSED";
+
+    /**
+     * 人工放行通过：7→8 且 {@code reason=AUDIT_PASS}（<b>visible=0</b>，期 3 步骤 2.5 新增，见 V8）。
+     *
+     * <p>这是「结算 = 落终局标」这条新口径的第一条：单子离开待审核之后，它的"当前结论"不再是空的，
+     * 而是变成了「它最后怎么了」。为什么 visible=0：通过的判断由<b>订单状态</b>表达（吉客云口径），
+     * 而每张过审单都会有一条这个标 —— visible=1 会把队列刷成一屏"人工放行通过"，
+     * 真正要看的几条当场被淹掉（同 {@link #CODE_AUTO_PASSED} 的理由）。
+     */
+    public static final String CODE_AUDIT_PASSED = "AUDIT_PASSED";
+
+    /** 审核不通过：7→4 且 {@code reason=AUDIT_REJECT}（<b>visible=0</b>）。"没过"由状态 4 表达，标说明"是人工关的" */
+    public static final String CODE_AUDIT_REJECTED = "AUDIT_REJECTED";
+
+    /**
+     * 已申请退货：7→5 且 {@code reason=RETURN_APPLY}（<b>visible=1</b>，三条终局标里唯一可见的一条）。
+     *
+     * <p>为什么只有它可见：队列的「判定」列里<b>看不到订单状态</b>（队列是决策驱动的，
+     * {@code order.status} 只在订单页），运营从队列里根本看不出这单已进退货流程；
+     * 而退货是少数单，噪声风险与信息增量不对称。
+     *
+     * <p>为什么 blocking=0（不是 1）：{@code blocking} 的语义是「会拦住下单往下走」，
+     * 而<b>结论标从不参与下发保险</b>（{@code DeliveryFlowService#enforceDispatchTagGate} 只拦
+     * FROZEN 族 + 特征标里 blocking=1 的）。写 1 就是让字典承诺一件系统不执行的事；
+     * 而且 5→1（退货审核拒绝，直发单）之后单子还能 1→2 发货，那时 blocking=1 的这条标仍 active ——
+     * 将来谁把结论标接进第二道保险，就是真死锁。可见性不靠 blocking（队列 chip 只按 visible 过滤）。
+     */
+    public static final String CODE_RETURN_APPLIED = "RETURN_APPLIED";
 
     /** 结论标：审核跑完的产物 —— 本期只实现这一档的自动落标 */
     public static final String CATEGORY_CONCLUSION = "结论";

@@ -30,19 +30,23 @@ import {
  *   **判定结论必须落成可读、可筛、可聚合的标**；决策行退回审计层。
  *   业务人员看标，排障人员看矩阵 —— 而队列上"什么都没有"是不合格的。
  *
- * 期 1 的结论 → 标映射（六笔演示单刚好覆盖五种结论 + 一条不落标的 AUTO_PASS）：
- *   QT-1001 AUTO_PASS    → **不产标**（自动过审等于"什么都没发生"，落上去是噪声）7→8
+ * 期 1 的结论 → 标映射（六笔演示单刚好覆盖五种结论 + 一条 AUTO_PASS）：
+ *   QT-1001 AUTO_PASS    → **AUTO_PASSED（visible=0）** 7→8
+ *                          ⚠️ 期 3 步骤 1（V7，2026-11-16 拍板）改了期 1 的口径：
+ *                          期 1 是「AUTO_PASS 不产标」（理由=显示噪声），现在必须落标 ——
+ *                          否则"结论从标读"在最常见的那个结论上根本给不出答案；
+ *                          噪声问题由 `visible=0` 解决：**数据上有标，队列里不显示**。
  *   QT-1002 MANUAL(排除) → AUDIT_PENDING  ← 以前这一支一个标都不落，队列里一片空白
  *   QT-1003 NO_MATCH     → NO_POLICY_MATCH
  *   QT-1004 BLOCKED      → BLOCKED
  *   QT-1005 FROZEN       → FROZEN（既有 P2 路径，本用例不重复验它在目录里的元数据）
  *   QT-1006 NO_MATCH     → NO_POLICY_MATCH
  *
- * ⚠️ 口径（2026-11-16 修正，别写反了）：
- *   「AUTO_PASS 这个**结论**不产标」≠「自动过审的单**不能有任何标**」。
- *   客诉客户 / 绿旗急发 / 双地址这类**特征标**与"过没过"无关，打了标照样自动过审
- *   （吉客云原话）。所以断言一律写"**结论**标为 0"（按标目录 category='结论' 过滤），
- *   绝不写"没有任何标"—— 后者将来加一个特征标就会误红。
+ * ⚠️ 口径（2026-11-16 期 3 再修正，别写反了）：
+ *   ① AUTO_PASS **有一条结论标** {@code AUTO_PASSED}，但它 visible=0 ⇒ **页面上不显示**；
+ *   ② 自动过审的单可以**另外**带特征标（客诉客户 / 绿旗急发 / 双地址…），那些与"过没过"无关
+ *      （吉客云原话：打了标照样自动过审）。所以断言一律按标目录 category='结论' 过滤，
+ *      绝不写"没有任何标"—— 后者将来加一个特征标就会误红。
  *
  * 页面侧钉四件事：
  *   ① 行内能看到标的中文名（不是英文码），且不新开列（10 列已顶满画幅）；
@@ -62,14 +66,14 @@ test.describe('业务 › 订单-自动审核 › 结论标-看得见与筛得�
     restoreAuditSchedule()
   })
 
-  test('跑一轮后：五种结论各落各的标（AUTO_PASS 不落结论标）；队列行看得见、按标筛得动、抽屉说得出处', async ({ page, request }) => {
+  test('跑一轮后：五种结论各落各的标（AUTO_PASS 落 visible=0 的 AUTO_PASSED）；队列行看得见、按标筛得动、抽屉说得出处', async ({ page, request }) => {
     test.setTimeout(300_000)
     await adminLoginHardened(page)
     const token = await adminTokenOf(page)
 
     resetAuditDemoBaseline()
 
-    await test.step('① 跑一轮：结论标真的落到每张单身上（AUTO_PASS 除外）', async () => {
+    await test.step('① 跑一轮：结论标真的落到每张单身上（含 AUTO_PASS → AUTO_PASSED）', async () => {
       await gotoAuditQueue(page)
       await runAuditViaUi(page)
 
@@ -82,8 +86,11 @@ test.describe('业务 › 订单-自动审核 › 结论标-看得见与筛得�
         .toEqual(['AUDIT_PENDING'])
       expect(activeConclusionTagsOf(orderFactOf('QT-1004').id), 'QT-1004（BLOCKED）应落 BLOCKED')
         .toEqual(['BLOCKED'])
-      expect(activeConclusionTagsOf(orderFactOf('QT-1001').id), 'QT-1001（AUTO_PASS）**不产结论标**')
-        .toEqual([])
+      // 期 3 步骤 1：AUTO_PASS 也落结论标（AUTO_PASSED），但 visible=0 ⇒ 不进队列显示。
+      // 这条断言按**新决定**写：库里必须有这条标（否则"结论从标读"在这批单上给不出答案）。
+      expect(activeConclusionTagsOf(orderFactOf('QT-1001').id),
+        'QT-1001（AUTO_PASS）落 AUTO_PASSED 结论标（visible=0，不进队列显示）')
+        .toEqual(['AUTO_PASSED'])
       // MANUAL 的"被排除"这支不许打挂起标（挂起标只有库存/成本预检降级才打）
       expect(activeHangTagsOf(orderFactOf('QT-1002').id), 'MANUAL（排除型）不该有挂起标').toEqual([])
 
@@ -111,10 +118,10 @@ test.describe('业务 › 订单-自动审核 › 结论标-看得见与筛得�
       const chips2 = auditQueueRow(page, 'QT-1002').locator('[data-testid="audit-row-tags-QT-1002"]')
       await expect(chips2, 'QT-1002（留人工）应显示「待人工审核」').toContainText('待人工审核')
 
-      // AUTO_PASS 的单不产结论标 → 本场景里它的行上没有标区
+      // AUTO_PASS 的结论标 visible=0 ⇒ 队列行**不显示**它（数据上有、页面上没有，这正是 visible 的语义）
       const row1 = auditQueueRow(page, 'QT-1001')
       await expect(row1.locator('[data-testid="audit-row-tags-QT-1001"]'),
-        'AUTO_PASS 不产标 → 行上不该出现标区（注意：这是"结论标为 0"，不是"任何标都不许有"）')
+        'AUTO_PASSED 是 visible=0 的标 → 行上不该出现标区（"自动过审"落成一枚标是噪声）')
         .toHaveCount(0)
 
       // 不新开列：表头仍是那 10 列（加列会把「原因」挤出 1960 画幅，上一轮踩过）

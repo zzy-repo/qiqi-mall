@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.qiqi.mall.audit.service.AuditTagCatalogService;
 import com.qiqi.mall.audit.service.OrderAuditTagService;
 import com.qiqi.mall.oms.entity.DeliveryOrder;
 import com.qiqi.mall.oms.entity.ReturnApply;
@@ -26,6 +27,7 @@ import org.mockito.ArgumentCaptor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -302,24 +304,56 @@ class StatusEntryGuardTest {
      * {@code AuditConclusionSettlementIntegrationTest}（真 HTTP 入口）覆盖。
      */
     @Test
-    @DisplayName("③ 离开待审核：7→8(人工) / 7→8(自动) / 7→4 / 7→5 / 兜底 各写什么 released_by")
+    @DisplayName("③ 离开待审核：7→8(人工) / 7→8(自动) / 7→4 / 7→5 / 兜底 各写什么 released_by + 落哪枚终局标")
     void leavingAuditPendingSettlesWithFixedReleasedBy() {
-        assertReleasedBy(8, OrderStatusService.REASON_AUDIT_PASS, OrderAuditTagService.RELEASED_BY_AUDIT_PASS);
-        assertReleasedBy(8, ReasonCodes.AUDIT_AUTO_PASS, OrderAuditTagService.RELEASED_BY_SUPERSEDED);
-        assertReleasedBy(4, OrderStatusService.REASON_AUDIT_REJECT, OrderAuditTagService.RELEASED_BY_AUDIT_REJECT);
-        assertReleasedBy(5, OrderStatusService.REASON_RETURN_APPLY, OrderStatusService.RELEASED_BY_RETURN_APPLY);
-        // 兜底：聚合推导把 7 推成 2（包裹事实变了）—— 也是「离开待审核」，同样要结算
-        assertReleasedBy(2, OrderStatusService.REASON_AGGREGATE, "SYSTEM:STATUS_2");
+        assertSettlement(8, OrderStatusService.REASON_AUDIT_PASS,
+                OrderAuditTagService.RELEASED_BY_AUDIT_PASS, AuditTagCatalogService.CODE_AUDIT_PASSED);
+        assertSettlement(8, ReasonCodes.AUDIT_AUTO_PASS,
+                OrderAuditTagService.RELEASED_BY_SUPERSEDED, AuditTagCatalogService.CODE_AUTO_PASSED);
+        assertSettlement(4, OrderStatusService.REASON_AUDIT_REJECT,
+                OrderAuditTagService.RELEASED_BY_AUDIT_REJECT, AuditTagCatalogService.CODE_AUDIT_REJECTED);
+        assertSettlement(5, OrderStatusService.REASON_RETURN_APPLY,
+                OrderStatusService.RELEASED_BY_RETURN_APPLY, AuditTagCatalogService.CODE_RETURN_APPLIED);
+        // 兜底：聚合推导把 7 推成 2（包裹事实变了）—— 也是「离开待审核」，同样要**解**，
+        // 但**不落**终局标：那是包裹事实，不是审核结论（给它落"人工放行通过"就是伪造判定证据）。
+        assertSettlement(2, OrderStatusService.REASON_AGGREGATE, "SYSTEM:STATUS_2", null);
     }
 
-    private static void assertReleasedBy(int to, String reason, String expected) {
+    /**
+     * 一次流转同时钉两件事：① {@code releaseAllConclusionTags} 带对了 released_by；
+     * ② 落的是哪枚终局标（{@code null} = 这一支不落）。
+     *
+     * <p>为什么连"不落"也要断言：{@code null} 那一支如果哪天悄悄落了标，
+     * 库里的证据会变成一条假的"人工放行通过"——数字上看不出来，业务上错得离谱。
+     */
+    private static void assertSettlement(int to, String reason, String expectedReleasedBy, String expectedTerminalCode) {
         Order target = order(7, 3);
         OrderAuditTagService tags = conclusionTags();
         OrderStatusService svc = orderService(orderMapperReturning(1), tags);
 
         assertThat(svc.change(target, to, reason, null)).isEqualTo(1);
 
-        verify(tags).releaseAllConclusionTags(target.getId(), expected);
+        verify(tags).releaseAllConclusionTags(target.getId(), expectedReleasedBy);
+        if (expectedTerminalCode == null) {
+            verify(tags, never()).ensureActive(any(), any(), any());
+        } else {
+            // 顺序契约（release 在前）由真库用例验"最终只有一条 active 结论标"来兜 ——
+            // 这里只断言"落的是正确的码"（用 eq 全匹配，别混用裸值与匹配器）。
+            verify(tags).ensureActive(eq(target.getId()), eq(expectedTerminalCode), any());
+        }
+    }
+
+    @Test
+    @DisplayName("③ 兜底那一支（聚合推导）只解不落：不许凭空造一条审核结论")
+    void derivedExitReleasesButDoesNotLandTerminalTag() {
+        Order target = order(7, 3);
+        OrderAuditTagService tags = conclusionTags();
+        OrderStatusService svc = orderService(orderMapperReturning(1), tags);
+
+        assertThat(svc.change(target, 9, OrderStatusService.REASON_AGGREGATE, null)).isEqualTo(1);
+
+        verify(tags).releaseAllConclusionTags(target.getId(), "SYSTEM:STATUS_9");
+        verify(tags, never()).ensureActive(any(), any(), any());
     }
 
     @Test
@@ -331,6 +365,7 @@ class StatusEntryGuardTest {
         assertThat(svc.change(order(7, 3), 8, OrderStatusService.REASON_AUDIT_PASS, null)).isZero();
 
         verify(tags, never()).releaseAllConclusionTags(any(), any());
+        verify(tags, never()).ensureActive(any(), any(), any());
     }
 
     @Test
@@ -342,6 +377,7 @@ class StatusEntryGuardTest {
         assertThat(svc.change(order(7, 3), 7, OrderStatusService.REASON_AGGREGATE, null)).isEqualTo(1);
 
         verify(tags, never()).releaseAllConclusionTags(any(), any());
+        verify(tags, never()).ensureActive(any(), any(), any());
     }
 
     @Test
@@ -353,6 +389,7 @@ class StatusEntryGuardTest {
         assertThat(svc.change(order(5, 3), 7, OrderStatusService.REASON_AGGREGATE, null)).isEqualTo(1);
 
         verify(tags, never()).releaseAllConclusionTags(any(), any());
+        verify(tags, never()).ensureActive(any(), any(), any());
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.qiqi.mall.oms.service;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.qiqi.mall.audit.service.ConclusionTags;
 import com.qiqi.mall.audit.service.OrderAuditTagService;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.shared.ledger.ReasonCodes;
@@ -33,11 +34,14 @@ import java.util.function.Consumer;
  * （写了就是「记一笔没发生的事」）。{@code reason}/{@code reasonDetail} 就是
  * {@code order_status_ledger} 的那两列，所以每个调用点必须把「这次是什么事件」说清楚。
  *
- * <h3>结论标跟着状态一起结算（离开待审核就清空）</h3>
+ * <h3>结论标跟着状态一起结算（离开待审核 ⇒ 落终局标，<b>不再是一把清空</b>）</h3>
  * 「结论标」（{@code order_audit_tag} 里 {@code category='结论'} 或 {@code FROZEN%} 的那些：AUDIT_PENDING /
  * BLOCKED / NO_POLICY_MATCH / STOCK_SHORT / FROZEN…）描述的是<b>这一轮判定得出的当前结论</b>。
  * 单子一旦离开「7 待审核」，那个结论就不再成立，必须收尾 —— 就在 {@link #change} 成功之后、
  * 同一事务内，由 {@link #settleConclusionTagsIfLeavingAuditPending} 统一做。
+ * <p>期 3 步骤 2.5 起收尾是<b>两步</b>：先解除"待审核期间的临时结论"，再落一条<b>终局结论标</b>
+ * （AUDIT_PASSED / AUDIT_REJECTED / RETURN_APPLIED / AUTO_PASSED）。理由：清空只回答了
+ * "旧结论不成立"，没回答"那它最后怎么了"——而后者正是状态答不出、又必须答得出来的那一句。
  * 期 1.6 曾在两个入口（审核通过 / 审核不通过）手工调用过结算，本期删掉了那两处：
  * 同一件事有两个写点，迟早早漏（7→5 申请退货就是这么漏掉的）。
  *
@@ -162,7 +166,8 @@ public class OrderStatusService {
     /** 状态台账写入口（与状态 UPDATE 同一事务；开关关闭时它自己 no-op） */
     private final StatusLedgerWriter ledger;
     /**
-     * 审核标写入口：只用于<b>离开待审核</b>时结算结论标（见 {@link #settleConclusionTagsIfLeavingAuditPending}）。
+     * 审核标写入口：只用于<b>离开待审核</b>时结算结论标（见 {@link #settleConclusionTagsIfLeavingAuditPending}：
+     * 先 release 旧的、再 ensureActive 终局标）。
      * 这里是 oms → audit 的唯一一条依赖，方向与 {@code AuditExecutor}（audit → oms）相反，
      * 但两者是<b>不同 bean 的不同字段</b>，Spring 不会成环；语义上也不是环：
      * 「状态变了 ⇒ 结论标这一栏清空」是状态写入的收尾，判定链反过来只是状态的一个调用方。
@@ -261,53 +266,77 @@ public class OrderStatusService {
             ledger.orderChanged(order, from, to, reason, reasonDetail, refType, refId);
             // 结论标结算：同样只在 UPDATE 成功之后、同一事务内 —— rows == 0 时状态没变，
             // 「单子还停在待审核」，结算就是「把还成立着的结论标清掉」（写没了证据也丢了依据）。
-            settleConclusionTagsIfLeavingAuditPending(order, from, to, reason);
+            settleConclusionTagsIfLeavingAuditPending(order, from, to, reason, reasonDetail);
         }
         log.debug("订单 {} 状态 {} → {}（reason={}，影响 {} 行）", order.getId(), from, to, reason, rows);
         return rows;
     }
 
     /**
-     * 离开「待审核(7)」时结算结论标：把这单身上所有 active 的「结论」标置为已解除（行留着当历史）。
+     * 离开「待审核(7)」时结算结论标：<b>先把旧的解除，再落一条终局结论标</b>（行都留着当历史）。
      *
      * <h3>为什么挂在这里（而不是各入口）</h3>
      * 见 {@link #STATUS_AUDIT_PENDING}：出口不止两个，逐个入口手工调用迟早早漏，而漏掉的后果是
      * 带着 {@code blocking=1} 的残留结论标离开待审核 —— 期 2 的「下发前第二道保险」会把这类单误拦，
      * 而队列里它已经不是待审核，没有任何入口能解掉那条标。
      *
-     * <h3>口径（固定的映射表，改它就要同时改这张表）</h3>
+     * <h3>⚠️ 期 3 步骤 2.5：结算不再等于「清空」</h3>
+     * 期 1.6 的结算只做 {@code releaseAll} 一件事 —— 于是终局单的"当前结论"变成了 {@code null}：
+     * 清空回答了"旧结论不成立"，没回答"那它最后怎么了"。一旦结论改从标读，这批单会答不出结论。
+     * 现在两步走，<b>顺序不能反</b>：
+     * <ol>
+     *   <li>{@code releaseAllConclusionTags} —— 清掉"待审核期间的临时结论"（AUDIT_PENDING / BLOCKED / …）；</li>
+     *   <li>{@code ensureActive(终局标)} —— 落一条"它最后怎么了"。
+     *       反了（先落新标再 release）会被自己刚插的行当成旧结论解掉 —— {@code releaseAll} 不看"新不新"。</li>
+     * </ol>
+     * 终局码由 {@link ConclusionTags#terminalCodeOf} 一处决定（(to 状态 + reason) 二元映射），
+     * 这里只负责按它执行。两步在同一事务里，要么都成、要么都回滚 —— 不会留下"一个结论标都没有"的空档。
+     *
+     * <h3>口径（固定映射：改它就要同时改 {@link ConclusionTags#terminalCodeOf} 与这张表）</h3>
      * <pre>
-     * 离开 7 的流转                       reason（台账原因码）    released_by（解除人）
-     * ──────────────────────────────────────────────────────────────────────────────
-     * 7 → 8 待发货（人工放行）            AUDIT_PASS              SYSTEM:AUDIT_PASS      ← 沿用期 1.6 常量
-     * 7 → 8 待发货（自动审核引擎过审）    AUDIT_AUTO_PASS         SYSTEM:SUPERSEDED      ← 引擎落新结论 ⇒ 旧结论「被取代」
-     * 7 → 4 已关闭（审核不通过）          AUDIT_REJECT            SYSTEM:AUDIT_REJECT    ← 沿用期 1.6 常量
-     * 7 → 5 退款中（登记退货申请）        RETURN_APPLY            SYSTEM:RETURN_APPLY    ← 本期补上的那条出口
-     * 7 → 2/3/8/9（包裹聚合推导）         其它                     SYSTEM:STATUS_&lt;to&gt;     ← 兜底：不认识的出口也要结算
-     * ──────────────────────────────────────────────────────────────────────────────
-     * 7 → 7（聚合幂等重写同一个值）       ——                      不结算：状态没离开待审核，结论仍然成立
+     * 离开 7 的流转                       reason（台账原因码）    released_by（解除人）        终局标
+     * ────────────────────────────────────────────────────────────────────────────────────────────
+     * 7 → 8（人工放行）                   AUDIT_PASS              SYSTEM:AUDIT_PASS            AUDIT_PASSED
+     * 7 → 8（自动审核引擎过审）           AUDIT_AUTO_PASS         SYSTEM:SUPERSEDED            AUTO_PASSED
+     * 7 → 4（审核不通过）                 AUDIT_REJECT            SYSTEM:AUDIT_REJECT          AUDIT_REJECTED
+     * 7 → 5（登记退货申请）               RETURN_APPLY            SYSTEM:RETURN_APPLY          RETURN_APPLIED
+     * 7 → 2/3/9（或 7→8，包裹聚合推导）   DELIVERY_AGGREGATE 等    SYSTEM:STATUS_&lt;to&gt;          —— 不落（只解）
+     * ────────────────────────────────────────────────────────────────────────────────────────────
+     * 7 → 7（聚合幂等重写同一个值）       ——                      不结算：没离开待审核，结论仍然成立
      * </pre>
      *
      * <p>为什么 7→8 自动过审仍写 {@code SYSTEM:SUPERSEDED}：自动审核是一轮<b>新判定</b>，
-     * 上一轮的结论标是被这一轮的结论取代的（{@code AuditExecutor} 原来就是这么写的），口径不能变。
-     * 换句话说 released_by 回答「它为什么不成立了」，两条 7→8 的答案本来就不同：
-     * 人工放行是「人放行了」，自动过审是「引擎给出了新结论」。
+     * 上一轮的结论标是被这一轮的结论取代的，口径不变。换句话说 released_by 回答「它为什么不成立了」，
+     * 两条 7→8 的答案本来就不同：人工放行是「人放行了」，自动过审是「引擎给出了新结论」。
      *
-     * <p>为什么兜底不省：聚合推导（{@code DeliveryFlowService#recompute}）也能把 7 推成 2/3/9
-     * （包裹事实变了），那同样是「离开待审核」。今天它少见，但正因为它少见，
-     * 将来谁再往 7 的出口上加一条时，「忘了结算」不该是一次静默的回归 —— 兜底值
-     * {@code SYSTEM:STATUS_<to>} 至少让库里的解除痕迹说得出「是因为流转到了哪个状态」。
+     * <p>为什么兜底那一支<b>不落终局标</b>：聚合推导讲的是包裹事实（全出库了/取消了），
+     * 它不是一条审核结论 —— 给它落"人工放行通过"就是伪造一条判定证据。那一支只解不落，
+     * 该单随后没有结论标是<b>设计如此</b>；对账端点用台账 {@code reason} 把它单列成
+     * {@code noAuditConclusionByDesign}（正常），不会被误算成真缺口。
      *
      * <p>进入 7（0→7 支付送审、5→7 删申请交回聚合、8/9→7 包裹全取消退回）<b>不需要任何处理</b>：
      * 进 7 之前那次「离开 7」已经结算干净，而 7 的出生（建单/渠道导单）本来就没有结论标；
      * 交回重算后的结论标由下一次判定重新落（{@code AuditExecutor#settleConclusionTag}）。
      */
-    private void settleConclusionTagsIfLeavingAuditPending(Order order, Integer from, int to, String reason) {
+    private void settleConclusionTagsIfLeavingAuditPending(Order order, Integer from, int to,
+                                                          String reason, String reasonDetail) {
         if (from == null || from != STATUS_AUDIT_PENDING || to == STATUS_AUDIT_PENDING) return;
         String releasedBy = conclusionReleasedBy(to, reason);
+        // 终局码只有一处决定（ConclusionTags#terminalCodeOf）；null = 这一支不落（聚合推导等）
+        String terminalCode = ConclusionTags.terminalCodeOf(to, reason);
         int released = conclusionTags.releaseAllConclusionTags(order.getId(), releasedBy);
-        log.info("订单 {} 离开待审核（7→{}，reason={}），结论标结算 {} 条（released_by={}）",
-                order.getId(), to, reason, released, releasedBy);
+        if (terminalCode != null) {
+            // ★ 顺序契约：必须在 releaseAll **之后**。反了的话，刚插进去的终局标会被
+            //   releaseAllConclusionTags 自己解掉（它只认 category='结论'，不看"新不新"）。
+            // 标的 reason 优先用调用方给的人话（自动过审那支传的是引擎的判定原话，
+            // 与改动前落 AUTO_PASSED 时写的内容一致）；没有就用一句能自证出处的话。
+            String why = reasonDetail != null && !reasonDetail.isBlank()
+                    ? reasonDetail
+                    : "离开待审核 7→" + to + "（reason=" + reason + "，released_by=" + releasedBy + "）";
+            conclusionTags.ensureActive(order.getId(), terminalCode, why);
+        }
+        log.info("订单 {} 离开待审核（7→{}，reason={}），结论标结算 {} 条，终局标={}（released_by={}）",
+                order.getId(), to, reason, released, terminalCode == null ? "（不落）" : terminalCode, releasedBy);
     }
 
     /** 离开待审核时 {@code released_by} 的取值（映射表见 {@link #settleConclusionTagsIfLeavingAuditPending}） */

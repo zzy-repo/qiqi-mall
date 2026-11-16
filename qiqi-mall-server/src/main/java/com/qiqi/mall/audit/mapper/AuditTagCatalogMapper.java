@@ -49,4 +49,26 @@ public interface AuditTagCatalogMapper extends BaseMapper<AuditTagCatalog> {
             + "<foreach item='c' collection='codes' open='(' separator=',' close=')'>#{c}</foreach>"
             + "</script>")
     List<AuditTagCatalog> selectByCodes(@Param("codes") java.util.Collection<String> codes);
+
+    /**
+     * 这几条标码里<b>最早被登记进目录</b>的时刻 —— 也就是"这条规则从哪一刻起生效"。
+     *
+     * <h3>谁在用、为什么必须直查库</h3>
+     * 对账端点（{@code GET /admin/order-audit/queue/conclusion-parity}）要用它把两类完全不同的单分开：
+     * <ul>
+     *   <li><b>历史单</b>：规则生效<b>之前</b>就离开过待审核 ⇒ 那时候结算只清空、不落终局标，
+     *       它们身上没有终局标是<b>如实的过去</b>（结论退回决策行，不回填）；</li>
+     *   <li><b>真缺口</b>：规则生效<b>之后</b>按结算四条路离开 7，却没有终局标 ⇒ 代码 bug，必须报警。</li>
+     * </ul>
+     * 判据不能靠"猜"，只能靠一个真实的时间点。这里取的是<b>迁移写下这几条目录项</b>的那一刻
+     * （{@code audit_tag_catalog.created_at}，V8 里三条同一语句写入、时刻相同；重放迁移不会刷新它，
+     * 因为 V8 是 {@code ON DUPLICATE KEY UPDATE id=id}）—— 比耦合 Flyway 记账表更稳，
+     * 也不需要在代码里硬编一个日期。
+     *
+     * @return 最早那条的创建时间；目录里一条都没有（迁移没跑）时回 {@code null}，上层据此报"判据未知"
+     */
+    @Select("<script>SELECT MIN(created_at) FROM audit_tag_catalog WHERE code IN "
+            + "<foreach item='c' collection='codes' open='(' separator=',' close=')'>#{c}</foreach>"
+            + "</script>")
+    java.time.LocalDateTime selectEarliestCreatedAt(@Param("codes") java.util.Collection<String> codes);
 }
