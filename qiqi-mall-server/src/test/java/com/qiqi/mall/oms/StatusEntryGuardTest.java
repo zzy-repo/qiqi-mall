@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.qiqi.mall.audit.service.OrderAuditTagService;
 import com.qiqi.mall.oms.entity.DeliveryOrder;
 import com.qiqi.mall.oms.entity.ReturnApply;
 import com.qiqi.mall.oms.service.DeliveryOrderService;
@@ -14,6 +15,7 @@ import com.qiqi.mall.oms.service.ReturnApplyService;
 import com.qiqi.mall.oms.service.ReturnStatusService;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.order.mapper.OrderMapper;
+import com.qiqi.mall.shared.ledger.ReasonCodes;
 import com.qiqi.mall.shared.ledger.StatusLedgerWriter;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
@@ -26,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -89,10 +92,22 @@ class StatusEntryGuardTest {
         return mapper;
     }
 
+    /**
+     * 结论标结算入口：同样给 mock —— 本类只验入口层的 CAS / 单语句 UPDATE / 守卫。
+     * 「离开待审核到底结算了什么」由 {@code AuditConclusionSettlementIntegrationTest}（真库 + 真 HTTP 入口）负责。
+     */
+    private static OrderAuditTagService conclusionTags() {
+        return mock(OrderAuditTagService.class);
+    }
+
     private static OrderStatusService orderService(OrderMapper mapper) {
+        return orderService(mapper, conclusionTags());
+    }
+
+    private static OrderStatusService orderService(OrderMapper mapper, OrderAuditTagService tags) {
         OrderService orderService = mock(OrderService.class);
         when(orderService.getBaseMapper()).thenReturn(mapper);
-        return new OrderStatusService(orderService, ledger());
+        return new OrderStatusService(orderService, ledger(), tags);
     }
 
     // ------------------------------------------------------------------ ① CAS：条件 + 影响行数
@@ -274,6 +289,70 @@ class StatusEntryGuardTest {
                 .hasMessageContaining("非法的包裹状态流转");
         assertThatThrownBy(() -> svc.init(d, DeliveryOrder.SIGNED))
                 .isInstanceOf(IllegalStateException.class);
+    }
+
+    // ------------------------------------------------------------------ ③ 离开待审核 ⇒ 结算结论标
+
+    /**
+     * 本期把「结论标结算」从各入口手工调用，收敛到状态写入的唯一入口。
+     *
+     * <p>为什么单测也要钉一次：这张映射表（7→8 / 7→4 / 7→5 / 兜底）是<b>数据口径</b>，
+     * 事后查库就靠 {@code released_by} 回答「这条标为什么不成立了」。它一旦漂成 system 或空，
+     * 库里的证据还在、但没人说得清原因。真库路径由
+     * {@code AuditConclusionSettlementIntegrationTest}（真 HTTP 入口）覆盖。
+     */
+    @Test
+    @DisplayName("③ 离开待审核：7→8(人工) / 7→8(自动) / 7→4 / 7→5 / 兜底 各写什么 released_by")
+    void leavingAuditPendingSettlesWithFixedReleasedBy() {
+        assertReleasedBy(8, OrderStatusService.REASON_AUDIT_PASS, OrderAuditTagService.RELEASED_BY_AUDIT_PASS);
+        assertReleasedBy(8, ReasonCodes.AUDIT_AUTO_PASS, OrderAuditTagService.RELEASED_BY_SUPERSEDED);
+        assertReleasedBy(4, OrderStatusService.REASON_AUDIT_REJECT, OrderAuditTagService.RELEASED_BY_AUDIT_REJECT);
+        assertReleasedBy(5, OrderStatusService.REASON_RETURN_APPLY, OrderStatusService.RELEASED_BY_RETURN_APPLY);
+        // 兜底：聚合推导把 7 推成 2（包裹事实变了）—— 也是「离开待审核」，同样要结算
+        assertReleasedBy(2, OrderStatusService.REASON_AGGREGATE, "SYSTEM:STATUS_2");
+    }
+
+    private static void assertReleasedBy(int to, String reason, String expected) {
+        Order target = order(7, 3);
+        OrderAuditTagService tags = conclusionTags();
+        OrderStatusService svc = orderService(orderMapperReturning(1), tags);
+
+        assertThat(svc.change(target, to, reason, null)).isEqualTo(1);
+
+        verify(tags).releaseAllConclusionTags(target.getId(), expected);
+    }
+
+    @Test
+    @DisplayName("③ 状态没真的变（0 行 = 被别人抢先改过）⇒ 一条结论标都不许结算")
+    void casFailureDoesNotSettleConclusionTags() {
+        OrderAuditTagService tags = conclusionTags();
+        OrderStatusService svc = orderService(orderMapperReturning(0), tags);
+
+        assertThat(svc.change(order(7, 3), 8, OrderStatusService.REASON_AUDIT_PASS, null)).isZero();
+
+        verify(tags, never()).releaseAllConclusionTags(any(), any());
+    }
+
+    @Test
+    @DisplayName("③ 聚合幂等重写 7→7 ⇒ 状态没离开待审核，结论仍然成立，不结算")
+    void rewritingPendingStatusDoesNotSettleConclusionTags() {
+        OrderAuditTagService tags = conclusionTags();
+        OrderStatusService svc = orderService(orderMapperReturning(1), tags);
+
+        assertThat(svc.change(order(7, 3), 7, OrderStatusService.REASON_AGGREGATE, null)).isEqualTo(1);
+
+        verify(tags, never()).releaseAllConclusionTags(any(), any());
+    }
+
+    @Test
+    @DisplayName("③ 进入待审核（5 退款中被交回聚合 5→7）不结算：结论标由下一次判定重新落")
+    void enteringAuditPendingDoesNotSettle() {
+        OrderAuditTagService tags = conclusionTags();
+        OrderStatusService svc = orderService(orderMapperReturning(1), tags);
+
+        assertThat(svc.change(order(5, 3), 7, OrderStatusService.REASON_AGGREGATE, null)).isEqualTo(1);
+
+        verify(tags, never()).releaseAllConclusionTags(any(), any());
     }
 
     @Test

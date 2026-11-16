@@ -8,7 +8,6 @@ import com.qiqi.mall.shared.common.Result;
 import com.qiqi.mall.shared.guard.OptimisticLockGuard;
 import com.qiqi.mall.shared.ledger.AdminAuditWriter;
 import com.qiqi.mall.shared.ledger.ReasonCodes;
-import com.qiqi.mall.audit.service.OrderAuditTagService;
 import com.qiqi.mall.oms.dto.OrderDetailDTO;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.order.entity.OrderItem;
@@ -58,8 +57,6 @@ public class OrderController {
     private final StockStore stockStore;
     /** 后台操作审计（删单/发货这类敏感动作要留证；开关可一键关掉） */
     private final AdminAuditWriter auditWriter;
-    /** 结论标结算：放行/关闭一张待审核单时，它身上的「结论」标（AUDIT_PENDING / BLOCKED…）都不再成立 */
-    private final OrderAuditTagService auditTagService;
 
     public OrderController(OrderService orderService, OrderStatusService orderStatusService,
                            OrderItemService orderItemService,
@@ -69,8 +66,7 @@ public class OrderController {
                            OrderPurgeService orderPurgeService,
                            MemberService memberService,
                            StockStore stockStore,
-                           AdminAuditWriter auditWriter,
-                           OrderAuditTagService auditTagService) {
+                           AdminAuditWriter auditWriter) {
         this.orderService = orderService;
         this.orderStatusService = orderStatusService;
         this.orderItemService = orderItemService;
@@ -83,7 +79,6 @@ public class OrderController {
         this.memberService = memberService;
         this.stockStore = stockStore;
         this.auditWriter = auditWriter;
-        this.auditTagService = auditTagService;
     }
 
     /**
@@ -321,15 +316,9 @@ public class OrderController {
         // 绝不能往下走 split() —— 否则订单停在待审核、发货单却已生成，只能人工对账。
         int rows = orderStatusService.change(order, 8, OrderStatusService.REASON_AUDIT_PASS, null);
         OptimisticLockGuard.requireAffected(rows);
-        // ---------------- 期 1.6：放行即结算结论标 ----------------
-        // 这张单已经离开待审核（7→8），它身上那些「结论」标（AUDIT_PENDING / BLOCKED /
-        // NO_POLICY_MATCH / STOCK_SHORT…，以及万一还挂着的 FROZEN 族）描述的都是**上一轮**判定，
-        // 不再是"当前结论" ⇒ 全部让位（active=0 + released_at + released_by=SYSTEM:AUDIT_PASS，行留着当历史）。
-        // 为什么不落一条 AUDIT_PASS 标：期 1 已定「通过由状态表达」，落标就是噪声（一屏 200 条"已通过"）。
-        // ⚠️ 不结算的后果实测：AUDIT_PENDING/BLOCKED 的 blocking=1，下游若按「结论标 + blocking」一刀切，
-        //    这些**已经放行**的单会被当成待处理锁死，而且没有任何入口能解（它已经不在待审核队列了）。
-        // 与状态写入同一事务：拆单抛 409 时连结算一起回滚，不会留下"没放行却把标清了"。
-        auditTagService.releaseAllConclusionTags(id, OrderAuditTagService.RELEASED_BY_AUDIT_PASS);
+        // 结论标结算**不在这里做**：离开待审核（7→8）就结算，这件事已经收敛到状态写入的唯一入口
+        // （OrderStatusService#change → settleConclusionTagsIfLeavingAuditPending，released_by=SYSTEM:AUDIT_PASS）。
+        // 期 1.6 曾在这里手工调一次 releaseAllConclusionTags —— 同一件事两个写点，7→5 那条出口就是这么漏掉的。
         return Result.ok(splitOrderService.split(id));
 
     }
@@ -399,14 +388,8 @@ public class OrderController {
         // fail-closed：0 行 = 读到 status=7 之后别人改过 → 409 回滚，绝不回补库存
         int rows = orderStatusService.change(order, 4, OrderStatusService.REASON_AUDIT_REJECT, null);
         OptimisticLockGuard.requireAffected(rows);
-        // ---------------- 期 1.6：审核不通过也结算结论标 ----------------
-        // 4 已关闭是终局：这单永远不会再往下走，挂着 AUDIT_PENDING / NO_POLICY_MATCH（blocking=1）只会
-        // 让「按 blocking 拦下发」的口径把它算成"待处理"，而它其实已经关掉了（关单由状态表达）。
-        // 与放行同一条路（releaseAllConclusionTags），只是 released_by 不同 —— 事后查库能分清
-        // 「被放行结算」与「被关闭结算」。
-        auditTagService.releaseAllConclusionTags(id, OrderAuditTagService.RELEASED_BY_AUDIT_REJECT);
-
-
+        // 结论标结算**不在这里做**：7→4 也是「离开待审核」，同样由状态唯一入口统一结算
+        // （released_by=SYSTEM:AUDIT_REJECT，与放行区分得开）。
         // 回补必须记台账（缺陷：这条入口原来是裸的 stock = stock + N，和「取消包裹」叠加会补两次）。
         // 声明归属 → 库存接口按幂等键 + 数量守恒记账：同一订单同一规格补过一次，这里就整笔跳过。
         StockLedgerContext.Attribution outer = StockLedgerContext.open(
