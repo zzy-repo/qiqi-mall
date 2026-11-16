@@ -7,6 +7,7 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +26,14 @@ import java.util.Map;
  *
  * <p>⚠️ 缓存里<b>必须包含停用项</b>：历史标行可能挂着已停用的标码，它照样要有中文名
  * （不是显示英文码、更不是空白）。「停用」只影响"能不能被新打上"，不影响"读得出当初是什么"。
+ *
+ * <h3>⚠️⚠️ 这份缓存<b>只能给显示用</b>；「放行 / 拦住」这类判据必须直查库</h3>
+ * 缓存是 <b>per-instance</b> 的：启动时装载，{@link #createCustom} 只 reload <b>处理该请求的那个实例</b>
+ * ⇒ 多实例部署下其余实例会一直陈旧（{@link #TTL_MS} 只把窗口从"永久"缩到几秒，仍不是零）。
+ * 2026-11-16 v1.1.9 真站事故：新加的阻断特征标在陈旧实例上"不存在"，下发保险因此静默放行，
+ * 包裹真的发给了 WMS 并拿到 ACK。所以安全判据走 {@link #freshInfoByCodes}（直查库），
+ * 不要用 {@link #info} / {@link #byCode} / {@link #nameOf} 去决定"放不放行"。
+ * 反过来，{@link #info} / {@link #nameOf} 这类读路径用于显示与下拉时，过期只是显示旧名字 —— 可以接受。
  *
  * <h3>⚠️ 目录里查不到的标码不是错误</h3>
  * {@code tag_code} 允许先落库、目录后补（否则每加一个标都要先跑迁移才能写数据）。
@@ -70,8 +79,44 @@ public class AuditTagCatalogService {
 
     private volatile Map<String, AuditTagCatalog> byCode = Map.of();
 
+    /**
+     * 缓存装载时刻（毫秒）。配合 {@link #TTL_MS} 做「读时惰性过期」：
+     * 这份副本是 <b>per-instance</b> 的，而 {@link #createCustom} 只会 reload <b>处理该请求的那一个实例</b>
+     * ⇒ 多实例部署下别的实例会一直陈旧（2026-11-16 v1.1.9 事故根因）。
+     * 见类注释的「⚠️ 这份缓存只能给显示用，安全判据必须直查库」。
+     */
+    private volatile long loadedAt = 0L;
+
+    /**
+     * 缓存有效期（毫秒）：过了这个点，下一次<b>读</b>就顺手 reload 一次。
+     *
+     * <p>取值 5s 的理由：目录是几十行的静态表，一次 reload 就是一条主键索引全表扫（<1ms）；
+     * 而"运营新增一个标之后，别的实例多久能显示/能校验通过"这个窗口取 5~10s 人根本感觉不到。
+     *
+     * <p>⚠️ TTL <b>不是</b>为了安全判据 —— 安全判据（下发保险）已经绕开这份缓存直查库
+     * （{@code AuditTagCatalogMapper#selectByCodes}）。TTL 只是把"别的实例多久能看到新标"
+     * 从<b>永久</b>缩到几秒，服务于前端下拉 / 打标校验 / 中文名显示。
+     */
+    private static final long TTL_MS = 5_000L;
+
     public AuditTagCatalogService(AuditTagCatalogMapper mapper) {
         this.mapper = mapper;
+    }
+
+    /**
+     * 定时全量重载（兜底：某些实例可能长时间没人读目录，靠定时器保证它不会一直停在启动那一刻）。
+     *
+     * <p>与 TTL 是<b>两个方向</b>：TTL 保证"有人读就一定不会太旧"，定时器保证"没人读也在慢慢跟上"。
+     * 两者都不承担安全判据 —— 那是下发保险直查库的事。
+     */
+    @Scheduled(fixedDelay = 30_000L, initialDelay = 30_000L)
+    public void refreshPeriodically() {
+        try {
+            reload();
+        } catch (RuntimeException e) {
+            // 一次重载失败不该把定时任务炸掉（异常抛出去会让 Scheduled 取消后续调度）
+            log.warn("标目录定时重载失败（沿用上一份缓存）: {}", e.getMessage());
+        }
     }
 
     @PostConstruct
@@ -93,19 +138,62 @@ public class AuditTagCatalogService {
             c.put(t.getCode(), t);
         }
         this.byCode = c;
+        this.loadedAt = System.currentTimeMillis();
         log.info("标目录已装载：{} 条（结论 {} 条 / 特征 {} 条）", all.size(),
                 countCategory(all, CATEGORY_CONCLUSION), countCategory(all, CATEGORY_FEATURE));
     }
 
+    /**
+     * 读前的惰性过期：缓存超过 {@link #TTL_MS} 就 reload 一次（失败只告警，沿用旧副本）。
+     *
+     * <p>只在<b>读</b>路径上调用，且必须先读一次 {@code loadedAt} 判断 —— 命中时只是一次
+     * volatile 读 + 一次减法，不进 synchronized，不会把热路径（队列每行都要翻中文名）拖慢。
+     */
+    private void reloadIfStale() {
+        if (System.currentTimeMillis() - loadedAt <= TTL_MS) return;
+        try {
+            reload();
+        } catch (RuntimeException e) {
+            // 读不到库时沿用旧副本（比"整页 500"好）；下一次读还会再试
+            log.warn("标目录过期重载失败（沿用上一份缓存）: {}", e.getMessage());
+        }
+    }
+
     // ---------------------------------------------------------------- 读
+
+    /**
+     * <b>直查库</b>（绕过缓存）：按标码批量取当前目录项，返回 {@code code → TagInfo}。
+     *
+     * <h3>这是给「安全判据」用的，不是给显示用的</h3>
+     * 缓存是 per-instance 的、会过期；「放行 / 拦住」这类决策读到过期副本就等于<b>静默失效</b>
+     * （2026-11-16 v1.1.9 真站事故：新加的阻断特征标在没 reload 的实例上"不存在"，
+     * 挂着阻断标的包裹被下发给 WMS 并拿到 ACK）。所以这类判据一律走这里直查。
+     *
+     * <p>成本：一条 `WHERE code IN (...)` 带唯一键 `uk_code` 的查询（目录只有几十行）。
+     * 调用方保证 {@code codes} 非空（空集合直接短路，不必来查库）。
+     *
+     * <p>目录里查不到的标码<b>不会</b>出现在返回的 map 里 —— 那是合法状态（标先落库、目录后补），
+     * 调 用方应按"谈不上 category/blocking"处理，绝不许因此抛异常。
+     */
+    public Map<String, TagInfo> freshInfoByCodes(java.util.Collection<String> codes) {
+        if (codes == null || codes.isEmpty()) return Map.of();
+        Map<String, TagInfo> out = new LinkedHashMap<>();
+        for (AuditTagCatalog t : mapper.selectByCodes(codes)) {
+            out.put(t.getCode(), new TagInfo(t.getCode(), t.getName(), t.getDescription(),
+                    t.getCategory(), eq1(t.getBlocking()), eq1(t.getVisible())));
+        }
+        return out;
+    }
 
     /** 全量（含停用项）：报表 / 维护页口径 */
     public List<AuditTagCatalog> all() {
+        reloadIfStale();
         return List.copyOf(byCode.values());
     }
 
     /** 队列/抽屉用：启用 + 业务可见 */
     public List<TagCatalogDto> visible() {
+        reloadIfStale();
         return byCode.values().stream()
                 .filter(t -> eq1(t.getEnabled()) && eq1(t.getVisible()))
                 .map(TagCatalogDto::of)
@@ -114,6 +202,7 @@ public class AuditTagCatalogService {
 
     /** 某一档下已启用的项（期 2 的特征标下拉会用；本期前端只用 visible/all） */
     public List<TagCatalogDto> enabledByCategory(String category) {
+        reloadIfStale();
         return byCode.values().stream()
                 .filter(t -> eq1(t.getEnabled()) && category != null && category.equals(t.getCategory()))
                 .map(TagCatalogDto::of)
@@ -122,7 +211,9 @@ public class AuditTagCatalogService {
 
     /** 目录项；**查不到返回 null**（调用方降级显示原始标码，见类注释） */
     public AuditTagCatalog byCode(String code) {
-        return code == null ? null : byCode.get(code);
+        if (code == null) return null;
+        reloadIfStale();
+        return byCode.get(code);
     }
 
     /** 目录项的精简视图（中文名 + 说明 + 是否阻断）：队列行富化用；查不到返回 null */

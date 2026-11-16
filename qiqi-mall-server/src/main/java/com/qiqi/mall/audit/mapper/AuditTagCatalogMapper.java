@@ -29,4 +29,24 @@ public interface AuditTagCatalogMapper extends BaseMapper<AuditTagCatalog> {
     @Select("SELECT * FROM audit_tag_catalog WHERE enabled = 1 AND category = #{category} "
             + "ORDER BY sort_no ASC, id ASC")
     List<AuditTagCatalog> selectEnabledByCategory(@Param("category") String category);
+
+    /**
+     * 按标码批量<b>直查库</b>（<b>绕过内存缓存</b>）—— 给「安全判据」用，不是显示用的。
+     *
+     * <h3>为什么必须有这条绕开缓存的入口</h3>
+     * {@link com.qiqi.mall.audit.service.AuditTagCatalogService} 的目录是 <b>per-instance 内存副本</b>
+     * （启动时整表装载，只有处理 {@code createCustom} 的那个实例会 reload）。多实例部署下，
+     * 另一个实例的副本会一直陈旧 —— 如果<b>下发保险</b>的判据读这份副本，
+     * 新增的阻断特征标在那个实例上就"不存在"，保险<b>静默放行</b>（2026-11-16 v1.1.9 真站事故，
+     * 见 {@code DeliverFlowService#enforceDispatchTagGate} 的注释）。
+     *
+     * <p>所以「放行 / 拦住」这类决策一律走本方法直查库：多一次带主键/唯一键的查询，
+     * 换掉一整类"缓存过期 ⇒ 保险失效"的隐患。缓存留给显示与下拉（过期只是显示旧名字）。
+     *
+     * @param codes 标码集合（调用方保证非空；空集合会被上层短路，不走到这里）
+     */
+    @Select("<script>SELECT * FROM audit_tag_catalog WHERE code IN "
+            + "<foreach item='c' collection='codes' open='(' separator=',' close=')'>#{c}</foreach>"
+            + "</script>")
+    List<AuditTagCatalog> selectByCodes(@Param("codes") java.util.Collection<String> codes);
 }

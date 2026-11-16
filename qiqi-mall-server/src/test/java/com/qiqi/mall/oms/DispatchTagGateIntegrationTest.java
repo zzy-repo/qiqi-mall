@@ -46,7 +46,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 订单<b>离开待审核之后</b>才被冻结 / 被打了阻断标（人工冻结不看 status，见
  * {@code OrderAuditController#freeze}），或者历史遗留单。
  *
- * <h3>六个场景（每条都真跑：真起后端 + 真打 HTTP + 真连库）</h3>
+ * <h3>八个场景（每条都真跑：真起后端 + 真打 HTTP + 真连库）</h3>
  * <pre>
  * ① 正常单（无标）→ 下发成功（最重要的一条：不许把正常发货挡住）
  * ② 冻结单（真实 freeze 接口冻的）→ code=1、包裹状态仍 0、WMS 台账 0 行、
@@ -56,6 +56,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * ⑤ 残留结论标（AUDIT_PENDING / BLOCKED 手工造，都是 category='结论' + blocking=1）→ 不拦（硬约束的回归防线）
  * ⑥ ?dryRun=true 预演同样报错，且一行都不落库（连审计都不写）
  * ⑦ （额外）冻结 → 人工审核通过 → 冻结标被结算 → 下发放行：证明"已放行的单不会被误拦"
+ * ⑧ （回归防线）目录缓存陈旧（新标只进了库、没进缓存）→ 下发仍被拦：
+ *    证明安全判据直查库、不读 per-instance 内存副本（2026-11-16 真站漏拦事故的防线）
  * </pre>
  *
  * <h3>为什么 ⑦ 必须存在（它把"第二道保险到底拦得到什么"钉在证据上）</h3>
@@ -386,6 +388,68 @@ class DispatchTagGateIntegrationTest {
                 .as("**已经人工放行的单不许被第二道保险误拦**（拦了它也没有任何动作能解）").isZero();
         assertThat(deliveryStatus(deliveries.get(0))).isEqualTo(1);
         assertThat(mockWms.dispatchCount() - wmsBefore).isEqualTo(1);
+    }
+
+    // ================================================================== ⑧ 目录缓存陈旧 → 保险仍然生效
+
+    /**
+     * <b>回归防线（2026-11-16 真站事故）</b>：目录缓存陈旧时，下发保险必须<b>照样拦住</b>。
+     *
+     * <h3>事故原貌</h3>
+     * 保险的「特征标」判据原来读 {@code AuditTagCatalogService} 的 per-instance 内存缓存
+     * （启动装载；只有处理 {@code createCustom} 的那个实例会 reload）。
+     * 双实例部署下，另一个实例的副本一直陈旧 ⇒ 新加的阻断特征标在它眼里"不存在" ⇒
+     * <b>挂着阻断标的包裹被下发给 WMS 并拿到 ACK</b>（包裹 DL20261116202343872321 / 订单 3）。
+     * 同一段代码里「FROZEN」那条腿是纯 {@code tag_code LIKE 'FROZEN%'}、不查目录，所以它一直是对的。
+     *
+     * <h3>这个用例怎么真正把"缓存陈旧"造出来</h3>
+     * 关键在<b>顺序</b>，不在"等一会儿"：
+     * <ol>
+     *   <li>{@code tagCatalog.reload()} —— 把缓存刷到"当前库里没有这个标"，并重置 TTL 计时；</li>
+     *   <li>直接用 SQL 插一条 {@code category='特征' AND blocking=1} 的目录项（<b>不走</b> createCustom，
+     *       所以没有任何代码会去 reload 缓存）；</li>
+     *   <li><b>先断言缓存确实是陈旧的</b>（{@code byCode} 拿不到它）—— 这一步不能省：
+     *       少了它，用例只是在验证"缓存刚好是新鲜的"，根本证明不了判据绕开了缓存；</li>
+     *   <li>再下发 → 必须被拦。</li>
+     * </ol>
+     * TTL 是 5s，而 2→4 之间只有毫秒级，所以"陈旧"是构造出来的事实，不是运气。
+     */
+    @Test
+    @Order(8)
+    @DisplayName("⑧ 目录缓存陈旧（新标只进了库、没进缓存）→ 下发仍被拦（安全判据直查库）")
+    void staleCatalogCacheStillBlocks() {
+        final String staleCode = "GATE_STALE_ONLY_TAG";
+        Fixture f = newOrderWithParcel("QT-4009", 8);
+
+        // 1) 先把缓存刷到"库里还没有这个标"的状态
+        tagCatalog.reload();
+        // 2) 只进库、不进缓存（刻意不用 createCustom —— 它就是那个"只 reload 自己实例"的入口）
+        jdbc.update("INSERT INTO audit_tag_catalog (code, name, description, category, blocking, visible, "
+                + "enabled, builtin, sort_no) VALUES (?, '缓存陈旧验证标', '只进库不进缓存', '特征', 1, 1, 1, 0, 900)",
+                staleCode);
+        addTag(f.orderId(), staleCode, "人工打的阻断标（目录项刚刚才补登记）");
+
+        // 3) 先证明"缓存确实陈旧"：拿不到 ⇒ 若判据还读缓存，就一定会放行
+        assertThat(tagCatalog.byCode(staleCode))
+                .as("前置条件：这个标此刻还不在内存缓存里（否则本用例证明不了任何事）").isNull();
+
+        int wmsBefore = mockWms.dispatchCount();
+        JsonNode body = post("/admin/deliveries/" + f.deliveryId() + "/dispatch", null).getBody();
+        assertThat(body).isNotNull();
+        System.out.printf("⑧ 缓存陈旧（%s 不在缓存里）下发 → code=%d message=%s%n",
+                staleCode, body.path("code").asInt(), body.path("message").asText());
+
+        assertThat(body.path("code").asInt())
+                .as("★ 缓存陈旧也必须拦住：安全判据不许读 per-instance 内存副本").isEqualTo(1);
+        assertThat(body.path("message").asText())
+                .as("要点名这个标（中文名来自直查库，不是缓存）")
+                .contains("缓存陈旧验证标").contains(staleCode)
+                .contains(NO_WMS_REQUEST);
+        assertThat(deliveryStatus(f.deliveryId())).isZero();
+        assertThat(mockWms.dispatchCount() - wmsBefore).isZero();
+        assertThat(wmsLedgerRows(f.deliveryId())).isZero();
+        assertThat(count("SELECT COUNT(*) FROM admin_audit_log WHERE action = 'DISPATCH_BLOCKED' "
+                + "AND target_id = ?", f.deliveryId())).isEqualTo(1);
     }
 
     // ================================================================== 造数

@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.TreeMap;
 
 /**
@@ -370,6 +371,19 @@ public class DeliveryFlowService {
      * 换句话说它的定位是「防『离开待审核之后才冻住的单』继续往 WMS 发」+「兜历史遗留」，
      * 而不是"把审核阶段那道保险再做一遍"（审核阶段那道靠的是 SKIPPED，根本不产生包裹）。
      *
+     * <h3>⚠️ 判据必须是「当下的事实」：标读库，目录也读库</h3>
+     * 两个数据源都<b>不许读缓存</b>：
+     * <ul>
+     *   <li>标行：{@code auditTagService.activeTags(orderId)} —— 本来就是直查；</li>
+     *   <li>目录（category / blocking / 中文名）：{@code tagCatalog.freshInfoByCodes(...)} 直查，
+     *       <b>不走</b> {@code AuditTagCatalogService} 的 per-instance 内存缓存。</li>
+     * </ul>
+     * 为什么后者是硬约束：那份缓存是"启动装载 + 新增后 reload <b>自己这个实例</b>"，
+     * 多实例部署下另一个实例会一直陈旧 ⇒ 保险<b>静默放行</b>。
+     * 2026-11-16 v1.1.9 真站事故就是这么发生的（包裹 DL20261116202343872321 挂 blocking=1 特征标
+     * 仍被下发、WMS 回了 ACK；双实例对照：stale 实例放行、fresh 实例拦住）。
+     * 缓存留着给下拉/中文名显示用 —— 那些过期只是显示旧名字，不会放走一张单。
+     *
      * @param delivery  待下发的包裹（用 {@code orderId} 读标）
      * @param writeAudit true = 真实下发路径：被拦时写一条 <b>独立事务</b>审计（{@code DISPATCH_BLOCKED}）；
      *                   false = 预演路径：只抛，不写（预演零落库）。
@@ -382,19 +396,35 @@ public class DeliveryFlowService {
         List<OrderAuditTag> active = auditTagService.activeTags(orderId);
         if (active == null || active.isEmpty()) return;       // 无标：绝大多数单（直发/AUTO_PASS）走这条
 
+        // ★ 目录信息一律**直查库**（freshInfoByCodes），不走 auditTagCatalogService 的内存缓存：
+        //   那份缓存是 per-instance 的（启动装载 + 只有处理 createCustom 的那个实例会 reload），
+        //   安全判据读到过期副本 = 保险静默放行。这不是"防御性写法"，是 2026-11-16 的真事故：
+        //   新加的阻断特征标在没 reload 的实例上"不存在"，挂着阻断标的包裹被下发给了 WMS 并拿到 ACK。
+        //   （同一段代码的腿①FROZEN 是纯前缀匹配、根本不查目录 —— 它跨实例一直是对的，
+        //     这个对照本身就把结论说清楚了。）
+        List<String> codes = new ArrayList<>();
+        for (OrderAuditTag tag : active) {
+            String c = tag.getTagCode();
+            if (c != null && !c.isBlank()) codes.add(c);
+        }
+        // 一次查完（不按标逐个查：一张单身上就几个标，但别写成 N+1）
+        Map<String, AuditTagCatalogService.TagInfo> catalog =
+                codes.isEmpty() ? Map.of() : tagCatalog.freshInfoByCodes(codes);
+
         List<BlockingTag> frozen = new ArrayList<>();
         List<BlockingTag> features = new ArrayList<>();
         for (OrderAuditTag tag : active) {
             String code = tag.getTagCode();
             if (code == null || code.isBlank()) continue;
-            // 腿①：FROZEN 家族（前缀，不依赖标目录）
+            AuditTagCatalogService.TagInfo info = catalog.get(code);
+            // 腿①：FROZEN 家族（前缀，不依赖标目录）。中文名取不到的降级成原始码（nameOf 语义）
             if (OrderAuditTagService.isFrozenFamily(code)) {
-                frozen.add(new BlockingTag(code, tagCatalog.nameOf(code), tag.getReason()));
+                String name = info == null || info.name() == null || info.name().isBlank() ? code : info.name();
+                frozen.add(new BlockingTag(code, name, tag.getReason()));
                 continue;
             }
             // 腿②：特征标里 blocking=1 的。目录里查不到 = 谈不上 category/blocking → 不拦（不是错误，
             // 允许"标先落库、目录后补"，见 AuditTagCatalogService 类注释）
-            AuditTagCatalogService.TagInfo info = tagCatalog.info(code);
             if (info == null) continue;
             if (AuditTagCatalogService.CATEGORY_FEATURE.equals(info.category()) && info.blocking()) {
                 features.add(new BlockingTag(code, info.name(), tag.getReason()));
