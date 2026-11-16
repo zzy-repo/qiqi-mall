@@ -300,9 +300,11 @@ public class AuditExecutor {
                 int rows = orderStatusService.change(order, com.qiqi.mall.audit.engine.AuditContext.STATUS_PENDING_SHIP,
                         ReasonCodes.AUDIT_AUTO_PASS, verdict.reasonText(), null, ReasonCodes.REF_AUDIT_RUN, runId);
                 OptimisticLockGuard.requireAffected(rows, "订单 " + order.getOrderSn() + " 状态已变化，本轮审核未生效");
-                // 过审了：库存/成本挂起标不再成立（复跑时清掉，避免「已过审却还挂着 STOCK_SHORT」）
-                tagService.release(order.getId(), OrderAuditTagService.TAG_STOCK_SHORT, "system");
-                tagService.release(order.getId(), OrderAuditTagService.TAG_COST_MISSING, "system");
+                // 过审了（7→8）：这张单身上**所有**结论标都不再是当前结论 ——
+                // 库存/成本挂起标（旧实现只解这两个）、上一轮拦过它的 BLOCKED、更早的 NO_POLICY_MATCH…
+                // 以前只解前两个，于是「BLOCKED 过一轮 → 下一轮自动过审」的单会带着 blocking=1 的 BLOCKED
+                // 一路走到下发环节（期 1.6 修）。逐条按 catalog category='结论' 结算，一条 UPDATE 换空。
+                tagService.releaseAllConclusionTags(order.getId(), OrderAuditTagService.RELEASED_BY_SUPERSEDED);
             }
             case FROZEN -> {
                 ActionSpec action = verdict.matchedPolicy() != null && verdict.matchedPolicy().action() != null
@@ -314,7 +316,14 @@ public class AuditExecutor {
                         ? action.reasonCode()
                         : AuditFreezeReasonService.inferCodeFromText(action.reason());
                 if (code == null) code = AuditFreezeReasonService.CODE_UNSPECIFIED;
-                tagService.freeze(order, action.tagCode(), code, action.reason(),
+                // 标码只有一处判定：ConclusionTags#frozenCodeOf（策略没配细分码 → 通用 FROZEN）。
+                // 那边同时是「这轮冻结算哪个结论标」的答案，这边是真正写库的人 —— 同一个函数，
+                // 就不会出现"结论唯一性以为是 FROZEN、实际落的却是 FROZEN_RETURN_APPLY"的互相挤掉。
+                String tagCode = ConclusionTags.frozenCodeOf(verdict);
+                // 期 1.6：冻结与人工冻结走**同一条**写路径 —— freeze 内部先 supersede 其他 active 结论标
+                // 再落 FROZEN 类标（以前这里和人工冻结都不调 supersede，策略冻的单会并挂上一轮的结论标）。
+                // 互斥只此一处，别在下面 settleConclusionTag 里再来一遍（见那里的 early return）。
+                tagService.freeze(order, tagCode, code, action.reason(),
                         "自动审核：策略「" + (verdict.matchedPolicy() == null ? "-" : verdict.matchedPolicy().name()) + "」");
             }
             case MANUAL -> {
@@ -340,19 +349,26 @@ public class AuditExecutor {
      *
      * <p>映射只在 {@link ConclusionTags#codeOf} 一处决定，这里只负责"写下去"：
      * <ul>
-     *   <li>AUTO_PASS / FROZEN / SKIPPED → 不落（理由见 {@link ConclusionTags} 的映射表）；</li>
+     *   <li>AUTO_PASS / SKIPPED → 不落（理由见 {@link ConclusionTags} 的映射表）；</li>
      *   <li>MANUAL → AUDIT_PENDING / STOCK_SHORT / COST_MISSING（三支来路靠标拆开）；</li>
-     *   <li>BLOCKED → BLOCKED；NO_MATCH → NO_POLICY_MATCH。</li>
+     *   <li>BLOCKED → BLOCKED；NO_MATCH → NO_POLICY_MATCH；</li>
+     *   <li>FROZEN → 码由 {@code codeOf} 给出，但<b>写库由 {@link OrderAuditTagService#freeze} 独占</b>
+     *       （它要同时写 {@code reason_id}/{@code reason_code}），这里不再写第二条（期 1.6）。</li>
      * </ul>
      *
      * <p><b>幂等靠 {@link OrderAuditTagService#ensureActive}</b>：先查 active 同码标、没有才 insert；
      * 并发下靠 {@code uk_active}（虚拟列 {@code active_tag} 的唯一键）兜住并当成"已存在"。
      * 所以同一单同轮跑一百遍也只有一行 —— <b>不产生第二行、也不报错</b>。
      *
-     * <p><b>结论标互斥</b>（期 1.5）：结论标描述的是"<b>当前</b>判定结论"，而当前结论天然只有一个 ——
-     * 一单不可能同时是"无策略命中"和"待人工审核"。所以落新结论标之前，先把该单其他 active 的
-     * 结论档标置 {@code active=0}（{@code released_by=SYSTEM:SUPERSEDED} + {@code released_at}），
-     * **一条 UPDATE、同一事务**（见 {@link OrderAuditTagService#supersedeOtherConclusionTags}）。
+     * <p><b>结论标互斥</b>（期 1.5 立规矩，期 1.6 补齐全部路径）：结论标描述的是"<b>当前</b>判定结论"，
+     * 而当前结论天然只有一个 —— 一单不可能同时是"无策略命中"和"待人工审核"。所以落新结论标之前，
+     * 先把该单其他 active 的结论档标置 {@code active=0}（{@code released_by=SYSTEM:SUPERSEDED} +
+     * {@code released_at}），**同一事务**（见 {@link OrderAuditTagService#supersedeOtherConclusionTags}）。
+     *
+     * <p>期 1.5 只在"引擎落新标"这一条路上做了互斥，另外三条路漏了（期 1.6 实测补上）：
+     * 人工冻结 / 策略冻结（都在 {@code OrderAuditTagService#freeze} 里补）和
+     * <b>离开待审核时的结算</b>（{@link #applyActions} 的 AUTO_PASS 分支 +
+     * {@code OrderController#auditPass} / {@code #auditReject}）。
      *
      * <p>为什么必须互斥（期 1 的教训，别退回去）：不做互斥时，一单从 NO_MATCH 变成 MANUAL 之后
      * {@code NO_POLICY_MATCH} 与 {@code AUDIT_PENDING} 会并列 active，于是
@@ -369,7 +385,12 @@ public class AuditExecutor {
      */
     private void settleConclusionTag(Order order, AuditVerdict verdict) {
         String code = ConclusionTags.codeOf(verdict);
-        if (code == null) return;
+        if (code == null) return;                       // AUTO_PASS / SKIPPED：不落标
+        // FROZEN：码是结论标码（FROZEN 或策略配的细分码），但**写库与互斥都在 freeze() 里做完了**
+        // （它必须同时写 reason_id / reason_code，那是冻结原因的键）。这里若再落一次，
+        // 会出现"细分码 + 通用 FROZEN"两条冻结标（通用那条 reason_id 为空），把一条结论说成两条。
+        // 所以 FROZEN 只在这里「确认它已被 conclude 过」—— 互斥规则本身仍由 OrderAuditTagService 一处管。
+        if (verdict.result() == AuditResult.FROZEN) return;
         // 顺序不能反：先让旧结论让位，再落新标 —— 同一事务，要么都成、要么都回滚。
         // 反过来的话，若 supersede 失败（例如目录缺失），新标已经插进去，就成了"两个结论标"。
         tagService.supersedeOtherConclusionTags(order.getId(), code);

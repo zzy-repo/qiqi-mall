@@ -40,9 +40,26 @@ public class OrderAuditTagService {
     /** 结论标互斥时的解除人：系统（不是某个运营），且原因固定为"被新结论取代" */
     public static final String RELEASED_BY_SUPERSEDED = "SYSTEM:SUPERSEDED";
 
+    /**
+     * 人工审核通过（7→8）结算结论标时的解除人。
+     *
+     * <p>为什么不用 {@link #RELEASED_BY_SUPERSEDED}：这不是"被另一条结论取代"，
+     * 而是"这张单已经离开待审核，结论标这一栏从此为空"（通过由状态表达，AUDIT_PASS 不落标 —— 期 1 的决定）。
+     * 分开记，事后查库才能一眼分清「这单的 AUDIT_PENDING 是被新结论挤掉的，还是被放行结算掉的」。
+     */
+    public static final String RELEASED_BY_AUDIT_PASS = "SYSTEM:AUDIT_PASS";
+
+    /** 人工审核不通过（7→4 已关闭，终局）结算结论标时的解除人：单子已关，结论不必再挂着 */
+    public static final String RELEASED_BY_AUDIT_REJECT = "SYSTEM:AUDIT_REJECT";
+
     public static final String TAG_FROZEN = "FROZEN";
     public static final String TAG_STOCK_SHORT = "STOCK_SHORT";
     public static final String TAG_COST_MISSING = "COST_MISSING";
+
+    /** 冻结类标（FROZEN / FROZEN_RETURN_APPLY / …）的判据：与 unfreeze 的 {@code LIKE 'FROZEN%'} 同口径 */
+    public static boolean isFrozenFamily(String tagCode) {
+        return tagCode != null && tagCode.startsWith(TAG_FROZEN);
+    }
 
     private final OrderAuditTagMapper tagMapper;
     private final AdminAuditWriter auditWriter;
@@ -113,7 +130,7 @@ public class OrderAuditTagService {
     }
 
     /**
-     * 结论标互斥（期 1.5）：把该单身上**其他** active 的「结论」档标置为已解除（{@code active=0}）。
+     * 结论标互斥（期 1.5 立，期 1.6 补全路径）：把该单身上**其他** active 的「结论」档标置为已解除。
      *
      * <p>语义见 {@link OrderAuditTagMapper#supersedeOtherConclusionTags}：结论标描述"当前判定结论"，
      * 当前结论只有一个 ⇒ 新结论落地时旧结论必须让位。<b>不是删除</b>：行留着，
@@ -122,20 +139,89 @@ public class OrderAuditTagService {
      * <p>只动「结论」档（join 标目录判 category）：特征标（客诉客户/双地址…）与"过没过"无关，
      * 一单可以既刷单又客诉，**一律不碰**。
      *
-     * <p>调用方必须在**同一事务**里紧接着写新标（{@code AuditExecutor#settleConclusionTag} 就是这么做的）：
-     * 否则中途失败会留下"一个结论标都没有"的空档 —— 那比"两个"更糟，因为它是沉默的。
+     * <p>调用方必须在**同一事务**里紧接着写新标（{@code AuditExecutor#settleConclusionTag}、
+     * {@link #freeze} 都是这么做的）：否则中途失败会留下"一个结论标都没有"的空档 ——
+     * 那比"两个"更糟，因为它是沉默的。
      *
-     * @param keepTagCode 本次要落的新结论标码（自己不能被自己解除）
+     * <h3>FROZEN 家族按"一族"算一个结论（期 1.6）</h3>
+     * {@code FROZEN} 与细分码 {@code FROZEN_RETURN_APPLY} 是<b>同一个结论的粗细两种说法</b>，
+     * 不是两个结论 —— 与 {@link #unfreeze}「按前缀一次放掉」的判据同口径（一次解冻放掉整族）。
+     * 所以当 {@code keepTagCode} 是冻结族时，**同族的一条都不解开**、只挤掉别的结论标；
+     * 反过来，落别的结论标（NO_POLICY_MATCH 等）时冻结族照样要让位（它就是上一轮的当前结论）。
+     *
+     * <p>为什么这一族要逐条让位而不是一条 UPDATE：「同前缀」SQL 表达不了，而
+     * {@code supersedeOtherConclusionTags} 那条 UPDATE 是按 {@code tag_code <> keep} 排除的。
+     * 冻结路径下单身上结论标本来就只有个位数，逐条 release 的往返代价可以忽略。
+     *
+     * @param keepTagCode 本次要落的新结论标码（自己不能被自己解除；冻结族=整族都保留）
      * @return 被取代的行数（0 = 本来就没有别的结论标，这是最常见的正常情况）
      */
     @Transactional(rollbackFor = Exception.class)
     public int supersedeOtherConclusionTags(Long orderId, String keepTagCode) {
-        int rows = tagMapper.supersedeOtherConclusionTags(orderId, keepTagCode, RELEASED_BY_SUPERSEDED);
+        int rows = isFrozenFamily(keepTagCode)
+                ? releaseOtherConclusionsKeepingFrozenFamily(orderId)
+                : tagMapper.supersedeOtherConclusionTags(orderId, keepTagCode, RELEASED_BY_SUPERSEDED);
         if (rows > 0) {
             log.info("订单 {} 的旧结论标已让位给 {}（{} 条，released_by={}）",
                     orderId, keepTagCode, rows, RELEASED_BY_SUPERSEDED);
         }
         return rows;
+    }
+
+    /**
+     * 冻结族让位：保留整族 FROZEN%（见 {@link #supersedeOtherConclusionTags}），只挤掉别的结论标。
+     */
+    private int releaseOtherConclusionsKeepingFrozenFamily(Long orderId) {
+        int rows = 0;
+        for (OrderAuditTag tag : tagMapper.selectActive(orderId)) {
+            String code = tag.getTagCode();
+            if (isFrozenFamily(code) || !isConclusionTag(code)) continue;
+            rows += tagMapper.release(orderId, code, RELEASED_BY_SUPERSEDED);
+        }
+        return rows;
+    }
+
+    /**
+     * 结算：这张单<b>离开「待审核」</b>时，它身上所有 active 的「结论」标都不再是当前结论。
+     *
+     * <h3>为什么必须有这条路（期 1.6 的第三个洞，也是最危险的一个）</h3>
+     * 人工放行（7→8）与审核不通过（7→4）在期 1.5 之前<b>一处释放都没有</b>：
+     * 走过「MANUAL → 人工通过」的单到下发环节还挂着 {@code AUDIT_PENDING}（{@code blocking=1}），
+     * 被拦过再放行的挂着 {@code BLOCKED}。下游只要按"结论标 + blocking"一刀切就会把**已经放行的单**
+     * 当成待处理锁死 —— 而且没有任何动作能解掉（队列里它已经不是待审核，没有"再审一次"的入口）。
+     *
+     * <p>为什么连 FROZEN 族一起放：冻着的单照样能被人点「审核通过」（守卫只看 status==7），
+     * 放行之后它已经是待发货，冻结语义（按住在待审核）已经不成立。这里一并结算，
+     * 冻结/解冻的审计不在这里补 —— 结算的出处是 {@code released_by}（{@code SYSTEM:AUDIT_PASS} 等）。
+     *
+     * @param releasedBy 解除人（{@link #RELEASED_BY_AUDIT_PASS} / {@link #RELEASED_BY_AUDIT_REJECT}）：
+     *                   必须能回答"它为什么不再成立了"，不能只写 system
+     * @return 解除的标数（0 = 本来就没有结论标，正常：AUTO_PASS 的单、纯特征标的单）
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public int releaseAllConclusionTags(Long orderId, String releasedBy) {
+        String by = releasedBy == null || releasedBy.isBlank() ? "system" : clip(releasedBy, 64);
+        int rows = 0;
+        for (OrderAuditTag tag : tagMapper.selectActive(orderId)) {
+            String code = tag.getTagCode();
+            if (!isConclusionTag(code)) continue;      // 特征标不动：它们与"过没过"无关
+            rows += tagMapper.release(orderId, code, by);
+        }
+        if (rows > 0) {
+            log.info("订单 {} 离开待审核，结论标已结算（{} 条，released_by={}）", orderId, rows, by);
+        }
+        return rows;
+    }
+
+    /**
+     * 这个标码算不算「结论」档（互斥 / 结算的射程）。
+     *
+     * <p>口径 = 标目录 {@code category='结论'}，**外加**冻结族前缀兜底：
+     * 细分冻结码（{@code FROZEN_RETURN_APPLY}）今天还没登记进标目录，但它语义上就是 FROZEN ——
+     * 若只认目录，这条标会成为唯一一条"谁都解不掉"的结论标。
+     */
+    private boolean isConclusionTag(String code) {
+        return isFrozenFamily(code) || tagCatalog.isConclusion(code);
     }
 
     /** 解标：返回影响行数（0 = 本来就没这个 active 标） */
@@ -265,6 +351,14 @@ public class OrderAuditTagService {
                 : (resolved != null && resolved.ok() ? resolved.name() : null);
 
         OrderAuditTag before = tagMapper.selectActiveByCode(order.getId(), tag);
+        // ---------------- 期 1.6：落冻结标之前先让**其他** active 结论标让位 ----------------
+        // 人工冻结与策略冻结共用这一处（策略冻结也是调本方法，见 AuditExecutor 的 FROZEN 分支）：
+        // 「先判成 NO_MATCH、再人工冻」的单，以前会同时挂 NO_POLICY_MATCH + FROZEN ——
+        // 两条在标目录里都是 category='结论'，等于一单两个"当前结论"。
+        // 语义上人工冻结不篡改"上一轮判成什么"（决策行一个字不动），但**它确实是当前结论的新状态**：
+        // 这单现在就是"被冻结"，不是"无策略命中"。所以旧结论标让位，行留着当历史（active=0 + released_by）。
+        // 幂等：已冻过（before != null）再调一次也只是 0 行，不产生第二条标、不产生第二条审计。
+        supersedeOtherConclusionTags(order.getId(), tag);
         OrderAuditTag tag0 = ensureActive(order.getId(), tag, human, resolved);
         if (before == null) {
             String summary = freezeSummary(order, tag, source, resolved, note);

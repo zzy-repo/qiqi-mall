@@ -1,5 +1,6 @@
 package com.qiqi.mall.audit.service;
 
+import com.qiqi.mall.audit.engine.ActionSpec;
 import com.qiqi.mall.audit.engine.AuditResult;
 import com.qiqi.mall.audit.engine.AuditVerdict;
 
@@ -30,21 +31,28 @@ import com.qiqi.mall.audit.engine.AuditVerdict;
  *   <tr><td>NO_MATCH</td><td>NO_POLICY_MATCH</td>
  *       <td><b>本期最大的缺口</b>：现在 18 条空白单全是这一类，一个标都没有。落上之后
  *           {@code ?tag=NO_POLICY_MATCH} 就能一次筛出"系统不知道该拿它怎么办"的全部单。</td></tr>
- *   <tr><td>FROZEN</td><td>{@code null}（由冻结分支自己落）</td>
- *       <td>冻结走 {@link OrderAuditTagService#freeze}，它落的码可能是 {@code FROZEN}
- *           也可能是策略配的细分码（{@code FROZEN_RETURN_APPLY}），并且要带 {@code reason_id} 字典。
- *           这里再补一个通用 FROZEN 会让同一单同轮出现两条冻结标（前缀都是 FROZEN），
- *           队列的 frozen 判据与解冻的按前缀一次放掉都会被它们拖出歧义。</td></tr>
+ *   <tr><td>FROZEN</td><td>FROZEN（或策略配的细分码 {@code FROZEN_RETURN_APPLY}…）</td>
+ *       <td>由冻结分支（{@code OrderAuditTagService#freeze}）落，它还要带 {@code reason_id} 字典 ——
+ *           <b>写入</b>只在那一条路上做，本表只回答"这轮冻结落的<b>码</b>是什么"。
+ *           为什么本表必须回答它（期 1.6 修正）：冻结<b>也是</b>「当前结论」，不参与结论唯一性，
+ *           一单就会同时挂 NO_POLICY_MATCH + FROZEN（两条都是 category='结论'）。</td></tr>
  *   <tr><td>SKIPPED</td><td>{@code null}</td>
  *       <td>跳过的单不写判定记录（见 {@code AuditExecutor} 类注释），也就不落标：
  *           它的"为什么"已经由那条 active 的冻结标回答了。</td></tr>
  * </table>
  *
- * <h3>⚠️ 结论标互斥（期 1.5）：同一时刻一单只有一个 active 的结论标</h3>
+ * <h3>⚠️ 结论标互斥（期 1.5 立规矩，期 1.6 补齐全部路径）：同一时刻一单只有一个 active 的结论标</h3>
  * 结论标描述的是"<b>当前</b>判定结论"，而当前结论天然只有一个 —— 一单不可能同时是
  * "无策略命中"和"待人工审核"。所以每次落新结论标前，先把该单其他 active 的结论档标置
  * {@code active=0} 并记 {@code released_by=SYSTEM:SUPERSEDED}（见 {@code AuditExecutor#settleConclusionTag}、
  * {@code OrderAuditTagService#supersedeOtherConclusionTags}）。
+ *
+ * <p><b>期 1.5 只覆盖了「引擎落新标」这一条路</b>，实测漏了三条（期 1.6 补）：
+ * ① 人工冻结走 {@code OrderAuditTagService#freeze}，以前从不 supersede ⇒「先 NO_MATCH 再人工冻」
+ * 的单并挂 NO_POLICY_MATCH + FROZEN；② 本表的 {@code codeOf(FROZEN)} 以前返回 {@code null}
+ * ⇒ 策略冻结也不参与唯一性；③ 人工放行整条链（7→8）一处释放都没有 ⇒ 放行后还挂着
+ * AUDIT_PENDING / BLOCKED（blocking=1），下游按"结论标 + blocking"一刀切就会把已经放行的单锁死。
+ * 现在四条路（引擎落标 / 人工冻结 / 策略冻结 / 离开待审核结算）都收敛到同一条互斥规则上。
  *
  * <p><b>这不是"删历史"</b>：只增不删管的是"事实"（行不删、解除留痕），不管"当前状态标"。
  * 不做互斥的后果（期 1 实测过）：一单从 NO_MATCH 变 MANUAL 后两个标并列 active，
@@ -65,7 +73,9 @@ public final class ConclusionTags {
     /**
      * 这条结论该落哪个标码。
      *
-     * @return 标码；{@code null} 表示这条结论不落标（AUTO_PASS / FROZEN / SKIPPED，见类注释）
+     * @return 标码；{@code null} 表示这条结论不落标（AUTO_PASS / SKIPPED，见类注释）。
+     *         注意 FROZEN 也返回值（{@code FROZEN} 或策略配的细分码）：冻结是结论，
+     *         它必须参与「一单只有一个当前结论」这条唯一性规则。
      */
     public static String codeOf(AuditVerdict verdict) {
         if (verdict == null || verdict.result() == null) return null;
@@ -81,11 +91,34 @@ public final class ConclusionTags {
             }
             case BLOCKED -> AuditTagCatalogService.CODE_BLOCKED;
             case NO_MATCH -> AuditTagCatalogService.CODE_NO_POLICY_MATCH;
-            case AUTO_PASS, FROZEN, SKIPPED -> null;
+            case FROZEN -> frozenCodeOf(verdict);
+            case AUTO_PASS, SKIPPED -> null;
         };
     }
 
-    /** 供文档/测试引用：当前会落标的全部结论标码（不含 FROZEN —— 它由冻结分支落） */
+    /**
+     * 冻结这一轮落的**码**：策略 {@code action_json} 配了细分码就用它（{@code FROZEN_RETURN_APPLY}…），
+     * 没配就是 {@code FROZEN}。
+     *
+     * <p>为什么必须回具体码而不是恒回 {@code FROZEN}：冻结标的写入方是
+     * {@code OrderAuditTagService#freeze}（它要同时写 {@code reason_id} / {@code reason_code}），
+     * 两边必须说同一个码 —— 若这里恒回 {@code FROZEN}，而 freeze 落的是 {@code FROZEN_RETURN_APPLY}，
+     * 互斥步骤就会把刚落的细分码当成"别的结论"挤掉，细分原因当场丢失（队列里只剩一个没有原因的 FROZEN）。
+     *
+     * <p><b>细分码与 FROZEN 是同一个结论的粗细两种说法，不是两个结论</b>：
+     * 互斥按「FROZEN 家族」整族算一类（{@code OrderAuditTagService#supersedeOtherConclusionTags}），
+     * 与解冻「按前缀一次放掉」的判据同口径。
+     */
+    public static String frozenCodeOf(AuditVerdict verdict) {
+        ActionSpec action = verdict == null || verdict.matchedPolicy() == null
+                ? null : verdict.matchedPolicy().action();
+        String configured = action == null ? null : action.tagCode();
+        return configured == null || configured.isBlank()
+                ? AuditTagCatalogService.CODE_FROZEN
+                : configured.trim();
+    }
+
+    /** 供文档/测试引用：落在 order_audit_tag 上的全部结论标码（FROZEN 由冻结分支独占写入） */
     public static java.util.List<String> conclusionCodesWrittenHere() {
         return java.util.List.of(AuditTagCatalogService.CODE_AUDIT_PENDING,
                 AuditTagCatalogService.CODE_STOCK_SHORT,
@@ -94,8 +127,13 @@ public final class ConclusionTags {
                 AuditTagCatalogService.CODE_NO_POLICY_MATCH);
     }
 
-    /** {@link AuditResult} 的哪几类会落标（AUTO_PASS/FROZEN/SKIPPED 除外），给测试与报表用 */
+    /**
+     * {@link AuditResult} 的哪几类<b>会落标</b>（AUTO_PASS / SKIPPED 不落）。
+     *
+     * <p>期 1.6 起 FROZEN 也算：它落 FROZEN 类标（写入方是 freeze，但"这条结论产标"是真的）。
+     */
     public static boolean producesTag(AuditResult result) {
-        return result == AuditResult.MANUAL || result == AuditResult.BLOCKED || result == AuditResult.NO_MATCH;
+        return result == AuditResult.MANUAL || result == AuditResult.BLOCKED
+                || result == AuditResult.NO_MATCH || result == AuditResult.FROZEN;
     }
 }

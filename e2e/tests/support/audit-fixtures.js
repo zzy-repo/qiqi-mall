@@ -415,8 +415,10 @@ export function activeTagsOf(orderId) {
 /**
  * 只「冻结」类标（{@code FROZEN%} 前缀）：判断"这单冻没冻"只能用这个。
  *
- * <p>期 1 起，一单身上除了冻结标还可能挂着结论标（NO_POLICY_MATCH / BLOCKED / AUDIT_PENDING…），
- * 所以「解冻后不该有标」这类断言必须收窄到冻结类 —— 否则结论标会把它们全打成假红。
+ * <p>期 1.6 起冻结会<b>取代</b>上一轮的结论标（NO_POLICY_MATCH / AUDIT_PENDING… 被置 active=0，行留着），
+ * 所以冻结单的「当前结论」就是冻结标本身；但<b>特征标</b>（客诉客户 / 绿旗急发…）与结论无关、照样并列，
+ * 而且已解除的结论标行也在表里。所以「解冻后不该有标」这类断言仍然必须收窄到冻结类 ——
+ * 否则特征标/历史行会把它们全打成假红。
  */
 export function activeFrozenTagsOf(orderId) {
   return activeTagsOf(orderId).filter((t) => String(t.tagCode).startsWith('FROZEN'))

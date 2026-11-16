@@ -173,7 +173,8 @@ test.describe('业务 › 订单-自动审核 › 冻结看得见撤得掉', () 
         // 库：标被**解除**（active=0，行留着当证据），决策表依然只有那一条 NO_MATCH
         const f = orderFactOf('QT-1003')
         expect(activeFrozenTagsOf(f.id), '解冻后不应再有 active 的冻结标').toHaveLength(0)
-        // 只看冻结类：期 1 起这单身上还挂着结论标（NO_POLICY_MATCH），它与"解冻解掉什么"无关
+        // 只看冻结类：期 1.6 起「人工冻结会取代上一轮的结论标」（NO_POLICY_MATCH 被置 active=0、行留着），
+        // 这单此刻身上还躺着那条已解除的结论标 —— 它与"解冻解掉什么"无关，所以断言只收窄到冻结类
         const all = allTagsOf(f.id).filter((t) => String(t.tagCode).startsWith('FROZEN'))
         expect(all, '解冻是「解除」不是「删行」：标行必须留着当证据').toHaveLength(1)
         expect(all[0].active, '标行应是 active=0').toBe(0)
