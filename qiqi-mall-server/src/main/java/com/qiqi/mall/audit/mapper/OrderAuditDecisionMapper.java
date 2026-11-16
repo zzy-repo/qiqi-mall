@@ -83,7 +83,13 @@ public interface OrderAuditDecisionMapper extends BaseMapper<OrderAuditDecision>
             + "       (SELECT t.reason FROM order_audit_tag t WHERE t.order_id = d.order_id "
             + "        AND t.active = 1 AND t.tag_code LIKE 'FROZEN%' ORDER BY t.id ASC LIMIT 1) AS frozen_reason, "
             + "       (SELECT t.tag_code FROM order_audit_tag t WHERE t.order_id = d.order_id "
-            + "        AND t.active = 1 AND t.tag_code LIKE 'FROZEN%' ORDER BY t.id ASC LIMIT 1) AS frozen_tag_code "
+            + "        AND t.active = 1 AND t.tag_code LIKE 'FROZEN%' ORDER BY t.id ASC LIMIT 1) AS frozen_tag_code, "
+            // 原因字典 ID（P2）：中文名/原因码由 AuditQueryService 用内存字典翻出来。
+            // 为什么不在这里 JOIN 字典：会变成第 5 个同构相关子查询，或者要把上面三个改写成
+            // JOIN LATERAL（MySQL 8.0.14+）—— 为了"形态统一"去重写 P0 刚验证过的 SQL，风险不对等。
+            // 字典只有十几行且全量在内存里，翻名字是零成本。
+            + "       (SELECT t.reason_id FROM order_audit_tag t WHERE t.order_id = d.order_id "
+            + "        AND t.active = 1 AND t.tag_code LIKE 'FROZEN%' ORDER BY t.id ASC LIMIT 1) AS frozen_reason_id "
             + "FROM order_audit_decision d JOIN `order` o ON o.id = d.order_id "
             + "WHERE d.id IN (SELECT MAX(id) FROM order_audit_decision GROUP BY order_id) "
             + "<if test='result != null and result != \"\"'> AND d.result = #{result}</if> "

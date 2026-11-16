@@ -1,6 +1,9 @@
-%% 审核域 · 6 张表 / 2 条真实外键 + 5 条逻辑关系
+%% 审核域 · 7 张表 / 3 条真实外键 + 5 条逻辑关系
 %% 图例：实线 = 库中真实外键；点线 = 逻辑关联但库中无外键，标签以「逻辑·」开头
 %% 本域分两个角色：
+%%   字典侧（可改）：冻结原因字典 audit_freeze_reason —— 冻结原因的唯一闭集。
+%%     可按业务增删/停用/改名，但 code 一经写入永不修改（P1 冻结豁免与策略 action_json 都以它为键）；
+%%     停用不删：历史行仍按 reason_id 显示中文名，统计口径不因"停用"而消失。
 %%   配置侧（可改）：审核策略 / 策略条件 / 策略版本 —— 只有这三张允许 UPDATE，
 %%     改条件会把策略版本号加一并留一份整份快照，历史决策永远指得到当时的版本。
 %%   运行与证据侧（不改历史）：审核批次 / 订单审核决策 / 订单审核标记。
@@ -71,13 +74,27 @@ erDiagram
         varchar idem_key UK "幂等键 订单:轮次"
         datetime created_at "判定时间"
     }
+    audit_freeze_reason["冻结原因字典·可改"] {
+        bigint id PK "主键"
+        varchar code UK "稳定键·永不改·豁免与策略都引用它"
+        varchar name "中文名·随便改不影响键"
+        varchar description "为什么冻/下一步做什么"
+        tinyint enabled "1启用 0停用·历史照旧显示"
+        tinyint selectable "1可人工选 0仅兜底/迁移项·可见不可选"
+        tinyint builtin "1系统内置·禁删禁停"
+        int sort_no "排序"
+        datetime created_at "创建时间"
+        datetime updated_at "更新时间"
+    }
     order_audit_tag["订单审核标记·可解除"] {
         bigint id PK "主键"
         bigint order_id "无外键"
         varchar tag_code "冻结／缺货／缺成本等"
         varchar active_tag UK "仅生效时非空·同单同标唯一"
         tinyint active "1 生效 0 已解除"
-        varchar reason "为什么打这个标"
+        bigint reason_id FK "冻结原因·字典"
+        varchar reason_code "原因码快照·改名不影响"
+        varchar reason "人话快照/备注·历史原文不动"
         datetime released_at "解除时间"
         varchar released_by "解除人"
     }
@@ -88,4 +105,5 @@ erDiagram
     audit_policy ||..o{ order_audit_decision : "逻辑·matched_policy_id"
     order ||..o{ order_audit_decision : "证据·只追加·库中无外键"
     order ||..o{ order_audit_tag : "逻辑·order_id·库中无外键"
+    audit_freeze_reason ||--o{ order_audit_tag : "字典·reason_id·库中真实外键"
     order_status_ledger ||..o{ order_audit_decision : "取证链·order_status_seq"

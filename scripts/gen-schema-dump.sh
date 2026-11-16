@@ -283,5 +283,6 @@ if [[ "$MODE" == "verify" ]]; then
     echo "❌ 生成结果与源库不一致（见上），不要提交" >&2
     exit 1
   fi
-  echo "✓ 生成结果与 $SRC_DB 完全一致（39 表 + 1 视图 + channel_shop 3 行）"
+  # 表数/视图数用实测值，不写死：写死过一次（39），加一张表之后这句就和上面的「BASE TABLE 数」自相矛盾
+  echo "✓ 生成结果与 $SRC_DB 完全一致（$s_tab 表 + $s_view 视图 + channel_shop $s_shop 行）"
 fi

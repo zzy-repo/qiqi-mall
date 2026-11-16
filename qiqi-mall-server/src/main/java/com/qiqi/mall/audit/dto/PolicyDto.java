@@ -22,6 +22,7 @@ public record PolicyDto(
         Integer versionNo,
         String actionTag,
         String actionReason,
+        String actionReasonCode,
         List<ConditionDto> conditions,
         LocalDateTime updatedAt) {
 }

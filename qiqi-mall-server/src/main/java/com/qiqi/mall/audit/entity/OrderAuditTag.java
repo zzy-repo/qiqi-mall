@@ -38,6 +38,28 @@ public class OrderAuditTag {
     /** 1 生效 0 已解除 */
     private Integer active;
 
+    /**
+     * 冻结原因字典 ID（{@code audit_freeze_reason.id}，外键）。
+     *
+     * <p>只有 {@code FROZEN} 类标才有值：{@code STOCK_SHORT} / {@code COST_MISSING} 的 reason 是
+     * 「留人工的原因」长句，不是冻结原因，且已有 {@code downgrade_reason} 这个结构化字段表达。
+     */
+    private Long reasonId;
+
+    /**
+     * 原因码快照（= {@code audit_freeze_reason.code}）。
+     *
+     * <p>为什么有外键还要存一份码：{@code reason_id} 是自增代理键，**跨库不稳定**；
+     * 而「这个月为什么冻了 50 单」要的是一条不用 join、不含字符串比较、改名也不动的聚合键。
+     * 码是稳定键（永不修改），所以统计 / P1 豁免 / 导出回放都以它为准。
+     */
+    private String reasonCode;
+
+    /**
+     * 冻结那一刻的人话快照（**不是字典名的副本**，见 {@link #reasonId}）：
+     * 人工冻结 = 运营填的备注，没填则写字典中文名；自动冻结 = 策略里配的原话，没配则写字典中文名。
+     * 历史行保留迁移前的原文（{@code 111} / {@code 1231} …），一个字符都不改。
+     */
     private String reason;
 
     private LocalDateTime createdAt;

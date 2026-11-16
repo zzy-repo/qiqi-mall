@@ -196,16 +196,39 @@ export const unfreezeRow = async (page, row) => {
 }
 
 /**
- * 人工冻结：行内「冻结」→ 原因输入框 → 「确认冻结」。
- * 本套用例只用它做「页面确实能人工冻结」这一条反证（主体冻结由异常策略自动完成）。
+ * 人工冻结：行内「冻结」→ 弹窗里**选一条原因**（字典下拉）+ 备注 → 「确认冻结」。
+ *
+ * ── 为什么第三个参数还是那句自由文本（P2 变了什么、没变什么）────────────────
+ * P2 把"原因"从一句自由文本换成了字典里的稳定键。但 `frozenReason` 这个契约**没变**：
+ * 它仍然是"冻结那一刻的人话"（人工填的备注 / 策略原话 / 历史行原文）。
+ * 所以本 helper 的签名刻意保持不变：`reason` 现在落到**备注**，「原因」由 `reasonName` 选。
+ * 这样 P0 那条用例里 13 处 `frozenReason === FREEZE_REASON` 的断言一行都不用改 ——
+ * 它们断的本来就是人话，不是键。
+ *
+ * @param reason     备注文本（会出现在 tag.reason / frozenReason / 审计摘要的末尾）
+ * @param reasonName 选哪一条原因（字典中文名，如 '风控核实中'）；缺省选列表第一项。
+ *                   要验"某个具体原因被记住"，就显式传它。
  */
-export const freezeRow = async (page, row, reason = 'e2e：人工冻结回归') => {
+export const freezeRow = async (page, row, reason = 'e2e：人工冻结回归', reasonName = null) => {
   await row.getByTestId('audit-row-freeze').click()
-  const box = page.locator('.el-message-box')
-  await expect(box, '点「冻结」应弹出原因输入框').toBeVisible({ timeout: 10_000 })
-  await box.locator('input').first().fill(reason)
-  await box.locator('.el-message-box__btns').getByRole('button', { name: '确认冻结' }).click()
-  await expect(box).toBeHidden({ timeout: 10_000 })
+  const dlg = page.getByTestId('audit-freeze-dialog')
+  await expect(dlg, '点「冻结」应弹出冻结弹窗').toBeVisible({ timeout: 10_000 })
+
+  // 原因：下拉里选（不再有自由输入框 —— 那正是"没法统计"的根源）
+  await dlg.getByTestId('audit-freeze-reason-select').click()
+  const options = page.locator('.el-select-dropdown__item:visible')
+  await expect(options.first(), '冻结原因下拉应有可选项（字典未取到会直接报错）').toBeVisible({ timeout: 10_000 })
+  if (reasonName) {
+    await options.filter({ hasText: reasonName }).first().click()
+  } else {
+    await options.first().click()
+  }
+
+  // 备注：选填，但本 helper 默认填一句，方便断言"人话被记住了"
+  if (reason) await dlg.getByTestId('audit-freeze-note').fill(reason)
+
+  await dlg.getByTestId('audit-freeze-ok').click()
+  await expect(dlg).toBeHidden({ timeout: 10_000 })
   await page.waitForTimeout(1200)
 }
 

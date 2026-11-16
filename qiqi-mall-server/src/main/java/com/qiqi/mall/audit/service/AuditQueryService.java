@@ -37,13 +37,17 @@ public class AuditQueryService {
     private final AuditRunMapper runMapper;
     private final AuditTrailMapper trailMapper;
     private final ObjectMapper json;
+    /** 冻结原因字典：把队列行的 {@code reason_id} 翻成中文名/原因码（整表在内存，零成本） */
+    private final AuditFreezeReasonService freezeReasonService;
 
     public AuditQueryService(OrderAuditDecisionMapper decisionMapper, AuditRunMapper runMapper,
-                             AuditTrailMapper trailMapper, ObjectMapper json) {
+                             AuditTrailMapper trailMapper, ObjectMapper json,
+                             AuditFreezeReasonService freezeReasonService) {
         this.decisionMapper = decisionMapper;
         this.runMapper = runMapper;
         this.trailMapper = trailMapper;
         this.json = json;
+        this.freezeReasonService = freezeReasonService;
     }
 
     // ================================================================ 人工队列
@@ -90,10 +94,29 @@ public class AuditQueryService {
         out.put("frozen", toBoolean(out.remove("frozen")));
         out.put("frozenReason", out.remove("frozen_reason"));
         out.put("frozenTagCode", out.remove("frozen_tag_code"));
+        // 原因字典（P2）：id 只用来翻名字，**不回给前端**（跨库不稳定的代理键，界面上一律用 code）
+        // frozenReasonName 对**历史行**同样有效：老行的 reason 还是 1231/111 这种原文，
+        // 但它已经被回填了 reason_id，所以能显示「历史未填（占位）」—— 两个都在，谁也不掩盖谁。
+        Long reasonId = asLong(out.remove("frozen_reason_id"));
+        out.put("frozenReasonCode", freezeReasonService.codeOf(reasonId));
+        out.put("frozenReasonName", freezeReasonService.nameOf(reasonId));
         return out;
     }
 
     /** MySQL 的 EXISTS 回来是 0/1（有时是字符串），统一收敛成 boolean；缺列/空值 = false */
+    /** 宽松 Long 收敛：MySQL 的 UNSIGNED 派生列会回 BigInteger，null 保持 null */
+    private static Long asLong(Object raw) {
+        if (raw == null) return null;
+        if (raw instanceof Number n) return n.longValue();
+        String text = String.valueOf(raw).trim();
+        if (text.isEmpty()) return null;
+        try {
+            return Long.parseLong(text);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
     private static boolean toBoolean(Object raw) {
         if (raw == null) return false;
         if (raw instanceof Boolean b) return b;

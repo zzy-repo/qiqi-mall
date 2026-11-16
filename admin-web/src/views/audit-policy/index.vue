@@ -209,8 +209,19 @@
               </el-form-item>
             </el-col>
             <el-col :xs="24" :sm="14">
+              <!-- 原因从字典里选：这条策略冻出来的单靠 reason_code 才能被统计、才能做 P1 的豁免键。
+                   一句自由文本会让「这个月为什么冻了 50 单」再次算不清（P2 之前就是这样）。 -->
               <el-form-item label="冻结原因">
-                <el-input v-model="editing.actionReason" data-testid="policy-form-action-reason" placeholder="留空则用策略名" />
+                <el-select
+                  v-model="editing.actionReasonCode"
+                  data-testid="policy-form-action-reason"
+                  clearable
+                  filterable
+                  placeholder="选一条原因（统计与豁免都以它为准）"
+                  style="width: 100%"
+                >
+                  <el-option v-for="r in freezeReasonOptions" :key="r.code" :label="r.name" :value="r.code" />
+                </el-select>
               </el-form-item>
             </el-col>
           </el-row>
@@ -404,7 +415,8 @@ import { Plus, Refresh } from '@element-plus/icons-vue'
 import {
   listAuditPolicies, policyBundle,
   createAuditPolicy, updateAuditPolicy, deleteAuditPolicy, moveAuditPolicy,
-  previewAuditPolicy, listAuditQueue, queuePage, toConditionRequest, mapCondition
+  previewAuditPolicy, listAuditQueue, queuePage, toConditionRequest, mapCondition,
+  listFreezeReasons
 } from '../../api/audit'
 import { handleSaveError } from '../../composables/useConflictHandler'
 import { compareCondition, rowFieldValue, expectedText } from '../../composables/useAuditExplain'
@@ -491,6 +503,7 @@ const editing = reactive({
   enabled: true,
   actionTag: 'FROZEN',
   actionReason: '',
+  actionReasonCode: '',
   conditions: [],
   globalExclusions: []
 })
@@ -506,6 +519,21 @@ const blankCondition = () => ({
   valueText: ''
 })
 
+const freezeReasonOptions = ref([])
+const freezeReasonNameOf = (code) => freezeReasonOptions.value.find((r) => r.code === code)?.name || ''
+
+/**
+ * 冻结原因字典：策略页只在「异常」页签用得到，但也就 11 行，
+ * 打开页面就取一次最省事（失败不阻塞：下拉空着，后端仍接受只有人话的老配置）。
+ */
+const loadFreezeReasons = async () => {
+  try {
+    freezeReasonOptions.value = (await listFreezeReasons()) || []
+  } catch {
+    freezeReasonOptions.value = []
+  }
+}
+
 const openEditor = (policy) => {
   impactText.value = ''
   if (policy) {
@@ -516,6 +544,10 @@ const openEditor = (policy) => {
     editing.enabled = policy.enabled
     editing.actionTag = policy.actionTag || 'FROZEN'
     editing.actionReason = policy.actionReason || ''
+    // 老策略的 action_json 里可能只有一句人话、没有 reason_code：
+    // 按中文名反查回填，让下拉显示"它现在是哪一条"，而不是空着诱导人误以为没配
+    editing.actionReasonCode = policy.actionReasonCode
+      || (freezeReasonOptions.value.find((r) => r.name === policy.actionReason)?.code ?? '')
     // seq 重排成 0..n：后端保存时也是按数组下标重排的，两边口径一致（why-miss-${id}-${seq} 才对得上）
     editing.conditions = policy.conditions.map((c, i) => ({ ...mapCondition(c), seq: i }))
     editing.globalExclusions = globalExclusions.value.map((c, i) => ({ ...c, seq: i }))
@@ -527,6 +559,7 @@ const openEditor = (policy) => {
     editing.enabled = true
     editing.actionTag = 'FROZEN'
     editing.actionReason = ''
+    editing.actionReasonCode = ''
     editing.conditions = [blankCondition()]
     editing.globalExclusions = globalExclusions.value.map((c, i) => ({ ...c, seq: i }))
   }
@@ -568,7 +601,12 @@ const payloadOf = () => ({
   name: (editing.name || '').trim(),
   enabled: Boolean(editing.enabled),
   actionTag: editing.type === 'EXCEPTION' ? editing.actionTag || 'FROZEN' : null,
-  actionReason: editing.type === 'EXCEPTION' ? editing.actionReason || editing.name : null,
+  // actionReason 仍然提交：它是**人话**（进审计摘要与 tag.reason 快照）；
+  // 选了字典项就以字典中文名为准，没选则保留原文本（老策略回退时不至于把原因清空）
+  actionReason: editing.type === 'EXCEPTION'
+    ? (freezeReasonNameOf(editing.actionReasonCode) || editing.actionReason || editing.name)
+    : null,
+  actionReasonCode: editing.type === 'EXCEPTION' ? (editing.actionReasonCode || null) : null,
   conditions: editing.conditions.map((c) => toConditionRequest(c, { kind: c.kind, scope: 'POLICY' })),
   // null = 不动全局排除（改策略 B 不该顺手抹掉策略 A 里配的全局排除）
   globalExclusions: editing.type === 'AUTO'
@@ -784,6 +822,7 @@ onMounted(async () => {
     activeType.value = String(route.query.type).toUpperCase()
   }
   await load()
+  await loadFreezeReasons()
   // 从队列「判定依据 → 去改这条策略」跳过来：直接打开对应策略的编辑器，条件高亮由 isFocused 负责
   if (focusPolicy.value) {
     const target = policies.value.find((p) => p.id === focusPolicy.value)

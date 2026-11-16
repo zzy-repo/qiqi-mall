@@ -1,9 +1,9 @@
-%% 全库总览：39 张表 + 1 个只读视图 / 10 个域。只写表名，不写任何字段。
+%% 全库总览：40 张表 + 1 个只读视图 / 10 个域。只写表名，不写任何字段。
 %% 视图 v_biz_status_timeline（三张状态台账合并 + 中文状态名）不在表数内，故不画卡片。
 %% 域间 17 条主干箭头；6 张只追加台账带「只追加」短语；纪律例外（审核批次计数回写、审核标记可解除）标在节点上。
 %% 实线=真实外键；点线=逻辑关联但库中无外键，详见各域图图例。
 flowchart LR
-    subgraph ALL["全库总览 · 39 张表 + 1 视图 / 10 个域"]
+    subgraph ALL["全库总览 · 40 张表 + 1 视图 / 10 个域"]
         subgraph D1["商品域 · 7 张"]
             direction TB
             t_category["商品分类<br/>category"]
@@ -58,13 +58,14 @@ flowchart LR
             direction TB
             t_admin_audit_log["操作审计日志<br/>admin_audit_log<br/>只追加·横切全库"]
         end
-        subgraph D9["审核域 · 6 张"]
+        subgraph D9["审核域 · 7 张"]
             direction TB
             t_audit_policy["审核策略<br/>audit_policy"]
             t_audit_policy_condition["策略条件<br/>audit_policy_condition"]
             t_audit_policy_version["策略版本<br/>audit_policy_version"]
             t_audit_run["审核批次<br/>audit_run<br/>计数会回写"]
             t_order_audit_decision["订单审核决策<br/>order_audit_decision<br/>只追加"]
+            t_audit_freeze_reason["冻结原因字典<br/>audit_freeze_reason<br/>可改·停用不删"]
             t_order_audit_tag["订单审核标记<br/>order_audit_tag<br/>可解除"]
         end
         subgraph D10["渠道接入域 · 3 张"]

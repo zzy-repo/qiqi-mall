@@ -15,6 +15,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.MethodOrderer;
+import com.qiqi.mall.audit.entity.OrderAuditTag;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
@@ -105,6 +106,8 @@ class AuditRunIntegrationTest {
     private OrderAuditTagService tagService;
     @Autowired
     private AuditQueryService queryService;
+    @Autowired
+    private com.qiqi.mall.audit.service.AuditFreezeReasonService freezeReasonService;
     /** 人工审核入口（7→8 / 7→4）：直接调 controller 方法 = 与 HTTP 同一路径 */
     @Autowired
     private OrderController orderController;
@@ -553,6 +556,103 @@ class AuditRunIntegrationTest {
             o.setStatus(rs.getInt("status"));
             return o;
         }, orderSn);
+    }
+
+    // ============================================================ 冻结原因字典（P2）
+
+    /**
+     * 冻结写下的原因必须**三样齐全**，且审计摘要里「原因码」不能被备注挤掉。
+     *
+     * <p>为什么这条用例必须存在（它不是"顺手补一个"）：P2 取消了独立的 {@code note} 列
+     * —— 备注并进 {@code order_audit_tag.reason}（人话快照），而**名字的历史**（"这条原因当年叫什么"）
+     * 交给了 {@code admin_audit_log}。那就必须有一条测试压着审计表，证明它真的接住了，
+     * 否则"把审计当快照"只是打算、不是事实。
+     *
+     * <p>⚠️ 摘要句的顺序是契约：<b>原因码 → 中文名 → 备注</b>。
+     * {@code AdminAuditWriter} 会把 summary 裁到 255 字符（{@code LedgerText.clip}，254 + "…"，不抛异常），
+     * 所以原因码若排在句尾，一句长备注就能把它挤掉 —— 那时断言会随机变红，而冻结其实是成功的。
+     * 因此：{@code summary} 只做 {@code contains}（可能带省略号，{@code isEqualTo} 必然误报），
+     * 码与名字的权威断言放在 {@code after_json}（json，不受 255 限制）。
+     */
+    @Test
+    @Order(7)
+    @DisplayName("冻结原因落三处：tag.reason_id/code + 人话快照 + 审计摘要（码→名→备注）")
+    void freezeReasonIsFirstClassData() {
+        Long orderId = orderIdOf("QT-1003");
+        tagService.release(orderId, OrderAuditTagService.TAG_FROZEN, "system");
+
+        // ---------------- ① 写入：给 code + 备注 ----------------
+        tagService.freeze(orderOf("QT-1003"), OrderAuditTagService.TAG_FROZEN,
+                "REFUND_PENDING", "客户说等财务确认", "人工");
+
+        OrderAuditTag tag = tagService.activeFrozen(orderId);
+        assertThat(tag).as("冻结后应有一条 active 的冻结标").isNotNull();
+        assertThat(tag.getReasonCode()).as("原因码要落库（统计与 P1 豁免的键）").isEqualTo("REFUND_PENDING");
+        assertThat(tag.getReasonId()).as("原因 ID 要落库（库层引用完整性）").isNotNull();
+        assertThat(tag.getReason()).as("reason 是人话快照：有备注就存备注")
+                .isEqualTo("客户说等财务确认");
+
+        // ---------------- ② 审计：码 → 名 → 备注，且 after_json 结构化可断言 ----------------
+        //     （紧跟 ① 断，否则后面再冻一次就换了"最新一条"，断到的不是这一步写的那条）
+        Map<String, Object> log = newestFreezeAudit(orderId);
+        String summary = String.valueOf(log.get("summary"));
+        int idxCode = summary.indexOf("REFUND_PENDING");
+        int idxName = summary.indexOf("退款申请未处理");
+        int idxNote = summary.indexOf("客户说等财务确认");
+        assertThat(idxCode).as("摘要必须含原因码（稳定键，改名后仍追得到）").isGreaterThan(-1);
+        assertThat(idxName).as("摘要必须含字典中文名（人话）").isGreaterThan(-1);
+        assertThat(idxNote).as("摘要必须含备注（它是本题存在的理由：note 列被取消了）").isGreaterThan(-1);
+        assertThat(idxCode).as("契约：原因码排在最前 —— summary 被裁到 255 是从尾部裁，码在后面会被长备注挤掉")
+                .isLessThan(idxName);
+        assertThat(idxName).as("契约：中文名排在备注之前").isLessThan(idxNote);
+
+        String after = String.valueOf(log.get("after_json"));
+        assertThat(after).as("after_json 是权威落点：不受 summary 的 255 限制")
+                .contains("REFUND_PENDING").contains("退款申请未处理");
+        assertThat(log.get("reason"))
+                .as("admin_audit_log.reason 是 varchar(32)、语义是「敏感动作管理员填写的原因」，本设计不占用它")
+                .isNull();
+
+        // ---------------- ③ 没备注时：人话快照退化成字典中文名（人查库不必 join） ----------------
+        tagService.release(orderId, OrderAuditTagService.TAG_FROZEN, "system");
+        tagService.freeze(orderOf("QT-1003"), OrderAuditTagService.TAG_FROZEN,
+                "RISK_REVIEW", null, "人工");
+        OrderAuditTag noNote = tagService.activeFrozen(orderId);
+        assertThat(noNote.getReasonCode()).isEqualTo("RISK_REVIEW");
+        assertThat(noNote.getReason()).as("没备注时 reason 写字典中文名，不能是 NULL 也不能是 code")
+                .isEqualTo("风控核实中");
+
+        // 队列侧：reason_id 必须真的翻成中文名（页面显示的是它，永远不是 ID）
+        Map<String, Object> qRow = queueRowOf("QT-1003");
+        assertThat(qRow.get("frozenReasonName")).as("队列行要能给出字典中文名").isEqualTo("风控核实中");
+        assertThat(qRow.get("frozenReasonCode")).as("队列行也要给出稳定键（统计/豁免用）").isEqualTo("RISK_REVIEW");
+        assertThat(qRow.get("frozenReason")).as("人话快照仍在（P0 的契约没被顶掉）").isEqualTo("风控核实中");
+
+        // 历史行同理：迁移回填出来的那三笔（reason 还是 111/1231/2131）也必须解析出「历史未填（占位）」。
+        // 这条断言问的是「字典里有没有这一项、名字对不对」，不是「这台机器上有没有历史行」——
+        // 历史行只存在于被回填过的库里（e2e 会 reset，IT 库是空的），所以只能这样钉。
+        assertThat(freezeReasonService.nameOf(freezeReasonService.byCode("LEGACY_PLACEHOLDER").getId()))
+                .as("历史行 reason_id → 中文名必须解析得出（否则回填那 7 行白做）")
+                .isEqualTo("历史未填（占位）");
+
+        // ---------------- ④ 老调用方（只给人话、没有 code）：按关键词反查，不丢原因 ----------------
+        tagService.release(orderId, OrderAuditTagService.TAG_FROZEN, "system");
+        tagService.freeze(orderOf("QT-1003"), OrderAuditTagService.TAG_FROZEN,
+                "存在待处理退款申请", "人工");   // 4 参旧签名
+        OrderAuditTag inferred = tagService.activeFrozen(orderId);
+        assertThat(inferred.getReasonCode())
+                .as("旧签名只给人话时，必须按关键词反查到 REFUND_PENDING（老配置不必升级）")
+                .isEqualTo("REFUND_PENDING");
+
+        // ---------------- ⑤ 清理 ----------------
+        tagService.release(orderId, OrderAuditTagService.TAG_FROZEN, "system");
+    }
+
+    /** 任意一次 AUDIT_FREEZE 审计（summary + after_json + reason） */
+    private Map<String, Object> newestFreezeAudit(Long orderId) {
+        return jdbc.queryForMap(
+                "SELECT summary, after_json, reason FROM admin_audit_log "
+                        + "WHERE action = 'AUDIT_FREEZE' AND target_id = ? ORDER BY id DESC LIMIT 1", orderId);
     }
 
     private Long orderIdOf(String orderSn) {

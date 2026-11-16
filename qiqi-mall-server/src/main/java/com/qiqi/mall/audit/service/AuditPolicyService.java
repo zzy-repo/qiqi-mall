@@ -63,17 +63,21 @@ public class AuditPolicyService {
     private final AuditPolicyVersionMapper versionMapper;
     private final AdminAuditWriter auditWriter;
     private final ObjectMapper json;
+    /** 冻结原因字典：校验 action_json 里的 reason_code 是不是真的存在 */
+    private final AuditFreezeReasonService freezeReasonService;
 
     public AuditPolicyService(AuditPolicyMapper policyMapper,
                               AuditPolicyConditionMapper conditionMapper,
                               AuditPolicyVersionMapper versionMapper,
                               AdminAuditWriter auditWriter,
-                              ObjectMapper json) {
+                              ObjectMapper json,
+                              AuditFreezeReasonService freezeReasonService) {
         this.policyMapper = policyMapper;
         this.conditionMapper = conditionMapper;
         this.versionMapper = versionMapper;
         this.auditWriter = auditWriter;
         this.json = json;
+        this.freezeReasonService = freezeReasonService;
     }
 
     // ================================================================== 读
@@ -335,6 +339,19 @@ public class AuditPolicyService {
             if (tag.length() > 32) {
                 throw new IllegalArgumentException("冻结标码不能超过 32 字符（order_audit_tag.tag_code）");
             }
+            // 原因码必须是字典里存在的启用项：写错一个字母就 400，而不是等到真冻结时
+            // 才在库里留下一条指不准原因的记录（那时没人会回头改配置）
+            String code = req.actionReasonCode();
+            if (code != null && !code.isBlank()) {
+                var reason = freezeReasonService.byCode(code.trim());
+                if (reason == null) {
+                    throw new IllegalArgumentException("冻结原因码不存在：" + code.trim()
+                            + "（可用 GET /admin/order-audit/freeze-reasons 取列表）");
+                }
+                if (reason.getEnabled() == null || reason.getEnabled() != 1) {
+                    throw new IllegalArgumentException("冻结原因码已停用：" + code.trim());
+                }
+            }
         } else if ((req.actionTag() != null && !req.actionTag().isBlank())
                 || (req.actionReason() != null && !req.actionReason().isBlank())) {
             throw new IllegalArgumentException(type + " 策略不能带冻结动作（只有 EXCEPTION 会冻结订单）");
@@ -347,6 +364,11 @@ public class AuditPolicyService {
                 ? ActionSpec.DEFAULT_TAG : req.actionTag().trim());
         action.put("reason", req.actionReason() == null || req.actionReason().isBlank()
                 ? "异常策略命中" : req.actionReason().trim());
+        // 原因码是稳定键（统计与 P1 豁免都靠它）；没配就留 null，执行时按人话反查 ——
+        // 不在这里"猜一个"写死，否则策略里会留下一份可能与字典改版失配的副本
+        if (req.actionReasonCode() != null && !req.actionReasonCode().isBlank()) {
+            action.put("reason_code", req.actionReasonCode().trim());
+        }
         try {
             return json.writeValueAsString(action);
         } catch (JsonProcessingException e) {
@@ -360,7 +382,8 @@ public class AuditPolicyService {
             com.fasterxml.jackson.databind.JsonNode node = json.readTree(actionJson);
             String tag = node.path("tag").asText(ActionSpec.DEFAULT_TAG);
             String reason = node.path("reason").asText("异常策略命中：" + policyName);
-            return new ActionSpec(tag, reason);
+            String reasonCode = node.path("reason_code").asText(null);   // 老配置没有这个键 → null
+            return new ActionSpec(tag, reason, reasonCode);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("策略 " + policyName + " 的 action_json 不是合法 JSON：" + e.getMessage(), e);
         }
@@ -454,6 +477,7 @@ public class AuditPolicyService {
         return new PolicyDto(policy.getId(), policy.getType(), policy.getPriority(), policy.getName(),
                 policy.getEnabled() != null && policy.getEnabled() == 1, policy.getVersionNo(),
                 action == null ? null : action.tagCode(), action == null ? null : action.reason(),
+                action == null ? null : action.reasonCode(),
                 conditions.stream().map(this::toDto).toList(),
                 // ⑥ 顺手补：实体上有 updated_at（ON UPDATE 自动刷），策略页那一列不用再显示「—」
                 policy.getUpdatedAt());

@@ -91,7 +91,7 @@ for DB in "${TARGETS[@]}"; do
   mysql_exec -e "DROP DATABASE IF EXISTS \`$DB\`;
                  CREATE DATABASE \`$DB\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
 
-  # 2) 空库 ⇒ Flyway 不会 baseline，直接全量执行 V1（39 表 + 1 视图 + channel_shop 3 行）
+  # 2) 空库 ⇒ Flyway 不会 baseline，直接全量执行 V1..V最新（当前 40 表 + 1 视图 + channel_shop 3 行）
   mvn -B -q -f "$SERVER_POM" flyway:migrate \
     -Dflyway.url="jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/${DB}?characterEncoding=utf8&serverTimezone=Asia/Shanghai" \
     -Dflyway.user="$DB_USER" \
@@ -106,11 +106,15 @@ for DB in "${TARGETS[@]}"; do
       (SELECT COUNT(*) FROM \`$DB\`.flyway_schema_history WHERE version='1' AND success=1), ',',
       (SELECT COUNT(*) FROM \`$DB\`.channel_shop));")"
   IFS=',' read -r n_tab n_view n_hist n_shop <<< "$verdict"
-  if [[ "$n_tab" != "39" || "$n_view" != "1" || "$n_hist" != "1" || "$n_shop" != "3" ]]; then
-    echo "✗ $DB 结构校验失败：业务表=$n_tab（应 39）视图=$n_view（应 1）V1记录=$n_hist（应 1）channel_shop=$n_shop（应 3）" >&2
+  # 业务表数：**加迁移就要跟着改**（V3 冻结原因字典 → 40 张）。
+  # 为什么写死一个数而不是"≥ 30 就放过"：这条断言挡的是「半建出来的库」
+  # （flyway 中途失败、建到一半），放宽成区间就挡不住少了三张的那种半成品。
+  EXPECT_TABLES=40
+  if [[ "$n_tab" != "$EXPECT_TABLES" || "$n_view" != "1" || "$n_hist" != "1" || "$n_shop" != "3" ]]; then
+    echo "✗ $DB 结构校验失败：业务表=$n_tab（应 $EXPECT_TABLES）视图=$n_view（应 1）V1记录=$n_hist（应 1）channel_shop=$n_shop（应 3）" >&2
     exit 1
   fi
-  echo "  ✓ 结构就绪：39 表 + 1 视图（V1 全量执行），channel_shop 3 行"
+  echo "  ✓ 结构就绪：$n_tab 表 + $n_view 视图（V1..V3 全量执行），channel_shop $n_shop 行"
 
   # 4) 灌种子：库名由本脚本显式传给 mysql（`mysql <库名> < 文件`）。
   #    seed 文件里不再写 `USE <库名>`（2026-11-13 两次事故的根因：文件写死库名 = 谁 source 它

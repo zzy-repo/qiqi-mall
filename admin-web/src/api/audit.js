@@ -107,7 +107,16 @@ export const mapQueueRow = (r) => ({
    * 所以「操作列显示冻结还是解冻」「行上要不要打冻结标记」一律读 frozen，不许再拿 result 猜。
    */
   frozen: asBool(pick(r, 'frozen')),
+  /**
+   * 冻结原因的三层（P2 起）：
+   *   frozenReasonName = 字典中文名（**页面显示的就是它**，永远不是 ID）；
+   *   frozenReasonCode = 稳定键（统计 / P1 豁免用它；不是给运营看的）；
+   *   frozenReason     = 冻结那一刻的人话快照（人工填的备注 / 策略原话；历史行是迁移前原文如 1231）。
+   * 三者并存不是冗余：改名不影响历史行给人的印象，号码又不随改名声漂移。
+   */
   frozenReason: pick(r, 'frozenReason', 'frozen_reason') ?? null,
+  frozenReasonCode: pick(r, 'frozenReasonCode', 'frozen_reason_code') ?? null,
+  frozenReasonName: pick(r, 'frozenReasonName', 'frozen_reason_name') ?? null,
   frozenTagCode: pick(r, 'frozenTagCode', 'frozen_tag_code') ?? null,
   matchedPolicyId: num(pick(r, 'matchedPolicyId', 'matched_policy_id')),
   matchedPolicyName: pick(r, 'matchedPolicyName', 'matched_policy_name') ?? null,
@@ -187,9 +196,24 @@ export const trailEntries = (payload) => (Array.isArray(payload) ? payload : [])
 
 // ---------------------------------------------------------------- 冻结 / 解冻
 
-/** 人工冻结：打标 + 审计（不动 status，不写状态台账） */
-export const freezeOrderAudit = (orderId, { reason, tagCode } = {}) =>
-  request.post(`/order-audit/orders/${orderId}/freeze`, { tagCode, reason })
+/**
+ * 人工冻结：打标 + 审计（不动 status，不写状态台账）。
+ *
+ * P2 起原因走字典：{reasonCode} 是稳定键（统计与 P1 豁免都以它为准），{note} 是选填备注。
+ * `reason` 只为兼容旧调用点（传了就当备注），新代码不要再用它 ——
+ * 一句自由文本救不了「这个月为什么冻了 50 单」。
+ */
+export const freezeOrderAudit = (orderId, { reasonCode, note, reason, tagCode } = {}) =>
+  request.post(`/order-audit/orders/${orderId}/freeze`, { tagCode, reasonCode, note, reason })
+
+/**
+ * 冻结原因字典。
+ * @param {{all?: boolean}} [opts] all=true 回全量（含停用 + 未分类/历史未填这类兜底项，报表用）；
+ *                               缺省只回「启用的 + 允许人工选的」——下拉就该用这个。
+ * ⚠️ 兜底项 selectable=0：统计里必须看得见，但**不许**出现在冻结下拉里（否则又变成自由填写）。
+ */
+export const listFreezeReasons = ({ all = false } = {}) =>
+  request.get('/order-audit/freeze-reasons', { params: all ? { all: true } : {} })
 
 /** 人工解冻：解除所有冻结类标；下一轮 run 才会重新判定 */
 export const unfreezeOrderAudit = (orderId) => request.post(`/order-audit/orders/${orderId}/unfreeze`)

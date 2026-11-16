@@ -42,10 +42,13 @@ public class OrderAuditTagService {
 
     private final OrderAuditTagMapper tagMapper;
     private final AdminAuditWriter auditWriter;
+    private final AuditFreezeReasonService reasonDict;
 
-    public OrderAuditTagService(OrderAuditTagMapper tagMapper, AdminAuditWriter auditWriter) {
+    public OrderAuditTagService(OrderAuditTagMapper tagMapper, AdminAuditWriter auditWriter,
+                                AuditFreezeReasonService reasonDict) {
         this.tagMapper = tagMapper;
         this.auditWriter = auditWriter;
+        this.reasonDict = reasonDict;
     }
 
     // ================================================================== 查询
@@ -68,6 +71,19 @@ public class OrderAuditTagService {
     /** 打标（已存在 active 同标则什么都不做，返回既有行） */
     @Transactional(rollbackFor = Exception.class)
     public OrderAuditTag ensureActive(Long orderId, String tagCode, String reason) {
+        return ensureActive(orderId, tagCode, reason, null);
+    }
+
+    /**
+     * 打标（带原因字典）。
+     *
+     * @param resolved 冻结原因的解析结果；{@code null} = 这条标与冻结原因无关
+     *                 （{@code STOCK_SHORT} / {@code COST_MISSING} 这类「留人工」的挂起标——它们的
+     *                 理由是 {@code downgrade_reason}，不是冻结原因，所以 {@code reason_id} 留空）
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public OrderAuditTag ensureActive(Long orderId, String tagCode, String reason,
+                                      AuditFreezeReasonService.Resolved resolved) {
         OrderAuditTag existing = tagMapper.selectActiveByCode(orderId, tagCode);
         if (existing != null) return existing;
         OrderAuditTag tag = new OrderAuditTag();
@@ -75,6 +91,10 @@ public class OrderAuditTagService {
         tag.setTagCode(tagCode);
         tag.setActive(1);
         tag.setReason(reason == null ? null : clip(reason, 255));
+        if (resolved != null && resolved.ok()) {
+            tag.setReasonId(resolved.id());
+            tag.setReasonCode(resolved.code());
+        }
         try {
             tagMapper.insert(tag);
             return tag;
@@ -94,27 +114,93 @@ public class OrderAuditTagService {
     // ================================================================== 冻结 / 解冻（写审计）
 
     /**
-     * 冻结：打 FROZEN 类标 + 写审计。
+     * 冻结（旧签名：只有一句人话，没有原因码）。
      *
-     * @param source 冻结来源（「自动审核：策略X」/「人工」），进审计摘要 ——
-     *               事后最常问的就是「这单是谁冻的、凭什么冻的」。
+     * <p>保留它是因为调用方还在用（脚本、集成测试、以及"人工填一句备注"的旧前端）。
+     * 它的 {@code reason} 会被当成**备注**，原因码按人话关键词反查；
+     * 反查不到就落到「未分类（待人工归类）」—— 那是一条 {@code selectable=0} 但报表可见的兜底，
+     * 不是静默丢弃。新代码请用带 {@code reasonCode} 的那个重载。
      */
     @Transactional(rollbackFor = Exception.class)
     public OrderAuditTag freeze(Order order, String tagCode, String reason, String source) {
+        return freeze(order, tagCode, null, reason, source);
+    }
+
+    /**
+     * 冻结：打 FROZEN 类标（带原因字典）+ 写审计。
+     *
+     * @param reasonCode 原因码（字典 {@code code}）：新前端下拉与策略 {@code action_json} 都给这个
+     * @param note       备注（运营手打的那句人话，可为空）
+     * @param source     冻结来源（「自动审核：策略X」/「人工」），进审计摘要 ——
+     *                   事后最常问的就是「这单是谁冻的、凭什么冻的」。
+     *
+     * <h3>三样东西落在哪（别混）</h3>
+     * <ul>
+     *   <li>{@code reason_id} / {@code reason_code}：**键**。统计与 P1 豁免靠它；</li>
+     *   <li>{@code reason} 列：**人话快照** —— 备注优先，没备注就写字典中文名
+     *       （历史行是迁移前的原文，从不改写）；</li>
+     *   <li>{@code admin_audit_log}：冻结那一刻的完整人话（码 + 中文名 + 备注），
+     *       字典改名后仍能回答"当时这条原因叫什么"。</li>
+     * </ul>
+     *
+     * <h3>⚠️ 审计摘要的字段顺序是契约：原因码 → 中文名 → 备注</h3>
+     * {@code AdminAuditWriter} 会把 summary 裁到 255 字符（{@code LedgerText.clip}，254 + "…"，
+     * 不抛异常）。若把原因码放在句尾，一句长备注就能把它挤掉 —— 于是压在这句话上的断言会随机变红，
+     * 而冻结其实成功了（假故障，最难查）。规则：**机器要断言的靠前、人写的靠后**。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public OrderAuditTag freeze(Order order, String tagCode, String reasonCode, String note, String source) {
         String tag = tagCode == null || tagCode.isBlank() ? TAG_FROZEN : tagCode;
+        boolean frozenTag = tag.startsWith(TAG_FROZEN);
+
+        // 只有冻结类标才解析原因：STOCK_SHORT / COST_MISSING 的 reason 是"留人工的原因"，不是冻结原因
+        AuditFreezeReasonService.Resolved resolved = frozenTag
+                ? reasonDict.resolveForWrite(reasonCode, note, AuditFreezeReasonService.CODE_UNCLASSIFIED)
+                : null;
+
+        // reason 列 = 人话快照：备注优先；没备注就写字典中文名（人查库时不必 join 也看得懂）
+        String human = note != null && !note.isBlank()
+                ? note.trim()
+                : (resolved != null && resolved.ok() ? resolved.name() : null);
+
         OrderAuditTag before = tagMapper.selectActiveByCode(order.getId(), tag);
-        OrderAuditTag tag0 = ensureActive(order.getId(), tag, reason);
+        OrderAuditTag tag0 = ensureActive(order.getId(), tag, human, resolved);
         if (before == null) {
+            String summary = freezeSummary(order, tag, source, resolved, note);
             auditWriter.record(new AdminAuditWriter.Event(
                     ReasonCodes.ACTION_AUDIT_FREEZE, ReasonCodes.TARGET_ORDER, order.getId(), order.getOrderSn(),
-                    "冻结订单 " + order.getOrderSn() + "：" + (source == null ? "" : source + "，")
-                            + "标=" + tag + (reason == null ? "" : "，原因=" + reason),
+                    summary,
                     null, order.getId(),
                     AdminAuditWriter.snapshot("frozen", Boolean.FALSE),
-                    AdminAuditWriter.snapshot("frozen", Boolean.TRUE, "tag", tag, "reason", reason)));
-            log.info("订单 {} 已冻结：tag={} source={} reason={}", order.getOrderSn(), tag, source, reason);
+                    // 结构化的权威落点：不受 summary 的 255 限制，码与名字都在这儿
+                    AdminAuditWriter.snapshot(
+                            "frozen", Boolean.TRUE,
+                            "tag", tag,
+                            "reason", human,
+                            "reason_code", resolved == null ? null : resolved.code(),
+                            "reason_name", resolved == null ? null : resolved.name())));
+            log.info("订单 {} 已冻结：tag={} source={} code={} reason={}",
+                    order.getOrderSn(), tag, source,
+                    resolved == null ? null : resolved.code(), human);
         }
         return tag0;
+    }
+
+    /** 摘要句：顺序固定「原因码 → 中文名 → 备注」（见 freeze 的注释，别调换） */
+    private static String freezeSummary(Order order, String tag, String source,
+                                        AuditFreezeReasonService.Resolved resolved, String note) {
+        StringBuilder sb = new StringBuilder("冻结订单 ").append(order.getOrderSn()).append("：");
+        if (source != null && !source.isBlank()) sb.append(source).append("，");
+        sb.append("标=").append(tag);
+        if (resolved != null) {
+            sb.append("，原因码=").append(resolved.ok() ? resolved.code() : "<未知>");
+            sb.append("，原因=").append(resolved.ok() ? resolved.name() : "<未知>");
+        }
+        // 备注放在**最后**：它最可能很长、也最不参与断言（255 从尾部裁，裁掉的只能允许是它）
+        boolean noteWorthTelling = note != null && !note.isBlank()
+                && (resolved == null || !resolved.ok() || !note.trim().equals(resolved.name()));
+        if (noteWorthTelling) sb.append("（补充：").append(note.trim()).append("）");
+        return sb.toString();
     }
 
     /**

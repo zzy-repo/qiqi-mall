@@ -1,8 +1,10 @@
 package com.qiqi.mall.audit.controller;
 
+import com.qiqi.mall.audit.dto.FreezeReasonDto;
 import com.qiqi.mall.audit.dto.RunResultDto;
 import com.qiqi.mall.audit.entity.OrderAuditTag;
 import com.qiqi.mall.audit.service.AuditExecutor;
+import com.qiqi.mall.audit.service.AuditFreezeReasonService;
 import com.qiqi.mall.audit.service.AuditQueryService;
 import com.qiqi.mall.audit.service.OrderAuditTagService;
 import com.qiqi.mall.order.entity.Order;
@@ -42,14 +44,17 @@ public class OrderAuditController {
     private final AuditExecutor executor;
     private final AuditQueryService queryService;
     private final OrderAuditTagService tagService;
+    private final AuditFreezeReasonService freezeReasonService;
     private final OrderService orderService;
 
     public OrderAuditController(AuditExecutor executor, AuditQueryService queryService,
-                                OrderAuditTagService tagService, OrderService orderService) {
+                                OrderAuditTagService tagService, OrderService orderService,
+                                AuditFreezeReasonService freezeReasonService) {
         this.executor = executor;
         this.queryService = queryService;
         this.tagService = tagService;
         this.orderService = orderService;
+        this.freezeReasonService = freezeReasonService;
     }
 
     /**
@@ -83,15 +88,38 @@ public class OrderAuditController {
         return Result.ok(queryService.trail(id));
     }
 
+    /**
+     * 冻结原因字典（下拉 / 报表用）。
+     *
+     * <p>为什么挂在 {@code /admin/order-audit/**} 而不是新开一个前缀：
+     * {@link com.qiqi.mall.shared.security.ApiKeyAuthFilter} 对**未登记前缀一律 fail-closed（403）**，
+     * 而这块已经在 {@code audit:read}（读）/ {@code audit:write}（写）规则下 ——
+     * 字典读取属于审核域读，将来维护页的写正好落进 {@code audit:write}（对任何 API Key 都不可授予，
+     * 与「AI 不能改审核配置」同一条红线）。开新前缀就得再写一条规则，且容易写成默认可写。
+     *
+     * @param all false/缺省 = 只回「启用的 + 允许人工选的」（下拉就这么用）；
+     *            true = 回全量（含停用项与「未分类/历史未填」这类兜底项，**报表与维护页必须用它**，
+     *            否则"无法归因的那几单"会从统计里消失）
+     */
+    @GetMapping("/order-audit/freeze-reasons")
+    public Result<List<FreezeReasonDto>> freezeReasons(@RequestParam(required = false) Boolean all) {
+        boolean includeAll = Boolean.TRUE.equals(all);
+        return Result.ok((includeAll ? freezeReasonService.all() : freezeReasonService.selectable())
+                .stream().map(FreezeReasonDto::of).toList());
+    }
+
     /** 人工冻结：打标 + 审计（不动 status，不写状态台账） */
     @PostMapping("/order-audit/orders/{id}/freeze")
     public Result<OrderAuditTag> freeze(@PathVariable Long id, @RequestBody(required = false) FreezeRequest body) {
         Order order = requireOrder(id);
         String tag = body == null || body.tagCode() == null || body.tagCode().isBlank()
                 ? OrderAuditTagService.TAG_FROZEN : body.tagCode().trim();
-        String reason = body == null || body.reason() == null || body.reason().isBlank()
-                ? "人工冻结" : body.reason().trim();
-        return Result.ok(tagService.freeze(order, tag, reason, "人工"));
+        String reasonCode = body == null ? null : body.reasonCode();
+        // note 是新的（补充说明）；reason 是旧字段名，仍接受 —— 老前端/脚本不该因为这次改造失效
+        String note = body == null ? null : (body.note() != null && !body.note().isBlank()
+                ? body.note() : body.reason());
+        if (note == null || note.isBlank()) note = "人工冻结";
+        return Result.ok(tagService.freeze(order, tag, reasonCode, note.trim(), "人工"));
     }
 
     /** 人工解冻：解除所有 FROZEN 类标 + 审计；下一轮 run 才会重新判定 */
@@ -110,7 +138,16 @@ public class OrderAuditController {
         return order;
     }
 
-    /** 冻结请求体：tagCode 默认 FROZEN（也可给 FROZEN_RETURN_APPLY 这类细分标） */
-    public record FreezeRequest(String tagCode, String reason) {
+    /**
+     * 冻结请求体。
+     *
+     * @param tagCode    默认 FROZEN（也可给 FROZEN_RETURN_APPLY 这类细分标）
+     * @param reasonCode 冻结原因码（{@code audit_freeze_reason.code}）—— **新前端应当给这个**；
+     *                   这是 P1「不再以此原因冻结该单」的键，也是统计口径。给了就按它算，
+     *                   不给则按 {@code note/reason} 的人话反查，再不行落「未分类（待归类）」
+     * @param note       补充说明（运营手打的那句人话；进 {@code order_audit_tag.reason} 与审计摘要）
+     * @param reason     旧字段（= 旧的自由文本原因），保留兼容：没给 note 时当 note 用
+     */
+    public record FreezeRequest(String tagCode, String reasonCode, String note, String reason) {
     }
 }

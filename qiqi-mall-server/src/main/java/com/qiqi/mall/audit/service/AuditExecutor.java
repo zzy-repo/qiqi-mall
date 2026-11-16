@@ -306,7 +306,13 @@ public class AuditExecutor {
                 ActionSpec action = verdict.matchedPolicy() != null && verdict.matchedPolicy().action() != null
                         ? verdict.matchedPolicy().action()
                         : ActionSpec.freeze(verdict.reasonText());
-                tagService.freeze(order, action.tagCode(), action.reason(),
+                // 原因码三级：策略显式配了 code 就用它；只配了人话就按关键词反查（老配置不必升级）；
+                // 反查不到落 POLICY_FREEZE_UNSPECIFIED（"策略命中但没填原因"，selectable=0 但报表可见）。
+                String code = action.reasonCode() != null && !action.reasonCode().isBlank()
+                        ? action.reasonCode()
+                        : AuditFreezeReasonService.inferCodeFromText(action.reason());
+                if (code == null) code = AuditFreezeReasonService.CODE_UNSPECIFIED;
+                tagService.freeze(order, action.tagCode(), code, action.reason(),
                         "自动审核：策略「" + (verdict.matchedPolicy() == null ? "-" : verdict.matchedPolicy().name()) + "」");
             }
             case MANUAL -> {

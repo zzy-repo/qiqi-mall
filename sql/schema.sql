@@ -59,6 +59,7 @@ DROP TABLE IF EXISTS `audit_run`;
 DROP TABLE IF EXISTS `audit_policy_version`;
 DROP TABLE IF EXISTS `audit_policy_condition`;
 DROP TABLE IF EXISTS `audit_policy`;
+DROP TABLE IF EXISTS `audit_freeze_reason`;
 DROP TABLE IF EXISTS `attribute`;
 DROP TABLE IF EXISTS `product_type`;
 DROP TABLE IF EXISTS `ai_api_key`;
@@ -66,7 +67,7 @@ DROP TABLE IF EXISTS `admin_audit_log`;
 DROP TABLE IF EXISTS `admin`;
 
 -- ============================================================================
--- 1. 表结构（39 张，按外键依赖拓扑排序：父表在前）
+-- 1. 表结构（40 张，按外键依赖拓扑排序：父表在前）
 -- ============================================================================
 
 -- admin
@@ -142,6 +143,26 @@ CREATE TABLE `attribute` (
   KEY `idx_type` (`type_id`),
   CONSTRAINT `fk_attr_type` FOREIGN KEY (`type_id`) REFERENCES `product_type` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='属性';
+
+-- audit_freeze_reason
+CREATE TABLE `audit_freeze_reason` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `code` varchar(32) NOT NULL COMMENT '稳定键：大写字母+下划线。一经写入永不修改——P1 冻结豁免、策略 action_json、导出/回放都以它为键',
+  `name` varchar(50) NOT NULL COMMENT '中文名（人看的那一句）；随便改，改名不影响任何键',
+  `description` varchar(255) DEFAULT NULL COMMENT '说明：为什么冻、下一步该做什么（给客服看的操作指引）',
+  `enabled` tinyint NOT NULL DEFAULT '1' COMMENT '1 启用 0 停用：停用后新冻结不能再选它，历史行照旧显示与统计',
+  `selectable` tinyint NOT NULL DEFAULT '1' COMMENT '1 允许人工选择 0 仅系统兜底/迁移归类项（报表与字典页可见，但不许拿它去冻新单）',
+  `builtin` tinyint NOT NULL DEFAULT '0' COMMENT '1 系统内置（兜底/未分类）：禁止删除、禁止停用',
+  `sort_no` int NOT NULL DEFAULT '100' COMMENT '排序（升序，小的在前）',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_code` (`code`),
+  KEY `idx_enabled_sort` (`enabled`,`sort_no`),
+  CONSTRAINT `ck_freeze_reason_builtin` CHECK ((`builtin` in (0,1))),
+  CONSTRAINT `ck_freeze_reason_enabled` CHECK ((`enabled` in (0,1))),
+  CONSTRAINT `ck_freeze_reason_selectable` CHECK ((`selectable` in (0,1)))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='冻结原因字典：审核标记 FROZEN 的原因（一等公民，可统计/可作豁免键）';
 
 -- audit_policy
 CREATE TABLE `audit_policy` (
@@ -508,13 +529,18 @@ CREATE TABLE `order_audit_tag` (
   `tag_code` varchar(32) NOT NULL COMMENT 'FROZEN / STOCK_SHORT / COST_MISSING …',
   `active_tag` varchar(48) GENERATED ALWAYS AS (if((`active` = 1),concat(`order_id`,_utf8mb4':',`tag_code`),NULL)) VIRTUAL COMMENT '仅 active 时非空的唯一键载体：{orderId}:{tagCode}',
   `active` tinyint NOT NULL DEFAULT '1' COMMENT '1生效 0已解除',
-  `reason` varchar(255) DEFAULT NULL COMMENT '为什么打这个标',
+  `reason` varchar(255) DEFAULT NULL COMMENT '人话快照/备注（写入规则：人工冻结=备注，空则字典中文名；自动冻结=策略配的原话，空则字典中文名）；迁移前的历史行保留原文不动。原因本身看 reason_id/reason_code',
+  `reason_id` bigint DEFAULT NULL COMMENT '冻结原因字典ID（FROZEN 类标必填；STOCK_SHORT/COST_MISSING 等非冻结标留 NULL）',
+  `reason_code` varchar(32) DEFAULT NULL COMMENT '原因码快照（= audit_freeze_reason.code，写入时由字典带出）：对外/统计/豁免都用它，改名不受影响',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '打标时间',
   `released_at` datetime(3) DEFAULT NULL COMMENT '解除时间（解冻/恢复）',
   `released_by` varchar(64) DEFAULT NULL COMMENT '解除人（ADMIN 用户名 / APIKEY 名 / system）',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_active` (`active_tag`),
   KEY `idx_order` (`order_id`,`tag_code`),
+  KEY `idx_reason` (`reason_id`),
+  KEY `idx_reason_code_created` (`reason_code`,`created_at`),
+  CONSTRAINT `fk_tag_reason` FOREIGN KEY (`reason_id`) REFERENCES `audit_freeze_reason` (`id`),
   CONSTRAINT `ck_order_audit_tag_active` CHECK ((`active` in (0,1)))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='订单审核标记（冻结/挂起用标表达，不动 order.status）';
 
@@ -734,12 +760,13 @@ CREATE SQL SECURITY DEFINER VIEW `v_biz_status_timeline` AS select cast('ORDER' 
 -- ============================================================================
 -- 3. 参考数据（channel_shop 店铺种子）
 --    这 3 行是结构的一部分（后端/前端都靠 shop_code 定位店铺），不是演示数据：
---    历史来源是 sql/migrate-channel.sql 的种子段，e2e 重置后必须有，否则店铺表为空。
+--    历史来源是 channel_shop 的种子段（原 migrate-channel.sql：历史脚本，已下线；
+--    结构请用 db/migration/V1__baseline.sql，本段基线已包含它），e2e 重置后必须有，否则店铺表为空。
 --    02-seed.sql 既不 TRUNCATE 也不 INSERT 它 —— 所以必须跟着结构一起进基线。
 -- ============================================================================
 
-INSERT INTO `channel_shop` (`id`, `platform_type`, `shop_code`, `shop_name`, `enabled`, `watermark_at`, `last_pull_at`, `created_at`, `updated_at`) VALUES (1,'MALL','MALL-001','七七商城自营',1,NULL,NULL,'2026-11-13 20:25:55','2026-11-13 20:25:55');
-INSERT INTO `channel_shop` (`id`, `platform_type`, `shop_code`, `shop_name`, `enabled`, `watermark_at`, `last_pull_at`, `created_at`, `updated_at`) VALUES (2,'TAOBAO_MOCK','TB-001','淘宝旗舰店（模拟）',1,NULL,NULL,'2026-11-13 20:25:55','2026-11-13 20:25:55');
-INSERT INTO `channel_shop` (`id`, `platform_type`, `shop_code`, `shop_name`, `enabled`, `watermark_at`, `last_pull_at`, `created_at`, `updated_at`) VALUES (3,'DOUYIN_MOCK','DY-001','抖音小店（模拟）',1,NULL,NULL,'2026-11-13 20:25:55','2026-11-13 20:25:55');
+INSERT INTO `channel_shop` (`id`, `platform_type`, `shop_code`, `shop_name`, `enabled`, `watermark_at`, `last_pull_at`, `created_at`, `updated_at`) VALUES (1,'MALL','MALL-001','七七商城自营',1,'2026-11-14 22:02:11','2026-11-14 22:02:11','2026-11-13 20:25:55','2026-11-14 22:02:11');
+INSERT INTO `channel_shop` (`id`, `platform_type`, `shop_code`, `shop_name`, `enabled`, `watermark_at`, `last_pull_at`, `created_at`, `updated_at`) VALUES (2,'TAOBAO_MOCK','TB-001','淘宝旗舰店（模拟）',1,'2026-11-14 22:06:49','2026-11-14 22:06:49','2026-11-13 20:25:55','2026-11-14 22:06:49');
+INSERT INTO `channel_shop` (`id`, `platform_type`, `shop_code`, `shop_name`, `enabled`, `watermark_at`, `last_pull_at`, `created_at`, `updated_at`) VALUES (3,'DOUYIN_MOCK','DY-001','抖音小店（模拟）',1,'2026-11-14 22:02:11','2026-11-14 22:02:11','2026-11-13 20:25:55','2026-11-14 22:02:11');
 
 SET FOREIGN_KEY_CHECKS = 1;

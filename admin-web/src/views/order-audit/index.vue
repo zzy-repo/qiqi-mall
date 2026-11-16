@@ -394,7 +394,7 @@
                  依赖 EP 内部实现，挂在内层才是确定的锚点。 -->
             <el-descriptions-item label="冻结原因">
               <span data-testid="audit-order-frozen-reason">
-                <span v-if="orderRow.frozen">{{ orderRow.frozenReason || '（未填写原因）' }}</span>
+                <span v-if="orderRow.frozen">{{ frozenWhy(orderRow) || '（未填写原因）' }}</span>
                 <span v-else class="muted">—</span>
               </span>
               <el-text v-if="orderRow.frozen && orderRow.frozenTagCode" size="small" type="info" class="frozen-tagcode">
@@ -446,6 +446,59 @@
         />
       </div>
     </el-dialog>
+
+    <!-- ============ 冻结弹窗：原因从字典下拉选，备注选填 ============
+         为什么不继续用 ElMessageBox.prompt：那句自由文本正是"没法统计"的根源。
+         现在原因是一个**有限闭集里的键**，备注只是备注（不参与统计）。 -->
+    <el-dialog
+      v-model="freezeVisible"
+      :title="`冻结订单 ${freezeForm.orderSn || ''}`"
+      width="540px"
+      data-testid="audit-freeze-dialog"
+    >
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="冻结只会打标，不会改订单状态；本轮之后这张单不再参与自动审核，需人工解冻。"
+      />
+      <el-form label-width="88px" class="freeze-form">
+        <el-form-item label="冻结原因" required>
+          <el-select
+            v-model="freezeForm.reasonCode"
+            placeholder="选一条原因（统计与「不再以此原因冻结」都以它为准）"
+            data-testid="audit-freeze-reason-select"
+            style="width: 100%"
+          >
+            <el-option v-for="r in freezeReasonOptions" :key="r.code" :label="r.name" :value="r.code">
+              <span>{{ r.name }}</span>
+              <!-- 说明文字的外观交给 el-text 的 props（size/type）：scoped style 里只许写位置 -->
+              <el-text size="small" type="info" class="freeze-opt-hint">{{ r.description }}</el-text>
+            </el-option>
+          </el-select>
+        </el-form-item>
+        <el-form-item label="补充说明">
+          <el-input
+            v-model="freezeForm.note"
+            type="textarea"
+            :rows="2"
+            maxlength="200"
+            show-word-limit
+            data-testid="audit-freeze-note"
+            placeholder="选填。只是备注，不参与统计（要能被统计就必须选一条原因）"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button data-testid="audit-freeze-cancel" @click="freezeVisible = false">取消</el-button>
+        <el-button
+          type="warning"
+          data-testid="audit-freeze-ok"
+          :loading="freezeSubmitting"
+          @click="submitFreeze"
+        >确认冻结</el-button>
+      </template>
+    </el-dialog>
   </el-card>
 </template>
 
@@ -458,7 +511,7 @@ import AuditTrail from '../../components/AuditTrail.vue'
 import {
   listAuditQueue, queuePage, listAuditPolicies, policyBundle,
   listAuditRuns, runPage, runAudit,
-  freezeOrderAudit, unfreezeOrderAudit
+  freezeOrderAudit, unfreezeOrderAudit, listFreezeReasons
 } from '../../api/audit'
 import { auditPassDryRun, auditPassOrder } from '../../api/delivery'
 import { useDangerConfirm } from '../../composables/useDangerConfirm'
@@ -559,8 +612,21 @@ const fmtTime = (at) => (at ? String(at).replace('T', ' ').slice(0, 19) : '—')
  */
 const frozenTitle = (row) => {
   const tag = row?.frozenTagCode || 'FROZEN'
-  const why = row?.frozenReason ? row.frozenReason : '未填写原因'
-  return `冻结中（标 ${tag}）：${why}`
+  return `冻结中（标 ${tag}）：${frozenWhy(row) || '未填写原因'}`
+}
+
+/**
+ * 冻结原因的人话（字典中文名 + 备注）。
+ *
+ * 为什么两个都要：中文名是"为什么冻的"（可统计、可做豁免键），备注是"当时那个人想说什么"。
+ * 历史行两者都在：reason 还是迁移前的原文（如 1231），字典名是回填出来的「历史未填（占位）」——
+ * 把 1231 藏起来等于假装它不存在，把字典名省掉等于回填白做。
+ */
+const frozenWhy = (row) => {
+  const name = row?.frozenReasonName || ''
+  const note = row?.frozenReason || ''
+  if (name && note && note !== name) return `${name}（${note}）`
+  return name || note || ''
 }
 
 /**
@@ -568,7 +634,7 @@ const frozenTitle = (row) => {
  * 人工冻的单 result 不是 FROZEN，reasonHead/reasonSub 讲的全是上一轮的判定，
  * 一个字都不会提到冻结 —— 所以这一行不能靠上面那几行代替。
  */
-const frozenReasonText = (row) => (row?.frozenReason ? `冻结原因：${row.frozenReason}` : '冻结原因：（未填写）')
+const frozenReasonText = (row) => (frozenWhy(row) ? `冻结原因：${frozenWhy(row)}` : '冻结原因：（未填写）')
 
 /** 原因栏第一行：说「命中了哪条 / 为什么没命中」，第二行灰字才是后端原话（含数值差） */
 const reasonHead = (row) => {
@@ -874,32 +940,54 @@ const manualPass = async () => {
 
 // ---------------------------------------------------------------- 冻结 / 解冻
 
-const freeze = async (row) => {
-  let reason = ''
-  const box = ElMessageBox.prompt(
-    '冻结只会打标，**不会**改订单状态；本轮之后这张单不再参与自动审核，需人工解冻。',
-    `冻结订单 ${row.orderSn}`,
-    {
-      confirmButtonText: '确认冻结',
-      cancelButtonText: '取消',
-      customClass: 'audit-confirm-freeze',
-      inputPlaceholder: '冻结原因（例如：疑似刷单，等风控确认）',
-      inputValidator: (v) => (v && v.trim() ? true : '请填写冻结原因')
-    }
-  )
-  stampMessageBoxButtons('audit-confirm-freeze', { confirm: 'audit-confirm-freeze-ok', cancel: 'audit-confirm-freeze-cancel' })
+const freezeVisible = ref(false)
+const freezeSubmitting = ref(false)
+const freezeReasonOptions = ref([])
+const freezeForm = reactive({ orderId: null, orderSn: '', reasonCode: '', note: '' })
+
+/**
+ * 冻结原因字典（下拉）：只在打开弹窗时按需拉一次，失败不阻塞页面。
+ *
+ * 拉不到就**不允许冻结**（提交时会提示"请选择冻结原因"）：比退回自由输入更可接受 ——
+ * 自由输入那种账，回了就再也算不清了。
+ */
+const loadFreezeReasons = async () => {
   try {
-    const res = await box
-    reason = res.value
-  } catch {
+    freezeReasonOptions.value = (await listFreezeReasons()) || []
+  } catch (e) {
+    freezeReasonOptions.value = []
+    ElMessage.warning('冻结原因字典没取到，暂时无法冻结：' + (e?.message || e))
+  }
+}
+
+/** 「冻结」按钮：打开弹窗（原因从字典选，不再自由填写） */
+const freeze = async (row) => {
+  if (!freezeReasonOptions.value.length) await loadFreezeReasons()
+  freezeForm.orderId = row.orderId
+  freezeForm.orderSn = row.orderSn
+  freezeForm.reasonCode = ''
+  freezeForm.note = ''
+  freezeVisible.value = true
+}
+
+const submitFreeze = async () => {
+  if (!freezeForm.reasonCode) {
+    ElMessage.warning('请选择冻结原因（备注不能代替原因）')
     return
   }
+  freezeSubmitting.value = true
   try {
-    await freezeOrderAudit(row.orderId, { reason })
+    await freezeOrderAudit(freezeForm.orderId, {
+      reasonCode: freezeForm.reasonCode,
+      note: (freezeForm.note || '').trim()
+    })
     ElMessage.success('已冻结，下一轮不再自动审核')
+    freezeVisible.value = false
     refreshAll()
   } catch (e) {
     ElMessage.error('冻结失败：' + (e?.message || e))
+  } finally {
+    freezeSubmitting.value = false
   }
 }
 
@@ -968,6 +1056,8 @@ onMounted(() => {
   loadQueue()
   loadCounts()
   loadPolicies()
+  // 字典 11 行：预取一次，弹窗打开即可选（失败也不阻塞页面，只是冻结时会提示取不到）
+  loadFreezeReasons()
 })
 </script>
 
@@ -999,6 +1089,10 @@ onMounted(() => {
 /* 判定列：判定徽标 + 冻结标记上下叠，纵向排列、左对齐（不加宽就不挤掉「原因」列） */
 .verdict-cell { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
 .frozen-tagcode { margin-left: 6px; }
+
+/* 冻结弹窗：选项副标题（说明文字）右侧灰字，不抢中文名的视觉重量 */
+.freeze-form { margin-top: 12px; }
+.freeze-opt-hint { float: right; margin-left: 12px; }
 
 /* 全局排除块 = el-alert（warning）：浅黄底、警示图标、标题层级全由组件给。
    原来是一张 el-card 自己染色 + 虚线边框，虚线和淡黄都是"这块不一样"的语气，不是信息：
