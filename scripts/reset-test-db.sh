@@ -26,7 +26,7 @@
 #     种子里的 admin 哈希是演示弱口令，复位后必须用 /root/.qiqi-secrets/admin.txt 覆盖，
 #     否则「复位一次就把后台口令打回弱口令」。那一步失败时本脚本会失败退出（不再静默）。
 #
-# 除 init-test-db.sh 之外，本脚本自己还要**补种三样**（2026-11-14 新增，见下）：
+# 除 init-test-db.sh 之外，本脚本自己还要**补种四样**（2026-11-14 增 a~c，2026-11-17 增 d，见下）：
 #   init-test-db.sh 只灌「种子骨架」（会员/商品/SKU/14 笔种子单），演示必需的审核数据不在种子里，
 #   所以光跑它 = 复位后审核队列空、渠道演示缺六单。实测证据（2026-11-14）：只跑 init 后
 #   audit_policy=0、QT 单=0。因此复位末尾补齐：
@@ -34,8 +34,15 @@
 #     b) sql/reset-sku-bucket-N.sql     @n=8 全库重铺库存桶。**必须做**：a 新建的 9 个 SKU 只有
 #        1 个桶，而扣减按 bucket_no = hash % 8 找桶 → 7/8 概率找不到桶、明明有货却判「库存不足」
 #     c) 三自检（桶行数 = SKU×8 / 每 SKU 8 桶 / drift=0）+ 审核演示数据自检（策略 7 条、QT 六单）
-#   ⚠️ 三样都必须幂等（复位本来就会反复跑）；任一失败 → 非 0 退出，绝不留「复位完成但演示数据不全」
+#     d) scripts/prepare-audit-demo-queue.mjs  调运行中服务 POST /admin/order-audit/run **跑一轮真判定**。
+#        **必须做**：a 只把六笔单摆成 status=7 的「起点」，决策行与标一行都没有；而人工队列是
+#        FROM order_audit_decision 的 ⇒ 少了 d，复位后队列页是空表、「按标筛」0 行，
+#        「这单为什么卡」在演示站上根本演不出来（2026-11-17 实测）。手写 SQL 糊决策行不在选项内：
+#        那是伪造引擎结论，改一条策略文案抄来的行就成了假证据。
+#   ⚠️ 四样都必须幂等（复位本来就会反复跑）；任一失败 → 非 0 退出，绝不留「复位完成但演示数据不全」
 #      这种半成品状态（那正是文档里「复位后自动补六单」曾经骗人的地方）。
+#   ⚠️ d 需要演示栈在跑（网关 18080）。这是刻意的硬依赖：判定只能由真引擎做，栈不在就跑不了，
+#      跑不了就不许报「复位完成」。口令由 d 自己从 ADMIN_PASSWORD / /root/.qiqi-secrets/admin.txt 读。
 #
 # 安全边界：
 #   - 只碰 qiqi_mall_test，绝不碰 dev 库 qiqi_mall（init-test-db.sh 只 USE 测试库；
@@ -98,14 +105,23 @@ rm -f "$init_log"
 # ============================================================================
 # 补种演示必需数据：复位 = 回到「完整演示态」，不是回到空骨架
 #   init-test-db.sh 只灌种子骨架，审核演示数据不在种子里（实测：只跑 init 后
-#   audit_policy=0 / QT 单=0 → 审核队列页空、演示六单没了）。以下三步缺一不可，
+#   audit_policy=0 / QT 单=0 → 审核队列页空、演示六单没了）。以下四步缺一不可，
 #   且都幂等：脚本可以反复跑，结果一样。
+#
+#   2026-11-17 补第 3 步（跑一轮真判定）：只做 1、2 两步时，六笔演示单虽然都在 7（待审核），
+#   但**一行决策行、一条标都没有**。而人工队列是 FROM order_audit_decision 的 ⇒ 复位完打开队列页
+#   是**空表**，「按标筛选」（?tag=NO_POLICY_MATCH）也是 0 行 —— 演示站上「这单为什么卡」根本演不出来。
+#   修法不是往 order_audit_decision / order_audit_tag 里手糊行（那是伪造引擎结论，改一条策略文案
+#   抄来的行就成了假证据，而且下次复位就没了），而是**让引擎自己判一轮**：
+#   scripts/prepare-audit-demo-queue.mjs 调运行中服务的 POST /admin/order-audit/run，
+#   决策行、结论标、状态流转全部由真引擎落。它同时是本脚本对「队列有没有单可看」的那道自检。
 # ============================================================================
 AUDIT_SEED="$REPO_DIR/sql/seed-order-audit-demo.sql"
 BUCKET_SQL="$REPO_DIR/sql/reset-sku-bucket-N.sql"
+QUEUE_PREP="$REPO_DIR/scripts/prepare-audit-demo-queue.mjs"
 
 echo
-echo "▶ [补种 1/3] 审核演示数据：sql/seed-order-audit-demo.sql（7 条策略 + 全局排除 + QT-1001..1006）"
+echo "▶ [补种 1/4] 审核演示数据：sql/seed-order-audit-demo.sql（7 条策略 + 全局排除 + QT-1001..1006）"
 if [[ ! -f "$AUDIT_SEED" ]]; then
   echo "✗ 找不到 $AUDIT_SEED —— 复位后审核队列会是空的，拒绝把半成品当完成" >&2
   exit 1
@@ -115,7 +131,7 @@ mysql_exec "$DB_NAME" < "$AUDIT_SEED" > /dev/null \
 echo "  ✓ 审核策略与六笔演示单已补齐（幂等：已存在则整条跳过）"
 
 echo
-echo "▶ [补种 2/3] 库存桶重铺：sql/reset-sku-bucket-N.sql（@n=8 全库，按各 SKU 自己的 sku.stock）"
+echo "▶ [补种 2/4] 库存桶重铺：sql/reset-sku-bucket-N.sql（@n=8 全库，按各 SKU 自己的 sku.stock）"
 if [[ ! -f "$BUCKET_SQL" ]]; then
   echo "✗ 找不到 $BUCKET_SQL —— 补种 1 新建的 SKU 只有 1 个桶，扣减会假缺货，拒绝继续" >&2
   exit 1
@@ -127,7 +143,18 @@ mysql_exec "$DB_NAME" < "$BUCKET_SQL" | grep -E '^参数 OK|^✗ 参数' || {
 echo "  ✓ 全库每 SKU 重铺 8 个桶（幂等：先删该 SKU 所有桶再均分，重跑结果相同）"
 
 echo
-echo "▶ [补种 3/3] 自检（复位必须真的等于「回到完整演示态」，任一不过即失败）"
+echo "▶ [补种 3/4] 跑一轮真判定：scripts/prepare-audit-demo-queue.mjs（让队列里出现带标的待审核单）"
+if [[ ! -f "$QUEUE_PREP" ]]; then
+  echo "✗ 找不到 $QUEUE_PREP —— 复位后审核队列会是空表（按标筛 0 行），拒绝把半成品当完成" >&2
+  exit 1
+fi
+# 它需要演示栈（网关 18080）在跑：判定必须由真引擎做，不能在 SQL 里手抄一份决策行。
+# 口令由它自己从 ADMIN_PASSWORD / /root/.qiqi-secrets/admin.txt 读，取不到就失败 —— 不静默跳过。
+node "$QUEUE_PREP" || {
+  echo "✗ 演示队列没跑起来（$QUEUE_PREP）—— 复位后「按标筛」会是 0 行，不接受" >&2; exit 1; }
+
+echo
+echo "▶ [补种 4/4] 自检（复位必须真的等于「回到完整演示态」，任一不过即失败）"
 selftest="$(mysql_exec -N -e "SELECT CONCAT(
     (SELECT COUNT(*) FROM $DB_NAME.sku), ',',
     (SELECT COUNT(*) FROM $DB_NAME.sku_bucket), ',',
@@ -136,13 +163,27 @@ selftest="$(mysql_exec -N -e "SELECT CONCAT(
        ON b.sku_id = s.id WHERE s.stock <> COALESCE(b.t, 0)), ',',
     (SELECT COUNT(*) FROM $DB_NAME.audit_policy), ',',
     (SELECT COUNT(*) FROM $DB_NAME.\`order\` WHERE order_sn LIKE 'QT-100%'), ',',
-    (SELECT COUNT(*) FROM $DB_NAME.channel_shop));")"
-IFS=',' read -r t_sku t_bucket t_bad t_drift t_policy t_qt t_shop <<< "$selftest"
+    (SELECT COUNT(*) FROM $DB_NAME.channel_shop), ',',
+    (SELECT COUNT(*) FROM $DB_NAME.\`order\` o WHERE o.status = 7 AND EXISTS (
+        SELECT 1 FROM $DB_NAME.order_audit_tag t WHERE t.order_id = o.id AND t.active = 1
+          AND (t.tag_code IN ('NO_POLICY_MATCH','AUDIT_PENDING','BLOCKED','STOCK_SHORT','COST_MISSING')
+               OR t.tag_code LIKE 'FROZEN%'))), ',',
+    (SELECT COUNT(DISTINCT t.tag_code) FROM $DB_NAME.\`order\` o
+       JOIN $DB_NAME.order_audit_tag t ON t.order_id = o.id AND t.active = 1
+      WHERE o.status = 7
+        AND (t.tag_code IN ('NO_POLICY_MATCH','AUDIT_PENDING','BLOCKED','STOCK_SHORT','COST_MISSING')
+             OR t.tag_code LIKE 'FROZEN%')), ',',
+    (SELECT COUNT(DISTINCT o.id) FROM $DB_NAME.\`order\` o
+       JOIN $DB_NAME.order_audit_tag t ON t.order_id = o.id AND t.active = 1
+      WHERE o.status = 7 AND t.tag_code = 'NO_POLICY_MATCH'), ',',
+    (SELECT COUNT(DISTINCT order_id) FROM $DB_NAME.order_audit_decision));")"
+IFS=',' read -r t_sku t_bucket t_bad t_drift t_policy t_qt t_shop t_tagged t_tagkinds t_nomatch t_decided <<< "$selftest"
 expected_bucket=$(( t_sku * 8 ))
 echo "  ① 桶行数 = $t_bucket（应为 SKU×8 = $t_sku×8 = $expected_bucket）"
 echo "  ② 非 8 桶的 SKU = $t_bad（应为 0）"
 echo "  ③ 桶总量 ≠ sku.stock 的 SKU（drift）= $t_drift（应为 0）"
 echo "  ④ 审核策略 = $t_policy 条（应 7）｜演示六单 QT-1001..1006 = $t_qt 笔（应 6）｜渠道店铺 = $t_shop 家（应 3）"
+echo "  ⑤ 演示队列：待审核且带结论标的单 = $t_tagged 张（应 ≥3）｜这些单身上的结论标 = $t_tagkinds 种（应 ≥3）｜其中挂 NO_POLICY_MATCH = $t_nomatch 张（应 ≥1）｜有决策行的单 = $t_decided 张（队列就靠它，应 ≥5）"
 selftest_bad=0
 [[ "$t_bucket" == "$expected_bucket" ]] || { echo "  ✗ 桶行数不等于 SKU×8" >&2; selftest_bad=1; }
 [[ "$t_bad" == "0" ]]                   || { echo "  ✗ 存在不是 8 个桶的 SKU（扣减会按 hash%8 假缺货）" >&2; selftest_bad=1; }
@@ -150,11 +191,15 @@ selftest_bad=0
 [[ "$t_policy" == "7" ]]                || { echo "  ✗ 审核策略不是 7 条（补种 1 没生效）" >&2; selftest_bad=1; }
 [[ "$t_qt" == "6" ]]                    || { echo "  ✗ 演示六单不齐（QT-1001..1006 应为 6 笔）" >&2; selftest_bad=1; }
 [[ "$t_shop" == "3" ]]                  || { echo "  ✗ 渠道店铺不是 3 家（V1 基线应自带）" >&2; selftest_bad=1; }
+[[ "$t_tagged" -ge 3 ]]                 || { echo "  ✗ 带结论标的待审核单不足 3 张（补种 3 的判定没生效 / 判定后单子都离开 7 了）" >&2; selftest_bad=1; }
+[[ "$t_tagkinds" -ge 3 ]]               || { echo "  ✗ 待审核单身上的结论标不足 3 种（演示要求 NO_POLICY_MATCH / AUDIT_PENDING / BLOCKED 至少各一）" >&2; selftest_bad=1; }
+[[ "$t_nomatch" -ge 1 ]]                || { echo "  ✗ 没有一张待审核单挂 NO_POLICY_MATCH ⇒ 按标筛筛不出单，第 5 步演示做不了" >&2; selftest_bad=1; }
+[[ "$t_decided" -ge 5 ]]                || { echo "  ✗ 有决策行的单不足 5 张 ⇒ 人工队列是空表" >&2; selftest_bad=1; }
 if [[ "$selftest_bad" -ne 0 ]]; then
   echo "✗ 复位自检未通过：$DB_NAME 不是「完整演示态」，别拿它去演示/对外" >&2
   exit 1
 fi
-echo "  ✓ 自检全过：桶 = SKU×8、每 SKU 8 桶、drift=0、策略 7 条、六单齐、三店铺在"
+echo "  ✓ 自检全过：桶 = SKU×8、每 SKU 8 桶、drift=0、策略 7 条、六单齐、三店铺在、队列里有 $t_tagged 张带标的待审核单（$t_tagkinds 种标，按标筛 NO_POLICY_MATCH 能筛出 $t_nomatch 张）"
 
 echo
 echo "▶ 复位后 $DB_NAME（member/order/product/sku/inventory）：$(snapshot)"
@@ -179,6 +224,6 @@ mysql_exec -t -e "SELECT 'qiqi_mall.product' t, COUNT(*) c FROM qiqi_mall.produc
 UNION ALL SELECT 'qiqi_mall.order', COUNT(*) FROM qiqi_mall.\`order\`;"
 
 echo
-echo "✅ $DB_NAME 已复位为**完整演示态**（种子骨架 + 审核演示六单 QT-1001..1006 + 每 SKU 8 桶）。"
+echo "✅ $DB_NAME 已复位为**完整演示态**（种子骨架 + 审核演示六单 QT-1001..1006 + 每 SKU 8 桶 + 一轮真判定落下的决策行与结论标）。"
 echo "   录片/演示后跑一次即可让测试环境恢复干净，演示数据不会缺。"
 echo "   提示：若刚重建过 server 容器，docker compose restart gateway（否则网关缓存旧 IP 会 502）。"
