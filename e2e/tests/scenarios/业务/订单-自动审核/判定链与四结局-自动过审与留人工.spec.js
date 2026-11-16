@@ -17,6 +17,8 @@ import {
   unevaluatedConditions,
   ledgerRowsOf,
   activeTagsOf,
+  activeHangTagsOf,
+  activeConclusionTagsOf,
   POLICY_NAME
 } from '../../../support/audit-fixtures.js'
 import { getAuditPolicies, getQueueRowOf } from '../../../support/audit-api.js'
@@ -269,7 +271,10 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-自动�
         expect(led1[0].refType, '台账应记下「这次 run 推的」ref_type=AUDIT_RUN').toBe('AUDIT_RUN')
         expect(led1[0].refId, '台账的 ref_id 应是这一轮 run 的 id').toBe(Number(run.runId))
         expect(led1[0].idemKey, `台账幂等键应是 {orderId}:{status_seq} = ${id1}:1`).toBe(`${id1}:1`)
-        expect(activeTagsOf(id1), '自动过审不该给订单打任何标').toHaveLength(0)
+        // ⚠️ 口径（2026-11-16 修正）：断的是「**结论**标为 0」，不是「没有任何标」。
+        // AUTO_PASS 这个结论不产标；但自动过审的单可以带特征标（客诉客户/绿旗急发…），
+        // 那些与"过没过"无关 —— 按"没有任何标"断言的话，将来加一个特征标就会误红。
+        expect(activeConclusionTagsOf(id1), '自动过审不产**结论**标').toHaveLength(0)
 
         // 命中条件留痕（matched_condition_json 与 miss/excluded 同一形状：策略组 → 条件数组）
         // ⚠️ 必须 parse 后按字段断言：MySQL 输出 JSON 列时会规范化成 `"policy_name": "直营-小单"`（带空格），
@@ -301,7 +306,11 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-自动�
         const after2 = orderFactOf('QT-1002')
         expect(after2.status, '留人工不该改动订单状态（仍是 7 待审核）').toBe(7)
         expect(ledgerRowsOf(id2), '留人工不推进状态 → 不该有状态台账行').toHaveLength(0)
-        expect(activeTagsOf(id2), 'MANUAL（排除型）不该打挂起标 —— 只有库存/成本预检降级才打').toHaveLength(0)
+        // 期 1：MANUAL 三支来路靠标拆开 —— 被排除这条落 AUDIT_PENDING；挂起标只有预检降级才打
+        expect(activeTagsOf(id2).map((t) => t.tagCode), 'MANUAL（排除型）应落 AUDIT_PENDING 标')
+          .toContain('AUDIT_PENDING')
+        expect(activeHangTagsOf(id2), 'MANUAL（排除型）不该打挂起标 —— 只有库存/成本预检降级才打')
+          .toHaveLength(0)
 
         const excluded = decisionJsonOf(id2, 1, 'excluded_by_json')
         expect(Array.isArray(excluded), 'excluded_by_json 应是数组').toBe(true)

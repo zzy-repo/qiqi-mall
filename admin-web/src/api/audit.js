@@ -82,6 +82,9 @@ export const listAuditQueue = (params = {}) =>
   request.get('/order-audit/queue', {
     params: {
       result: params.result || undefined,
+      // 期 1 新增的**平行**筛选入口：按标码筛（?tag=NO_POLICY_MATCH）。
+      // 它与 result 正交、可并列；本期不改 result 那六个页签的语义（期 3 才改）。
+      tag: params.tag || undefined,
       page: clampPage(params.page),
       size: clampSize(params.size)
     }
@@ -137,7 +140,32 @@ export const mapQueueRow = (r) => ({
   missReasons: pick(r, 'missReasons', 'miss_reasons'),
   matchedConditions: pick(r, 'matchedConditions', 'matched_conditions'),
   excludedBy: pick(r, 'excludedBy', 'excluded_by'),
-  evidence: pick(r, 'evidence') ?? null
+  evidence: pick(r, 'evidence') ?? null,
+  /**
+   * 期 1：这单身上**当前全部** active 的标（后端已是驼峰，且已把 tag_code 翻成中文名/说明）。
+   * 形状：[{ tagCode, name, description, category, blocking, visible, reason, at }]
+   *  - name        中文名（**页面显示的就是它**，永远不是英文码）
+   *  - description 一句话说明（抽屉里逐条显示）
+   *  - at          打标时间（yyyy-MM-dd HH:mm:ss）
+   *  - blocking    1 = 会拦住下单往下走（列表层优先显示它，见 index.vue 的 displayTags 注释）
+   * ⚠️ 这里给的是**并列多标**，后端**没有**也不该有"主标"字段；要压缩显示只能在前端算，
+   *    那条规则只影响显示，不影响数据、不进字典、不产生第二套口径。
+   * 后端没回（旧版后端）时给空数组，页面走"没有标"分支而不是崩。
+   */
+  tags: Array.isArray(r.tags) ? r.tags.map(mapTag) : [],
+  tagCodes: Array.isArray(r.tagCodes) ? r.tagCodes.map(String) : (Array.isArray(r.tags) ? r.tags.map((t) => String(t.tagCode)) : [])
+})
+
+/** 单个标（队列行内嵌 / 抽屉 / 将来的标字典页共用一套字段） */
+export const mapTag = (t) => ({
+  tagCode: String(pick(t, 'tagCode', 'tag_code') ?? ''),
+  name: pick(t, 'name') ?? String(pick(t, 'tagCode', 'tag_code') ?? ''),
+  description: pick(t, 'description') ?? null,
+  category: pick(t, 'category') ?? null,
+  blocking: t?.blocking === true || t?.blocking === 1 || t?.blocking === '1',
+  visible: t?.visible !== false && t?.visible !== 0 && t?.visible !== '0',
+  reason: pick(t, 'reason') ?? null,
+  at: pick(t, 'at', 'createdAt', 'created_at') ?? null
 })
 
 export const queuePage = (payload) => pageOf(payload, mapQueueRow)
@@ -217,6 +245,53 @@ export const listFreezeReasons = ({ all = false } = {}) =>
 
 /** 人工解冻：解除所有冻结类标；下一轮 run 才会重新判定 */
 export const unfreezeOrderAudit = (orderId) => request.post(`/order-audit/orders/${orderId}/unfreeze`)
+
+// ---------------------------------------------------------------- 标字典（期 1）
+
+/**
+ * 标目录：标码 → 中文名 / 一句话说明 / 分组（结论/特征）/ 是否阻断。
+ *
+ * ⚠️ 前端**不许**自己抄一份标码常量表：抄一份的下场是"后端有 NO_POLICY_MATCH、前端没有"，
+ * 页面显示成空白英文码且不报错（和字段注册表同一条纪律）。下拉/筛选器的选项必须来自这里。
+ *
+ * @param {{all?: boolean}} [opts] all=true 回全量（含停用项与仅排障可见的，报表/维护用）；
+ *                                缺省只回「启用 + 业务可见」的 —— 队列筛选器就该用这个。
+ */
+export const listAuditTags = ({ all = false } = {}) =>
+  request.get('/order-audit/tags', { params: all ? { all: true } : {} })
+
+export const tagCatalogOf = (payload) =>
+  (Array.isArray(payload) ? payload : []).map((t) => ({
+    code: String(pick(t, 'code') ?? ''),
+    name: pick(t, 'name') ?? '',
+    description: pick(t, 'description') ?? null,
+    category: pick(t, 'category') ?? null,
+    blocking: t?.blocking === 1 || t?.blocking === true,
+    visible: t?.visible !== 0,
+    builtin: t?.builtin === 1 || t?.builtin === true,
+    sortNo: num(pick(t, 'sortNo', 'sort_no')) ?? 100,
+    enabled: t?.enabled !== 0
+  }))
+
+/**
+ * 新增一条自定义标（期 1 只做「新增」；改名/停用/排序是期 2 维护页）。
+ * 中文名必填；code 缺省自动生成（CUSTOM_<id>）。自定义项固定归「特征」档。
+ */
+export const createAuditTag = (data) =>
+  request.post('/order-audit/tags', {
+    code: data?.code || undefined,
+    name: data?.name,
+    description: data?.description || undefined,
+    category: data?.category || '特征',
+    blocking: data?.blocking ? 1 : 0
+  })
+
+/**
+ * 人工给订单打一个标（特征标），后端会写审计 AUDIT_TAG_ADD。
+ * 约束：标码必须来自标字典、幂等（同单同码只有一行）、不许人工打「结论」标。
+ */
+export const addOrderAuditTag = (orderId, { tagCode, note } = {}) =>
+  request.post(`/order-audit/orders/${orderId}/tags`, { tagCode, note })
 
 // ---------------------------------------------------------------- 策略
 

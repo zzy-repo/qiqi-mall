@@ -1,5 +1,6 @@
 package com.qiqi.mall.audit.service;
 
+import com.qiqi.mall.audit.entity.AuditTagCatalog;
 import com.qiqi.mall.audit.entity.OrderAuditTag;
 import com.qiqi.mall.audit.mapper.OrderAuditTagMapper;
 import com.qiqi.mall.order.entity.Order;
@@ -36,6 +37,9 @@ public class OrderAuditTagService {
 
     private static final Logger log = LoggerFactory.getLogger(OrderAuditTagService.class);
 
+    /** 结论标互斥时的解除人：系统（不是某个运营），且原因固定为"被新结论取代" */
+    public static final String RELEASED_BY_SUPERSEDED = "SYSTEM:SUPERSEDED";
+
     public static final String TAG_FROZEN = "FROZEN";
     public static final String TAG_STOCK_SHORT = "STOCK_SHORT";
     public static final String TAG_COST_MISSING = "COST_MISSING";
@@ -43,12 +47,15 @@ public class OrderAuditTagService {
     private final OrderAuditTagMapper tagMapper;
     private final AdminAuditWriter auditWriter;
     private final AuditFreezeReasonService reasonDict;
+    /** 标目录：人工打标前必须校验「这个标码是不是目录里真有、是不是特征标」 */
+    private final AuditTagCatalogService tagCatalog;
 
     public OrderAuditTagService(OrderAuditTagMapper tagMapper, AdminAuditWriter auditWriter,
-                                AuditFreezeReasonService reasonDict) {
+                                AuditFreezeReasonService reasonDict, AuditTagCatalogService tagCatalog) {
         this.tagMapper = tagMapper;
         this.auditWriter = auditWriter;
         this.reasonDict = reasonDict;
+        this.tagCatalog = tagCatalog;
     }
 
     // ================================================================== 查询
@@ -105,10 +112,104 @@ public class OrderAuditTagService {
         }
     }
 
+    /**
+     * 结论标互斥（期 1.5）：把该单身上**其他** active 的「结论」档标置为已解除（{@code active=0}）。
+     *
+     * <p>语义见 {@link OrderAuditTagMapper#supersedeOtherConclusionTags}：结论标描述"当前判定结论"，
+     * 当前结论只有一个 ⇒ 新结论落地时旧结论必须让位。<b>不是删除</b>：行留着，
+     * {@code released_at} + {@code released_by=SYSTEM:SUPERSEDED} 说明"它什么时候因为什么不再成立"。
+     *
+     * <p>只动「结论」档（join 标目录判 category）：特征标（客诉客户/双地址…）与"过没过"无关，
+     * 一单可以既刷单又客诉，**一律不碰**。
+     *
+     * <p>调用方必须在**同一事务**里紧接着写新标（{@code AuditExecutor#settleConclusionTag} 就是这么做的）：
+     * 否则中途失败会留下"一个结论标都没有"的空档 —— 那比"两个"更糟，因为它是沉默的。
+     *
+     * @param keepTagCode 本次要落的新结论标码（自己不能被自己解除）
+     * @return 被取代的行数（0 = 本来就没有别的结论标，这是最常见的正常情况）
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public int supersedeOtherConclusionTags(Long orderId, String keepTagCode) {
+        int rows = tagMapper.supersedeOtherConclusionTags(orderId, keepTagCode, RELEASED_BY_SUPERSEDED);
+        if (rows > 0) {
+            log.info("订单 {} 的旧结论标已让位给 {}（{} 条，released_by={}）",
+                    orderId, keepTagCode, rows, RELEASED_BY_SUPERSEDED);
+        }
+        return rows;
+    }
+
     /** 解标：返回影响行数（0 = 本来就没这个 active 标） */
     @Transactional(rollbackFor = Exception.class)
     public int release(Long orderId, String tagCode, String releasedBy) {
         return tagMapper.release(orderId, tagCode, releasedBy == null ? "system" : clip(releasedBy, 64));
+    }
+
+    // ================================================================== 人工打标（期 1）
+
+    /**
+     * 人工打一个标（特征标：客诉客户 / 双地址 / 绿旗急发…），并写审计。
+     *
+     * <h3>为什么这条路必须存在</h3>
+     * 标目录从第一天就允许「新增自定义值」（{@link AuditTagCatalogService#createCustom}），
+     * 但如果没有任何地方能把新增出来的标打到单上，那新增就是白新增 ——
+     * 人工遇到新情况仍然只能写自由文本，又回到 {@code reason="1231"} 那个灾难。
+     *
+     * <h3>三条硬约束（缺一条这条路就会变成新的漏洞）</h3>
+     * <ol>
+     *   <li><b>tag_code 必须来自标目录</b>（内置或刚新增的）。自由文本不能当 code ——
+     *       那正是标目录要消灭的东西；</li>
+     *   <li><b>幂等</b>：同一单同一 code 已有 active 标就不产生第二行、不报错
+     *       （复用 {@link #ensureActive} + {@code uk_active}）；</li>
+     *   <li><b>必须写审计</b>（{@code AUDIT_TAG_ADD}）：谁在什么时候给哪张单打了什么标。
+     *       没有出处的标比没有标更糟 —— 冻结那边今天刚吃过这个教训。</li>
+     * </ol>
+     *
+     * <p>⚠️ <b>不许人工打「结论」标</b>：结论标是判定链的产物，谁判出来的、落什么码由引擎决定。
+     * 人工手动打一个 {@code BLOCKED} 上去，等于伪造了一条判定结论的证据；
+     * 想按住这单请用冻结（{@code POST …/freeze}），那才是有原因码、有审计、能解冻的动作。
+     *
+     * @param tagCode 标码（必须已在目录里且启用）
+     * @param note    备注（可选；进 {@code order_audit_tag.reason} 与审计摘要）
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public OrderAuditTag applyManualTag(Order order, String tagCode, String note) {
+        String code = tagCode == null ? "" : tagCode.trim();
+        if (code.isEmpty()) {
+            throw new IllegalArgumentException("必须指定标码（tagCode）");
+        }
+        AuditTagCatalog def = tagCatalog.byCode(code);
+        if (def == null) {
+            throw new IllegalArgumentException("标目录里没有标码「" + code
+                    + "」。先在标字典里新增一条（POST /admin/order-audit/tags），再来打标 —— "
+                    + "自由文本不能当标码（那正是标目录要消灭的东西）");
+        }
+        if (def.getEnabled() == null || def.getEnabled() != 1) {
+            throw new IllegalArgumentException("标「" + def.getName() + "」（" + code + "）已停用，不能再往上打");
+        }
+        if (AuditTagCatalogService.CATEGORY_CONCLUSION.equals(def.getCategory())) {
+            throw new IllegalArgumentException("「" + def.getName() + "」是**结论**标，由判定链自动落，人工不能手动打。"
+                    + "要按住这单请用冻结（会带原因码、留审计、可解冻）；要给单挂个说法请新增一条「特征」标");
+        }
+
+        String human = note != null && !note.isBlank() ? note.trim() : def.getName();
+        OrderAuditTag before = tagMapper.selectActiveByCode(order.getId(), code);
+        OrderAuditTag tag = ensureActive(order.getId(), code, human);
+        if (before == null) {
+            // 摘要顺序：标码 → 中文名 → 备注（机器要断言的靠前，人写的靠后；255 从尾部裁）
+            String summary = "给订单 " + order.getOrderSn() + " 打标：标=" + code
+                    + "，中文名=" + def.getName()
+                    + (note != null && !note.isBlank() && !note.trim().equals(def.getName())
+                        ? "（备注：" + note.trim() + "）" : "");
+            auditWriter.record(new AdminAuditWriter.Event(
+                    ReasonCodes.ACTION_AUDIT_TAG_ADD, ReasonCodes.TARGET_ORDER, order.getId(), order.getOrderSn(),
+                    clip(summary, 255),
+                    null, order.getId(),
+                    AdminAuditWriter.snapshot("tagActive", Boolean.FALSE),
+                    AdminAuditWriter.snapshot("tagActive", Boolean.TRUE, "tag", code,
+                            "tagName", def.getName(), "category", def.getCategory(), "note", human)));
+            log.info("订单 {} 已打标：{}（{}）", order.getOrderSn(), code, def.getName());
+        }
+        return tag;
     }
 
     // ================================================================== 冻结 / 解冻（写审计）

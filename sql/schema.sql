@@ -55,6 +55,7 @@ DROP TABLE IF EXISTS `channel_order_map`;
 DROP TABLE IF EXISTS `category`;
 DROP TABLE IF EXISTS `cart`;
 DROP TABLE IF EXISTS `member`;
+DROP TABLE IF EXISTS `audit_tag_catalog`;
 DROP TABLE IF EXISTS `audit_run`;
 DROP TABLE IF EXISTS `audit_policy_version`;
 DROP TABLE IF EXISTS `audit_policy_condition`;
@@ -67,7 +68,7 @@ DROP TABLE IF EXISTS `admin_audit_log`;
 DROP TABLE IF EXISTS `admin`;
 
 -- ============================================================================
--- 1. 表结构（40 张，按外键依赖拓扑排序：父表在前）
+-- 1. 表结构（41 张，按外键依赖拓扑排序：父表在前）
 -- ============================================================================
 
 -- admin
@@ -231,6 +232,29 @@ CREATE TABLE `audit_run` (
   UNIQUE KEY `uk_idem` (`idem_key`),
   KEY `idx_created` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='一次自动审核 run（计数在建 run 时写 0、跑完回写一次）';
+
+-- audit_tag_catalog
+CREATE TABLE `audit_tag_catalog` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `code` varchar(32) NOT NULL COMMENT '稳定键 = order_audit_tag.tag_code。一经写入永不修改（队列 ?tag= 筛选、报表聚合、策略 action_json 都以它为键）',
+  `name` varchar(50) NOT NULL COMMENT '中文名（业务看的那一句）；随便改，改名不影响任何键',
+  `description` varchar(255) DEFAULT NULL COMMENT '一句话说明：这个标是什么意思、下一步该做什么（给业务/客服看）',
+  `category` enum('结论','特征') NOT NULL DEFAULT '结论' COMMENT '分组：结论=审核跑完的产物（期1只实现这一档的落标）；特征=标记策略/平台旗帜/人工打标（期2，本期只留位置）',
+  `blocking` tinyint NOT NULL DEFAULT '0' COMMENT '1=会拦住下单往下走（人工必须处理才能继续）；0=只是提示，不影响流程',
+  `visible` tinyint NOT NULL DEFAULT '1' COMMENT '1=业务可见（队列/抽屉里显示）；0=只在排障/报表里可见',
+  `sort_no` int NOT NULL DEFAULT '100' COMMENT '排序（升序，小的在前）',
+  `enabled` tinyint NOT NULL DEFAULT '1' COMMENT '1 启用 0 停用（历史行照旧按它显示中文名，停用不删）',
+  `builtin` tinyint NOT NULL DEFAULT '0' COMMENT '1=迁移种下的内置项（禁止删除）；0=运行期人工新增的自定义值（本期允许新增，改名/停用留给期2）',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_code` (`code`),
+  KEY `idx_enabled_category_sort` (`enabled`,`category`,`sort_no`),
+  CONSTRAINT `ck_tag_catalog_blocking` CHECK ((`blocking` in (0,1))),
+  CONSTRAINT `ck_tag_catalog_builtin` CHECK ((`builtin` in (0,1))),
+  CONSTRAINT `ck_tag_catalog_enabled` CHECK ((`enabled` in (0,1))),
+  CONSTRAINT `ck_tag_catalog_visible` CHECK ((`visible` in (0,1)))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='审核标目录：标码的稳定键 + 中文名 + 一句话说明（标实例仍然只在 order_audit_tag）';
 
 -- member
 CREATE TABLE `member` (

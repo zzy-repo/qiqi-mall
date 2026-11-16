@@ -39,15 +39,19 @@ public class AuditQueryService {
     private final ObjectMapper json;
     /** 冻结原因字典：把队列行的 {@code reason_id} 翻成中文名/原因码（整表在内存，零成本） */
     private final AuditFreezeReasonService freezeReasonService;
+    /** 标目录：把 {@code tag_code} 翻成中文名 + 一句话说明（同样整表在内存） */
+    private final AuditTagCatalogService tagCatalog;
 
     public AuditQueryService(OrderAuditDecisionMapper decisionMapper, AuditRunMapper runMapper,
                              AuditTrailMapper trailMapper, ObjectMapper json,
-                             AuditFreezeReasonService freezeReasonService) {
+                             AuditFreezeReasonService freezeReasonService,
+                             AuditTagCatalogService tagCatalog) {
         this.decisionMapper = decisionMapper;
         this.runMapper = runMapper;
         this.trailMapper = trailMapper;
         this.json = json;
         this.freezeReasonService = freezeReasonService;
+        this.tagCatalog = tagCatalog;
     }
 
     // ================================================================ 人工队列
@@ -60,17 +64,97 @@ public class AuditQueryService {
      * （这单当前是否挂着 active 的冻结标）。人工冻的单不产生新决策行，只有后者能说明它冻着。
      */
     public Map<String, Object> queue(String result, int page, int size) {
+        return queue(result, null, page, size);
+    }
+
+    /**
+     * 人工队列（每单最新一轮），{@code result} / {@code tag} 均可为空表示不过滤。
+     *
+     * <p>两个筛选条件是**正交、可并列**的：
+     * <ul>
+     *   <li>{@code result}：引擎这一轮判了什么（全部/自动过审/留人工/阻止/冻结/不命中 —— 本期**语义不变**，期 3 才改）；</li>
+     *   <li>{@code tag}：这单现在挂着哪些**标**（{@code ?tag=NO_POLICY_MATCH}）。
+     *       这是期 1 新增的**平行**入口：业务人员按标找单，不需要先知道 result 码怎么拼。</li>
+     * </ul>
+     *
+     * <p>每行带三段互相独立的事实（见 {@link #queueRow} 的注释）：
+     * {@code result}（引擎这一轮判了什么）、{@code frozen} + {@code frozenReason}（这单当前是否挂着
+     * active 冻结标）、{@code tags}（这单当前身上**全部** active 标，带中文名与打标时间）。
+     */
+    public Map<String, Object> queue(String result, String tag, int page, int size) {
         int p = Math.max(1, page);
         int s = Math.min(Math.max(1, size), 100);   // 与 MybatisPlusConfig.maxLimit 同口径，防 size=999999
         String filter = result == null || result.isBlank() ? null : result.trim().toUpperCase(Locale.ROOT);
-        List<Map<String, Object>> rows = decisionMapper.selectQueue(filter, (p - 1) * s, s);
-        long total = decisionMapper.countQueue(filter);
+        String tagFilter = tag == null || tag.isBlank() ? null : tag.trim().toUpperCase(Locale.ROOT);
+        List<Map<String, Object>> rows = decisionMapper.selectQueue(filter, tagFilter, (p - 1) * s, s);
+        long total = decisionMapper.countQueue(filter, tagFilter);
+        Map<Long, List<Map<String, Object>>> tagsByOrder = tagsOf(rows);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("total", total);
         out.put("page", p);
         out.put("size", s);
-        out.put("rows", rows.stream().map(this::queueRow).toList());
+        out.put("rows", rows.stream()
+                .map(r -> queueRow(r, tagsByOrder.get(asLong(r.get("order_id")))))
+                .toList());
         return out;
+    }
+
+    /**
+     * 本页这些订单的 active 标（**一次批量查询**，不是逐行查、也不是 JOIN 复制行）。
+     *
+     * @return {@code orderId → [标]}；没标的不出现在 map 里（调用方给空列表）
+     */
+    private Map<Long, List<Map<String, Object>>> tagsOf(List<Map<String, Object>> rows) {
+        List<Long> ids = rows.stream()
+                .map(r -> asLong(r.get("order_id")))
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+        if (ids.isEmpty()) return Map.of();
+        Map<Long, List<Map<String, Object>>> out = new LinkedHashMap<>();
+        for (Map<String, Object> t : decisionMapper.selectActiveTagsByOrders(ids)) {
+            Long orderId = asLong(t.get("order_id"));
+            if (orderId == null) continue;
+            String code = t.get("tag_code") == null ? null : String.valueOf(t.get("tag_code"));
+            AuditTagCatalogService.TagInfo info = tagCatalog.info(code);
+            // 形状固定（键名与其它队列行统一走驼峰，前端只认一份）：目录里查不到的标码不是错误
+            // —— 它允许先落库、目录后补，这里降级成「中文名=原始码 + description=null」，
+            // 绝不许因为一条没登记的标把整张队列打成空白。
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("tagCode", code);
+            item.put("name", tagCatalog.nameOf(code));            // 查不到时回原始码（永不 null）
+            item.put("description", info == null ? null : info.description());
+            item.put("category", info == null ? null : info.category());
+            item.put("blocking", info != null && info.blocking());
+            item.put("visible", info == null || info.visible());
+            item.put("reason", t.get("reason") == null ? null : String.valueOf(t.get("reason")));
+            item.put("at", fmtTagTime(t.get("created_at")));
+            out.computeIfAbsent(orderId, k -> new ArrayList<>()).add(item);
+        }
+        return out;
+    }
+
+    /** 打标时间统一成 {@code yyyy-MM-dd HH:mm:ss}：抽屉里直接显示，不把 JDBC 的毫秒尾巴丢给页面 */
+    private static final java.time.format.DateTimeFormatter TAG_TIME =
+            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    /**
+     * 打标时间归一（MyBatis 可能回 {@code LocalDateTime} / {@code Timestamp} / 字符串）。
+     * 解析不出来就回 {@code null} 而不是抛：一条时间格式异常不该让整张队列 500。
+     */
+    private static String fmtTagTime(Object raw) {
+        if (raw == null) return null;
+        if (raw instanceof java.time.LocalDateTime ldt) return TAG_TIME.format(ldt);
+        if (raw instanceof java.sql.Timestamp ts) return TAG_TIME.format(ts.toLocalDateTime());
+        String text = String.valueOf(raw).trim();
+        if (text.length() >= 19) {
+            try {
+                return TAG_TIME.format(java.time.LocalDateTime.parse(text.substring(0, 19).replace(' ', 'T')));
+            } catch (java.time.format.DateTimeParseException e) {
+                return text;
+            }
+        }
+        return text;
     }
 
     /**
@@ -81,7 +165,7 @@ public class AuditQueryService {
      * 前端于是永远走「本地对照」降级路径 —— 数据明明在，页面却说没回传。
      * 所以解析放在这里（唯一知道这些列语义的地方），并按前端读的键名给出。
      */
-    private Map<String, Object> queueRow(Map<String, Object> row) {
+    private Map<String, Object> queueRow(Map<String, Object> row, List<Map<String, Object>> tags) {
         Map<String, Object> out = new LinkedHashMap<>(row);
         // 注意 remove 要在**副本**上做：四个 *_json 原始列换成同名结构，避免同一份证据
         // 既以字符串又以数组出现在同一行里（两份形状会让前端 pick() 随键名不同取到不同东西）
@@ -100,6 +184,14 @@ public class AuditQueryService {
         Long reasonId = asLong(out.remove("frozen_reason_id"));
         out.put("frozenReasonCode", freezeReasonService.codeOf(reasonId));
         out.put("frozenReasonName", freezeReasonService.nameOf(reasonId));
+        // 期 1：这单身上的**全部** active 标（带中文名 + 一句话说明 + 打标时间）。
+        // ⚠️ 键名走驼峰（tags / tagCodes），与 frozenReason 等既有驼峰字段一致 ——
+        //    上一轮漏了 snake→camel 这一步，前端拿不到值且不报错，是最难查的那种空白。
+        // ⚠️ 这里给的是**数据层的并列多标**，不排"主标"：显示层要压缩（阻断优先、同类型取最新）
+        //    的规则写在前端，不进数据、不进字典 —— 否则就有了第二套口径。
+        List<Map<String, Object>> safeTags = tags == null ? List.of() : tags;
+        out.put("tags", safeTags);
+        out.put("tagCodes", safeTags.stream().map(t -> t.get("tagCode")).toList());
         return out;
     }
 

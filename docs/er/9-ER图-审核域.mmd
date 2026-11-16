@@ -1,6 +1,10 @@
-%% 审核域 · 7 张表 / 3 条真实外键 + 5 条逻辑关系
+%% 审核域 · 8 张表 / 3 条真实外键 + 6 条逻辑关系
 %% 图例：实线 = 库中真实外键；点线 = 逻辑关联但库中无外键，标签以「逻辑·」开头
 %% 本域分两个角色：
+%%   字典侧（可改）：标目录 audit_tag_catalog —— 标码 tag_code 的唯一闭集
+%%     （中文名 / 一句话说明 / 分组 结论｜特征 / 是否阻断）。它与 order_audit_tag 之间
+%%     **没有外键**，也刻意不加：标码允许先落库、目录后补（否则每加一个标都要先跑迁移才能写数据）。
+%%     数据层没有也不该有"主标"列 —— 一单多个标就是并列多行，压缩显示只在前端算。
 %%   字典侧（可改）：冻结原因字典 audit_freeze_reason —— 冻结原因的唯一闭集。
 %%     可按业务增删/停用/改名，但 code 一经写入永不修改（P1 冻结豁免与策略 action_json 都以它为键）；
 %%     停用不删：历史行仍按 reason_id 显示中文名，统计口径不因"停用"而消失。
@@ -74,6 +78,20 @@ erDiagram
         varchar idem_key UK "幂等键 订单:轮次"
         datetime created_at "判定时间"
     }
+    audit_tag_catalog["标目录·可改"] {
+        bigint id PK "主键"
+        varchar code UK "稳定键=tag_code·永不改"
+        varchar name "中文名·随便改不影响键"
+        varchar description "一句话说明·给业务看"
+        enum category "结论（审核产物）／特征（标记策略·旗帜·人工）"
+        tinyint blocking "1会拦住下单往下走"
+        tinyint visible "1业务可见 0仅排障/报表"
+        int sort_no "排序"
+        tinyint enabled "1启用 0停用·停用不删"
+        tinyint builtin "1内置禁删 0人工新增的自定义值"
+        datetime created_at "创建时间"
+        datetime updated_at "更新时间"
+    }
     audit_freeze_reason["冻结原因字典·可改"] {
         bigint id PK "主键"
         varchar code UK "稳定键·永不改·豁免与策略都引用它"
@@ -106,4 +124,5 @@ erDiagram
     order ||..o{ order_audit_decision : "证据·只追加·库中无外键"
     order ||..o{ order_audit_tag : "逻辑·order_id·库中无外键"
     audit_freeze_reason ||--o{ order_audit_tag : "字典·reason_id·库中真实外键"
+    audit_tag_catalog ||..o{ order_audit_tag : "逻辑·tag_code·库中无外键·码可先落库后补目录"
     order_status_ledger ||..o{ order_audit_decision : "取证链·order_status_seq"

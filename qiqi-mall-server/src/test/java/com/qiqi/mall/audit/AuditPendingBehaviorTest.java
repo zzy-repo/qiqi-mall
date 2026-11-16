@@ -198,7 +198,11 @@ class AuditPendingBehaviorTest {
 
         // 只是提示：状态不动（仍待审核 7）、库存不足不产生任何挂起标、不写状态台账
         assertThat(statusOf("QT-1006")).isEqualTo(7);
-        assertThat(countTags("QT-1006")).as("NO_MATCH 不打任何挂起标（含 STOCK_SHORT）").isZero();
+        // 期 1 口径变更：NO_MATCH 会落 NO_POLICY_MATCH 标（可读可筛），但**仍不打挂起标**
+        assertThat(countHangTags("QT-1006"))
+                .as("NO_MATCH 不打任何挂起标（含 STOCK_SHORT / COST_MISSING）").isZero();
+        assertThat(countTagsOfCode("QT-1006", "NO_POLICY_MATCH"))
+                .as("NO_MATCH 必须落 NO_POLICY_MATCH 标（期 1）").isEqualTo(1);
         assertThat(countLedger("QT-1006", "AUDIT%")).as("台账 0 行：NO_MATCH 不推进状态").isZero();
 
         printRun("①", run);
@@ -605,6 +609,22 @@ class AuditPendingBehaviorTest {
         Integer n = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM order_audit_tag t JOIN `order` o ON o.id = t.order_id "
                         + "WHERE o.order_sn = ? AND t.active = 1", Integer.class, orderSn);
+        return n == null ? -1 : n;
+    }
+
+    /** 挂起标（STOCK_SHORT / COST_MISSING）：MANUAL 降级的产物，NO_MATCH 不该有 */
+    private int countHangTags(String orderSn) {
+        Integer n = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM order_audit_tag t JOIN `order` o ON o.id = t.order_id "
+                        + "WHERE o.order_sn = ? AND t.active = 1 AND t.tag_code IN ('STOCK_SHORT','COST_MISSING')",
+                Integer.class, orderSn);
+        return n == null ? -1 : n;
+    }
+
+    private int countTagsOfCode(String orderSn, String code) {
+        Integer n = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM order_audit_tag t JOIN `order` o ON o.id = t.order_id "
+                        + "WHERE o.order_sn = ? AND t.active = 1 AND t.tag_code = ?", Integer.class, orderSn, code);
         return n == null ? -1 : n;
     }
 

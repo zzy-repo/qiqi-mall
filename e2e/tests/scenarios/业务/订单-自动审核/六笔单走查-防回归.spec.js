@@ -13,6 +13,8 @@ import {
   decisionsOf,
   ledgerRowsOf,
   activeTagsOf,
+  activeHangTagsOf,
+  activeFrozenTagsOf,
   policyRowsOf,
   policyOf,
   policyVersionCountOf,
@@ -231,7 +233,10 @@ test.describe('业务 › 订单-自动审核 › 六笔单走查-防回归', ()
         const f = orderFactOf('QT-1001')
         expect(f.status, 'QT-1001 仍是 8 待发货').toBe(8)
         expect(ledgerRowsOf(f.id), '那行 7→8 台账仍在（改策略不影响历史流转）').toHaveLength(1)
-        expect(activeTagsOf(f.id), '过审后不该有挂起/冻结标').toHaveLength(0)
+        // 过审后挂起标会被自动解掉（AUTO_PASS 分支），冻结标从来不会有；
+        // 结论标则按"只增不删"留着（期 1 不做解除逻辑）—— 所以这里只看挂起/冻结两类。
+        expect(activeHangTagsOf(f.id), '过审后不该有挂起标').toHaveLength(0)
+        expect(activeFrozenTagsOf(f.id), '过审后不该有冻结标').toHaveLength(0)
       })
     } finally {
       // 双保险：UI 复原没走到也要把优先级按原值写回（否则后面所有用例的判定顺序都被带偏）

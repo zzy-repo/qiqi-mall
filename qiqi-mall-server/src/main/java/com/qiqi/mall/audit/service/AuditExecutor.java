@@ -46,7 +46,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li>建 {@code audit_run} 行（决策行要引用 run_id，所以先建行、跑完回写计数）；</li>
  *   <li>逐单装配上下文 → 调 {@link AuditEngine#evaluate}（纯函数）；</li>
  *   <li>按结论执行：AUTO_PASS → {@code OrderStatusService.change(order, 8, AUDIT_AUTO_PASS, …)}
- *       （7→8 与状态台账同一事务）；FROZEN → 打标 + 审计；STOCK_SHORT / COST_MISSING → 打挂起标；</li>
+ *       （7→8 与状态台账同一事务）；FROZEN → 打标 + 审计；
+ *       <b>然后每种结论都落一个标</b>（{@link ConclusionTags}：MANUAL → AUDIT_PENDING/STOCK_SHORT/COST_MISSING，
+ *       BLOCKED → BLOCKED，NO_MATCH → NO_POLICY_MATCH，AUTO_PASS/FROZEN 不额外落）；</li>
  *   <li>落 {@code order_audit_decision}（每单每轮一行）—— <b>SKIPPED 不落行</b>（见下）；</li>
  *   <li>回写五类计数 + 写一条 {@code ACTION_AUDIT_RUN} 审计。</li>
  * </ol>
@@ -316,20 +318,62 @@ public class AuditExecutor {
                         "自动审核：策略「" + (verdict.matchedPolicy() == null ? "-" : verdict.matchedPolicy().name()) + "」");
             }
             case MANUAL -> {
-                if (AuditVerdict.DOWNGRADE_STOCK_SHORT.equals(verdict.downgradeReason())) {
-                    // 库存不足时不把订单判成 4 已关闭：货补上之后这张单还要继续审，关掉就再也进不来。
-                    // 所以保持 status=7（下一轮仍是候选单）+ 打 STOCK_SHORT 标挂起；补货后重跑一轮即可过审，
-                    // 过审时这个标会被自动解掉（见上面 AUTO_PASS 分支）。
-                    tagService.ensureActive(order.getId(), OrderAuditTagService.TAG_STOCK_SHORT, verdict.reasonText());
-                } else if (AuditVerdict.DOWNGRADE_COST_MISSING.equals(verdict.downgradeReason())) {
-                    tagService.ensureActive(order.getId(), OrderAuditTagService.TAG_COST_MISSING, verdict.reasonText());
-                }
+                // MANUAL 不动订单、不改状态，只落标 —— 落标统一在 settleConclusionTag 里做，
+                // 不再在这里分三支 if：
+                //   · 库存不足（downgrade=STOCK_SHORT）→ STOCK_SHORT 标挂起，订单保持 7（补货后重跑即可过审，
+                //     过审时这个标会被 AUTO_PASS 分支自动解掉）；绝不能判成 4 已关闭，关掉就再也进不来；
+                //   · 成本缺失（downgrade=COST_MISSING）→ COST_MISSING 标；
+                //   · 被排除条件挡下（无 downgrade）→ AUDIT_PENDING 标（**以前这一支一个标都不落**，
+                //     于是"留人工"那 18 条在队列里一片空白）。
+                // 三支的判断只有一处：ConclusionTags#codeOf（谁加了新结论就只有那里要改）。
             }
             default -> {
-                // BLOCKED / NO_MATCH：不动订单（拦是结论，不是动作）。
+                // BLOCKED / NO_MATCH：不动订单（拦是结论，不是动作），但要落标（见 settleConclusionTag）。
                 // SKIPPED 走不到这里 —— 它在 doRun 里就 continue 了（不落决策行，也就不需要动作）
             }
         }
+        settleConclusionTag(order, verdict);
+    }
+
+    /**
+     * 按结论落标（期 1 的核心：<b>每种结论都留下一个可读、可筛、可聚合的标</b>）。
+     *
+     * <p>映射只在 {@link ConclusionTags#codeOf} 一处决定，这里只负责"写下去"：
+     * <ul>
+     *   <li>AUTO_PASS / FROZEN / SKIPPED → 不落（理由见 {@link ConclusionTags} 的映射表）；</li>
+     *   <li>MANUAL → AUDIT_PENDING / STOCK_SHORT / COST_MISSING（三支来路靠标拆开）；</li>
+     *   <li>BLOCKED → BLOCKED；NO_MATCH → NO_POLICY_MATCH。</li>
+     * </ul>
+     *
+     * <p><b>幂等靠 {@link OrderAuditTagService#ensureActive}</b>：先查 active 同码标、没有才 insert；
+     * 并发下靠 {@code uk_active}（虚拟列 {@code active_tag} 的唯一键）兜住并当成"已存在"。
+     * 所以同一单同轮跑一百遍也只有一行 —— <b>不产生第二行、也不报错</b>。
+     *
+     * <p><b>结论标互斥</b>（期 1.5）：结论标描述的是"<b>当前</b>判定结论"，而当前结论天然只有一个 ——
+     * 一单不可能同时是"无策略命中"和"待人工审核"。所以落新结论标之前，先把该单其他 active 的
+     * 结论档标置 {@code active=0}（{@code released_by=SYSTEM:SUPERSEDED} + {@code released_at}），
+     * **一条 UPDATE、同一事务**（见 {@link OrderAuditTagService#supersedeOtherConclusionTags}）。
+     *
+     * <p>为什么必须互斥（期 1 的教训，别退回去）：不做互斥时，一单从 NO_MATCH 变成 MANUAL 之后
+     * {@code NO_POLICY_MATCH} 与 {@code AUDIT_PENDING} 会并列 active，于是
+     * {@code ?tag=NO_POLICY_MATCH} 把它算进两类，「这个月多少单无策略命中」当场被高估。
+     *
+     * <p>⚠️ 这**不违反"只增不删"**：只增不删管的是"事实"（历史行一行不删、解除留痕迹），
+     * 不管"当前状态标"。行的 {@code active=0} + {@code released_at/released_by} 就是
+     * "它曾经成立过、什么时候因为什么不再成立"的完整记录。
+     * <b>特征标</b>（客诉客户/双地址…）不参与互斥：一单可以既刷单又客诉，它们与"过没过"无关。
+     *
+     * <p>决策行<b>继续照常写</b>（{@link #insertDecision}）：本期是"两个都写"，不是"标取代决策行"。
+     * 当前结论的权威答案有两份且必须一致：{@code order_audit_decision.result}（流水）与
+     * 那条 active 的结论标（可筛可聚合的状态）。
+     */
+    private void settleConclusionTag(Order order, AuditVerdict verdict) {
+        String code = ConclusionTags.codeOf(verdict);
+        if (code == null) return;
+        // 顺序不能反：先让旧结论让位，再落新标 —— 同一事务，要么都成、要么都回滚。
+        // 反过来的话，若 supersede 失败（例如目录缺失），新标已经插进去，就成了"两个结论标"。
+        tagService.supersedeOtherConclusionTags(order.getId(), code);
+        tagService.ensureActive(order.getId(), code, verdict.reasonText());
     }
 
     // ================================================================== 落决策

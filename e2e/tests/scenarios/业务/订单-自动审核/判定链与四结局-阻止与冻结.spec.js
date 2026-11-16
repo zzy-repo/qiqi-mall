@@ -15,6 +15,7 @@ import {
   conditionOf,
   ledgerRowsOf,
   activeTagsOf,
+  activeFrozenTagsOf,
   allTagsOf,
   orderAuditActionsOf,
   POLICY_NAME
@@ -121,7 +122,10 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-阻止�
         expect(after.status, '阻止不改订单状态（仍是 7 待审核，等人联系客户）').toBe(7)
         expect(after.statusSeq, '阻止不推 status_seq').toBe(0)
         expect(ledgerRowsOf(f.id), '阻止不写状态台账（拦是结论，不是动作）').toHaveLength(0)
-        expect(activeTagsOf(f.id), '阻止不打任何标（冻结才是标）').toHaveLength(0)
+        // 期 1 口径变更：阻止（BLOCKED）**要落 BLOCKED 标** —— 拦是结论，状态不动，只有标能证明这一轮拦过它。
+        // 仍然成立的是：它不打冻结标（冻结才是"按住"）。
+        expect(activeTagsOf(f.id).map((t) => t.tagCode), '阻止应落 BLOCKED 标').toContain('BLOCKED')
+        expect(activeFrozenTagsOf(f.id), '阻止不是冻结：不许有 FROZEN 标').toHaveLength(0)
 
         // would-be 的完整形态：命中方式和真过审完全一样，只是结论被丢弃（证据在 evidence_json 里）。
         // ⚠️ 按**结构**断言：MySQL 输出 JSON 列时是 `"policy_name": "直营-小单"`（键值之间有空格），
@@ -169,7 +173,7 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-阻止�
         const f = orderFactOf('QT-1005')
         expect(f.status, 'QT-1005 起点应是 7 待审核').toBe(7)
         expect(decisionsOf(f.id), '起点不应有决策行（第 1 轮还没跑）').toHaveLength(0)
-        expect(activeTagsOf(f.id), '起点不应有冻结标').toHaveLength(0)
+        expect(activeFrozenTagsOf(f.id), '起点不应有冻结标').toHaveLength(0)
       })
 
       let run1 = null
@@ -206,8 +210,8 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-阻止�
         expect(after.status, '冻结不改状态（仍 7 待审核：它确实还没审完，只是被按住）').toBe(7)
         expect(ledgerRowsOf(f.id), '冻结不写状态台账（7→7 不是流转）').toHaveLength(0)
 
-        const tags = activeTagsOf(f.id)
-        expect(tags, '冻结应留下 1 个 active 标').toHaveLength(1)
+        const tags = activeFrozenTagsOf(f.id)
+        expect(tags, '冻结应留下 1 个 active 冻结标').toHaveLength(1)
         expect(tags[0].tagCode, '标码应是 FROZEN（FROZEN% 前缀都算冻结）').toMatch(/^FROZEN/)
         expect(tags[0].reason, '标的 reason 应是策略里配的冻结原因').toContain('退款申请')
 
@@ -229,7 +233,7 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-阻止�
         await page.waitForTimeout(1200)
 
         const f = orderFactOf('QT-1005')
-        expect(activeTagsOf(f.id), '解冻后不应再有 active 的冻结标').toHaveLength(0)
+        expect(activeFrozenTagsOf(f.id), '解冻后不应再有 active 的冻结标').toHaveLength(0)
         const all = allTagsOf(f.id)
         expect(all.length, '解冻是「解除」而不是「删行」：标行要留着当证据').toBe(1)
         expect(all[0].active, '标行应是 active=0').toBe(0)

@@ -2,10 +2,12 @@ package com.qiqi.mall.audit.controller;
 
 import com.qiqi.mall.audit.dto.FreezeReasonDto;
 import com.qiqi.mall.audit.dto.RunResultDto;
+import com.qiqi.mall.audit.dto.TagCatalogDto;
 import com.qiqi.mall.audit.entity.OrderAuditTag;
 import com.qiqi.mall.audit.service.AuditExecutor;
 import com.qiqi.mall.audit.service.AuditFreezeReasonService;
 import com.qiqi.mall.audit.service.AuditQueryService;
+import com.qiqi.mall.audit.service.AuditTagCatalogService;
 import com.qiqi.mall.audit.service.OrderAuditTagService;
 import com.qiqi.mall.order.entity.Order;
 import com.qiqi.mall.oms.service.OrderService;
@@ -45,29 +47,38 @@ public class OrderAuditController {
     private final AuditQueryService queryService;
     private final OrderAuditTagService tagService;
     private final AuditFreezeReasonService freezeReasonService;
+    private final AuditTagCatalogService tagCatalogService;
     private final OrderService orderService;
 
     public OrderAuditController(AuditExecutor executor, AuditQueryService queryService,
                                 OrderAuditTagService tagService, OrderService orderService,
-                                AuditFreezeReasonService freezeReasonService) {
+                                AuditFreezeReasonService freezeReasonService,
+                                AuditTagCatalogService tagCatalogService) {
         this.executor = executor;
         this.queryService = queryService;
         this.tagService = tagService;
         this.orderService = orderService;
         this.freezeReasonService = freezeReasonService;
+        this.tagCatalogService = tagCatalogService;
     }
 
     /**
-     * 人工队列：每单最新一轮决策，可按 result 过滤（MANUAL/BLOCKED/FROZEN/NO_MATCH/AUTO_PASS）。
+     * 人工队列：每单最新一轮决策，可按 result 过滤（MANUAL/BLOCKED/FROZEN/NO_MATCH/AUTO_PASS），
+     * 也可按 {@code tag} 过滤（标码，如 {@code ?tag=NO_POLICY_MATCH}）——两个条件正交、可并列。
+     *
+     * <p>每行带三件互相独立的事：{@code result}（本轮判了什么）、{@code frozen}/{@code frozenReason}
+     * （现在是否冻着）、{@code tags}（现在身上有哪些标，含中文名/说明/打标时间）。
+     * {@code ?tag=} 是期 1 **平行新增**的筛选入口，本期不改 result 那六个页签的语义（期 3 才改）。
      *
      * <p>过滤参数仍接受任意 result 字符串（含历史数据里可能存在的 SKIPPED），但新跑的轮次不再产生
      * SKIPPED 决策行（见 {@code AuditResult#SKIPPED}），所以按 SKIPPED 过滤通常为空集合。
      */
     @GetMapping("/order-audit/queue")
     public Result<Map<String, Object>> queue(@RequestParam(required = false) String result,
+                                             @RequestParam(required = false) String tag,
                                              @RequestParam(defaultValue = "1") int page,
                                              @RequestParam(defaultValue = "20") int size) {
-        return Result.ok(queryService.queue(result, page, size));
+        return Result.ok(queryService.queue(result, tag, page, size));
     }
 
     /** 立即触发一轮（MANUAL）：返回 runId 与五类计数 */
@@ -106,6 +117,48 @@ public class OrderAuditController {
         boolean includeAll = Boolean.TRUE.equals(all);
         return Result.ok((includeAll ? freezeReasonService.all() : freezeReasonService.selectable())
                 .stream().map(FreezeReasonDto::of).toList());
+    }
+
+    /**
+     * 标目录（{@code audit_tag_catalog}）：标码 → 中文名 / 一句话说明 / 分组 / 是否阻断。
+     *
+     * <p>前端**不许**自己抄一份标码常量表 —— 抄一份的下场是"后端有 NO_POLICY_MATCH、前端没有"，
+     * 显示成空白英文码且没人看得出来（和字段注册表同一条纪律）。
+     *
+     * @param all false/缺省 = 只回「启用 + 业务可见」的（队列/抽屉用）；true = 全量（含停用/仅排障可见）
+     */
+    @GetMapping("/order-audit/tags")
+    public Result<List<TagCatalogDto>> tags(@RequestParam(required = false) Boolean all) {
+        return Result.ok(Boolean.TRUE.equals(all)
+                ? tagCatalogService.all().stream().map(TagCatalogDto::of).toList()
+                : tagCatalogService.visible());
+    }
+
+    /**
+     * 新增一条自定义标（期 1：字典**从一开始就能新增**，否则人工遇到新情况只能写自由文本）。
+     *
+     * <p>只做「新增」：改名 / 停用 / 排序是期 2 维护页的事。
+     * 新增出来的项 {@code builtin=0}（可停用、不可删除），category 固定「特征」
+     * （「结论」标由判定链产出，人工自建一个永远不会出现的字典项没有意义）；code 缺省自动生成。
+     */
+    @PostMapping("/order-audit/tags")
+    public Result<TagCatalogDto> createTag(@RequestBody TagCreateRequest body) {
+        if (body == null) throw new IllegalArgumentException("请求体不能为空（至少要有 name）");
+        return Result.ok(TagCatalogDto.of(tagCatalogService.createCustom(
+                body.code(), body.name(), body.description(), body.category(), body.blocking())));
+    }
+
+    /**
+     * 人工给订单打一个标（特征标：客诉客户 / 双地址 / 绿旗急发…），并写审计 {@code AUDIT_TAG_ADD}。
+     *
+     * <p>约束（见 {@code OrderAuditTagService#applyManualTag}）：标码必须来自标目录、幂等、
+     * 必须留审计；**不许人工打「结论」标**（那等于伪造一条判定结论的证据，要按住这单请用冻结）。
+     */
+    @PostMapping("/order-audit/orders/{id}/tags")
+    public Result<OrderAuditTag> addTag(@PathVariable Long id, @RequestBody TagApplyRequest body) {
+        Order order = requireOrder(id);
+        return Result.ok(tagService.applyManualTag(order,
+                body == null ? null : body.tagCode(), body == null ? null : body.note()));
     }
 
     /** 人工冻结：打标 + 审计（不动 status，不写状态台账） */
@@ -149,5 +202,28 @@ public class OrderAuditController {
      * @param reason     旧字段（= 旧的自由文本原因），保留兼容：没给 note 时当 note 用
      */
     public record FreezeRequest(String tagCode, String reasonCode, String note, String reason) {
+    }
+
+    /**
+     * 新增自定义标请求。
+     *
+     * @param code        可选；为空则自动生成 {@code CUSTOM_<id>}。给了就必须是
+     *                    {@code ^[A-Z][A-Z0-9_]{1,31}$}（code 是永不修改的稳定键，别让它长成一句人话）
+     * @param name        中文名（**必填** —— 它就是业务人员在队列里看到的那几个字）
+     * @param description 一句话说明（给业务看：这标什么意思、下一步做什么）
+     * @param category    只接受「特征」（缺省即它）；「结论」标由判定链产出，人工不能自建
+     * @param blocking    1 = 会拦住下单往下走（缺省 0：人工打的标默认不拦流程）
+     */
+    public record TagCreateRequest(String code, String name, String description,
+                                   String category, Integer blocking) {
+    }
+
+    /**
+     * 人工打标请求。
+     *
+     * @param tagCode 标码（必须已在标目录里且启用；不许自由文本）
+     * @param note    备注（可选；进 {@code order_audit_tag.reason} 与审计摘要）
+     */
+    public record TagApplyRequest(String tagCode, String note) {
     }
 }

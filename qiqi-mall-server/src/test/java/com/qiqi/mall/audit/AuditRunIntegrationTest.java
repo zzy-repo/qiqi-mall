@@ -250,10 +250,20 @@ class AuditRunIntegrationTest {
         assertThat(String.valueOf(d6.get("miss_reason_json")))
                 .contains("淘宝-标准单").contains("商品种类数 6 ≤ 5");
         assertThat(statusOf("QT-1006")).isEqualTo(7);
-        Integer shortTags = jdbc.queryForObject(
+        // ⚠️ 期 1 口径变更（2026-11-16）：NO_MATCH **不再**是"一个标都不打"。
+        // 它必须落 NO_POLICY_MATCH（可读/可筛/可聚合的标），否则队列里继续一片空白 ——
+        // 那正是本期要补的缺口（最近一轮 18 条 NO_MATCH 全无标）。
+        // 仍然成立的是：它**不打挂起标**（STOCK_SHORT / COST_MISSING 是 MANUAL 降级的产物）。
+        Integer hangTags = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM order_audit_tag t JOIN `order` o ON o.id = t.order_id "
-                        + "WHERE o.order_sn = 'QT-1006' AND t.active = 1", Integer.class);
-        assertThat(shortTags).as("NO_MATCH 不打任何挂起标").isZero();
+                        + "WHERE o.order_sn = 'QT-1006' AND t.active = 1 "
+                        + "AND t.tag_code IN ('STOCK_SHORT','COST_MISSING')", Integer.class);
+        assertThat(hangTags).as("NO_MATCH 不打任何挂起标（STOCK_SHORT / COST_MISSING）").isZero();
+        Integer noPolicyTags = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM order_audit_tag t JOIN `order` o ON o.id = t.order_id "
+                        + "WHERE o.order_sn = 'QT-1006' AND t.active = 1 AND t.tag_code = 'NO_POLICY_MATCH'",
+                Integer.class);
+        assertThat(noPolicyTags).as("NO_MATCH 必须落 NO_POLICY_MATCH 标（期 1）").isEqualTo(1);
     }
 
     // ================================================================== ② 人工审核 7→4（离线事实：库存不足）

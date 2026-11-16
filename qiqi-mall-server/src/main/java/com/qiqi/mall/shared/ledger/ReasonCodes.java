@@ -135,6 +135,20 @@ public final class ReasonCodes {
     public static final String ACTION_AUDIT_FREEZE = "AUDIT_FREEZE";
     /** 人工解冻订单 */
     public static final String ACTION_AUDIT_UNFREEZE = "AUDIT_UNFREEZE";
+    /**
+     * 人工给订单打一个标（期 1：标从引擎私有开关升级为业务接口层之后，人工也能打标）。
+     *
+     * <p>为什么单独一个动作码、不并进 {@link #ACTION_AUDIT_FREEZE}：冻结是"按住这单等处理"，
+     * 打标是"给它挂一个说法"（客诉客户 / 双地址 / 绿旗急发…），后果完全不同 ——
+     * 打标不动状态机的任何东西，也不代表"这单被卡住了"。混成一个动作码，
+     * 事后查"这单为什么不能发货"会把一堆纯标记行为算成拦截原因。
+     *
+     * <p>⚠️ 没有这个动作码，标就没有出处：谁在什么时候给哪张单打了什么标，
+     * 是比"标本身"更重要的事实 —— 否则标只是一行不知道谁写的数据。
+     */
+    public static final String ACTION_AUDIT_TAG_ADD = "AUDIT_TAG_ADD";
+    /** 新增一条自定义标目录项（期 1：字典必须能新增，否则人工只能写自由文本） */
+    public static final String ACTION_TAG_CATALOG_CREATE = "TAG_CATALOG_CREATE";
     public static final String ACTION_POLICY_CREATE = "POLICY_CREATE";
     public static final String ACTION_POLICY_UPDATE = "POLICY_UPDATE";
     public static final String ACTION_POLICY_DELETE = "POLICY_DELETE";

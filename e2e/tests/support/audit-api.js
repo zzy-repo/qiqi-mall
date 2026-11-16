@@ -27,9 +27,11 @@ async function data(res, what) {
 }
 
 /** 人工队列：{total, page, size, rows[]}；rows 是 snake_case（order_sn / matched_policy_name / miss_reasons…） */
-export async function getAuditQueue(request, adminToken, { result, page = 1, size = 100 } = {}) {
+export async function getAuditQueue(request, adminToken, { result, tag, page = 1, size = 100 } = {}) {
   const params = new URLSearchParams({ page: String(page), size: String(size) })
   if (result) params.set('result', result)
+  // 期 1 新增的**平行**筛选：按标码筛（?tag=NO_POLICY_MATCH），与 result 正交、可并列
+  if (tag) params.set('tag', tag)
   return data(
     await request.get(`${API}/admin/order-audit/queue?${params.toString()}`, auth(adminToken)),
     '读取审核队列'

@@ -44,8 +44,36 @@
         >{{ chip.label }} <b>{{ counts[chip.result] }}</b></el-radio-button>
       </el-radio-group>
 
+      <!-- 期 1 新增的**平行**筛选入口：按标筛（?tag=STOCK_SHORT）。
+           它与左边那排 result 页签**正交、可并列**：
+             · result = 引擎这一轮判了什么（全部/自动过审/留人工/阻止/冻结/不命中 —— 本期语义不变，期 3 才改）；
+             · tag    = 这单现在身上挂着哪些标（业务人员按标找单，不需要先知道 result 码怎么拼）。
+           选项来自后端标字典（/order-audit/tags），这里**不许**硬编码一份标码常量表。
+           为什么用 clearable 的 el-select 而不是又排一排按钮：标会越来越多（自定义标能随时加），
+           一排按钮迟早撑爆这一行；而且它要和 result 那排视觉上分开——两者是不同维度。 -->
+      <el-select
+        v-model="tagValue"
+        clearable
+        placeholder="按标筛选"
+        size="default"
+        class="tag-filter"
+        data-testid="audit-queue-tag-filter"
+      >
+        <el-option
+          v-for="t in tagOptions"
+          :key="t.code"
+          :label="t.name"
+          :value="t.code"
+          :data-testid="`audit-tag-option-${t.code}`"
+        >
+          <span>{{ t.name }}</span>
+          <el-text size="small" type="info" class="freeze-opt-hint">{{ t.category }} · {{ t.code }}</el-text>
+        </el-option>
+      </el-select>
+
       <el-text size="small" type="info" class="chip-note">
         阻止 = 拦截下单，需人工联系客户；冻结 = 已打标等客服处理
+        <span v-if="query.tag">· 已按标「{{ tagNameOf(query.tag) }}」筛选</span>
         <span v-if="counts.skipped">· 另有 {{ counts.skipped }} 笔未参与本轮</span>
       </el-text>
     </div>
@@ -129,6 +157,38 @@
               :data-frozen-reason="row.frozenReason || ''"
               :data-frozen-tag="row.frozenTagCode || ''"
             >冻结中</el-tag>
+            <!-- 期 1：这单身上**现在**挂着的标（中文名，最多显示 2 个，其余收成 +N）。
+                 为什么塞在判定列而不是**新开一列**：这张表 10 列已经 1647px 顶满 1960 画幅，
+                 加一列会把「原因」挤出画面（上一轮踩过）。标与判定语义相邻，叠在下面最省宽。
+                 ⚠️ 显示压缩规则（阻断型优先 → 同类型取最新）只在**显示层**：数据层是并列多标、
+                    后端没有也不该有"主标"字段。这条规则不进字典、不产生第二套口径。 -->
+            <div
+              v-if="row.tags && row.tags.length"
+              class="tag-chips"
+              :title="tagListTitle(row)"
+              :data-testid="`audit-row-tags-${row.orderSn}`"
+              :data-tag-codes="row.tagCodes.join(',')"
+            >
+              <el-tag
+                v-for="t in displayTags(row)"
+                :key="t.tagCode"
+                size="small"
+                effect="plain"
+                :type="t.blocking ? 'danger' : 'info'"
+                class="tag-chip"
+                :title="`${t.name}${t.description ? '：' + t.description : ''}（${t.at || ''}）`"
+                :data-tag="t.tagCode"
+              >{{ t.name }}</el-tag>
+              <el-tag
+                v-if="row.tags.length > TAG_CHIP_MAX"
+                size="small"
+                effect="plain"
+                type="info"
+                class="tag-chip"
+                :title="tagListTitle(row)"
+                :data-testid="`audit-row-tags-more-${row.orderSn}`"
+              >+{{ row.tags.length - TAG_CHIP_MAX }}</el-tag>
+            </div>
           </div>
         </template>
       </el-table-column>
@@ -403,6 +463,45 @@
             </el-descriptions-item>
             <el-descriptions-item label="原因" :span="2">{{ orderRow.reason || '—' }}</el-descriptions-item>
           </el-descriptions>
+
+          <!-- 期 1：本单身上的标（逐个列 中文名 + 一句话说明 + 打标时间）。
+               为什么不复用上面的「冻结」那一行：冻结只是标的一种，而这一块要说的是
+               "这单身上到底挂了几张标、各自什么意思、什么时候打的" —— 那是**标维度**的事实，
+               与 result（这一轮判了什么）、frozen（现在冻没冻）都是不同的东西。 -->
+          <div v-if="orderRow" class="order-tags" data-testid="audit-order-tags">
+            <div class="order-tags-title">
+              <el-text tag="b">本单身上的标</el-text>
+              <el-text size="small" type="info">
+                （{{ orderRow.tags?.length || 0 }} 个 · 并列，没有「主标」）
+              </el-text>
+            </div>
+            <el-empty
+              v-if="!orderRow.tags || !orderRow.tags.length"
+              description="这单身上没有标"
+              :image-size="44"
+              data-testid="audit-order-tags-empty"
+            />
+            <div
+              v-for="t in orderRow.tags"
+              :key="t.tagCode"
+              class="order-tag-item"
+              :data-testid="`audit-order-tag-${t.tagCode}`"
+              :data-tag-category="t.category || ''"
+              :data-tag-blocking="t.blocking ? '1' : '0'"
+            >
+              <div class="order-tag-head">
+                <el-tag size="small" effect="plain" :type="t.blocking ? 'danger' : 'info'">{{ t.name }}</el-tag>
+                <el-text size="small" type="info" class="order-tag-code">{{ t.tagCode }}</el-text>
+                <el-text v-if="t.category" size="small" type="info" class="order-tag-cat">{{ t.category }}</el-text>
+              </div>
+              <div class="order-tag-desc" data-testid="audit-order-tag-desc">
+                {{ t.description || '（这个标还没登记说明，去标字典补一句）' }}
+              </div>
+              <el-text size="small" type="info" class="order-tag-at" data-testid="audit-order-tag-at">
+                打标时间 {{ t.at || '—' }}<template v-if="t.reason"> · 原因：{{ t.reason }}</template>
+              </el-text>
+            </div>
+          </div>
         </el-tab-pane>
       </el-tabs>
     </el-drawer>
@@ -511,7 +610,8 @@ import AuditTrail from '../../components/AuditTrail.vue'
 import {
   listAuditQueue, queuePage, listAuditPolicies, policyBundle,
   listAuditRuns, runPage, runAudit,
-  freezeOrderAudit, unfreezeOrderAudit, listFreezeReasons
+  freezeOrderAudit, unfreezeOrderAudit, listFreezeReasons,
+  listAuditTags, tagCatalogOf
 } from '../../api/audit'
 import { auditPassDryRun, auditPassOrder } from '../../api/delivery'
 import { useDangerConfirm } from '../../composables/useDangerConfirm'
@@ -579,11 +679,69 @@ const chipValue = computed({
   }
 })
 
+/**
+ * 标筛选值 ⇄ query.tag 的桥（与 chipValue 同一套写法：'' 表示不筛）。
+ *
+ * 与 chipValue 的差别只有一个：**改标筛选不重置 result**。两者是正交维度，
+ * 业务场景是「在留人工页签里再按 STOCK_SHORT 收窄」，重置 result 会把它踢回「全部」。
+ */
+const tagValue = computed({
+  get: () => query.tag || '',
+  set: (v) => {
+    query.tag = v || null
+    query.page = 1
+    loadQueue()
+  }
+})
+
+/** 标字典（筛选器选项）：来自后端，不硬编码 */
+const tagOptions = ref([])
+
+const tagNameOf = (code) => tagOptions.value.find((t) => t.code === code)?.name || code || ''
+
+const loadTagOptions = async () => {
+  try {
+    tagOptions.value = tagCatalogOf(await listAuditTags())
+  } catch (e) {
+    // 字典取不到不阻塞队列：筛选器空着，标照常显示（队列行里自带中文名，不依赖这个接口）
+    tagOptions.value = []
+    ElMessage.warning('加载标字典失败（标筛选暂不可用）：' + (e?.message || e))
+  }
+}
+
+/** 判定列里最多显示几个标（其余收成 +N）；抽屉里全部列出 */
+const TAG_CHIP_MAX = 2
+
+/**
+ * 显示层的压缩规则：**阻断型优先 → 同类型取最新**，只取前 TAG_CHIP_MAX 个。
+ *
+ * ⚠️ 这条规则**只影响显示**：数据层是并列多标、后端没有也不该有"主标"字段，
+ *    这里也不往字典里写任何东西 —— 一旦落库就有了第二套口径，谁都能拿它当判据。
+ *    所以它在 sort 之后没有 setter、没有持久化、换个页面要重新算（这是有意的）。
+ */
+const displayTags = (row) => (row?.tags || [])
+  .slice()
+  .sort((a, b) => {
+    if (!!b.blocking !== !!a.blocking) return b.blocking ? 1 : -1   // 阻断型优先
+    return String(b.at || '').localeCompare(String(a.at || ''))       // 同类型取最新
+  })
+  .slice(0, TAG_CHIP_MAX)
+
+/** 悬停 / 读屏：把**全部**标一次说清（不止显示出来的那两个） */
+const tagListTitle = (row) => (row?.tags || [])
+  .map((t) => `${t.name}（${t.tagCode}）${t.description ? '：' + t.description : ''}${t.at ? ' · ' + t.at : ''}`)
+  .join('\n')
+
 const rows = ref([])
 const total = ref(0)
 const loading = ref(false)
 const running = ref(false)
-const query = reactive({ page: 1, size: 20, result: null })
+/**
+ * 队列请求参数。
+ *   result = 判定结局页签（本期语义不变，期 3 才改口径）
+ *   tag    = 期 1 新增的**平行**筛选：按标码筛（?tag=NO_POLICY_MATCH），与 result 正交、可并列
+ */
+const query = reactive({ page: 1, size: 20, result: null, tag: null })
 const counts = reactive({ all: 0, AUTO_PASS: 0, MANUAL: 0, BLOCKED: 0, FROZEN: 0, NO_MATCH: 0, skipped: 0 })
 
 const policies = ref([])
@@ -767,7 +925,7 @@ const loadQueue = async () => {
   loading.value = true
   try {
     const page = queuePage(
-      await listAuditQueue({ result: query.result, page: query.page, size: query.size })
+      await listAuditQueue({ result: query.result, tag: query.tag, page: query.page, size: query.size })
     )
     rows.value = page.rows
     total.value = page.total
@@ -1058,6 +1216,8 @@ onMounted(() => {
   loadPolicies()
   // 字典 11 行：预取一次，弹窗打开即可选（失败也不阻塞页面，只是冻结时会提示取不到）
   loadFreezeReasons()
+  // 标字典（期 1）：筛选器选项来自后端，不硬编码（后端加一个标，页面自动多一个选项）
+  loadTagOptions()
 })
 </script>
 
@@ -1089,6 +1249,24 @@ onMounted(() => {
 /* 判定列：判定徽标 + 冻结标记上下叠，纵向排列、左对齐（不加宽就不挤掉「原因」列） */
 .verdict-cell { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
 .frozen-tagcode { margin-left: 6px; }
+
+/* 标筛选器：与 result 分段控件**视觉上分开**（两者是不同维度），宽度够放下「无策略命中」*/
+.tag-filter { width: 190px; }
+
+/* 判定列里的标：小 `inline-flex` 换行排列，不加宽整列（10 列 1647px 已顶满 1960 画幅） */
+.tag-chips { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 2px; max-width: 124px; }
+.tag-chip { max-width: 124px; }
+
+/* 抽屉「本单身上的标」：一行一个标，中文名 + 说明 + 打标时间 */
+/* 只写「位置」：外观（加粗、分隔线、等宽字体）一律交给 el-text 的 props —— 见 scripts/check-style-discipline.mjs */
+.order-tags { margin-top: 16px; }
+.order-tags-title { margin-bottom: 8px; }
+.order-tag-item { padding: 4px 0; margin-bottom: 10px; }
+.order-tag-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.order-tag-code { margin-left: 2px; }
+.order-tag-cat { margin-left: auto; }
+.order-tag-desc { margin-top: 4px; line-height: 20px; }
+.order-tag-at { display: block; margin-top: 2px; }
 
 /* 冻结弹窗：选项副标题（说明文字）右侧灰字，不抢中文名的视觉重量 */
 .freeze-form { margin-top: 12px; }

@@ -23,6 +23,7 @@ import {
   unevaluatedConditions,
   ledgerRowsOf,
   activeTagsOf,
+  activeHangTagsOf,
   POLICY_NAME
 } from '../../../support/audit-fixtures.js'
 import { getQueueRowOf, getPolicyOf } from '../../../support/audit-api.js'
@@ -246,7 +247,11 @@ test.describe('业务 › 订单-自动审核 › 判定链与四结局-不命�
           expect(dec[0].reason, `${sn} 的证据原因应含具体差值「${expectReason}」`).toContain(expectReason)
           expect(orderFactOf(sn).status, `${sn} 状态应仍是 7（不命中不推进）`).toBe(7)
           expect(ledgerRowsOf(f.id), `${sn} 不该有状态台账行`).toHaveLength(0)
-          expect(activeTagsOf(f.id), `${sn} 不该打标`).toHaveLength(0)
+          // 期 1：NO_MATCH 必须落 NO_POLICY_MATCH 标（以前 18 条空白单一个标都没有，这正是缺口）；
+          // 仍然成立的是：它不打挂起标（STOCK_SHORT / COST_MISSING 是 MANUAL 预检降级的产物）。
+          expect(activeTagsOf(f.id).map((t) => t.tagCode), `${sn} 必须落 NO_POLICY_MATCH 标`)
+            .toContain('NO_POLICY_MATCH')
+          expect(activeHangTagsOf(f.id), `${sn} 不该打挂起标`).toHaveLength(0)
           // miss_reason_json 是「逐条策略判定依据」的结构化留痕（不是一句人话）
           const miss = decisionJsonOf(f.id, 1, 'miss_reason_json')
           expect(Array.isArray(miss), `${sn} 的 miss_reason_json 应是数组`).toBe(true)

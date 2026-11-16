@@ -77,14 +77,14 @@ verdict="$(mysql_exec -N -e "
     (SELECT COUNT(*) FROM \`$DB_NAME\`.flyway_schema_history WHERE version='1' AND success=1), ',',
     (SELECT COUNT(*) FROM \`$DB_NAME\`.channel_shop));")"
 IFS=',' read -r n_tab n_view n_hist n_shop <<< "$verdict"
-# 业务表数：**加迁移就要跟着改**（V3 冻结原因字典 → 40 张）。
+# 业务表数：**加迁移就要跟着改**（V4 标目录 audit_tag_catalog → 41 张）。
 # 写死一个数而不是区间：这条断言挡的是「半建出来的库」，放宽就挡不住少了几张的那种半成品。
-EXPECT_TABLES=40
+EXPECT_TABLES=41
 if [[ "$n_tab" != "$EXPECT_TABLES" || "$n_view" != "1" || "$n_hist" != "1" || "$n_shop" != "3" ]]; then
   echo "✗ 结构校验失败：业务表=$n_tab（应 $EXPECT_TABLES）视图=$n_view（应 1）V1记录=$n_hist（应 1）channel_shop=$n_shop（应 3）" >&2
   exit 1
 fi
-echo "  ✓ 结构就绪：$n_tab 表 + $n_view 视图（V1..V3 全量执行），channel_shop $n_shop 行"
+echo "  ✓ 结构就绪：$n_tab 表 + $n_view 视图（V1..V4 全量执行），channel_shop $n_shop 行"
 
 if [[ -f "$SEED" ]]; then
   echo "▶ 灌种子：sql/testdb/02-seed.sql → $DB_NAME"

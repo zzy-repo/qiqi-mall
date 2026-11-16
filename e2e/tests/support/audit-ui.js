@@ -86,6 +86,32 @@ export const clearResultFilter = async (page) => {
   await page.waitForTimeout(1000)
 }
 
+/* ------------------------------------------------------------------ 按标筛选（期 1） */
+
+/**
+ * 用「按标筛选」下拉筛队列（{@code ?tag=CODE}）。
+ *
+ * <p>它与 result 页签是**两个正交维度**：页签回答"这一轮判了什么"，标回答"这单身上挂着什么"。
+ * 所以这里**不点**任何 result chip —— 也顺手证了「改标筛选不会把 result 页签重置掉」。
+ */
+export const filterByTag = async (page, code) => {
+  await tid(page, 'audit-queue-tag-filter').click()
+  await page.getByTestId(`audit-tag-option-${code}`).click()
+  await page.waitForTimeout(1200)
+}
+
+/** 清掉标筛选（回到「不按标筛」） */
+export const clearTagFilter = async (page) => {
+  const box = tid(page, 'audit-queue-tag-filter')
+  await box.locator('.el-select__clear').click({ force: true }).catch(async () => {
+    // 没有清除图标（已经空了）时什么都不做
+  })
+  await page.waitForTimeout(1200)
+}
+
+/** 队列行的标区（中文名小 tag；没有标时这个元素不存在） */
+export const tagChipsOf = (row) => row.locator('[data-testid^="audit-row-tags-"]')
+
 /* ------------------------------------------------------------------ 「判定依据」抽屉 */
 
 /**

@@ -12,6 +12,7 @@ import {
   orderAuditActionsOf,
   decisionsOf,
   activeTagsOf,
+  activeFrozenTagsOf,
   allTagsOf,
   POLICY_NAME
 } from '../../../support/audit-fixtures.js'
@@ -102,7 +103,7 @@ test.describe('业务 › 订单-自动审核 › 冻结看得见撤得掉', () 
 
         // 库：标表多了一条 active 的 FROZEN；**决策表一条都没多**（人工冻结不产生决策行）
         const f = orderFactOf('QT-1003')
-        const tags = activeTagsOf(f.id)
+        const tags = activeFrozenTagsOf(f.id)
         expect(tags, '人工冻结应留下 1 条 active 的冻结标').toHaveLength(1)
         expect(tags[0].tagCode, '标码应是 FROZEN（不是细分标）').toBe('FROZEN')
         expect(tags[0].reason, '标的 reason 应是我填的原因').toBe(FREEZE_REASON)
@@ -171,8 +172,9 @@ test.describe('业务 › 订单-自动审核 › 冻结看得见撤得掉', () 
 
         // 库：标被**解除**（active=0，行留着当证据），决策表依然只有那一条 NO_MATCH
         const f = orderFactOf('QT-1003')
-        expect(activeTagsOf(f.id), '解冻后不应再有 active 的冻结标').toHaveLength(0)
-        const all = allTagsOf(f.id)
+        expect(activeFrozenTagsOf(f.id), '解冻后不应再有 active 的冻结标').toHaveLength(0)
+        // 只看冻结类：期 1 起这单身上还挂着结论标（NO_POLICY_MATCH），它与"解冻解掉什么"无关
+        const all = allTagsOf(f.id).filter((t) => String(t.tagCode).startsWith('FROZEN'))
         expect(all, '解冻是「解除」不是「删行」：标行必须留着当证据').toHaveLength(1)
         expect(all[0].active, '标行应是 active=0').toBe(0)
         expect(all[0].releasedBy, '解除人应被记下（不是空）').not.toBe('')
@@ -209,7 +211,7 @@ test.describe('业务 › 订单-自动审核 › 冻结看得见撤得掉', () 
     try {
       await test.step('① 复位基线 + 跑一轮：QT-1005 被异常策略冻住（result=FROZEN）', async () => {
         resetAuditDemoBaseline()
-        expect(activeTagsOf(orderFactOf('QT-1005').id), '起点不应有冻结标').toHaveLength(0)
+        expect(activeFrozenTagsOf(orderFactOf('QT-1005').id), '起点不应有冻结标').toHaveLength(0)
 
         await gotoAuditQueue(page)
         const run = await runAuditViaUi(page)
@@ -239,7 +241,7 @@ test.describe('业务 › 订单-自动审核 › 冻结看得见撤得掉', () 
         await expectToastSuccess(page, '已解冻')
 
         const f = orderFactOf('QT-1005')
-        expect(activeTagsOf(f.id), '解冻后不应再有 active 的冻结标').toHaveLength(0)
+        expect(activeFrozenTagsOf(f.id), '解冻后不应再有 active 的冻结标').toHaveLength(0)
         expect(decisionsOf(f.id)[0].result, '决策行仍是 FROZEN（历史结论不该被解冻改写）').toBe('FROZEN')
 
         await gotoAuditQueue(page)

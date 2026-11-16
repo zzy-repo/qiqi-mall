@@ -64,6 +64,11 @@ public interface OrderAuditDecisionMapper extends BaseMapper<OrderAuditDecision>
      *
      * <p>为什么按 MAX(id) 去重而不是 DISTINCT：一轮一行、id 单调，取最新行是确定的；
      * 用 round_no 去重会在「同一单不同 run 但轮次相同」的脏数据上给出随机结果。
+     *
+     * <p><b>期 1 新增：{@code tag} 参数（标码筛选），与 {@code result} 正交、可并列。</b>
+     * 判据是「该单现在挂着一条 active 的同码标」，与「引擎这轮判了什么」无关 ——
+     * 本期标只增不删，所以一单 result=MANUAL 也可能同时挂着 NO_POLICY_MATCH。
+     * ⚠️ 这是**平行新增**的筛选入口，本期不动 {@code result} 那六个页签的语义（期 3 才改）。
      */
     @Select("<script>"
             + "SELECT d.id, d.order_id, d.run_id, d.round_no, d.result, d.matched_policy_id, d.matched_policy_name, "
@@ -92,18 +97,44 @@ public interface OrderAuditDecisionMapper extends BaseMapper<OrderAuditDecision>
             + "        AND t.active = 1 AND t.tag_code LIKE 'FROZEN%' ORDER BY t.id ASC LIMIT 1) AS frozen_reason_id "
             + "FROM order_audit_decision d JOIN `order` o ON o.id = d.order_id "
             + "WHERE d.id IN (SELECT MAX(id) FROM order_audit_decision GROUP BY order_id) "
+            // 标筛选（期 1 新增，**平行于 result**，不改它）：命中即「该单挂着一条 active 的同码标」。
+            // 用 EXISTS 而不是 JOIN 的理由同上：一单多标时 JOIN 会把队列行复制成多行。
+            + "<if test='tag != null and tag != \"\"'> AND EXISTS (SELECT 1 FROM order_audit_tag ft "
+            + "     WHERE ft.order_id = d.order_id AND ft.active = 1 AND ft.tag_code = #{tag})</if> "
             + "<if test='result != null and result != \"\"'> AND d.result = #{result}</if> "
             + "ORDER BY d.id DESC LIMIT #{limit} OFFSET #{offset}"
             + "</script>")
-    List<Map<String, Object>> selectQueue(@Param("result") String result,
+    List<Map<String, Object>> selectQueue(@Param("result") String result, @Param("tag") String tag,
                                           @Param("offset") int offset, @Param("limit") int limit);
 
     @Select("<script>"
             + "SELECT COUNT(*) FROM order_audit_decision d "
             + "WHERE d.id IN (SELECT MAX(id) FROM order_audit_decision GROUP BY order_id) "
             + "<if test='result != null and result != \"\"'> AND d.result = #{result}</if>"
+            + "<if test='tag != null and tag != \"\"'> AND EXISTS (SELECT 1 FROM order_audit_tag ft "
+            + "     WHERE ft.order_id = d.order_id AND ft.active = 1 AND ft.tag_code = #{tag})</if>"
             + "</script>")
-    long countQueue(@Param("result") String result);
+    long countQueue(@Param("result") String result, @Param("tag") String tag);
+
+    /**
+     * 一页里这些订单身上的 active 标（期 1：队列行要显示「这单有哪些标」）。
+     *
+     * <p>为什么是**一次批量查询**而不是第 6 个相关子查询（也不是 JOIN）：
+     * <ul>
+     *   <li>JOIN 会复制行（一单 3 个标 → 队列里 3 行），分页 total 与行数当场对不上；</li>
+     *   <li>第 6 个同构子查询只能回一个聚合串，拿不到**打标时间**（抽屉要逐条显示"什么时候打的"），
+     *       而 P0 那三段 SQL 刚刚验证过，没必要为了"形态统一"再动它一次；</li>
+     *   <li>一次 {@code WHERE order_id IN (本页 ≤100 个 id)} 走 {@code idx_order}：1 次往返、不走全表，
+     *       比逐行查询少 N 次往返，比子查询多不了几个字节。</li>
+     * </ul>
+     */
+    @Select("<script>"
+            + "SELECT order_id, tag_code, reason, created_at FROM order_audit_tag "
+            + "WHERE active = 1 AND order_id IN "
+            + "<foreach collection='orderIds' item='oid' open='(' separator=',' close=')'>#{oid}</foreach> "
+            + "ORDER BY order_id ASC, id ASC"
+            + "</script>")
+    List<Map<String, Object>> selectActiveTagsByOrders(@Param("orderIds") java.util.List<Long> orderIds);
 
     @Select("SELECT * FROM order_audit_decision WHERE order_id = #{orderId} ORDER BY round_no ASC, id ASC")
     List<OrderAuditDecision> selectByOrder(@Param("orderId") Long orderId);

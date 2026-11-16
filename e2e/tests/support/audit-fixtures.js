@@ -412,6 +412,37 @@ export function activeTagsOf(orderId) {
   ).map(([tagCode, reason]) => ({ tagCode, reason }))
 }
 
+/**
+ * 只「冻结」类标（{@code FROZEN%} 前缀）：判断"这单冻没冻"只能用这个。
+ *
+ * <p>期 1 起，一单身上除了冻结标还可能挂着结论标（NO_POLICY_MATCH / BLOCKED / AUDIT_PENDING…），
+ * 所以「解冻后不该有标」这类断言必须收窄到冻结类 —— 否则结论标会把它们全打成假红。
+ */
+export function activeFrozenTagsOf(orderId) {
+  return activeTagsOf(orderId).filter((t) => String(t.tagCode).startsWith('FROZEN'))
+}
+
+/** 只「挂起」类标（STOCK_SHORT / COST_MISSING）：它们只由 MANUAL 的预检降级产出 */
+export function activeHangTagsOf(orderId) {
+  return activeTagsOf(orderId)
+    .filter((t) => t.tagCode === 'STOCK_SHORT' || t.tagCode === 'COST_MISSING')
+}
+
+/**
+ * 只「结论」档的标（按标目录 {@code category='结论'} 过滤）。
+ *
+ * <p>⚠️ 口径（2026-11-16 修正）：<b>AUTO_PASS 这个结论不产标</b>，但自动过审的<b>单</b>完全可以带别的标
+ * （客诉客户 / 绿旗急发 / 双地址…，吉客云原话：这些单打了标照样自动过审，标没参与判断）。
+ * 所以断言只能写"结论标为 0"，不许写"没有任何标"—— 后者将来加一个特征标就会误红。
+ */
+export function activeConclusionTagsOf(orderId) {
+  return rowsOf(
+    `SELECT t.tag_code FROM order_audit_tag t `
+    + `JOIN audit_tag_catalog c ON c.code = t.tag_code `
+    + `WHERE t.order_id = ${orderId} AND t.active = 1 AND c.category = '结论' ORDER BY t.id`
+  ).map(([code]) => code)
+}
+
 /** 全部标（含已解除；用来断言「解冻 = 解除而不是删行」） */
 export function allTagsOf(orderId) {
   return rowsOf(
