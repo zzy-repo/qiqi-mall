@@ -1,0 +1,40 @@
+flowchart TB
+    BIRTH["建单<br/>出生事件，不是订单状态"]
+
+    O0["待付款（0）<br/>下单即占库存"]
+    O7["待审核（7）<br/>审核轮次在这层发生"]
+    O8["待发货（8）<br/>包裹可改可拆可下发"]
+    O9["部分发货（9）<br/>有包裹出库但没全出"]
+    O2["已发货（2）<br/>在途包裹全部出库"]
+    O3["已完成（3）<br/>在途包裹全部签收<br/>终局：不能再申请退货"]
+
+    BIRTH ==>|【买家】下单<br/>占库存| O0
+    O0 ==>|【买家】模拟支付成功<br/>支付即送审| O7
+    O7 ==>|【商家】人工审核通过<br/>同步按仓拆单| O8
+    O7 -->|【系统】自动审核过审| O8
+    O8 ==>|【WMS回传】<br/>部分包裹出库| O9
+    O9 ==>|【WMS回传】<br/>其余包裹也出库| O2
+    O8 ==>|【WMS回传】<br/>包裹全部出库| O2
+    O9 ==>|【WMS回传】<br/>包裹全部签收| O3
+    O2 ==>|【WMS回传】全部签收<br/>【买家】确认收货| O3
+
+    N1["注·支付口径<br/>支付即送审<br/>不落地已付款（1）<br/>只有后台建单<br/>退货被拒落在（1）"] ~~~ O0
+    N4["注·代码里不存在的流转<br/>超时未付款自动关单<br/>超时自动确认收货<br/>设置项在，没有任务读它<br/>买家取消订单<br/>所以待付款（0）没有出口"] ~~~ O0
+    N3["注·这些都不是订单状态<br/>冻结／解冻＝审核标记<br/>订单仍停在待审核<br/>拆单＝只改拆单标记<br/>删单＝整单物理删除"] ~~~ O7
+    GA["唯一入口<br/>只能从（7）进（8）<br/>且审核通过才进<br/>（人工／系统自动）"] ~~~ O7
+    GB["分支<br/>退货申请→「谁能进退款中」那张<br/>例外与回退→「回退与例外」那张"] ~~~ O8
+    GC["分支<br/>退货申请→「谁能进退款中」那张"] ~~~ O9
+
+    LG["线型与触发者<br/>粗实线＝正常主链路<br/>细实线＝正常分支<br/>【买家】【商家】<br/>【系统】【WMS回传】<br/>＝这条边由谁触发"] ~~~ BIRTH
+    SRC["口径来源<br/>订单状态唯一写入入口<br/>的合法流转表<br/>订单状态台账的原因码<br/>包裹聚合规则<br/>（子单是事实源）"] ~~~ BIRTH
+
+    classDef birth fill:#f0f5ff,stroke:#2f54eb,stroke-width:1px,stroke-dasharray:4 3,color:#10239e
+    classDef flow fill:#e6f4ff,stroke:#1677ff,stroke-width:2px,color:#0958d9
+    classDef fin fill:#fff1f0,stroke:#d03050,stroke-width:2px,color:#a8071a
+    classDef note fill:#fafafa,stroke:#aaa,stroke-dasharray:4 3,color:#444
+    classDef legend fill:#fffbe6,stroke:#d4b106,stroke-width:2px
+    class BIRTH birth
+    class O0,O7,O8,O9,O2 flow
+    class O3 fin
+    class N1,N3,N4,GA,GB,GC,SRC note
+    class LG legend

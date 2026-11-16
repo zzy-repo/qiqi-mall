@@ -1,0 +1,37 @@
+flowchart TB
+    subgraph KA["例外入口：不走待付款（0）"]
+        BIRTH["建单<br/>出生事件，不是订单状态"]
+        O1["已付款（1）<br/>只承接后台建单与退货被拒"]
+        O7A["待审核（7）<br/>后台建单落点"]
+        O2A["已发货（2）<br/>直发单直接到这里"]
+        BIRTH -->|【商家】后台建单（已付款）| O1
+        BIRTH -->|【商家】后台建单（待审核）<br/>【系统】渠道单导入| O7A
+        O1 -->|【商家】直发单标记发货<br/>没有包裹，不参与聚合| O2A
+    end
+
+    subgraph KB["回退与终止：管子里的例外出口"]
+        O8["待发货（8）<br/>包裹可改可拆可下发"]
+        O7B["待审核（7）<br/>退回后可重新审核拆单"]
+        O2B["已发货（2）<br/>人工标记到这里"]
+        O4["已关闭（4）<br/>审核不通过，同时回补库存"]
+        O8 -->|【商家】标记发货<br/>需有包裹已出库| O2B
+        O8 -.->|【商家】包裹全取消<br/>【系统】退回待审核并清空拆单标记| O7B
+        O7B -.->|【商家】审核不通过<br/>终止| O4
+    N5["注·审核不通过是终止<br/>不通过即已关闭<br/>没有重新提交／重新审核的退路<br/>唯一能重来的是包裹全被取消后<br/>退回待审核"] ~~~ O4
+    end
+
+    O2A ~~~ O8
+
+    R1["注·重算：父单状态是包裹事实的推导值<br/>包裹出库→已发货（2）／部分发货（9）<br/>包裹签收→已完成（3）<br/>重复写同一个值是幂等重算，不画自环<br/>（这些边画在主链路那张的第 5~9 条<br/>退货被拒的交回重算见「谁能进退款中」那张）"] ~~~ O2B
+    NT["读法与线型<br/>两块各自从上往下读：<br/>上面块＝后台建单／渠道导入怎么进来<br/>下面块＝管子里的例外怎么出去、怎么回来<br/>线型同主链路那张：细实线＝正常分支<br/>虚线＝异常／终止／回退"] ~~~ O2A
+
+    classDef birth fill:#f0f5ff,stroke:#2f54eb,stroke-width:1px,stroke-dasharray:4 3,color:#10239e
+    classDef flow fill:#e6f4ff,stroke:#1677ff,stroke-width:2px,color:#0958d9
+    classDef fin fill:#fff1f0,stroke:#d03050,stroke-width:2px,color:#a8071a
+    classDef after fill:#fff7e6,stroke:#d46b08,stroke-width:2px,color:#873800
+    classDef note fill:#fafafa,stroke:#aaa,stroke-dasharray:4 3,color:#444
+    class BIRTH birth
+    class O8,O7A,O7B,O2A,O2B flow
+    class O4 fin
+    class O1 after
+    class R1,N5,NT note

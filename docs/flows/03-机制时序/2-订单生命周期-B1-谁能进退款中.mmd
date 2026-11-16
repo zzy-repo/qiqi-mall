@@ -1,0 +1,33 @@
+%%{init: {"flowchart": {"diagramPadding": 30}}}%%
+flowchart TB
+    subgraph BUY["买家侧：粗实线＝买家能自己申请退货（线型同主链路那张）"]
+        I1["已付款（1）"]
+        I2["已发货（2）"]
+    end
+
+    subgraph MER["商家侧：虚线＝买家点不动，只能商家代客登记"]
+        I7["待审核（7）"]
+        I8["待发货（8）"]
+        I9["部分发货（9）"]
+    end
+
+    O5["退款中（5）<br/>有一条退货申请在审批<br/>包裹回传改不动它"]
+
+    I1 ==>|【买家】申请退货<br/>【商家】代客登记| O5
+    I2 ==>|【买家】申请退货<br/>【商家】代客登记| O5
+    I7 -.->|【商家】代客登记退货| O5
+    I8 -.->|【商家】代客登记退货| O5
+    I9 -.->|【商家】代客登记退货| O5
+
+    I1 ~~~ I2
+    I2 ~~~ I7
+    I7 ~~~ I8
+    I8 ~~~ I9
+
+    N1["读法<br/>五个入口是并列的：<br/>谁先谁后都行，阶梯只是排版<br/>同一笔单同时只认一条申请<br/>进（5）后包裹回传不改父单<br/>结论怎么落见「退款中能去哪」那张"] ~~~ I1
+
+    classDef flow fill:#fff7e6,stroke:#d46b08,stroke-width:2px,color:#873800
+    classDef note fill:#fafafa,stroke:#aaa,stroke-dasharray:4 3,color:#444
+    class O5 flow
+    class I1,I2,I7,I8,I9 flow
+    class N1 note
